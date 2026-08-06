@@ -37,7 +37,7 @@ CREATE TABLE "<collection>" (
 ### Les index : `INDEX_SPEC`, source unique front ⇄ back
 
 `indexDdls` émet un `CREATE INDEX idx_<collection>_<champ>` pour chaque champ de **`INDEX_SPEC`**
-(`src-shared/RelationalSchema`), la liste PARTAGÉE des colonnes du **chemin chaud** — **37 index** au total. C'est le
+(`src-shared/RelationalSchema`), la liste PARTAGÉE des colonnes du **chemin chaud**. C'est le
 même `INDEX_SPEC` que le client RÉ-EXPORTE via `src-client/data/config.ts` pour ses propres index mémoire
 (`Store._byFk`) : une seule déclaration gouverne l'indexation des deux côtés. Sont indexées les **FK / identités**
 interrogées par les `find` de la validation (dépendance inverse V5b, portée/unicité V6 — `equipments.name`,
@@ -162,12 +162,10 @@ hors du chemin chaud de validation.
 > `GET …/search`, exécution double n°15) est décrite dans **`docs/recherche.md`** — cette section ne
 > couvre que le versant PERSISTANCE : le contenu de la colonne, son invalidation et son backfill.
 
-Depuis le lot 1 du chantier recherche/chargement (2026-08-02), la colonne `search` n'est plus un simple
-`Object.values` du record : elle est calculée par le module PARTAGÉ **`src-shared/SearchTerms.ts`** —
-`searchText(collection, record, fetch, find)` = valeurs PROPRES (parité stricte avec l'historique : aucun terme
-d'hier n'est perdu, l'enrichissement AJOUTE) + termes **DÉRIVÉS PAR LIEN** + termes de **CATALOGUE traduits** +
-**COMPOSITIONS tapables** (search-v2 : « U12 », « ét. N »/« fl. N », « 42 U », « 12 brins », « marque modèle »,
-capacités/rpm — cf. `docs/recherche.md` pour le périmètre exact et ses limites assumées).
+La colonne `search` est calculée par le module PARTAGÉ **`src-shared/SearchTerms.ts`** —
+`searchText(collection, record, fetch, find)` = valeurs PROPRES du record + termes **DÉRIVÉS PAR LIEN** + termes de
+**CATALOGUE traduits** + **COMPOSITIONS tapables** (« U12 », « ét. N »/« fl. N », « 42 U », « 12 brins », « marque
+modèle », capacités/rpm — cf. `docs/recherche.md` pour le périmètre exact et ses limites assumées).
 
 - **La spec est un RELEVÉ, pas une invention** : `SEARCH_SPECS` reprend les dérivations que le CLIENT effectue déjà
   (`GlobalSearchSources` : habillage sub/path cherché au palier 30 ; `ListConfigs.searchFields`). Ex. : équipement →
@@ -240,13 +238,9 @@ Deux tables échappent au modèle relationnel (cadrage §1), DDL et mécanique r
   périmée). La `maintenance()` purge les images ORPHELINES (référencées par aucun `equipments.face_image_*_id`) puis
   compacte (checkpoint TRUNCATE + optimize + VACUUM).
 
-## Historique (bref)
+## Pourquoi le relationnel, et pas JSONB
 
-Le serveur a d'abord porté un **modèle blob JSON** (2026-07) : une colonne `data TEXT` par ligne stockant le record
-entier, interrogée par `json_extract` — simple, mais un `find` par champ = **full table scan** (aucun index
-utilisable), sur le chemin chaud de la validation. La **cible RELATIONNELLE** (décision 2026-07-10 : colonnes + index,
-PAS de rustine JSONB) a été livrée le **2026-07-31** en lots L0→L5 (mesure du coût, générateur de DDL partagé, dépôt
-relationnel, preuve de parité, bascule, retrait du blob). La **parité de comportement blob ⇄ relationnel a été PROUVÉE
-corpus contre corpus** (corpus de démo par les tests, corpus RÉEL par une sonde hors dépôt : 0 divergence) AVANT le
-retrait du modèle blob. Le détail des lots vit dans l'historique git et le cadrage
-`.notes/toDos/migration-db-relationnelle-cadrage-2026-07-31.md`.
+Le gain visé est l'**INDEX sur le chemin chaud des `find`** de la validation. Un modèle à colonne `data TEXT`
+interrogée par `json_extract` n'offre aucun index utilisable : chaque `find` par champ est un **full table scan**,
+et la validation en déclenche plusieurs par écriture (V5b/V6). Des colonnes typées + `INDEX_SPEC` transforment ces
+scans en `SEARCH … USING INDEX` — c'est ce que `explainFindBy` permet de vérifier à tout moment.

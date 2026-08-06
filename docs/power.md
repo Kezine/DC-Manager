@@ -5,9 +5,13 @@ risques (surcharge, redondance). Moteur pur : `PowerAnalysis` (**`src-shared/Pow
 Node), piloté par un **store injecté via l'interface `PowerAnalysisStore`** (4 lectures ; le `Store` client la satisfait
 structurellement). Les avertissements sortent en **codes + params** (`PowerWarning`), PAS en chaînes traduites : le moteur
 ignore l'i18n ; le client résout le libellé via `registries/PowerWarnings` (table code → clé `analysis.power.*`).
-Il vit dans `src-shared/` (et non plus dans `src-client/store/`) pour être consommable côté serveur — cible : un **futur
-producteur d'alertes power** (module `notify/`). UI : `PortEditorControls` (contrôles power du port + panneaux
-stats/warnings), piloté par `EquipmentForms`.
+Il vit dans `src-shared/` pour être consommable côté serveur — cible : un **futur producteur d'alertes power**
+(module `notify/`).
+
+**UI — deux surfaces distinctes.** La SAISIE (contrôles power du port : sens, calibre, phase, catégorie PoE) vit
+dans `PortEditorControls`, piloté par `EquipmentForms`. La CONSULTATION (jauge PoE, charges par départ/phase,
+avertissements) vit dans **`views/forms/EnergyInfo`**, rendu dans la modale d'**INFO** de l'équipement et calculé
+sur l'état ENREGISTRÉ — pas dans le formulaire d'édition.
 
 ## Modèle
 
@@ -85,9 +89,10 @@ néanmoins aux flux d'énergie**.
     câblé** (câble absent, vis-à-vis non-PSE, ou injection coupée `poe_enabled`) → l'appareil n'est pas alimenté.
     Un port PD lui-même **désactivé** (`poe_enabled: false`) est un choix volontaire (pas d'alerte). Miroir de
     `pdOfPsePort` — **parité avec l'éclair** de `cableCarriesPower` (mêmes deux extrémités actives requises).
-- **UI** : bloc POE de l'équipement (bascule + budget total + **jauge** de charge live) et éditeur de ports (catégorie ·
-  sens PSE/PD · **norme/budget**) dans `EquipmentForms` ; la jauge = Σ consos des PD câblés / budget total. Un **câble**
-  touchant un port POE porte le même **éclair ambre** de scène que les câbles power (`CableRouting.carriesPower`).
+- **UI** : bloc POE de l'équipement (bascule + budget total) et éditeur de ports (catégorie · sens PSE/PD ·
+  **norme/budget**) dans `EquipmentForms` ; la **jauge** de charge (Σ consos des PD câblés / budget total) est rendue
+  par `EnergyInfo` dans la modale d'INFO. Un **câble** touchant un port POE porte le même **éclair ambre** de scène
+  que les câbles power (`CableRouting.carriesPower`).
 
 ## Performance
 

@@ -2,8 +2,8 @@
 
 > Un **faisceau** (`cableBundles`) est un câble MULTI-FIBRES créé à l'avance entre **deux patch panels**
 > (`endpoint_a/b_equipment_id`) : il forme un **pool de brins** que les ports de ces patchs « piochent »
-> (`Port.bundle_id` + `strand_a`/`strand_b`) — **source unique** : l'ancien mécanisme « câble-brin »
-> (`cables.bundle_id`/`strand_no`) a été RETIRÉ. Le versant **déduction réseau** (arête BRIN, garde-fous
+> (`Port.bundle_id` + `strand_a`/`strand_b`) — **source unique** : un brin se pioche depuis un PORT, jamais
+> depuis un câble. Le versant **déduction réseau** (arête BRIN, garde-fous
 > T4/T6/T7/V6) est décrit dans [`deduction-reseau.md`](deduction-reseau.md). Ce document couvre les
 > **contraintes d'extrémité** et le **rendu du tracé** (2D + 3D).
 
@@ -57,18 +57,17 @@ Service pur parallèle à `CableRouting` (mêmes trois cas, parité complète av
   chevaucherait un câble voisin ;
 - une route saisie « à l'envers » (extrémité A dans la salle d'arrivée) est **tolérée** en inversant les
   bouts (le formulaire faisceau n'oriente pas la route comme le fait `orientEnds` côté câble) — le
-  verdict vient du champ `sens` de `bundleRoute` (« aligned » / « swapped »), plus d'un calcul local.
-  L'ÉDITEUR de route en propose désormais la CORRECTION (« Inverser les extrémités A ⇄ B ») sur l'ancre
-  en alerte, plutôt que de laisser l'utilisateur deviner (cf. § 3.2).
+  verdict vient du champ `sens` de `bundleRoute` (« aligned » / « swapped »), jamais d'un calcul local.
+  L'ÉDITEUR de route en propose la CORRECTION (« Inverser les extrémités A ⇄ B ») sur l'ancre en alerte,
+  plutôt que de laisser l'utilisateur deviner (cf. § 3.2).
 
 ### 3.1 Cohérence extrémités ⇄ route — `store.bundleRoute` (source unique du verdict)
 
-Un faisceau n'a pas de ports : l'analyse du pseudo-câble ne pouvait déclencher NI `portA_room`/
-`portB_room` NI `ports_split`, et l'alignement extrémités ⇄ route se vérifiait DANS le rendu — qui, en
-cas d'incohérence, ne traçait rien, **silencieusement** (incident réel, corpus SONUMA 2026-07-30 : un
-faisceau dont le 1er waypoint sortait d'une salle ne contenant AUCUNE extrémité était invisible en
-2D/3D, sans le moindre message). Le verdict vit désormais dans `CableRouteAnalyzer.bundleRoute(bundle)`
-(pure lecture, testé) :
+Un faisceau n'a pas de ports : l'analyse du pseudo-câble ne peut déclencher NI `portA_room`/`portB_room`
+NI `ports_split`. Le verdict d'alignement extrémités ⇄ route vit donc dans
+`CableRouteAnalyzer.bundleRoute(bundle)` (pure lecture, testé), et **jamais dans le rendu** : un rendu qui
+arbitre la cohérence ne sait que ne rien tracer, **silencieusement** — un faisceau dont le 1er waypoint
+sort d'une salle sans extrémité disparaîtrait de la 2D et de la 3D sans le moindre message.
 
 - `containerA`/`containerB` = conteneurs des **patchs** (`equipmentNamedContainer` — la salle de la
   chaîne, sinon l'étage), remplaçant les `null` du pseudo-câble sans ports ;
@@ -82,24 +81,22 @@ faisceau dont le 1er waypoint sortait d'une salle ne contenant AUCUNE extrémit�
   STRUCTURELLES (`routeStructuralError`), comme le câble.
 
 **Conséquence rendu (voulue, parité câbles)** : `TrunkRouting.trunkRoute` délègue à `bundleRoute` et
-`r.valid` intègre ces erreurs → une route incohérente avec ses extrémités ne trace plus **rien**, y
-compris le stub « s'arrête au mur » (`outgoingTrunkStubs`) qui se dessinait auparavant dans la salle de
-l'extrémité qui matchait l'arrivée de la route. Le signal vit dans le formulaire, plus dans un tracé
+`r.valid` intègre ces erreurs → une route incohérente avec ses extrémités ne trace **rien**, stub
+« s'arrête au mur » compris (`outgoingTrunkStubs`). Le signal vit dans le formulaire, pas dans un tracé
 fantôme.
 
 ### 3.2 L'ÉDITEUR de route — une CHAÎNE, le même pour le câble et le faisceau
 
-Depuis le 2026-07-31, la route ne s'édite plus par un **nuage de cases à cocher** doublé d'une liste
-« Ordre du trajet » : les deux formulaires (`CableForms.cable` et `CableForms.cableBundle`) partagent le
-composant **`views/forms/RouteChainEditor`**, qui affiche la route comme une **chaîne ordonnée** entre
-deux **ancres**. Seules les ancres diffèrent — des **ports** pour un câble, des **patchs** pour un
+La route s'édite comme une **chaîne ordonnée** entre deux **ancres**, jamais par un nuage de cases à
+cocher doublé d'une liste « Ordre du trajet » : les deux formulaires (`CableForms.cable` et
+`CableForms.cableBundle`) partagent le composant **`views/forms/RouteChainEditor`**.
+Seules les ancres diffèrent — des **ports** pour un câble, des **patchs** pour un
 faisceau (`equipmentNamedContainer`) —, et elles sont fournies par l'hôte : le composant n'importe ni le
 store ni les formulaires (interface `RouteChainHost`).
 
-Ce que le faisceau y gagne, et qui lui manquait totalement : chaque erreur rattachée à **SON étape**,
-l'état « transit » (`exit_unpaired`) rendu **visible** en cours d'édition au lieu d'être découvert au
-save, les **ancres en alerte** quand la route ne les dessert pas, et l'action **« Inverser les
-extrémités A ⇄ B »** sur le cas « route à l'envers ».
+L'éditeur rattache chaque erreur à **SON étape**, rend l'état « transit » (`exit_unpaired`) **visible**
+en cours d'édition plutôt qu'au save, signale les **ancres en alerte** quand la route ne les dessert pas,
+et propose l'action **« Inverser les extrémités A ⇄ B »** sur le cas « route à l'envers ».
 
 - **La grammaire n'est pas réécrite** : `core/RouteEligibility` (pur, testé) la CONSOMME. Il rend, pour
   une position d'insertion, la liste des waypoints **utilisables** et le **motif** (code stable) des

@@ -54,7 +54,9 @@ npm run dev            # webpack serve --mode development → ouvre /dc-manager.
 
 > Le serveur de dev webpack sert le client **sans config API injectée** → il démarre en
 > **mode fichier**. Pour tester le **mode API**, lancer le backend (section 3 ou Docker),
-> qui injecte `window.__DCMANAGER_CONFIG__ = { mode: "api", apiBaseUrl: "/api" }` dans le HTML.
+> qui injecte `window.__DCMANAGER_CONFIG__ = { mode: "api", apiBaseUrl: "api" }` dans le HTML.
+> La base d'API est **relative** (sans slash initial, résolue contre le `<base>` du HTML) :
+> c'est ce qui permet de servir l'app sous un sous-dossier — cf. [`docs/reverse-proxy.md`](docs/reverse-proxy.md).
 
 ### Vérifications
 
@@ -115,7 +117,7 @@ Développement serveur (recompilation à chaud) :
 
 ```bash
 cd src-server
-npm run dev            # tsx watch src-client/index.ts
+npm run dev            # tsx watch src/index.ts
 ```
 
 ---
@@ -186,7 +188,7 @@ Lues par le serveur au démarrage — cœur dans [`src-server/src/index.ts`](src
 | `SSO_LOGIN_URL` | *(vide)* | URL de connexion SSO du bouton « Connexion » (écran d'accueil, si non authentifié). Macro `${clbkUrl}` → URL courante encodée (retour après login). Vide = pas de bouton. |
 | `DEV_USER` | — | Nom de l'utilisateur factice (mode dev). |
 | `BASIC_AUTH` | — | `"user:pass"` → impose une Basic Auth navigateur (dev). Prioritaire sur le SSO. |
-| `DCMANAGER_SECRETS_KEY` | — | **Clé de chiffrement** des secrets serveur (coffre `SecretBox` partagé, lu par les modules — pas par `index.ts`). Requise par les modules **VM/Proxmox** (jetons des providers) et **notifications** (jetons de webhook) : absente → ces modules se désactivent et le signalent (**503 explicite**) ; le serveur démarre quand même. **Doit être un secret LONG et ALÉATOIRE (≥ 16 caractères** — refusé au démarrage du module sinon, car la clé en est un simple SHA-256 sans sel : une passphrase courte rendrait un backup de la base force-brutable hors ligne). La générer, p. ex. `openssl rand -base64 32`. **Aucun repli** : `VM_PROVIDERS_KEY` (ancien nom, retiré le 2026-07-20) n'est plus lu — un déploiement encore dessus doit **renommer** la variable (même valeur, même dérivation). La PKI/certs est *zéro-connaissance* (chiffrement navigateur) et **n'en dépend pas**. |
+| `DCMANAGER_SECRETS_KEY` | — | **Clé de chiffrement** des secrets serveur (coffre `SecretBox` partagé, lu par les modules — pas par `index.ts`). Requise par les modules **VM/Proxmox** (jetons des providers) et **notifications** (jetons de webhook) : absente → ces modules se désactivent et le signalent (**503 explicite**) ; le serveur démarre quand même. **Doit être un secret LONG et ALÉATOIRE (≥ 16 caractères** — refusé au démarrage du module sinon, car la clé en est un simple SHA-256 sans sel : une passphrase courte rendrait un backup de la base force-brutable hors ligne). La générer, p. ex. `openssl rand -base64 32`. **Seule variable lue** pour ce coffre : aucun autre nom n'est reconnu. La PKI/certs est *zéro-connaissance* (chiffrement navigateur) et **n'en dépend pas**. |
 | `JIRA_BASE_URL` | *(vide)* | **Base d'URL Jira** (module **interventions**) pour fabriquer un lien vers un ticket depuis une clé (ex. `https://monorg.atlassian.net/browse/`). Trimmée ; vide/absente → le client masque le lien. Exposée par `GET …/interventions/meta` ; simple RÉFÉRENCE (aucun appel Jira côté serveur). |
 
 **Authentification.** L'app **ne gère pas le login** : elle transmet les cookies de
@@ -203,10 +205,39 @@ session au backend, qui valide via un SSO externe (ou le proxifie).
 
 ## Documentation
 
-- [`docs/rest-migration.md`](docs/rest-migration.md) — backend REST, concurrence
-  (révisions, SSE, verrou optimiste 409), cascade de suppression, limites connues.
-- [`docs/render-impact.md`](docs/render-impact.md) — rechargement granulaire et impact 3D.
-- [`docs/validation.md`](docs/validation.md) — normalisation & validation partagées.
+**Données & modèle**
+
+- [`docs/validation.md`](docs/validation.md) — normalisation & validation partagées front ⇄ back.
+- [`docs/persistance.md`](docs/persistance.md) — persistance serveur : modèle relationnel SQLite,
+  schéma dérivé de la spec, colonne `search`, migration des documents legacy.
+- [`docs/recherche.md`](docs/recherche.md) — palette Ctrl+K, listings serveur-pilotés, filtre cible.
+- [`docs/placement.md`](docs/placement.md) — doctrine du placement (conteneurs, repères, chaîne
+  bâtiment → étage → salle → baie).
+
+**Domaine métier**
+
+- [`docs/deduction-reseau.md`](docs/deduction-reseau.md) — réseau déduit depuis les ports terminaux.
+- [`docs/faisceaux.md`](docs/faisceaux.md) — faisceaux (trunks) : contraintes et rendu du tracé.
+- [`docs/power.md`](docs/power.md) — analyse énergie (source/sink, charges, PoE, avertissements).
+
+**Vues 2D/3D**
+
+- [`docs/perf-3d.md`](docs/perf-3d.md) — optimisations du moteur 3D WebGL.
+- [`docs/redressement-perspective.md`](docs/redressement-perspective.md) — correction de perspective
+  et assemblage des images de façade.
+
+**Modules serveur amovibles**
+
+- [`docs/vm-proxmox.md`](docs/vm-proxmox.md) — inventaire VM Proxmox.
+- [`docs/wifi-unifi.md`](docs/wifi-unifi.md) — inventaire des clients wifi (UniFi).
+- [`docs/notifications.md`](docs/notifications.md) — service de notifications et d'alertes.
+- [`docs/certs.md`](docs/certs.md) — PKI interne zéro-connaissance.
+- [`docs/interventions.md`](docs/interventions.md) — incidents & interventions.
+
+**Transverse**
+
+- [`docs/user-resolver.md`](docs/user-resolver.md) — annuaire utilisateurs et audit « créé/modifié par ».
+- [`docs/i18n.md`](docs/i18n.md) — localisation du client (fr/en).
 - [`docs/reverse-proxy.md`](docs/reverse-proxy.md) — servir l'app **sous un sous-dossier**
   derrière un reverse-proxy (URLs relatives, `X-Forwarded-Prefix`), sans reconfiguration.
 

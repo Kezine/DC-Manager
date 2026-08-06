@@ -265,73 +265,26 @@ ment, du type de celles que cette doctrine cherche justement à éliminer.
 
 ### 6.7 Duplication `TrayFit` ⇄ `RackGeometry` : SUPPRIMÉE — **IMPLÉMENTÉ**
 
-§6.5 affirmait que loger l'abstraction dans `src-shared/` ferait « disparaître » la duplication
-`TrayFit` ⇄ `RackGeometry`. La géométrie de l'étagère vit désormais **une seule fois**, dans
-`src-shared/TrayGeometry.ts`, consommée par le RENDU (`RackGeometry.tray*`, qui délègue) ET par la
-VALIDATION (règles T2d / V6e), avec ses sept constantes.
+La géométrie de l'étagère vit **une seule fois**, dans `src-shared/TrayGeometry.ts`, consommée par le
+RENDU (`RackGeometry.tray*`, qui délègue) ET par la VALIDATION (règles T2d / V6e), avec ses sept
+constantes. `DataValidation.ts` l'**IMPORTE** directement (`import { TrayGeometry } from
+"./TrayGeometry.js"`), comme `RackDepthPolicy` — aucun collaborateur n'est injecté dans la validation.
 
-> **Correction de la version précédente de ce paragraphe.** Il affirmait que `DataValidation.ts`
-> « ne pourra JAMAIS importer ce module » parce que les fichiers de `src-shared/` sont auto-suffisants.
-> C'est **faux comme énoncé technique**, et la prémisse n'avait jamais été testée. Mesure faite avant de
-> choisir (fichier sonde importé en `./__probe.js`, puis jeté) :
+> **La condition de cet import : l'extension `.js`.** Un import relatif entre fichiers partagés est
+> autorisé, à condition IMPÉRATIVE d'écrire le spécificateur AVEC `.js` (`./TrayGeometry.js`) — la seule
+> forme que les trois chaînes acceptent, parce que NodeNext l'EXIGE côté serveur. `tsc` ramène de lui-même
+> un spécificateur `.js` sur le `.ts` correspondant, en résolution *bundler* comme en NodeNext ; le point
+> de rupture est **webpack**, dont la résolution AJOUTE les extensions au lieu de les substituer (il
+> chercherait `./X.js`, `./X.js.ts`, `./X.js.js`). D'où le `resolve.extensionAlias: { ".js": [".ts",
+> ".js"] }` de `webpack.config.js` — **ne pas retirer cette ligne** : les trois chaînes en dépendent.
 >
-> | Chaîne | Verdict |
-> |---|---|
-> | `tsc --noEmit` racine (résolution *bundler*) | **PASSE** |
-> | `tsc --noEmit` serveur (NodeNext) | **PASSE** |
-> | `webpack --mode production` | **ÉCHOUE** — `Can't resolve './__probe.js'` |
->
-> TypeScript 5.9 ramène de lui-même un spécificateur `.js` sur le `.ts` correspondant, dans les DEUX
-> résolutions. Le seul point de rupture est **webpack**, dont la résolution AJOUTE les extensions au lieu
-> de les substituer (il cherche `./__probe.js`, `./__probe.js.ts`, `./__probe.js.js`).
+> ⚠ **Deux règles distinctes, à ne pas confondre** (cf. §6.19). Ce qui est autorisé, c'est l'import d'un
+> AUTRE FICHIER PARTAGÉ. L'interdit d'importer **hors de `src-shared/`** (client, serveur, paquet npm) est
+> **PERMANENT**, ne dépend d'aucune configuration, et est verrouillé par un test. Le mot « auto-suffisant »
+> désignait les deux à la fois : il est banni de cette doc.
 
-> **Mise à jour — la contrainte est LEVÉE (lot suivant).** Le `resolve.extensionAlias: { ".js": [".ts",
-> ".js"] }` est désormais **posé dans `webpack.config.js`**, et l'auto-suffisance de `src-shared/` n'est
-> plus une règle : **un import relatif entre fichiers partagés est autorisé**, à la condition IMPÉRATIVE
-> d'écrire le spécificateur AVEC l'extension `.js` (`./TrayGeometry.js`) — la seule forme que les trois
-> chaînes acceptent, parce que NodeNext l'EXIGE côté serveur. Re-mesuré à la pose, sonde comprise : les
-> trois chaînes passent, la sonde retirée de la config fait bien ÉCHOUER webpack (donc la ligne travaille),
-> et le bundle est identique **octet pour octet** à celui d'avant — la nouvelle résolution ne dévie rien
-> dans `node_modules` ni ailleurs.
->
-> **Ce que cela ne change PAS** : `ValidationCollaborators` reste en place. Le patron avait été choisi
-> pour contourner la contrainte, mais son retrait est un lot à part — il touche onze points d'appel et le
-> garde-fou d'échec fermé, alors que ce lot-ci ne modifie qu'une ligne de configuration et n'a donc AUCUN
-> effet de bord à surveiller. Le raisonnement « il FAUT injecter » est mort ; l'injection, elle, se
-> défend encore sur ses propres mérites (découplage), et c'est à ce titre qu'elle est conservée.
->
-> **Mise à jour — 2026-07-31 (sur demande) : l'injection de `TrayGeometry` a été RETIRÉE.**
-> `DataValidation.ts` l'IMPORTE désormais directement (`import { TrayGeometry } from "./TrayGeometry.js"`),
-> comme `RackDepthPolicy`. `ValidationCollaborators`, le port `TrayGeometryPort` et le garde-fou d'échec
-> fermé ont DISPARU. Motif : le point de substitution n'avait jamais servi (tous les appelants injectaient
-> la vraie géométrie) et chaque nouvel appelant devait penser à injecter sous peine d'échec fermé — plomberie
-> sans bénéfice. Le paragraphe ci-dessus est donc HISTORIQUE : le lot évoqué a été fait.
->
-> ⚠ **Précision APPORTÉE EN §6.19 — « l'auto-suffisance n'est plus une règle » dit trop.** Ce qui est
-> levé, c'est le seul interdit d'importer un AUTRE FICHIER PARTAGÉ. L'interdit d'importer **hors de
-> `src-shared/`** (client, serveur, paquet npm), lui, est PERMANENT et n'a jamais dépendu d'une
-> configuration. La formule « auto-suffisant » confondait les deux ; §6.19 les sépare et verrouille la
-> première par un test.
+**Décisions de découpage** — avec les alternatives écartées et leur motif :
 
-**Décisions prises À L'IMPLÉMENTATION** — avec les alternatives écartées et leur motif :
-
-- **Injection par OBJET NOMMÉ, pas par 5ᵉ paramètre anonyme.** `ValidationCollaborators { trayGeometry? }`
-  traverse `validateRecord` / `normalizeAndValidate` / `validateDependents` et descend jusqu'aux règles
-  (`CrossEntityRule` et `ScopeRule` gagnent un paramètre). Le nom du collaborateur reste lisible au point
-  d'appel, et l'objet accueillera les suivants sans nouvelle rupture de signature.
-- **Interface ÉTROITE et STRUCTURELLE** (doctrine §6.2). `DataValidation.ts` déclare `TrayGeometryPort` :
-  exactement les quatre opérations que les règles consomment. Comme il n'importe pas le type (injection
-  oblige), la garantie vient du typage structurel — les points d'INJECTION vérifient `TrayGeometry` contre le
-  port, donc toute dérive de signature casse `tsc`. Écarté : un port `any`, qui aurait rendu la dérive
-  indétectable.
-- **Le collaborateur manquant fait ÉCHOUER FERMÉ.** C'est le vrai danger du patron : un appelant qui oublie
-  d'injecter arrêterait la règle **en silence** — exactement le défaut du `FieldSpec.max` déclaré mais inerte
-  (une contrainte muette est pire qu'une contrainte absente). Sans géométrie, T2d REFUSE tout équipement posé,
-  avec un message qui nomme le collaborateur. Écarté : rendre le paramètre **obligatoire** pour que le
-  compilateur serve de garde-fou — impossible sans réordonner les paramètres (`fetch`/`find` sont optionnels
-  et précèdent), et surtout **inopérant là où ça compte** : les 221 appels de la suite de tests sont en JS,
-  que le compilateur ne voit pas. Le garde-fou d'exécution couvre les deux mondes. Vérifié par sonde : le
-  neutraliser fait ROUGIR les tests.
 - **La profondeur de CAGE se passe en NOMBRE** (`plank(cageMm, tray)`), jamais l'enregistrement de baie. La
   géométrie du plateau n'a pas à connaître la politique de profondeur d'une baie (marges, cavités de portes,
   bornage). Conséquence assumée : le CALCUL de la cage reste dupliqué (`RackGeometry.cageDepth` ⇄

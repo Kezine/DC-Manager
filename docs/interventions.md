@@ -8,12 +8,11 @@ Chaque objet porte un cycle de vie, une priorité de traitement, une fenêtre d'
 optionnelle, une référence Jira facultative et une description markdown. Un **veilleur de
 rappels** signale au service de notifications les fenêtres qui approchent de l'heure H.
 
-> **Serveur + client + fiches.** Le module serveur (base, routes, veilleur), la page « Interventions »
-> (première page **entièrement localisée** FR/EN) et l'**intégration « fiches »** (badge d'interventions
-> ouvertes + « Déclarer une intervention » depuis une fiche équipement/VM/spare) sont livrés. Les messages
-> **serveur** restent en **français** ; les libellés localisés des slugs `kind`/`status`/`priority` sont
-> l'affaire du **client**, via i18n (décision de cadrage 2026-07-16). Restent hors périmètre : badges dans
-> les **listes** (ListView), vue **calendrier**, lecture **Jira enrichie**.
+> **Périmètre.** Le module serveur (base, routes, veilleur), la page « Interventions » (**entièrement
+> localisée** FR/EN) et l'**intégration « fiches »** (badge d'interventions ouvertes + « Déclarer une
+> intervention » depuis une fiche équipement/VM/spare). Les messages **serveur** restent en **français** ;
+> les libellés localisés des slugs `kind`/`status`/`priority` sont l'affaire du **client**, via i18n.
+> Hors périmètre : badges dans les **listes** (ListView), vue **calendrier**, lecture **Jira enrichie**.
 
 Deux exigences fondatrices (pattern `vm/`, `notify/`, `certs/`) :
 
@@ -63,13 +62,12 @@ dénormalisée, et surveille les fenêtres à démarrer.
 - **`description`** : markdown (rendu côté client dans la **modale de détail**, via `core/Markdown`/
   micromark), bornée à 100 000 caractères.
 - **Audit** (`created_by`/`created_date`, `updated_by`/`updated_date`) : posé **PAR LE
-  SERVEUR**, jamais par le client. Depuis le lot « audit utilisateur », `created_by`/`updated_by`
-  stockent l'**ID CANONIQUE** de l'utilisateur authentifié (`RequestAuthor.identity(req).id` —
-  `String(id)` SSO sinon login, résoluble en profil affichable via l'annuaire, cf.
-  [`user-resolver.md`](user-resolver.md)), et non plus son display-name. Les valeurs **LEGACY** (noms
-  en clair écrits avant ce lot) restent en base et s'afficheront via le repli du client (id inconnu de
-  l'annuaire → valeur brute affichée). Colonnes inchangées (`TEXT NOT NULL`). `created_*` figés à la
-  création, `updated_*` rafraîchis. Un client qui enverrait ces champs est **ignoré**.
+  SERVEUR**, jamais par le client. `created_by`/`updated_by` portent l'**ID CANONIQUE** de
+  l'utilisateur authentifié (`RequestAuthor.identity(req).id` — `String(id)` SSO sinon login,
+  résoluble en profil affichable via l'annuaire, cf. [`user-resolver.md`](user-resolver.md)).
+  Les valeurs **LEGACY** (noms en clair) restent lisibles via le repli du client : un id inconnu
+  de l'annuaire s'affiche brut. Colonnes `TEXT NOT NULL`. `created_*` figés à la création,
+  `updated_*` rafraîchis. Un client qui enverrait ces champs est **ignoré**.
 
 ## Liens sans FK — politique d'orphelins
 
@@ -256,7 +254,7 @@ interventions sont propres au document).
   détail), Type, **Priorité** (badge coloré par rang), **Statut** (badge), **Fenêtre planifiée**
   (`formatWindow`, vide sinon), **Liens** (compte + détail en survol), **Jira** (lien cliquable via `jiraUrl`
   + `meta` chargée UNE fois ; texte brut si pas de base), **Créé par**, Actions.
-- **Filtre par CIBLE — dimension « à RECHERCHE » (lot 3 « recherche partagée »)**. Le filtre par objet lié
+- **Filtre par CIBLE — dimension « à RECHERCHE »**. Le filtre par objet lié
   (équipement / VM / spare / sous-équipement) est une **dimension ordinaire de la `FilterBar`**, dont le
   contrôle est un **`SearchPop`** au lieu d'un multiselect (principe n°14 : la liste des cibles est longue,
   croissante et à libellés composés). Il est alimenté par la **MÊME source injectée** que l'éditeur de liens
@@ -266,9 +264,9 @@ interventions sont propres au document).
   La chip résultante est une chip **normale** (`FilterChips`, « Cible : SW-Coeur ✕ »), retirée par son ✕ **et**
   par « Réinitialiser ». Son libellé est **résolu à chaque rendu** (`labelOf`), jamais mémorisé : un
   renommage se reflète tout seul, et une cible supprimée devient « (introuvable) » sans effacer le filtre —
-  l'utilisateur voit ce qui vide sa liste. ⚠ **Absorption** : avant le lot 3, cette chip avait sa propre
-  rangée, sa propre primitive visuelle et son propre code de retrait, hors du modèle `FilterChips` ; c'est
-  ce doublon qui a disparu (`FilterChips` sait désormais porter une valeur **libre**, cf. docs/recherche.md).
+  l'utilisateur voit ce qui vide sa liste. ⚠ **Aucune primitive visuelle dédiée** : la chip passe par
+  `FilterChips`, qui sait porter une valeur **LIBRE** (cf. docs/recherche.md) — pas de rangée, ni de code
+  de retrait, propres à ce filtre.
 - **Actions par ligne — boutons-ICÔNE** (registre `Icons` + `IconButton`, principe n°14 ; aria-label +
   tooltip i18n) : **Détails** (`INFO`, ouvre la modale de consultation), **Modifier** (`EDIT`, modale),
   **Démarrer** (`PLAY`, declared/planned → `in_progress`), **Clore** (`CHECK`, `in_progress` → `closed`),

@@ -7,12 +7,12 @@
 
 ## 1. Pourquoi
 
-Historiquement les règles d'intégrité étaient **implicites** : dans les commentaires du
-modèle (`/** FK → ports */`), les constructeurs d'entités (`Normalize`), les enums du
-domaine. Le serveur n'en vérifiait quasiment rien (`upsert` : id présent + collection
-connue). Une autre interface (script, intégration) pouvait donc écrire n'importe quoi.
+Une règle d'intégrité **implicite** — vivant dans un commentaire du modèle (`/** FK → ports */`),
+dans un constructeur d'entité ou dans un formulaire — ne protège que le chemin qui la traverse.
+Un `upsert` serveur qui ne vérifie que « id présent + collection connue » laisse une interface
+tierce (script, intégration) écrire n'importe quoi.
 
-On rend ces règles **déclaratives et exécutables**, dans `src-shared/`, appliquées aux deux
+Ces règles sont donc **déclaratives et exécutables**, dans `src-shared/`, appliquées aux deux
 points : **UI** (retour immédiat) et **serveur** (autorité : refus `400`).
 
 ## 2. Deux opérations, distinctes mais enchaînées
@@ -20,9 +20,8 @@ points : **UI** (retour immédiat) et **serveur** (autorité : refus `400`).
 1. **Normalisation** — met l'enregistrement en forme canonique AVANT stockage : coercition
    de type (`"42"` → `42`), valeurs par défaut (`u_count` → 42), `null`-isation des vides.
    Idempotente. C'est elle qui rend une autre interface « propre » sans qu'elle connaisse
-   toutes les conventions. (Depuis la régularisation D3a — 2026-07-31 — les specs sont
-   COMPLÈTES : tout champ persisté est déclaré et donc normalisé ; seuls l'AUDIT serveur et
-   deux legacy traversent encore, cf. §10.)
+   toutes les conventions. Les specs sont COMPLÈTES : tout champ persisté est déclaré, donc
+   normalisé ; seuls l'AUDIT serveur et deux legacy traversent sans être déclarés (cf. §10).
 2. **Validation** — vérifie l'enregistrement normalisé et renvoie des erreurs. Ne mute pas.
 
 Le serveur fait `record = normalize(...)` puis `errors = validate(record)` → si erreurs, `400`.
@@ -39,7 +38,7 @@ Le serveur fait `record = normalize(...)` puis `errors = validate(record)` → s
 `(collection, id) => boolean` — l'UI l'adosse au `Store`, le serveur au `Repository`.
 
 > **Piège transaction (V2)** : dans un `/transact`, un câble peut référencer un port créé
-> dans le MÊME lot. Le résolveur serveur doit voir `persistées ∪ crened − supprimées` du
+> dans le MÊME lot. Le résolveur serveur doit voir `persistées ∪ créées − supprimées` du
 > lot, pas seulement les données persistées. Sinon on rejette des écritures légitimes.
 
 ## 4. Format de spécification (déclaratif)
@@ -61,7 +60,7 @@ FieldSpec = {
 CollectionSpec = { fields: Record<string, FieldSpec> }   // + invariants[] en V3
 ```
 
-> **`type: "json"`** (régularisation D3a, 2026-07-31) : une STRUCTURE non exprimable par les types
+> **`type: "json"`** : une STRUCTURE non exprimable par les types
 > scalaires — objet value-object ou tableau d'objets (`racks.door_front`/`door_rear`,
 > `datacenters.doors`, `vms.nics`). Sémantique volontairement MINIMALE : la normalisation laisse la
 > valeur telle quelle (défaut posé si absente), la validation intrinsèque ne vérifie que
@@ -141,9 +140,9 @@ ValidationError = { collection, id?, path, code, message }
 | V | Contenu | État |
 |---|---|---|
 | **V1** | spec déclarative + normalisation + validation **intrinsèque** ; pilotes `equipments`, `cables`, `racks` ; serveur `400` + filet UI | ✅ |
-| **V2** | intégrité **référentielle** (FK `ref`) avec résolveur injecté **batch-aware** (`buildBatchResolver`) ; serveur : `Repository.exists` + résolveur par requête, `/transact` conscient du lot | ✅ |
+| **V2** | intégrité **référentielle** (FK `ref`) avec résolveur injecté **batch-aware** (`buildBatchFetcher`, qui le subsume depuis V5a) ; serveur : `Repository.exists` + résolveur par requête, `/transact` conscient du lot | ✅ |
 | **V3** | **invariants** inter-champs (`CollectionSpec.invariants`, ex. câble : `from ≠ to`, réseau principal ∈ réseaux portés) + **merge des patchs partiels** côté serveur (fusion sur l'existant avant normalisation) | ✅ |
-| **V4** | **convergence des normaliseurs** : les constructeurs d'entités front délégueraient à `src-shared/normalize` (une seule normalisation) — **différée par choix** (pas de bug, divergence déjà empêchée par test, gros refactor des 19 classes pour un bénéfice marginal ; cf. §6) | 🅿️ différée |
+| **V4** | **convergence des normaliseurs** : les constructeurs d'entités front délégueraient à `DataValidator.normalizeRecord` (une seule normalisation) — **différée par choix** (pas de bug, divergence déjà empêchée par test, gros refactor des 19 classes pour un bénéfice marginal ; cf. §6) | 🅿️ différée |
 | **V5a** | **règles cross-entité** (sens direct) : `EntityFetcher` injecté (remplace le résolveur d'existence — il le subsume), `buildBatchFetcher` conscient du CONTENU du lot ; IP ∈ CIDR de son réseau, plage DHCP ⊂ CIDR (cf. §8) | ✅ |
 | **V5b** | **dépendance inverse** : `CollectionSpec.dependents` + `ChildFinder` injecté → écrire un parent re-valide ses enfants via LEURS règles cross-entité contre le nouvel état (ex. changer un `cidr` rejette si une adresse/plage en sort). Câblé sur create/update (Store + serveur) ET sur `/transact` (lecteur d'enfants conscient du lot, `buildBatchChildFinder`) | ✅ |
 | **T1/T2** | règles métier supplémentaires : invariants intra-record (équipement racké ⇒ baie ; port X/Y cohérents ; brosse ⇒ baie) + cross-entité (équipement tient dans la baie ; baie dans les bornes de la salle ; port parent/agrégat même équipement) | ✅ |
@@ -151,40 +150,38 @@ ValidationError = { collection, id?, path, code, message }
 | **V6b** | portée — relations & intervalles : **1 câble par port** (périmètre `from`/`to`), **chevauchement** de plages DHCP, **IP ∈ plage** (exclusion bidirectionnelle adresse ↔ plage). Câblé Store + serveur + live (IPAM) | ✅ |
 | **V6c** | portée — **empilement de baie** : pas de collision de cellule `U:face` entre occupants (équipements rackés + rackItems + brosses), via `RackOccupancy` (réplique fidèle de `RackGeometry.mountSides`/`RackScene.occupants`) ; index `waypoints.rack_id` ajouté ; les règles `scope` reçoivent aussi `fetch` (lecture de la baie). ⚠ Une **brosse** n'occupe que la face **AVANT** (elle est ancrée au plan de montage avant et s'étend de `depth_mm` vers l'arrière — cf. `Resolver3D.brushGeom`) : la face arrière n'est protégée que par l'arithmétique de **profondeur** (V6d-brosse ci-dessous), exactement comme entre deux équipements dos à dos | ✅ |
 | **T2c/V6d** | **profondeur de baie en mm** (`depth_mm` remplace l'enum full/half/quarter — migré one-shot au chargement, `Store._migrateDepths` ; l'occupation des 2 faces est DÉCOUPLÉE via `locks_u`). T2c (cross-entité) : la profondeur d'un équipement racké tient dans l'espace disponible de sa baie (marges, cavités de portes, − 100 mm de sécurité derrière porte — parité brosses). V6d (portée) : **dos-à-dos** au même U d'une baie double, somme des profondeurs ≤ espace partagé (cage + cavités). La **politique de profondeur** (profondeur extérieure, cage BORNÉE au châssis, marges avant/arrière, cavités de portes) n'est plus répliquée : elle vit dans le module PARTAGÉ `src-shared/RackDepthPolicy`, **IMPORTÉ** ici (`"./RackDepthPolicy.js"`, extension impérative) et consommé aussi par le rendu (`RackGeometry` délègue) — cf. §11 et `docs/placement.md` §6.14, qui documente les DEUX divergences arbitrées. Reste propre à la validation, et volontairement NON mutualisée : la marge de sécurité de 100 mm derrière une porte (règle de prudence, pas de géométrie — le rendu ne la retranche pas). Les enregistrements legacy (sans `depth_mm`) ne sont JAMAIS sanctionnés. Le dos-à-dos est **étendu au duo équipement ⇄ brosse** (V6d-brosse) puisqu'une brosse ne bloque plus la face arrière (cf. V6c) : la somme profondeur d'un montage ARRIÈRE + profondeur de la brosse (défaut **100 mm**, en parité avec le constructeur client `Waypoint`) au même U doit tenir dans l'espace partagé — jugée dans les DEUX sens (`RackDepth.backToBack` quand on édite l'équipement, `RackDepth.brushBackToBack` en règle `scope` de `waypoints` quand on édite la brosse) | ✅ |
-| **T1c/T2d/V6e** | **équipement POSÉ sur une étagère** (`placement_mode: "tray"`, FK `tray_item_id` → rackItems kind "tray"). T1c (invariant) : mode tray ⇒ étagère référencée. T2d (cross-entité) : l'empreinte (orientation 90/270 permutée), la position (`tray_x`/`tray_y`) et la hauteur tiennent dans la boîte utile du plateau (TOUTE la réservation `u_height` moins 5 mm de réserve de tôle — `tray_u` = hauteur de la structure qui porte le plateau, pure indication de dessin). V6e (portée) : pas de **chevauchement** entre colocataires du même plateau. Géométrie du plateau = module PARTAGÉ `src-shared/TrayGeometry` (source unique consommée aussi par le rendu), **IMPORTÉ** directement dans la validation (`"./TrayGeometry.js"`, extension impérative) — cf. §11 et `docs/placement.md` §6.7 (la réplique `TrayFit` ⇄ `RackGeometry` a été supprimée ; l'injection par `ValidationCollaborators` a été retirée le 2026-07-31). Cascade : supprimer l'étagère DÉTACHE les posés (retour « non placé », jamais supprimés) — et supprimer sa BAIE aussi, par RÉCURSION de la cascade (la baie supprime ses étagères, dont la règle rejoue ; cf. `docs/placement.md` §6.16) | ✅ |
+| **T1c/T2d/V6e** | **équipement POSÉ sur une étagère** (`placement_mode: "tray"`, FK `tray_item_id` → rackItems kind "tray"). T1c (invariant) : mode tray ⇒ étagère référencée. T2d (cross-entité) : l'empreinte (orientation 90/270 permutée), la position (`tray_x`/`tray_y`) et la hauteur tiennent dans la boîte utile du plateau (TOUTE la réservation `u_height` moins 5 mm de réserve de tôle — `tray_u` = hauteur de la structure qui porte le plateau, pure indication de dessin). V6e (portée) : pas de **chevauchement** entre colocataires du même plateau. Géométrie du plateau = module PARTAGÉ `src-shared/TrayGeometry` (source unique consommée aussi par le rendu), **IMPORTÉ** directement dans la validation (`"./TrayGeometry.js"`, extension impérative) — cf. §11 et `docs/placement.md` §6.7 : une seule définition de la géométrie du plateau, ni réplique dans `RackGeometry`, ni injection. Cascade : supprimer l'étagère DÉTACHE les posés (retour « non placé », jamais supprimés) — et supprimer sa BAIE aussi, par RÉCURSION de la cascade (la baie supprime ses étagères, dont la règle rejoue ; cf. `docs/placement.md` §6.16) | ✅ |
 | **V6h** | portée — **unicité du nom de câble** : `cables.name` UNIQUE (non vide) dans le document, post-trim, comparaison EXACTE (casse discriminante), « sauf moi-même » par `id`, conscient du lot. Nom vide toléré en multiple (des câbles sans nom restent légaux — champ non `required`). MIROIR de l'unicité du nom d'équipement V6g (même mécanisme que V6a) ; l'invariant se manifeste à la prochaine écriture d'un câble concerné (des doublons préexistants ne sont pas rejetés rétroactivement). Câblé Store + serveur (au save/import) | ✅ |
 | **T12/T9b** | **intégrité énergie (direction & genre)**. T12 (`ports`, invariant) : la **direction** (source/sink) ne se déclare que sur un port d'ÉNERGIE (rôle `power` ou `poe`) — un port `data` à direction résiduelle deviendrait un faux départ/charge SECTEUR (`PowerAnalysis.eqPortsByDir` sélectionne par `direction` en n'excluant que `poe`). T9b (`cables`, cross-entité) : un câble d'énergie relie deux ports de **même genre** — power↔power ou PoE↔PoE, jamais poe↔power (sinon un port PoE fuiterait dans le graphe secteur) ; complète T9 (source↔sink). Ferment le chemin API/import ; l'UI neutralise déjà la direction au save (changement de rôle). Rôles en dur — leur source de vérité `PortRoles` vit côté CLIENT, donc hors de portée d'un fichier partagé : c'est la règle d'**ISOLEMENT** de `src-shared/` (PERMANENTE, cf. `CLAUDE.md`), et non l'interdit d'importer un autre fichier PARTAGÉ (celui-là est levé, cf. §11) ; ids stables ; rejeu au changement de rôle/direction d'un port câblé via les `dependents` ports→cables | ✅ |
 | **T13** | **taille de bâtiment déclarée** (`sites.width_mm`/`depth_mm`, mm, OPTIONNELS et indissociables — invariant, même patron que `lat`/`lon`). Cross-entité sur `floors` : un plan d'étage ne peut pas DÉBORDER de son bâtiment (`anchor + dimension ≤ taille du site`, sur les deux axes) ; `dependents` sur `sites` → `floors` par `location` pour que RÉTRÉCIR un bâtiment re-valide ses étages (la contrainte tient aux DEUX bouts). **OPT-IN** : sans taille déclarée, aucune vérification — aucun document existant ne peut devenir invalide. ⚠ `floors.location` reste une CHAÎNE (jamais `ref: "sites"`) : le dépôt contient des `location` historiques sans enregistrement `sites`, que la FK ferait rejeter (V2) ; la règle est donc défensive — site introuvable ⇒ non applicable. Cf. `docs/placement.md` §6.8 | ✅ |
 
 Pilotes initiaux (`equipments`, `cables`, `racks`) choisis pour leur richesse (types, enums,
 FK, tableaux). **Couverture : TOUTES les collections, et TOUS leurs champs persistés** (spec
-COMPLÈTE depuis la régularisation D3a — cf. §10). Un test d'invariant vérifie que (a) toutes
+COMPLÈTE — cf. §10). Un test d'invariant vérifie que (a) toutes
 les collections sont couvertes, et (b) l'entité par défaut de chaque constructeur front
 satisfait sa spec (aucune sur-contrainte) ; le verrou de complétude
 (`Tests/modules/test-spec-completude.js`) vérifie (c) qu'aucun champ du corpus de démo n'est
 hors spec. Les enums repris du domaine sont gardés alignés par des tests anti-divergence.
 
-> ⚠ Cette phrase a longtemps annoncé « les **19** collections » alors que le modèle en comptait
-> déjà 21 : un COMPTE écrit à la main dans une doc se périme au premier ajout, en silence, et
-> personne ne le relit. Le nombre est retiré à dessein — c'est le test d'invariant qui compte, pas
-> la prose. Ne pas le réintroduire.
+> ⚠ **Aucun COMPTE de collections n'est écrit ici, et il ne faut pas en introduire.** Un nombre
+> écrit à la main dans une doc se périme au premier ajout, en silence, et personne ne le relit.
+> C'est le test d'invariant qui fait foi, pas la prose.
 
-## 8. V5 — règles cross-entité (cadrage)
+## 8. V5 — règles cross-entité
 
 > Tranche **distincte** (pas un invariant de plus) : valider un enregistrement à partir des
 > **données d'une autre entité**, pas seulement de ses propres champs. **V5a et V5b
 > implémentées** (sens direct + fetcher batch-aware ; dépendance inverse parent→enfants sur
-> create/update). Ce qui suit fixe le périmètre et les pièges traités.
+> create/update). Ce qui suit décrit le périmètre et les pièges traités.
 
 ### 8.1 Le besoin
 
 Règle motrice : une adresse IP doit appartenir au sous-réseau de son réseau —
-`ipAddresses.address ∈ ipNetworks[network_id].cidr`. Aujourd'hui cette règle existe, mais
-**codée à la main dans l'UI** ([`IpamForms.ts`](../src-client/views/forms/IpamForms.ts) : IP-dans-CIDR
-à la création, et sur changement de CIDR, refus si une IP/plage existante tombe dehors).
-Elle n'est donc enforce ni en mode fichier hors formulaire, ni au serveur, ni pour une
-interface tierce. Autres candidates : plage DHCP ⊂ CIDR du réseau ; `cable.from`/`to`
-pointant des ports d'équipements cohérents ; etc.
+`ipAddresses.address ∈ ipNetworks[network_id].cidr`. Portée par l'UI seule
+([`IpamForms.ts`](../src-client/views/forms/IpamForms.ts)), elle ne vaudrait ni en mode fichier
+hors formulaire, ni au serveur, ni pour une interface tierce — d'où son passage en règle
+partagée. Même famille : plage DHCP ⊂ CIDR du réseau ; `cable.from`/`to` pointant des ports
+d'équipements cohérents ; etc.
 
 ### 8.2 Pourquoi c'est un niveau À PART
 
@@ -200,7 +197,7 @@ résolveur V2 renvoie un **booléen** → ne donne pas accès au `cidr`. V5 a be
 **fetcher** (récupère l'enregistrement lié), donc d'une **nouvelle capacité injectée**, qui
 garde `src-shared/` pur (l'UI l'adosse au `Store`, le serveur au `Repository`).
 
-### 8.3 Forme envisagée
+### 8.3 Forme d'une règle
 
 ```ts
 // dans la spec d'une collection :
@@ -215,42 +212,32 @@ crossEntity?: Array<(record, fetch: EntityFetcher) => ValidationError | null>
 }
 ```
 
-### 8.4 Les pièges à traiter (le vrai travail)
+### 8.4 Les pièges (traités)
 
 1. **Fetcher batch-aware sur le CONTENU.** Dans un `/transact`, l'IP et son réseau peuvent
-   être créés/modifiés ensemble : le fetcher doit renvoyer le réseau **tel qu'après le lot**
-   (y compris un `cidr` modifié dans ce même lot), pas l'état persisté. V2 résolvait
-   l'existence dans le lot ; V5 doit résoudre le **contenu** (étendre `buildBatchResolver`
-   en un `buildBatchFetcher` qui superpose `creates`/`updates` du lot sur le persisté).
+   être créés/modifiés ensemble : le fetcher renvoie le réseau **tel qu'après le lot**
+   (y compris un `cidr` modifié dans ce même lot), pas l'état persisté. C'est le rôle de
+   `buildBatchFetcher`, qui superpose `creates`/`updates` du lot sur le persisté — là où la
+   résolution d'existence de V2 se contentait d'un booléen.
 2. **Dépendance INVERSE (parent → enfants).** Changer le `cidr` d'un réseau peut faire sortir
-   ses adresses/plages du sous-réseau. Valider l'IP quand on touche l'IP ne suffit pas : il
-   faut **re-valider les enfants quand on touche le parent**. C'est la logique bidirectionnelle
-   déjà présente dans `IpamForms`. À porter dans `shared` (probablement : une collection
-   déclare les « validations déclenchées par un parent » à rejouer).
-3. **Réutilisation Ip.** La règle s'appuie sur `Ip.inCidr`/`parseCidr` (déjà partiellement
-   partagés : `Ip.toInt` délègue à `src-shared/ipv4ToInt`). Pour V5, `inCidr`/`parseCidr` devront
-   eux aussi vivre côté partagé (sinon `src-shared/` importerait `core/` — interdit). À extraire.
-4. **Coût / portée.** La dépendance inverse rend la validation potentiellement O(enfants) sur
-   une écriture de parent → borner et ne déclencher que sur les champs concernés (ex. `cidr`).
+   ses adresses/plages du sous-réseau : valider l'IP quand on touche l'IP ne suffit pas. Une
+   collection déclare donc ses `dependents` — les validations à rejouer quand on touche le
+   parent (`validateDependents` + `ChildFinder` injecté, `buildBatchChildFinder` pour un lot).
+3. **Réutilisation Ip.** Les primitives d'adressage (`Ipv4.toInt`, `parseCidr`, `inCidr`) vivent
+   dans `src-shared/DataValidation.ts`, avec les règles qui les consomment : `src-shared/` ne
+   peut pas importer `core/` (règle d'ISOLEMENT, cf. §11).
+4. **Coût / portée.** La dépendance inverse rend la validation O(enfants) sur une écriture de
+   parent — elle n'est donc déclenchée que par les champs concernés (ex. `cidr`), via des FK
+   indexées.
 
-### 8.5 Recommandation de découpe
-
-- **V5a** — sens direct seulement : IP ∈ CIDR, plage DHCP ⊂ CIDR, avec `EntityFetcher`
-  batch-aware. Couvre la création/édition d'une IP/plage. Risque modéré.
-- **V5b** — dépendance inverse : re-validation des enfants sur changement de `cidr`. Plus
-  lourd ; à faire seulement si V5a ne suffit pas (le `cidr` change rarement).
-
-Prérequis transverse : extraire `Ip.parseCidr`/`inCidr` vers `src-shared/` (principe
-réutilisation > duplication), comme déjà amorcé pour `ipv4ToInt`.
-
-## 9. V6 — contraintes d'unicité / portée (cadrage)
+## 9. V6 — contraintes d'unicité / portée
 
 > Tranche **distincte** : valider un enregistrement contre l'ENSEMBLE de ses PAIRS dans un
 > périmètre (« aucun AUTRE n'a la même valeur », « ne chevauche aucun autre »), pas juste
-> contre une entité liée. Non implémentée — ce qui suit fixe le périmètre, le mécanisme et
-> les pièges. Ces règles existent aujourd'hui codées à la main dans les formulaires/le Store.
+> contre une entité liée. **Implémentée** (V6a→V6h, cf. §7) : la spec porte des règles `scope`,
+> exécutées côté Store, serveur et validation live. Ce qui suit décrit le mécanisme et ses pièges.
 
-### 9.1 Le besoin (règles « Tier 3 »)
+### 9.1 Les règles couvertes
 
 - **ipAddresses** : adresse **unique** dans le document ; pas DANS une plage DHCP du réseau.
 - **dhcpRanges** : pas de **chevauchement** avec une autre plage du même réseau ; pas d'IP
@@ -267,16 +254,16 @@ réutilisation > duplication), comme déjà amorcé pour `ipv4ToInt`.
 | Cross-entité (V5) | UNE entité liée (par id) | `EntityFetcher` |
 | **Portée (V6)** | **TOUS les pairs** d'un périmètre (collection + filtre) | **`RecordFinder`** (par champ, conscient du lot) |
 
-Le `fetch` de V5 renvoie UNE entité ; ici il faut **énumérer un ensemble**. Bonne nouvelle :
-le `ChildFinder` de V5b (`(collection, fkField, parentId) => record[]`) est déjà exactement
-ça — un **recherche par champ** (les champs visés sont indexés : `address`, `from_port_id`,
-`to_port_id`, `network_id`, `rack_id`…). On le **généralise** en `RecordFinder` et on
-réutilise `buildBatchChildFinder` (déjà conscient du lot).
+Le `fetch` de V5 renvoie UNE entité ; ici il faut **énumérer un ensemble**. Le `ChildFinder` de
+V5b (`(collection, fkField, parentId) => record[]`) est exactement ça — une **recherche par
+champ** (les champs visés sont indexés : `address`, `from_port_id`, `to_port_id`, `network_id`,
+`rack_id`…). Il est **généralisé** en `RecordFinder`, et `buildBatchChildFinder` (conscient du
+lot) est réutilisé tel quel.
 
-### 9.3 Forme envisagée
+### 9.3 Forme d'une règle
 
 ```ts
-// nouvelle catégorie de règle dans la spec :
+// catégorie de règle dans la spec :
 scope?: Array<(record, find: RecordFinder) => { path; message } | null>
 // ex. unicité d'adresse IP :
 (addr, find) =>
@@ -287,7 +274,7 @@ scope?: Array<(record, find: RecordFinder) => { path; message } | null>
 Le wiring est **symétrique de V5b** : Store (`_byFk`) et serveur (`repo.list(where)`) pour le
 finder ; `buildBatchChildFinder` pour `/transact`.
 
-### 9.4 Les pièges à traiter (le vrai travail)
+### 9.4 Les pièges (traités)
 
 1. **« Sauf moi-même ».** En update, le record EST persisté → le finder le renvoie → la règle
    DOIT l'exclure par `id` (sinon il entre en conflit avec lui-même). En création, pas de self
@@ -298,31 +285,13 @@ finder ; `buildBatchChildFinder` pour `/transact`.
 3. **Intervalles** (DHCP) : pas une égalité mais un **recouvrement** `[s1,e1] ∩ [s2,e2] ≠ ∅` →
    la règle fait le calcul d'intervalles (réutilise `Ipv4.toInt`).
 4. **Empilement multi-collections** (baie) : les occupants viennent de `equipments` +
-   `rackItems` + brosses (`waypoints`), par **côté** et par **plage de U**. Le plus lourd.
-   ⚠️ `waypoints.rack_id` **n'est pas indexé** (cf. `INDEX_SPEC`) → soit ajouter l'index, soit
-   accepter un scan. C'est ce qui fait de cette règle la plus coûteuse.
-5. **Coût.** Un scan par écriture. Acceptable car les champs sont indexés (sauf le cas baie) ;
-   à surveiller pour les très gros documents.
+   `rackItems` + brosses (`waypoints`), par **côté** et par **plage de U**. La règle la plus
+   lourde — d'où l'entrée `waypoints.rack_id` dans `INDEX_SPEC`, sans laquelle elle imposerait
+   un scan à chaque écriture d'occupant.
+5. **Coût.** Une recherche par écriture, sur des champs **tous indexés** ; à surveiller pour les
+   très gros documents.
 
-### 9.5 Découpe proposée
-
-- **V6a — unicité simple (un champ)** : `ipAddresses.address` unique. ✅ **Fait** — nouvelle
-  catégorie de règle `CollectionSpec.scope` + `RecordFinder` injecté (généralisation du
-  `ChildFinder`), code d'erreur `scope`, « sauf moi-même » par `id`, conscient du lot
-  (`buildBatchChildFinder`). Câblé Store + serveur + live (formulaire adresse IP).
-- **V6b — relations & intervalles** : 1 câble par port (multi-champs) ; chevauchement de plages
-  DHCP + IP-dans-plage (intervalles). Risque moyen.
-- **V6c — empilement de baie** (collision de U) : multi-collections + côtés + index manquant
-  sur `waypoints.rack_id`. Le plus lourd ; à faire seulement si on veut retirer la logique
-  correspondante du Store (sinon elle y reste très bien).
-
-### 9.6 Recommandation
-
-Commencer par **V6a** (unicité d'adresse — net, sûr, réutilise tout l'existant), puis **V6b**.
-Laisser **V6c** au Store (`rackPlacementBlockedReason`) tant qu'il n'y a pas de besoin
-multi-client / interface tierce sur le placement en baie.
-
-## 10. Champs déclarés vs traversée — doctrine (régularisation D3a, 2026-07-31)
+## 10. Champs déclarés vs traversée — doctrine
 
 La spec est **COMPLÈTE** : **tout champ réellement persisté** d'une collection est déclaré dans
 `SPEC_FIELDS`. C'est la condition de la **dérivation du DDL relationnel** (chantier migration DB,
@@ -364,23 +333,18 @@ Règles de déclaration tenues lors de la régularisation (à maintenir pour tou
 - `ports.role` et `equipments.dim_mode` sont **dérivés côté client** mais lus par la validation →
   colonnes persistées ; la dérivation reste un comportement client (documenté dans la spec).
 
-Historique (audits précédents, conservé pour la traçabilité) :
+Cas particuliers à connaître :
 
-- **Régularisé puis DURCI (2026-07-20)** : `ipAddresses.hostname` (saisi dans les formulaires IPAM,
-  affiché en liste et en fiche, base des rapprochements par nom d'hôte) est déclaré
-  `{ type: "string", trim: true, format: "hostname" }`. Le format `hostname` (RFC 1123 :
-  labels alphanumériques + tirets, 1–63 car., pas de tiret en tête/queue, total ≤ 253, insensible
-  à la casse, nom court OU FQDN) est STRICT : une valeur mal formée (espaces, `_`, accents,
-  ponctuation) est rejetée (400 serveur / erreur UI). Reste **optionnel** (une IP peut n'avoir
-  aucun nom d'hôte) ; le durcissement a été décidé après confirmation qu'aucune donnée existante
-  n'était en conflit — pas de rétro-compat conservée à dessein.
-- **Régularisation `datacenters` (2026-07)** : la spec ne déclarait que `name` ; les dimensions,
-  la localisation et le placement d'étage ont été déclarés (défauts alignés sur le formulaire de
-  salle, `floor_orientation` borné à `min 0` faute d'enum numérique), plus deux hauteurs nullables
-  (`height_mm`, `underfloor_mm`). `doors` / `blocked_cells`, alors passthrough assumés, sont
-  déclarés depuis D3a (`json` / `string[]`).
-- Les passthrough intentionnels historiques (`vms.nics`, `datacenters.doors`/`blocked_cells`) sont
-  tous déclarés depuis D3a — `nics` et `doors` via le type `json` (cf. §4).
+- **`ipAddresses.hostname`** est déclaré `{ type: "string", trim: true, format: "hostname" }`.
+  Le format `hostname` (RFC 1123 : labels alphanumériques + tirets, 1–63 car., pas de tiret en
+  tête/queue, total ≤ 253, insensible à la casse, nom court OU FQDN) est STRICT : une valeur mal
+  formée (espaces, `_`, accents, ponctuation) est rejetée (400 serveur / erreur UI). Le champ reste
+  **optionnel** — une IP peut n'avoir aucun nom d'hôte. Aucune rétro-compatibilité n'est prévue.
+- **`datacenters`** déclare, au-delà de `name`, ses dimensions, sa localisation et son placement
+  d'étage (défauts alignés sur le formulaire de salle, `floor_orientation` borné à `min 0` faute
+  d'enum numérique), plus deux hauteurs nullables (`height_mm`, `underfloor_mm`).
+- **`vms.nics`** et **`datacenters.doors`** sont déclarés via le type `json` ;
+  `datacenters.blocked_cells` en `string[]` (cf. §4).
 
 ## 11. Collaborateurs partagés (modules que la validation IMPORTE)
 
@@ -390,18 +354,13 @@ profondeur de baie (`src-shared/RackDepthPolicy`, règles T2c/V6d) et la géomé
 `import { RackDepthPolicy } from "./RackDepthPolicy.js"`, `import { TrayGeometry } from "./TrayGeometry.js"`
 (extension `.js` IMPÉRATIVE — NodeNext l'exige côté serveur, cf. `CLAUDE.md` § « Code partagé »).
 
-> **Historique — `TrayGeometry` était auparavant INJECTÉ, injection retirée le 2026-07-31.** Le patron
-> `ValidationCollaborators { trayGeometry?: TrayGeometryPort }` faisait traverser un objet collaborateur à
-> `validateRecord` / `normalizeAndValidate` / `validateDependents` puis aux règles, avec un **garde-fou
-> d'échec fermé** si l'objet manquait. Il avait été choisi à l'époque où un fichier de `src-shared/` ne
-> pouvait rien importer (contrainte levée en §6.7). Le point de substitution n'a jamais servi — tous les
-> appelants (Store, LiveValidation, serveur, VmSyncService) injectaient la vraie `TrayGeometry` — et chaque
-> nouvel appelant devait penser à injecter sous peine d'échec fermé : plomberie sans bénéfice. Retiré sur
-> demande ; `ValidationCollaborators`, le port `TrayGeometryPort` et le garde-fou ont disparu, l'oubli
-> d'injection est désormais impossible par construction. Cf. `docs/placement.md` §6.7 (mise à jour).
+> **Aucun collaborateur n'est INJECTÉ dans la validation** — ni objet `collaborators`, ni port
+> structurel, ni garde-fou d'échec fermé. Un point de substitution que personne n'utilise coûte à
+> chaque nouvel appelant (penser à injecter, sous peine de voir la règle échouer fermé en silence).
+> L'import direct rend cet oubli impossible par construction.
 
 ```ts
-// La géométrie est résolue par IMPORT DIRECT, plus aucun paramètre « collaborators » :
+// La géométrie est résolue par IMPORT DIRECT, sans paramètre « collaborators » :
 DataValidator.validateRecord(collection, record, fetch?, find?)
 DataValidator.normalizeAndValidate(collection, record, fetch?, find?)
 DataValidator.validateDependents(parentColl, parentRecord, findChildren, fetch)

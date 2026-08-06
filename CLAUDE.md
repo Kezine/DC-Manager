@@ -260,9 +260,13 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
 
 ## Points d'architecture à connaître
 
-- **`EntityRegistry.COLLECTIONS`** est la liste canonique des collections. Toute
-  nouvelle collection doit être ajoutée à la carte d'impact (`src-client/sync/RenderImpact.ts`,
-  invariant testé) et au schéma serveur (`src-server/src/constants.ts`).
+- **`Schema.COLLECTIONS`** (`src-shared/Schema.ts`) est la liste canonique des collections —
+  code PARTAGÉ, source de vérité UNIQUE des deux côtés (`src-server/src/constants.ts` n'en est
+  qu'un ré-export ; l'y ajouter ne sert à rien). Côté client, `EntityRegistry.COLLECTIONS` doit
+  la refléter : un invariant testé compare les deux listes, ORDRE compris. Toute nouvelle
+  collection s'ajoute donc à `src-shared/Schema.ts` + `EntityRegistry`, à la spec de validation
+  (`src-shared/DataValidation.ts`) et à la carte d'impact (`src-client/sync/RenderImpact.ts`,
+  invariant testé).
 - **Localisation (i18n)** : le client se traduit via la classe `I18n` (i18next enveloppé,
   `src-client/i18n/`, catalogues `fr`/`en`). **Toute nouvelle chaîne UI passe par `I18n.t(...)`**
   (clé ajoutée DES DEUX CÔTÉS `fr.ts`/`en.ts` — test de complétude `test-i18n.js`). Pilote actuel :
@@ -281,9 +285,8 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   (cf. `PositioningTool` + `PositioningHost`), instanciée dans `DcBase` ; ne laisse dans la chaîne de vues que de
   **fins branchements** (un point de rendu, le routage des événements, l'ajout de la carte) + l'**adaptation**
   spécifique (l'équivalent de `posScene()`). La géométrie PURE va dans `src-client/geometry/`. Les outils `PositioningTool`,
-  `MeasureTool`, `RouteTool` et `DoorTool` suivent tous ce modèle — de BONS exemples à imiter. Dette résiduelle :
-  les PONTS d'accès transitoires dans `DcBase` (`measure`/`routeBuild`/`_measHi`, aperçu souris throttlé) que les
-  sites historiques utilisent encore — à résorber au fil de l'eau, pas à étendre.
+  `MeasureTool`, `RouteTool` et `DoorTool` suivent tous ce modèle — de BONS exemples à imiter. L'ÉTAT vit DANS
+  l'outil (`routeTool.state`, `measureTool`), jamais dans un pont d'accès porté par `DcBase`.
 
 ## Code partagé front/back (`src-shared/`)
 
@@ -303,11 +306,10 @@ moteur métier pur, découplé du store (interface injectée) et de la présenta
   vers `src-shared/` s'écrivent SANS extension, comme partout dans le front.
 
 > ⚠️ **DEUX RÈGLES DISTINCTES gouvernent les imports de `src-shared/`, et elles ne sont pas de
-> même nature.** La formulation historique — « les fichiers de `src-shared/` sont
-> **auto-suffisants** » — les CONFONDAIT en une seule phrase, justifiant la première (permanente)
-> par la contrainte de build de la seconde (un simple réglage webpack). Quand cette contrainte est
-> tombée, la phrase entière a paru tomber avec elle. C'est ce mélange qui a fait durer une
-> duplication inutile pendant cinq lots.
+> même nature.** L'une est PERMANENTE (l'isolement du dossier), l'autre n'était qu'un réglage de
+> build. Les confondre en une seule phrase — comme le fait le mot « auto-suffisant », BANNI ici —
+> revient à justifier la permanente par la contingente : le jour où la contingente tombe, la
+> permanente paraît tomber avec elle. Toujours écrire LAQUELLE des deux on invoque.
 
 **(1) ISOLEMENT DU DOSSIER — règle PERMANENTE.** Un fichier de `src-shared/` n'importe **RIEN hors
 de `src-shared/`** : ni `src-client/`, ni `src-server/`, ni aucun **paquet npm** ou module natif
@@ -328,9 +330,9 @@ respecter à la lettre en violant celle-ci.
   commentaires — ces fichiers documentent leurs propres imports en prose. Un contrôle de
   discrimination, dans la même section, prouve que le détecteur voit bien chacune de ces formes.
 
-**(2) IMPORTS ENTRE FICHIERS PARTAGÉS — AUTORISÉS** (levés au lot 7, cf. `docs/placement.md` §6.7).
-Artefact de build, et non règle de conception : c'était un défaut de configuration webpack, mesuré
-puis corrigé.
+**(2) IMPORTS ENTRE FICHIERS PARTAGÉS — AUTORISÉS** (cf. `docs/placement.md` §6.7). Ce qui les
+empêchait était un défaut de configuration webpack — un artefact de build, jamais une règle de
+conception.
 - ✅ **Un import relatif ENTRE fichiers de `src-shared/` est AUTORISÉ** — à une condition
   IMPÉRATIVE : le spécificateur porte l'extension **`.js`**, `import { X } from "./Foo.js"`
   pour un fichier `Foo.ts`. C'est la SEULE forme que les trois chaînes acceptent :
@@ -340,33 +342,26 @@ puis corrigé.
   serveur** — c'est la faute à ne pas commettre. La même section de test que la règle (1)
   **vérifie aussi cette extension** : une convention non tenue par une machine finit toujours
   par ne plus être tenue.
-- ⚠ **Pourquoi l'extension, EXACTEMENT** (mesuré le 2026-07-27, pas déduit — cette section a
-  longtemps affirmé le contraire sans l'avoir testé). Un import relatif `./Foo.js` entre
-  fichiers partagés est accepté par **`tsc` des DEUX côtés** (TypeScript 5.9 ramène le
+- ⚠ **Pourquoi l'extension, EXACTEMENT** (mesuré, pas déduit). Un import relatif `./Foo.js`
+  entre fichiers partagés est accepté par **`tsc` des DEUX côtés** (TypeScript 5.9 ramène le
   spécificateur `.js` sur le `.ts`, en résolution *bundler* comme en NodeNext). Le seul
-  point de rupture était **webpack** : sa résolution AJOUTE les extensions au lieu de les
+  point de rupture est **webpack** : sa résolution AJOUTE les extensions au lieu de les
   substituer (`Can't resolve './Foo.js'` — il essaie `./Foo.js`, `./Foo.js.ts`,
   `./Foo.js.js`). D'où le `resolve.extensionAlias: { ".js": [".ts", ".js"] }` de
   `webpack.config.js`, qui lui apprend à résoudre un spécificateur `.js` sur le `.ts`
   correspondant. **Ne pas retirer cette ligne** : les trois chaînes en dépendent.
 - L'**injection** d'un concept partagé dans un autre (paramètre plutôt qu'import) reste un
-  patron légitime **quand elle se justifie**, mais elle relève désormais du **choix de
-  conception**, plus de la contrainte de build : `PowerAnalysis` reçoit son store parce que ça
-  découple, pas parce que l'import serait impossible.
-- ⚠ **Les deux collaborateurs partagés de `DataValidation.ts` sont désormais IMPORTÉS** —
-  `RackDepthPolicy` (politique de profondeur de baie) et `TrayGeometry` (géométrie d'étagère,
-  règles T2d/V6e) le sont tous deux (`import { X } from "./X.js"`). `TrayGeometry` était
-  auparavant **INJECTÉ** (`ValidationCollaborators`, garde-fou d'échec fermé), patron choisi à
-  l'époque où un fichier partagé ne pouvait rien importer ; l'injection a été retirée le
-  2026-07-31 (le point de substitution n'avait jamais servi — tous les appelants injectaient la
-  vraie géométrie — et chaque nouvel appelant devait penser à injecter sous peine d'échec fermé).
-  **Plus aucun collaborateur n'est injecté dans la validation.** Le patron d'injection reste
-  légitime ailleurs quand le découplage se défend sur son propre mérite (cf. `PowerAnalysis`).
-- ⚠ **Une doc qui dit « auto-suffisant » fait DUPLIQUER.** Le seul vrai danger de la
-  contrainte périmée n'est pas qu'elle vieillisse : c'est qu'un contributeur y renonce à un
-  import légitime et **réécrive la règle sur place** — la dette exacte que les déduplications
-  `TrayGeometry` / `RackDepthPolicy` ont eu à résorber. Si un en-tête ou un commentaire
-  affirme encore l'auto-suffisance, c'est un **bug** (principe n°13) : le corriger. Le mot est
-  d'ailleurs à BANNIR même pour dire vrai : il désigne indistinctement la règle (1) et la
-  règle (2). Écrire laquelle des deux on invoque.
-- Le serveur émet désormais sous `dist/src-server/src/` (cf. `package.json` `start`).
+  patron légitime **quand elle se justifie** — mais c'est un **choix de conception**, jamais une
+  contrainte de build : `PowerAnalysis` reçoit son store parce que ça découple, pas parce que
+  l'import serait impossible.
+- ⚠ **Les deux collaborateurs partagés de `DataValidation.ts` sont IMPORTÉS** — `RackDepthPolicy`
+  (politique de profondeur de baie) et `TrayGeometry` (géométrie d'étagère, règles T2d/V6e), tous
+  deux en `import { X } from "./X.js"`. **Aucun collaborateur n'est injecté dans la validation** :
+  un point de substitution que personne n'utilise oblige chaque nouvel appelant à penser à
+  injecter, sous peine de voir la règle échouer fermé. Le patron d'injection reste légitime
+  ailleurs quand le découplage se défend sur son propre mérite (cf. `PowerAnalysis`).
+- ⚠ **Le mot « auto-suffisant » fait DUPLIQUER.** Un contributeur qui le lit renonce à un import
+  légitime et **réécrit la règle sur place** — c'est exactement la dette que les déduplications
+  `TrayGeometry` / `RackDepthPolicy` ont eu à résorber. Si un en-tête ou un commentaire l'affirme
+  encore, c'est un **bug** (principe n°13) : le corriger.
+- Le serveur émet sous `dist/src-server/src/` (cf. `package.json` `start`).

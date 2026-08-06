@@ -204,11 +204,9 @@ prend effet à chaud, sans redémarrage.
 ## API UniFi — VALIDÉ sur console réelle / limites
 
 ✅ **Validé le 2026-08-04** sur une console réelle : **UniFi Network 10.4.57**, **UniFi OS
-Server** auto-hébergé (console SONUMA). L'implémentation avait été écrite **sans** accès à un
-contrôleur (les noms de champs étaient des hypothèses documentées, cf. historique) ; cette
-sonde confirme la mécanique ET les noms de champs — ce tableau n'est donc plus une liste
-d'hypothèses « à valider », mais un **constat**, toujours rassemblé en un seul endroit du code
-pour rester corrigeable d'un geste si une future version de l'API change.
+Server** auto-hébergé. Le tableau ci-dessous est un **constat**, pas une liste d'hypothèses —
+et il reste rassemblé en un seul endroit du code, pour rester corrigeable d'un geste si une
+future version de l'API dévie.
 
 | Élément | Constaté | Où c'est décodé |
 |---|---|---|
@@ -228,24 +226,23 @@ d'intégration **et** orthographes historiques d'écosystème) — un choix cons
 validation : il ne coûte que quelques lignes et couvre une éventuelle console « Network
 Application » autonome dont le vocabulaire diffère légèrement.
 
-### Résolution de site par `internalReference` (corrigé le 2026-08-04)
+### Résolution de site par `internalReference`
 
-Un site UniFi réel peut porter à la fois un **nom d'affichage** (`name: "Sonuma"`, ce que
-l'administrateur voit dans la console) et une **référence interne stable** (`internalReference:
-"default"`, précisément la valeur par défaut du champ « Site » du formulaire de provider,
-cf. tableau plus haut). Avant cette correction, `internalReference` était déjà listée comme
-alias de *nom* (`SITE_NAME_ALIASES`) mais n'était en pratique **jamais consultée** dès qu'un
-`name` existait : la résolution ne retient qu'un seul nom par site (le premier alias présent),
-et « Sonuma » ne matche évidemment pas « default ». Sur la console SONUMA, la config par défaut
-ne se résolvait donc QUE via le repli « console mono-site » de `UnifiAdapter.resolveSite`
-(qui prend le premier site quand la valeur configurée vaut littéralement `"default"`) — un
-repli correct par coïncidence sur une console à un seul site, mais qui masquait le problème et
-aurait échoué sur une console **multi-site**.
+Un site UniFi réel porte à la fois un **nom d'affichage** (`name`, ce que l'administrateur voit
+dans la console — p. ex. « Sonuma ») et une **référence interne stable** (`internalReference`,
+typiquement « default », qui est précisément la valeur par défaut du champ « Site » du formulaire
+de provider). Les deux ne coïncident pas, et « Sonuma » ne matche pas « default ».
 
-`findSiteId` teste maintenant l'`internalReference` comme un **critère de correspondance
-INDÉPENDANT** de l'id et du nom (`SITE_INTERNAL_REF_ALIASES`, constante séparée de
-`SITE_NAME_ALIASES`) : un champ « Site » configuré à `default` se résout donc **directement**
-sur le site dont l'`internalReference` vaut `default`, sans dépendre du repli mono-site.
+`findSiteId` teste donc l'`internalReference` comme un **critère de correspondance INDÉPENDANT**
+de l'id et du nom (`SITE_INTERNAL_REF_ALIASES`, constante SÉPARÉE de `SITE_NAME_ALIASES`) : un
+champ « Site » configuré à `default` se résout **directement** sur le site dont
+l'`internalReference` vaut `default`.
+
+⚠ **Ne pas la ranger dans `SITE_NAME_ALIASES`** : la résolution ne retient qu'un seul nom par
+site (le premier alias présent), donc dès qu'un `name` existe l'alias serait MORT. La
+correspondance ne tiendrait plus que par le repli « console mono-site » de
+`UnifiAdapter.resolveSite` — correct par coïncidence sur une console à un seul site, faux sur une
+console **multi-site**.
 `siteSummaries` (l'énumération du message « site introuvable ») n'a **pas changé** : le libellé
 affiché reste `name` en priorité (« Sonuma »), l'`internalReference` n'y sert que de dernier
 repli d'affichage quand aucun nom n'est renseigné — cohérent avec ce que voit l'administrateur

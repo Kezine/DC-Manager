@@ -6,13 +6,12 @@ Il répond à un besoin transverse : l'application ne mémorise les utilisateurs
 d'un audit « créé/modifié par », destinataires…) que par un **id**, et l'interface veut
 en montrer « Prénom Nom », le login, éventuellement les coordonnées.
 
-> **Périmètre livré (lots 1, 2 & 3).** Le contrat, l'implémentation v1 (cache d'auth + snapshot
-> SQLite), la capture au fil des authentifications, `RequestAuthor.identity(req)` et
-> l'endpoint batch `GET /users/resolve` (lot 1) sont livrés et testés. L'**estampillage** de
-> `created_by`/`updated_by` (id canonique) et des **dates serveur** sur TOUTES les écritures —
-> cœur, interventions, configs des modules (lot 2) — l'est aussi (voir « Estampillage d'audit »).
-> Le **client** (lot 3) l'est également : service `UserDirectory` + affichage des auteurs dans les
-> fiches et la modale d'interventions (voir « Client : UserDirectory »).
+> **Périmètre.** Le contrat, l'implémentation v1 (cache d'auth + snapshot SQLite), la capture au fil
+> des authentifications, `RequestAuthor.identity(req)` et l'endpoint batch `GET /users/resolve` ;
+> l'**estampillage** de `created_by`/`updated_by` (id canonique) et des **dates serveur** sur TOUTES
+> les écritures — cœur, interventions, configs des modules (voir « Estampillage d'audit ») ; et côté
+> client le service `UserDirectory` + l'affichage des auteurs dans les fiches et la modale
+> d'interventions (voir « Client : UserDirectory »).
 
 Deux propriétés fondatrices :
 
@@ -172,8 +171,9 @@ Toutes les écritures qui traversent `resolveRepo` sont estampillées AVANT `ups
 **cascade résiduelle**), et les **updates de CASCADE** d'un `DELETE` (détacher une FK = une modification
 de l'entité par l'auteur de la suppression → `updated_by`). Les champs d'audit sont NON DÉCLARÉS dans
 `src-shared/DataValidation` (pas nécessaire) : ils **traversent** la normalisation/validation sans être
-retirés ni rejetés — passthrough ASSUMÉ, le seul restant avec deux legacy depuis la régularisation D3a
-(spec COMPLÈTE, cf. `docs/validation.md` §10) — et sont écrits dans le blob `data`.
+retirés ni rejetés — passthrough ASSUMÉ, le seul restant avec deux legacy (spec COMPLÈTE, cf.
+`docs/validation.md` §10). Ils sont persistés dans **quatre colonnes standard** du schéma relationnel
+(`created_by`/`updated_by`/`created_date`/`updated_date`, cf. `docs/persistance.md`).
 
 **Exception : la restauration de snapshot (`PUT /snapshot`) N'ESTAMPILLE PAS** (arbitrage Q7) —
 l'audit contenu dans le snapshot est restauré **tel quel** (fidélité historique). C'est le seul chemin
@@ -185,9 +185,9 @@ d'écriture qui ne passe pas par `AuditStamp` ; la normalisation partagée prés
 `created_by` / `updated_by` en **colonnes** : `created_by` posé à la création puis PRÉSERVÉ par l'upsert
 (hors `DO UPDATE SET`), `updated_by` rafraîchi à chaque écriture ; id vide → colonnes `NULL`. L'identité
 vient de la requête (`RequestAuthor.identity(req).id`, posée côté route). **Interventions** stocke
-désormais l'id canonique (les valeurs LEGACY = noms en clair restent lisibles via le repli du client).
+l'id canonique ; les valeurs LEGACY (noms en clair) restent lisibles via le repli du client.
 
-## Client : `UserDirectory` (lot 3)
+## Client : `UserDirectory`
 
 Service CLIENT (`src-client/core/UserDirectory.ts`, CORE, mode API uniquement) qui transforme un
 **id** d'auteur (posé en audit `created_by`/`updated_by`) en **libellé affichable**.
@@ -204,7 +204,7 @@ Service CLIENT (`src-client/core/UserDirectory.ts`, CORE, mode API uniquement) q
 - Instancié UNIQUEMENT en mode REST (null en mode fichier : aucune identité serveur), **injecté via
   `FormHost.userDirectory`** (pattern `interventionHooks` — contrat découplé).
 
-**Points d'affichage** (lot 3) : la ligne d'audit **discrète** « Créé par {auteur} le {date} ·
+**Points d'affichage** : la ligne d'audit **discrète** « Créé par {auteur} le {date} ·
 Modifié par {auteur} le {date} » des **fiches détail** du cœur (`AuditLine`, helper partagé — null en
 mode fichier → pas de ligne) ; la **colonne « Créé par »** du listing d'interventions et l'**audit** de
 sa modale de détail. `RestAdapter.resolveUsers(ids)` est le seul point d'accès réseau.

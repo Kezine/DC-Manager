@@ -32,14 +32,14 @@ le principal choisi sur le port est honoré (et non `network_ids[0]`, qui dépen
 
 `cableNetworkIds`/`cablePrimaryNetworkId` sont appelés sur les chemins chauds (rebuild 3D par tube ET par port,
 rendu SVG, légende, graphe, liste réseaux). La déduction est donc **mémoïsée par composante** : `Store._netCache`
-(port → `{ ids, primary }`, partagé par toute la composante, rempli en une seule traversée), **invalidé à chaque
-mutation** (`Store._emit`). Après le 1er calcul d'une composante, chaque lookup est O(1). Ne jamais sous-invalider :
-le cache est vidé en bloc au moindre changement.
+(port → `{ ids, primary, primaryPort }`, partagé par toute la composante, rempli en une seule traversée),
+**invalidé à chaque mutation** (`Store._emit`). Après le 1er calcul d'une composante, chaque lookup est O(1).
+Ne jamais sous-invalider : le cache est vidé en bloc au moindre changement.
 
-## Transition depuis l'ancien modèle
+## Champs dormants du câble
 
-Décision produit : **on ignore les données réseau préexistantes des câbles** (`Cable.network_ids`/`network_id`
-laissés **dormants** — plus jamais écrits par les formulaires ni lus par la déduction). Aucune migration.
+`Cable.network_ids` / `Cable.network_id` sont **DORMANTS** : jamais écrits par les formulaires, jamais lus par la
+déduction. Les documents qui en portent encore une valeur sont simplement ignorés — aucune migration.
 
 ## Lien avec les faisceaux
 

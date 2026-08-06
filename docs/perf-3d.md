@@ -10,7 +10,7 @@
   `floorgrid`/`orient`/`rackshell`/`racklabel`), `userData.eqSide` (`front`/`rear`) et/ou `userData.rackId` (masquage de baie).
   `applyLayerVisibility()` parcourt `gRacks`/`gFree`/`gWaypoints`/`gFloorDecor` et fixe `.visible` via
   `layerVisible(userData)`. Le picking (`rayHits`) ignore les meshes masqués (three ne le fait pas tout seul). Tout
-  est **construit en permanence** → toggle instantané. Plus aucun `eqRebuild` dans `applyOptionsDiff`.
+  est **construit en permanence** → toggle instantané. **Aucun toggle d'affichage ne reconstruit quoi que ce soit.**
   - **`showRackSides`** : coque OPAQUE + capots toujours construits, couche `rackshell` (masquage = on voit dedans,
     pas de box translucide ; les arêtes restent). Les trous de capot (toit + sol) sont en couche `slot` → pilotés par
     le seul toggle « emplacements libres », indépendamment de l'affichage des capots.
@@ -37,22 +37,24 @@
     cette règle, une boîte à image avant perdrait TOUT repère quand la bascule masque son image
     (tag `frontImageAsMarker`, arbitré par `layerVisible`).
   - **`colorMode`** : recoloration **en place** (`applyColorMode`), pas de rebuild.
-  - `applyOptionsDiff` route : `eqRebuild` (= showRackSides) → `rebuildRacks/Free` ; `eqVis` → `applyLayerVisibility` ;
-    `eqColor` → `applyColorMode` ; `cb` → `rebuildCables`.
+  - `applyOptionsDiff` route : `eqVis` → `applyLayerVisibility` (tous les toggles d'affichage, **`showRackSides`
+    compris**) ; `eqColor` → `applyColorMode` ; `cb` (câbles : visibilité, sélection, tension, style de courbe) →
+    `rebuildCables` ; `freeVis` (équipements libres masqués, personnage) → `rebuildFree` — SEUL chemin de
+    reconstruction du diff, parce qu'un équipement libre masqué est **sauté à la construction** (pas de couche de
+    visibilité, contrairement à `hiddenRacks`) ; `showPivot` → `updatePivot`.
 - **Câbles** : toggle de visibilité (`selCables`/`showAllCables`) via `rerenderView()` (diff `rebuildCables`, pas de
   full `render()`). `webglOptions().selCables` est une COPIE (sinon le diff ne détecte pas le changement).
 - **Diff STRUCTUREL fondé sur une SIGNATURE DE DISPOSITION** (`SceneLayoutSignature` — module PUR, testé en Node ;
-  `applyOptionsDiff` l'appelle et n'arbitre plus lui-même). La décision reposait sur une clé ne portant que
-  l'ENSEMBLE des identifiants de salles (`"M:dc-a,dc-b"`) : tout ce qui DÉPLACE la géométrie sans changer cet
-  ensemble était invisible au diff — la nouvelle disposition était mémorisée (`multiInfo`/`floorDecor` réaffectés)
-  mais jamais appliquée au graphe de scène, d'où des réglages qui ne prenaient effet qu'au RECHARGEMENT de la page
-  (curseur d'échelle inter-sites, bascule linéaire/logarithmique, bascule « Vue étage » quand la portée affichée ne
-  change pas — le cas d'un document mono-salle ou d'une portée réduite à la salle active). La signature couvre
-  désormais la disposition ENTIÈRE : origine/orientation/emprise/vide technique de chaque salle **et** décor d'étage
-  (plans + cellules bloquées, OOB, équipements d'étage, étiquettes d'étage — une par plan dessiné — et de
-  bâtiment). Trois
+  `applyOptionsDiff` l'appelle, il n'arbitre pas lui-même). La signature couvre la disposition ENTIÈRE :
+  origine/orientation/emprise/vide technique de chaque salle **et** décor d'étage (plans + cellules bloquées, OOB,
+  équipements d'étage, étiquettes d'étage — une par plan dessiné — et de bâtiment). ⚠ **Elle ne doit PAS se réduire
+  à l'ensemble des identifiants de salles** (`"M:dc-a,dc-b"`) : tout ce qui DÉPLACE la géométrie sans changer cet
+  ensemble échapperait au diff — curseur d'échelle inter-sites, bascule linéaire/logarithmique, bascule « Vue
+  étage » quand la portée affichée ne change pas (document mono-salle, ou portée réduite à la salle active). La
+  disposition serait mémorisée (`multiInfo`/`floorDecor` réaffectés) sans jamais atteindre le graphe de scène :
+  un réglage sans effet avant rechargement de la page. Trois
   issues : `keep` (rien n'a bougé — le diff d'options suit son cours), `roomDelta` (l'ENSEMBLE des salles change →
-  chemin incrémental inchangé), `rebuild`. Conformément à la note « Rendu 3D » de `CLAUDE.md`, on préfère une
+  chemin incrémental), `rebuild`. Conformément à la note « Rendu 3D » de `CLAUDE.md`, on préfère une
   reconstruction inutile à un mesh périmé. ⚠ **La STABILITÉ de la signature est aussi critique que sa sensibilité** :
   chaque rendu recalcule le contexte (objets neufs), donc une signature instable reconstruirait la scène à chaque
   événement d'affichage. Elle ne dépend que des VALEURS reçues (aucune horloge, aucun compteur, aucune identité
@@ -65,19 +67,20 @@
 - **Moteur préservé entre vues** : `render()` ne `dispose()` le moteur Three QUE si on bascule sur la 3D LEGACY
   (SVG). L'hôte WebGL est **persistant et conservé ATTACHÉ** (exclu de `clearStage`) : en 2D (Dessus/Étage) il est
   juste **masqué** (`display:none`), pas détaché. Au retour en 3D, comme il est toujours attaché, la garde de
-  révision (`_webglRev`) prend le chemin diff (no-op si données inchangées) → **aucune reconstruction**. (Avant : le
-  canvas était détaché → `mount→build` complet au retour = re-dessin de toute la scène multi-salles.)
+  révision (`_webglRev`) prend le chemin diff (no-op si données inchangées) → **aucune reconstruction**. Détacher le
+  canvas coûterait un `mount→build` complet au retour, soit le re-dessin de toute la scène multi-salles.
   - **La VISIBILITÉ de cet hôte est une DÉCISION PURE** (`core/WebglHostVisibility.visible(view, useWebGL, hasRoom)`) :
     visible si, et seulement si, on est en 3D-WebGL **AVEC une salle à montrer**. La condition « salle » n'est pas
-    cosmétique : sans elle, charger un document SANS SALLE en vue 3D laissait affiché le canevas — donc la scène — du
-    document PRÉCÉDENT sous le message « Aucune salle » (deux lignes de `render()` décidaient chacune de leur côté et se
-    contredisaient — dette n°7, corrigée). L'hôte reste masqué sans être détaché, donc le moteur reste chaud. Extraire
+    cosmétique : sans elle, charger un document SANS SALLE en vue 3D laisserait affiché le canevas — donc la scène — du
+    document PRÉCÉDENT sous le message « Aucune salle ». La règle est écrite UNE fois : deux lignes de `render()`
+    décidant chacune de leur côté finiraient par se contredire. L'hôte reste masqué sans être détaché, donc le moteur
+    reste chaud. Extraire
     la règle d'un `render()` non atteignable en test (garde headless `typeof document === "undefined"`) la rend
     VERROUILLABLE — table de vérité éprouvée dans `test-core-store.js`.
 - **Cache de textures d'images de façade** (`imgTexCache`, par URL) : réutilisées synchroniquement d'un build à
   l'autre (plus de rechargement TextureLoader à chaque reconstruction), élaguées après chaque build COMPLET
   (`pruneFaceTextureCache` : toute URL non reposée par ce build est libérée) + libération au `dispose` final.
-- **Réglages en place sans rebuild** : `setCablesOnTop`, `setMarkerScale`, `setCullDistance`, `setCableSpline`,
+- **Réglages en place sans rebuild** : `setCablesOnTop`, `setMarkerScale`, `setCableSpline`,
   `setCableCurveStyle` (le STYLE de tracé — spline uniforme / centripète / cordes arrondies — ne reconstruit que
   les câbles, coalescé rAF comme la tension). NB perf : le style « cordes arrondies » (défaut) échantillonne
   BEAUCOUP moins de points que les splines (les droites ne coûtent que leurs extrémités, ~1 pt / 5 mm sur les
@@ -116,12 +119,11 @@
   corrige le pivot délirant sous un angle rasant (multi-DC/multi-étage surtout). Géométrie PURE testée en Node.
 - **Marqueur du pivot LISIBLE SUR LES DEUX THÈMES** (`views/dc/three/PivotMarker`, module PUR — style, tracé
   et clé de cache ; `DcThreeBase.pivotTexture`/`updatePivot` ne font que fournir le canvas et poser le sprite).
-  Le marqueur était dessiné dans une couleur EN DUR (`#c8d2e0`, le `--fg` du thème SOMBRE) à `opacity: 0.55` :
-  invisible sur fond clair. Il se décline désormais sur le thème — trait de la teinte OPPOSÉE au fond, **halo**
-  (liseré de contraste, tracé SOUS le trait en une 1re passe plus épaisse) de la teinte du fond. Le halo est ce
-  qui garantit la lisibilité PAR-DESSUS n'importe quel contenu, `depthTest: false` obligeant (baie sombre, sol
-  clair, image de façade). Silhouette, taille écran (~46 px) et épaisseur apparente INCHANGÉES ; seule l'opacité
-  monte à 0,85. Tous les réglages sont des constantes de `PivotMarker`.
+  Le marqueur se décline sur le THÈME — trait de la teinte OPPOSÉE au fond, **halo** (liseré de contraste, tracé
+  SOUS le trait en une 1re passe plus épaisse) de la teinte du fond. Une couleur EN DUR le rendrait invisible sur
+  l'un des deux fonds. Le halo est ce qui garantit la lisibilité PAR-DESSUS n'importe quel contenu, `depthTest:
+  false` obligeant (baie sombre, sol clair, image de façade). Taille écran ~46 px, opacité 0,85. Tous les réglages
+  sont des constantes de `PivotMarker`.
   ⚠ **La clé de cache de la texture DÉPEND du thème** (`##pivot|light` / `##pivot|dark`) : les clés `##…` de
   `texCache` sont PERMANENTES (jamais évincées, cf. `pruneLabelTextureCache`), donc une clé fixe aurait resservi
   à vie la texture du premier thème rencontré. Deux entrées permanentes au maximum. Corollaire :

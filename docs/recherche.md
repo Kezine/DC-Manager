@@ -2,8 +2,7 @@
 
 Architecture de la **recherche** de DC Manager : la palette globale (Ctrl+K / loupe topbar), la recherche
 et les filtres des **listings**, le module partagé des termes, les routes serveur et la répartition
-local ⇄ serveur des deux modes de données. Chantier « recherche partagée / chargement dynamique »
-(lots 1-4, 2026-08-02).
+local ⇄ serveur des deux modes de données.
 
 ## Vue d'ensemble
 
@@ -26,8 +25,8 @@ local ⇄ serveur des deux modes de données. Chantier « recherche partagée / 
 Les **termes cherchables** des deux chemins sortent du même module : **`src-shared/SearchTerms.ts`**.
 C'est lui qui calcule la colonne `search` du serveur (à l'écriture, cf. `docs/persistance.md`) ET les
 termes du corpus local (à l'ouverture de la palette) — la parité des deux modes est **par
-construction**, pas par discipline. Depuis le lot 3, la **recherche des LISTINGS** boit à la même
-source (cf. « Listings serveur-pilotés » plus bas) : une seule définition de « quel texte trouve cet
+construction**, pas par discipline. La **recherche des LISTINGS** boit à la même source
+(cf. « Listings serveur-pilotés » plus bas) : une seule définition de « quel texte trouve cet
 enregistrement » pour toute l'application.
 
 ## Les composants
@@ -43,7 +42,7 @@ enregistrement » pour toute l'application.
 | `src-client/core/ListRowEngine.ts` | MOTEUR de lignes des listings : décision local ⇄ serveur, debounce, abort, repli, anti-boucle d'échec. Source INJECTÉE (`ListRowSource`). |
 | `src-client/core/StoreListRowSource.ts` | La source concrète : `local()` = cache hydraté + `RecordSearchIndex`, `remote()` = lecteur serveur injecté (`RemoteListReader`), traduction de la cible en `where` ou restriction cliente. |
 | `src-client/views/ListTargets.ts` | Descripteurs du **filtre CIBLE unifié** par listing (recherche des candidats, libellés, badge, `where`/`restrict`). |
-| `src-client/core/EntityCandidates.ts` | SOURCE de candidats d'entités PARTAGÉE (lot 4) : `EntityCandidates` (pur — `local`/`fromRecords`, re-classés par `TargetSearch`) + `EntityCandidateSource` (orchestration DOUBLE MODE : annulation + repli ; anti-rebond/StaleGate portés par le SearchPop). |
+| `src-client/core/EntityCandidates.ts` | SOURCE de candidats d'entités PARTAGÉE : `EntityCandidates` (pur — `local`/`fromRecords`, re-classés par `TargetSearch`) + `EntityCandidateSource` (orchestration DOUBLE MODE : annulation + repli ; anti-rebond/StaleGate portés par le SearchPop). |
 | `src-client/ui/FilterBar.ts` + `core/FilterChips.ts` + `core/TargetFilterDisplay.ts` | Dimension « à RECHERCHE » : déclencheur FERMÉ + panneau-portail à `SearchPop` HÉBERGÉ, chips à valeur LIBRE, badge/placeholder résolus par le module pur `TargetFilterDisplay`. |
 | `src-server/src/RelationalRepository.searchAll` | Recherche transverse : un LIKE sur la colonne `search` par collection, plafond par collection, troncature signalée. |
 | `src-server/src/RelationalRepository.list` | Listing d'UNE collection : LIKE sur `search` + `where` de colonnes + pagination — la route que consomment les listings serveur-pilotés. |
@@ -77,9 +76,8 @@ Pas de ranking serveur en v1 : le serveur FILTRE (LIKE sur `search`), le client 
 ## Caps ASSUMÉS (v1)
 
 - **`RelationalRepository.SEARCH_ALL_LIMIT` = 40 résultats PAR collection** (LIMIT cap+1, sans
-  `COUNT(*)` ; les collections tronquées sont signalées dans `truncated`). Même esprit que la page de
-  500 des interventions : au-delà, l'utilisateur affine sa requête. La palette v1 n'affiche pas la
-  troncature.
+  `COUNT(*)` ; les collections tronquées sont signalées dans `truncated`) : au-delà, l'utilisateur
+  affine sa requête. La palette v1 n'affiche pas la troncature.
 - Le LIKE `'%…%'` n'est pas sargeable (scan par collection) — assumé, la route est debouncée et le
   périmètre restreint aux familles à fiche (`collections=`, envoyé par la palette : inutile de
   scanner `ports`/`aggregates`, inhabillables au corpus).
@@ -101,10 +99,10 @@ Un copier-coller de la chaîne complète ne matche donc que côté client (habil
 — le backfill à l'ouverture (`PRAGMA user_version`, cf. `docs/persistance.md`) met les documents
 existants à niveau tout seul.
 
-## Listings serveur-pilotés (lot 3)
+## Listings serveur-pilotés
 
 Les listings du cœur (`views/ListView`, tous les onglets adossés à une collection du document) ne lisent
-plus `store.all()` : leurs lignes viennent d'un **moteur à source injectée**.
+pas `store.all()` : leurs lignes viennent d'un **moteur à source injectée**.
 
 ```
    saisie / filtre CIBLE
@@ -123,15 +121,15 @@ plus `store.all()` : leurs lignes viennent d'un **moteur à source injectée**.
                      Store.list → entités absorbées → repeint
 ```
 
-### Ce qui a changé, et pourquoi
+### Les règles du moteur
 
 - **La recherche d'un listing utilise le moteur PARTAGÉ**, dans les DEUX modes. Le texte cherché d'une
   ligne est `RecordSearch.textOf(...)` — c'est-à-dire, mot pour mot, le contenu de la colonne `search`
-  que le serveur a calculé pour ce même enregistrement. **Conséquence assumée** (même bascule que la
-  palette au lot 2) : l'assiette s'élargit du relevé trié d'hier au « tout champ propre + dérivés ». Un
-  équipement se trouve désormais par le nom de **sa baie**, d'un de ses **sous-équipements**, par
-  « U12 » ou « 42 U ». C'est le comportement de la palette, appliqué aux listes.
-- **`ListConfigs.searchFields` a disparu**, sauf **une** exception documentée : la **bibliothèque
+  que le serveur a calculé pour ce même enregistrement. **Assiette ASSUMÉE** : « tout champ propre +
+  dérivés », pas un relevé de champs trié à la main. Un équipement se trouve donc par le nom de **sa
+  baie**, d'un de ses **sous-équipements**, par « U12 » ou « 42 U » — le comportement de la palette,
+  appliqué aux listes.
+- **Aucun `ListConfigs.searchFields`**, sauf **une** exception documentée : la **bibliothèque
   d'images de façade**. Sa source est CUSTOM (`ImageStore`, hors collections du document, donc hors
   spec partagée) et ses enregistrements portent la **data URL complète** de l'image — qui n'a rien à
   faire dans un texte cherchable. Ce listing garde donc son relevé explicite (`ListOptions.searchFields`).
@@ -150,8 +148,8 @@ plus `store.all()` : leurs lignes viennent d'un **moteur à source injectée**.
 - **Le TRI et la PAGINATION restent CLIENT**, sur les lignes reçues : les accesseurs de tri d'un listing
   sont des fonctions arbitraires, souvent dérivées (occupation d'une baie, longueur d'un câble, chemin
   d'un équipement) — il n'y a pas de colonne SQL en face. Le jeu serveur est donc **plafonné**
-  (`StoreListRowSource.REMOTE_LIMIT` = **500** lignes, même esprit que la page de 500 des interventions
-  et que le cap par collection de la recherche transverse). Au-delà, l'utilisateur affine sa requête.
+  (`StoreListRowSource.REMOTE_LIMIT` = **500** lignes, même esprit que le cap par collection de la
+  recherche transverse). Au-delà, l'utilisateur affine sa requête.
 - Aucune **pagination serveur** n'est exposée dans l'UI des listings en v1.
 
 ### Coût de la recherche locale et mémoïsation
@@ -178,19 +176,19 @@ adresses IP de SW-Coeur », « les câbles de SW-Coeur », « les interventions 
 cibles est longue, croissante et à libellés composés → le contrôle est un **`SearchPop`**, jamais un
 `<select>` par famille (principe n°14, même règle que `FormControls.entityPicker`).
 
-- **`FilterBarDimension.search`** transforme une dimension en dimension « à recherche ». Depuis la
-  refonte du 2026-08-03 (maquette validée `design-system/briefs/filtre-cible-porteur-maquette.html`,
-  réponse au carton `filtre-cible-porteur.md`), elle se présente comme un **déclencheur FERMÉ** au même
-  langage que les autres dimensions (`.multi-trigger` + `.count-badge`, `aria-haspopup="dialog"`) — et
-  non plus comme un champ nu posé dans le menu. Le **badge** reflète la sélection : `(Tous)` sans cible,
+- **`FilterBarDimension.search`** transforme une dimension en dimension « à recherche ». Elle se
+  présente comme un **déclencheur FERMÉ** au même langage que les autres dimensions (`.multi-trigger`
+  + `.count-badge`, `aria-haspopup="dialog"`), jamais comme un champ nu posé dans le menu (maquette de
+  référence : `design-system/briefs/filtre-cible-porteur-maquette.html`).
+  Le **badge** reflète la sélection : `(Tous)` sans cible,
   le **NOM** de l'entité (ellipsé, résolu à chaque rendu — repli sur l'identifiant si elle disparaît) à
   une cible, le **compteur** à 2+ (multi OR, v2). La règle badge/placeholder vit dans le module **pur**
   `core/TargetFilterDisplay` (testé) ; l'i18n et le DOM restent dans `FilterBar`.
 - **Le panneau** (`.tf-panel`, 320 px) s'ouvre en **PORTAIL** sur `<body>` (`.dc-pop-portal`), ancré au
   déclencheur par la règle **partagée** `SearchPop.portalPlace` (retournement haut/bas, recadrage
-  viewport, quasi-feuille mobile héritée). C'est la **résolution de la tension historique** : le popover
-  de résultats (~380 px) débordait du menu « + Filtre » (200 px) ; désormais le menu ne change pas d'un
-  pixel et le panneau déborde **volontairement et proprement** (piste A de la maquette). Contenu, dans
+  viewport, quasi-feuille mobile). Le portail est ce qui résout le conflit de largeurs : le popover de
+  résultats (~380 px) ne tient pas dans le menu « + Filtre » (200 px) — le menu ne bouge donc pas d'un
+  pixel et le panneau déborde **volontairement et proprement**. Contenu, dans
   l'ordre : section « valeur courante » facultative (badge de famille + nom + ✕ — **le ✕ vide le filtre
   SANS fermer le panneau**), champ de recherche, liste de candidats, pied (aides clavier, mention du
   plafond `EntityCandidates.SEARCH_LIMIT`). États d'habillage : invite au repos, **squelette** pendant le
@@ -227,11 +225,11 @@ Cette **asymétrie est assumée** : le jour où le serveur saura joindre les por
 câbles change — `restrict` reste de toute façon le chemin du mode fichier. Les **certificats** ne sont
 pas branchés en v1 (base serveur séparée, client à part).
 
-## Pickers et recherches d'entités (lot 4)
+## Pickers et recherches d'entités
 
 Les recherches d'ENTITÉS derrière les `SearchPop` transverses — l'éditeur de LIENS d'intervention et les
-dimensions « à recherche » du **filtre CIBLE** des listings — sont désormais **serveur-pilotées en mode
-API**, tout en restant **100 % locales en mode fichier** (principe n°15). Une seule source répond à la
+dimensions « à recherche » du **filtre CIBLE** des listings — sont **serveur-pilotées en mode API**, tout
+en restant **100 % locales en mode fichier** (principe n°15). Une seule source répond à la
 question « quels candidats {kind, id, label} pour cette saisie, dans ces familles ? ».
 
 ```
@@ -273,7 +271,7 @@ question « quels candidats {kind, id, label} pour cette saisie, dans ces famill
   candidats viennent du serveur, **au-delà du corpus chargé** (préparation de l'hydratation partielle).
 - **Rythme & plafond** (aucun réglage inventé) : anti-rebond `EntityCandidateSource.DEBOUNCE_MS` =
   `ListRowEngine.REMOTE_DEBOUNCE_MS` (200 ms, le tempo de la palette et des listings) ; plafond de
-  candidats `EntityCandidates.SEARCH_LIMIT` = 12 (l'ancien `ListTargets.SEARCH_LIMIT`, centralisé).
+  candidats `EntityCandidates.SEARCH_LIMIT` = 12, valeur unique dont `ListTargets.SEARCH_LIMIT` n'est qu'un alias.
 
 ### Ce qui reste CLIENT, et pourquoi (`EntityPicker` / `OptionSearch`)
 
@@ -292,17 +290,15 @@ ports d'un équipement, quels conteneurs compatibles…) devra se faire **côté
 le corpus local ne suffira plus à les évaluer. C'est un **constat**, pas un chantier d'aujourd'hui — la
 source `EntityCandidateSource` prépare déjà le versant « recherche transverse » de cette bascule.
 
-### Nettoyage `VmStatus.searchTerms`
+### Cherchabilité des statuts VM
 
-Retiré au lot 4 : plus aucun consommateur depuis que les listings ont perdu leurs `searchFields` (lot 3).
-La cherchabilité de « orpheline »/« orphan » (fr **et** en) est portée par le catalogue `vmOrphan` du
-module partagé `src-shared/SearchTerms` (invariant n°15 testé). L'**affichage** des statuts VM
-(pastilles) n'a pas bougé.
+`VmStatus` ne porte **aucun** terme de recherche : la cherchabilité de « orpheline »/« orphan » (fr
+**et** en) est portée par le catalogue `vmOrphan` du module partagé `src-shared/SearchTerms` (invariant
+n°15 testé). `VmStatus` reste la source unique de l'**affichage** des statuts (pastilles).
 
-### Clients wifi (search-v3)
+### Clients wifi
 
-La collection `wifiClients` (cf. `docs/wifi-unifi.md`) est entrée dans la spec partagée le 2026-08-03,
-d'où le passage de `SEARCH_VERSION` à **3** (le backfill à l'ouverture met les documents à niveau).
+La collection `wifiClients` (cf. `docs/wifi-unifi.md`) fait partie de la spec partagée.
 Elle apporte : un dérivé par LIEN (le nom du **point d'accès** rapproché, `ap_equipment_id` →
 `equipments.name`) et le catalogue `wifiDisconnected` — **« déconnecté »/« disconnected »**, le pendant
 wifi de `vmOrphan` (MÊME mécanique `orphan`, autre vocabulaire : côté wifi, disparaître de l'inventaire
@@ -336,6 +332,6 @@ couverte par `ownText` — d'où l'absence de `own` pour cette collection. Côt�
 - `docs/persistance.md` § « La colonne `search` ENRICHIE » — écriture/invalidation/backfill serveur.
 - `docs/interventions.md` § « Filtre par CIBLE » — l'absorption de la chip de navigation par la dimension.
 - `.notes/toDos/chargement-dynamique-document-cadrage-2026-08-02.md` — cadrage du chantier (non versionné).
-- § « Pickers et recherches d'entités (lot 4) » ci-dessus — la source double mode `EntityCandidates` /
+- § « Pickers et recherches d'entités » ci-dessus — la source double mode `EntityCandidates` /
   `EntityCandidateSource`, ce qui reste client (`EntityPicker`/`OptionSearch`) et le re-cadrage prévu
   pour l'hydratation partielle (option C).

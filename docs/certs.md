@@ -101,7 +101,7 @@ Deux clés, deux rôles — c'est ce qui rend le **changement de phrase maître*
 
 Le modèle KEK/DEK ci-dessus est INSTANCIÉ PAR COFFRE (« vault ») : un document porte **N coffres**,
 chacun avec **sa DEK indépendante, sa phrase et son enveloppe `wrapped_dek`** (table `pki_vaults`,
-schéma Option B **UNIFORME** — le coffre « default » = l'unique DEK historique, migrée automatiquement).
+schéma **UNIFORME** — le coffre « default » est un coffre comme les autres).
 Chaque certificat porte un **`vault_id`** désignant le coffre dont la DEK chiffre sa `key_enc`.
 
 Objectif : **ne plus libérer les clés racine à chaque déverrouillage**. Usage quotidien = coffre
@@ -126,9 +126,8 @@ en découle : donner la phrase du coffre standard sans jamais donner celle du ro
   racine… »** : crée le coffre « root » (nouvelle phrase) puis, pour chaque CA racine à clé, déchiffre
   `key_enc` sous la DEK default et le re-chiffre sous la DEK root (`vault_id` + `key_enc` dans le même
   PUT). Seules les clés DÉPLACÉES sont re-chiffrées.
-- **Rekey PAR coffre** (`PUT /pki/vaults/:id/rekey`) : mêmes garde-fous que l'historique (verrou
-  optimiste + historisation, désormais PAR coffre) ; le coffre default garde son miroir legacy
-  `pki_documents`.
+- **Rekey PAR coffre** (`PUT /pki/vaults/:id/rekey`) : verrou optimiste + historisation, PAR coffre ;
+  le coffre default garde son miroir legacy `pki_documents`.
 - **Limite assumée** : ce n'est PAS un HSM — la clé racine est quand même déchiffrée dans le
   navigateur au moment où on l'utilise. La séparation protège le root HORS session en exploitation
   quotidienne et sépare les DÉTENTEURS de phrase, pas l'instant précis d'usage.

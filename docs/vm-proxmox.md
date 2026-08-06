@@ -2,10 +2,10 @@
 
 Feature **AMOVIBLE** : inventaire des machines virtuelles (QEMU) et conteneurs (LXC)
 d'un ou plusieurs clusters Proxmox, répliqué dans le document sous la collection
-`vms` par une synchronisation côté serveur. Exigences fondatrices (cadrage
-2026-07-12, amendé 2026-07-13) : **découplage maximal** (supprimable sans
-cicatrice), **résilience aux releases Proxmox**, providers configurés **par
-document** (chaque document = une infrastructure, multi-clusters possibles).
+`vms` par une synchronisation côté serveur. Exigences fondatrices : **découplage
+maximal** (supprimable sans cicatrice), **résilience aux releases Proxmox**,
+providers configurés **par document** (chaque document = une infrastructure,
+multi-clusters possibles).
 
 ## Vue d'ensemble
 
@@ -23,7 +23,7 @@ Une passe de synchro (par couple document × provider) :
 1. `ProxmoxAdapter.inventory()` — orchestration des appels API, décodage par
    `ProxmoxParse` (pur, tolérant) → `{ vms: VmRecord[]; cluster: VmClusterInfo }`
    (UN seul passage réseau produit l'inventaire des VMs ET l'état du cluster —
-   nœuds/métriques/quorum/version — cf. vue « Clusters », cadrage 2026-07-13) ;
+   nœuds/métriques/quorum/version — cf. vue « Clusters ») ;
 2. `VmReconcile.plan()` (pur) — diff contre les `vms` du document → opérations
    `{créations, patchs minimaux, orphelines}` ;
 3. `VmSyncService` — validation PARTAGÉE (autorité serveur), écriture
@@ -40,12 +40,12 @@ Idempotence de bout en bout : un inventaire inchangé ne produit **aucune**
 | Fichier | Rôle |
 |---|---|
 | `VmProvider.ts` | **Contrat** : `VmProviderAdapter` (test/inventory), pivot `VmRecord`/`VmNic` + état cluster `VmClusterInfo`/`VmClusterNode` (retour `VmInventory`), `ProviderConfig`. Agnostique du provider — Proxmox n'est que la 1re implémentation. |
-| `PveHttp.ts` | Client HTTPS d'UN nœud : jeton d'API (`PVEAPIToken=…`) et **hiérarchie de confiance TLS** par endpoint (`trustOptions`, statique pure : épinglage d'empreinte SHA-256 > CA du cluster `ca_pem` > CA système) — jamais « accepter tout ». Erreurs TYPÉES (`PveHttpError.retryable` : joignabilité vs applicatif). Le jeton n'apparaît jamais dans une erreur/un log. **Réponse BORNÉE** : au-delà de `MAX_RESPONSE_BYTES` (32 Mio) la requête est avortée (erreur non-retryable — données cluster-wide, basculer ne servirait à rien) pour qu'un endpoint détraqué ne gonfle pas la mémoire du serveur. **Agent HTTPS injectable** (dernier paramètre, optionnel) : sans injection, une socket **dédiée par requête** (comportement historique) ; avec l'agent keep-alive du pool, les connexions sont réutilisées (cf. `PveHttpPool.ts`). |
-| `PveHttpPool.ts` | **Pool de nœuds** avec bascule sur défaillance de joignabilité (jamais sur une erreur applicative) et préférence collante (le nœud mort ne coûte son délai qu'une fois par passe). **Agent keep-alive PARTAGÉ à la durée d'UNE passe** (`fromConfig` l'ouvre, `dispose()` le détruit en fin d'inventaire) : les **handshakes TLS sont AMORTIS** sur les ~N appels de détail d'une passe (constat d'audit N+1 — sans lui, `agent: false` repayait TCP + un handshake TLS complet par requête, ~50 ms de pur handshake par appel sur un gros cluster). Sûr entre endpoints aux confiances TLS différentes : l'agent réutilise les sockets **par origine** (host:port), chacune validée à SON handshake ; deux nœuds = deux origines distinctes. Le N+1 séquentiel lui-même **reste** (assumé, volumes faibles). |
+| `PveHttp.ts` | Client HTTPS d'UN nœud : jeton d'API (`PVEAPIToken=…`) et **hiérarchie de confiance TLS** par endpoint (`trustOptions`, statique pure : épinglage d'empreinte SHA-256 > CA du cluster `ca_pem` > CA système) — jamais « accepter tout ». Erreurs TYPÉES (`PveHttpError.retryable` : joignabilité vs applicatif). Le jeton n'apparaît jamais dans une erreur/un log. **Réponse BORNÉE** : au-delà de `MAX_RESPONSE_BYTES` (32 Mio) la requête est avortée (erreur non-retryable — données cluster-wide, basculer ne servirait à rien) pour qu'un endpoint détraqué ne gonfle pas la mémoire du serveur. **Agent HTTPS injectable** (dernier paramètre, optionnel) : sans injection, une socket **dédiée par requête** ; avec l'agent keep-alive du pool, les connexions sont réutilisées (cf. `PveHttpPool.ts`). |
+| `PveHttpPool.ts` | **Pool de nœuds** avec bascule sur défaillance de joignabilité (jamais sur une erreur applicative) et préférence collante (le nœud mort ne coûte son délai qu'une fois par passe). **Agent keep-alive PARTAGÉ à la durée d'UNE passe** (`fromConfig` l'ouvre, `dispose()` le détruit en fin d'inventaire) : les **handshakes TLS sont AMORTIS** sur les ~N appels de détail d'une passe. Sans lui, `agent: false` repaierait TCP + un handshake TLS complet par requête — ~50 ms de pur handshake par appel sur un gros cluster. Sûr entre endpoints aux confiances TLS différentes : l'agent réutilise les sockets **par origine** (host:port), chacune validée à SON handshake ; deux nœuds = deux origines distinctes. Le N+1 séquentiel lui-même **reste** (assumé, volumes faibles). |
 | `ProxmoxParse.ts` | Décodage PUR des réponses JSON (chaînes `netN` QEMU/LXC, `/cluster/resources` → VMs ET nœuds, `/cluster/status` → nom + quorate, config, guest-agent). TOLÉRANT : clé inconnue ignorée, valeur manquante → null, jamais de throw. |
 | `ProxmoxAdapter.ts` | Orchestration des appels (`/cluster/status` → nom + quorate, `/cluster/resources` SANS filtre → VMs + nœuds, `/version` → version + gamme, configs, agent pour les QEMU allumées). HTTP **injecté** (`PveJsonClient`) → testable par stub. Échec d'une config individuelle ou d'une métadonnée cluster (quorum/version) toléré ; seul l'échec de l'inventaire de masse rejette. Les segments issus du cluster distant (nom de nœud, `vmid`) sont **encodés** (`encodeURIComponent`) avant d'entrer dans un chemin d'URL. |
 | `ProviderConfigValidate.ts` | Validation PURE d'UN provider (id/kind/token requis, pool d'urls https + empreintes par nœud + doublons, include_lxc/interval_sec/timeout_sec avec défauts) — utilisée par le CRUD DB (messages d'erreur uniques, zéro duplication). Le token n'apparaît jamais dans un message. |
-| `../SecretBox.ts` | Coffre de chiffrement des secrets AU REPOS — module serveur **PARTAGÉ** (hors de `vm/`, réutilisé par `notify/`) : AES-256-GCM (authentifié), clé = SHA-256 de la passphrase d'env `DCMANAGER_SECRETS_KEY` (**clé UNIQUE, sans repli** depuis le 2026-07-20), IV aléatoire 12 o, format versionné `v1:<iv>:<tag>:<ct>` (base64). Aucun secret (passphrase/clé/jeton) dans un log ou une erreur. Limites assumées + clé perdue = jetons à ressaisir (cf. « Configuration »). |
+| `../SecretBox.ts` | Coffre de chiffrement des secrets AU REPOS — module serveur **PARTAGÉ** (hors de `vm/`, réutilisé par `notify/`) : AES-256-GCM (authentifié), clé = SHA-256 de la passphrase d'env `DCMANAGER_SECRETS_KEY` (**clé UNIQUE, sans repli**), IV aléatoire 12 o, format versionné `v1:<iv>:<tag>:<ct>` (base64). Aucun secret (passphrase/clé/jeton) dans un log ou une erreur. Limites assumées + clé perdue = jetons à ressaisir (cf. « Configuration »). |
 | `ProviderConfigDb.ts` | Stockage DB chiffré (`vm-providers.db`, tables typées `vm_providers` + `vm_provider_endpoints` ordonnées, jetons `token_enc`) — **UNIQUE source de config**. Deux surfaces : LECTURE synchro (`providersFor`/`configuredDocIds`) ET CRUD sans fuite de jeton (`listFor`/`save`/`remove`/`buildForTest` — `has_token` seul, jamais le jeton). Driver SQLite injecté. |
 | `VmReconcile.ts` | Moteur de réconciliation PUR (clé `ext_id`, périmètre = une instance de provider). Frontière source/locaux, orphelines jamais supprimées, patchs minimaux. Dépendances injectées (résolution d'hôte, id, horloge). |
 | `VmSyncService.ts` | Exécution d'une synchro + statut mémoire par doc×provider + timers périodiques (`interval_sec`, anti-chevauchement, `unref`). Sans Express (bus live vu par interface) → testé de bout en bout. `rearmTimers()` relit la config à chaud après une écriture CRUD. **Producteur `vm-sync-failure`** : sur une VRAIE passe (hors sorties anticipées « déjà en cours »/anti-rafale), un échec `raise` et un succès `resolve` un problème persistant AUPRÈS DU MODULE NOTIFICATIONS, via l'interface OPTIONNELLE `ProblemReporter` injectée au bootstrap (typage structurel — `vm/` n'importe rien de `notify/`). Clé stable `vm-sync:<docId>:<providerId>` ; AUCUN comptage/anti-spam ici (rappels et déduplication côté notify — cf. [`docs/notifications.md`](notifications.md)). |
@@ -91,7 +91,7 @@ par construction. Un test d'invariant vérifie la liste contre le modèle.
 | `views/forms/VmProvidersForm.ts` | Modale « Providers… » (en-tête du sous-onglet Clusters, mode API, non-viewer) : liste + formulaire création/édition (éditeur de POOL ordonné url+empreinte, jeton en ÉCRITURE SEULE « inchangé si vide », include_lxc/intervalle/timeout), « Tester la connexion », « Enregistrer », « Supprimer ». Clé absente/config invalide (503) → bandeau au lieu des contrôles ; rafraîchit la vue Clusters après écriture. |
 | `views/forms/VmSyncClient.ts` | Accès aux endpoints vm (contexte REST minimal injecté) : synchro/statut + CRUD/test des providers ; DTOs miroirs du serveur (dupliqués, assumés/commentés). Le jeton ne part qu'à l'envoi (écriture seule). |
 | `views/VmClustersView.ts` | Sous-onglet « Clusters » (mode API) : cartes par provider — version/gamme, quorum, état de synchro, table des nœuds (métriques, équipement rapproché, VMs par nœud) ; en-tête : « Providers… » (gestion) + « Actualiser » (l'état cluster est en mémoire serveur, sans push SSE). |
-| `core/VmStatus.ts` | **SOURCE UNIQUE** de l'état affiché d'une VM (PUR) : classification fermée du statut source (`running`/`stopped`/`other`/`none`), priorité de l'**orphelinat** sur le statut, couleurs sémantiques, clé de tri, termes de recherche et **pastilles HTML échappées**. La règle vivait réécrite dans `ListConfigs.vms`, `DetailForms.vmDetail` et `VmHostTip` — les deux premiers produisant un HTML rigoureusement identique. Statut affiché TEL QUEL et jamais traduit (tolérance aux releases Proxmox) ; seul le mot « orpheline » est localisé (`lists.ph.orphan`). Le statut est **rogné** avant classification. |
+| `core/VmStatus.ts` | **SOURCE UNIQUE** de l'état affiché d'une VM (PUR) : classification fermée du statut source (`running`/`stopped`/`other`/`none`), priorité de l'**orphelinat** sur le statut, couleurs sémantiques, clé de tri et **pastilles HTML échappées**. `ListConfigs.vms`, `DetailForms.vmDetail` et `VmHostTip` la CONSOMMENT, aucun ne la réécrit. Statut affiché TEL QUEL et jamais traduit (tolérance aux releases Proxmox) ; seul le mot « orpheline » est localisé (`lists.ph.orphan`). Le statut est **rogné** avant classification. |
 | `core/VmHostTip.ts` | Bloc « VMs hébergées » de la **bulle de survol d'un équipement** en vue Datacenter (PUR : ni DOM, ni store). Reçoit les VMs de l'hôte, rend des LIGNES HTML **déjà échappées** — tri par nom, bornage `MAX_LISTED` ; la pastille de statut est **déléguée à `VmStatus`**. Cf. « VMs dans la bulle d'un équipement » plus bas. |
 | `core/VmLocate.ts` | « Localiser en 3D » une VM = localiser son **HÔTE** (PUR : store injecté par interface étroite). Rend l'**id de l'équipement à viser**, ou `null` si la localisation ne peut pas aboutir. Cf. « Localiser une VM » plus bas. |
 | `core/VmClusterFormat.ts` | Helpers PURS de la vue Clusters : rapprochement nœud→équipement — **MIROIR EXACT de la hiérarchie v3** du serveur (`VmSyncService`), à synchroniser des deux côtés : ① hostnames des IP rattachées (complet ou 1er label, casse/trim), ② nom exact insensible à la casse, ③ 1er label FQDN du nom ; à chaque niveau unique→résolu, plusieurs→null (sans descendre), zéro→suivant. Reçoit les `ipAddresses` en plus des équipements. Formatage uptime/CPU/Go. |
@@ -104,8 +104,7 @@ par construction. Un test d'invariant vérifie la liste contre le modèle.
   `tags_src`, `nics`, `orphan`, `last_sync`.
 - **LOCAUX** (jamais touchés) : `notes`, `description` (héritée d'Entity),
   `group_id`/`group_ids`, `host_equipment_id`.
-- **Champ dérivé** (décision 2026-07-13, rapprochement v3 2026-07-14) :
-  `host_equipment_id` est re-résolu à **chaque** synchro depuis `host_node` par
+- **Champ dérivé** : `host_equipment_id` est re-résolu à **chaque** synchro depuis `host_node` par
   une **hiérarchie à 3 niveaux**, évaluée dans l'ordre. À CHAQUE niveau : un
   candidat UNIQUE → résolu ; **plusieurs → ambigu → null** (on ne devine pas, et
   on **ne descend pas** au niveau suivant) ; zéro → niveau suivant.
@@ -253,28 +252,21 @@ vit **côté serveur** — jamais dans le document (répliqué aux clients), pou
 les jetons ne quittent pas le serveur. Elle se fait EXCLUSIVEMENT par l'**UI**
 (modale « Providers… » du sous-onglet Clusters) ; le stockage est la base
 chiffrée `vm-providers.db`, **UNIQUE source de configuration**. La clé
-`DCMANAGER_SECRETS_KEY` est donc **REQUISE** pour toute la feature (cf. « Rupture »
-ci-dessous).
+`DCMANAGER_SECRETS_KEY` est donc **REQUISE** pour toute la feature.
 
-> **RUPTURE (2026-07-24) — retrait du mode fichier legacy** : le fichier
-> `vm-providers.json` (format transitoire v1, jusque-là lu sans clé puis migré
-> automatiquement vers la DB) a été **entièrement retiré** du code — il maintenait
-> des jetons EN CLAIR sur disque, en contradiction directe avec la promesse « un
-> backup n'expose aucun jeton » (la migration renommait certes le fichier en
-> `.imported-<date>` mais laissait les jetons clairs indéfiniment). La base chiffrée
-> `vm-providers.db` est désormais l'**unique** source de config. **Conséquence pour un
-> déploiement encore sur le fichier** : définir `DCMANAGER_SECRETS_KEY` puis
-> **(re)saisir les providers via l'UI** — le fichier n'est PLUS JAMAIS lu. S'il reste
-> un `vm-providers.json` (ou un `vm-providers.json.imported-*`) sur disque, le
-> **SUPPRIMER** manuellement (il porte des jetons en clair).
+> 🚨 **Aucun fichier de configuration n'est lu**, et surtout pas un `vm-providers.json` :
+> ce format porterait des jetons **EN CLAIR sur disque**, en contradiction directe avec la
+> promesse « un backup n'expose aucun jeton ». Le code ne le lit jamais. **À vérifier sur
+> tout serveur** : s'il traîne un `vm-providers.json` (ou un `vm-providers.json.imported-*`),
+> le **SUPPRIMER à la main** — il porte des jetons exploitables. La configuration se
+> (re)saisit alors via l'UI, une fois `DCMANAGER_SECRETS_KEY` définie.
 
 ### Stockage de référence : `vm-providers.db` (chiffré)
 
 Base SQLite **dédiée au module** (`vm-providers.db`, à côté de `registry.db` dans
 `DOCS_DIR`), POSSÉDÉE par `vm/` — jamais une table de `registry.db` (le cœur ne
 connaît rien de la feature ; supprimer la feature = supprimer le module + ce
-fichier). Colonnes **typées** (décision 2026-07-14 : jamais de secret en JSON
-plaintext, cf. persistance.md) :
+fichier). Colonnes **typées** — jamais de secret en JSON plaintext :
 
 - `vm_providers` : `doc_id`, `id`, `kind`, `token_enc` (jeton **chiffré**),
   `include_lxc`, `interval_sec`, `timeout_sec`, `ca_pem` (CA du cluster au format
@@ -295,17 +287,14 @@ quel par la liste et l'enregistrement (aucune réserve, contrairement au jeton).
 
 ### Chiffrement des jetons — `DCMANAGER_SECRETS_KEY` (SecretBox serveur partagé)
 
-- Le coffre vit désormais **hors de `vm/`** (`src-server/src/SecretBox.ts`) :
-  c'est le coffre à secrets serveur **PARTAGÉ** de l'application (généralisation
-  de l'ex-`VmSecretBox`, décision 2026-07-14 — réutilisé par le module
-  `notify/` pour les jetons de webhooks). Une **clé UNIQUE** pour tous les
-  modules : `DCMANAGER_SECRETS_KEY`.
-- **Migration (repli RETIRÉ le 2026-07-20)** : l'ancienne `VM_PROVIDERS_KEY`
-  n'est **plus lue**. Un déploiement encore sur ce nom doit **renommer** la
-  variable en `DCMANAGER_SECRETS_KEY` (même valeur → même dérivation SHA-256,
-  donc les jetons déjà stockés restent déchiffrables sans réécriture). Tant que le
-  renommage n'est pas fait, les features à secrets se comportent comme sans clé
-  (503 explicite, feature désactivée).
+- Le coffre vit **hors de `vm/`** (`src-server/src/SecretBox.ts`) : c'est le coffre
+  à secrets serveur **PARTAGÉ** de l'application, réutilisé par les modules `notify/`
+  et `wifi/`. Une **clé UNIQUE** pour tous les modules : `DCMANAGER_SECRETS_KEY`.
+- **Aucun autre nom de variable n'est reconnu**, et aucun repli n'existe : sans
+  `DCMANAGER_SECRETS_KEY`, les features à secrets se comportent comme sans clé
+  (503 explicite, feature désactivée). Renommer une variable qui portait la même
+  passphrase suffit — même valeur → même dérivation SHA-256, donc les jetons déjà
+  stockés restent déchiffrables sans réécriture.
 - **AES-256-GCM** (chiffrement *authentifié* : toute altération du stocké est
   détectée au déchiffrement), clé = **SHA-256 de la passphrase d'environnement**
   (dérivation qui normalise une passphrase libre en 32
@@ -390,10 +379,10 @@ cas « clé absente » (§ 503) : ici la clé EST présente, mais ce n'est pas l
 Le module fonctionne, la liste des providers s'affiche (elle ne déchiffre aucun
 jeton), mais toute opération qui a besoin du jeton en clair (synchro, test) échoue.
 
-**Comportement UI (désormais explicite — plus de silence)** :
+**Comportement UI — explicite, jamais silencieux** :
 
-- **Vue Clusters** : le provider concerné, jusqu'ici EXCLU de la liste des statuts
-  (car `providersFor` écarte tout jeton indéchiffrable), est **réinjecté** comme
+- **Vue Clusters** : le provider concerné, qu'un simple `providersFor` écarterait
+  (il rejette tout jeton indéchiffrable), est **réinjecté** comme
   une carte **« Provider en erreur »** (bandeau rouge) portant le message
   ci-dessus — au lieu d'une liste vide silencieuse.
 - **Bouton « Tester »** : affiche le message SecretBox actionnable dans la zone
@@ -435,7 +424,7 @@ d'erreur identiques par l'UI (400 affichée telle quelle) et par le CRUD DB.
      cluster** (`rejectUnauthorized: true` + option `ca`). ⚠ Le nom d'hôte de l'URL
      doit alors correspondre au CN/SAN du certificat du nœud (sinon
      `ERR_TLS_CERT_ALTNAME_INVALID`, expliqué par `explainNetworkError`).
-  3. sinon → validation par les **CA système** (comportement historique).
+  3. sinon → validation par les **CA système** (cas par défaut).
 - `ca_pem` : certificat **CA du cluster** (`pve-root-ca.pem`), au format PEM. La CA
   du cluster émet le certificat de CHAQUE nœud : lui faire confiance = **UNE seule
   valeur pour tout le pool**, qui SURVIT aux régénérations de certificats
@@ -466,11 +455,11 @@ d'erreur identiques par l'UI (400 affichée telle quelle) et par le CRUD DB.
 Ajouter **`DCMANAGER_SECRETS_KEY`** (une passphrase LONGUE) à l'environnement du
 serveur : elle est **REQUISE** pour toute la feature VM (inventaire ET gestion des
 providers par l'UI) et chiffre les secrets au repos (clé UNIQUE partagée par tous
-les modules à secrets — VM, notifications). Les déploiements historiques qui n'ont
-que `VM_PROVIDERS_KEY` doivent **renommer** la variable en `DCMANAGER_SECRETS_KEY`
-(même valeur → même dérivation : le repli automatique a été **retiré le 2026-07-20**).
-Sans clé : la feature est entièrement désactivée (toutes les routes en 503 actionnable ;
-le mode fichier legacy a été retiré le 2026-07-24). **Clé perdue = jetons à ressaisir**
+les modules à secrets — VM, notifications, wifi). **Aucun autre nom n'est reconnu** :
+un déploiement qui porterait la passphrase sous un autre nom doit **renommer** la
+variable en `DCMANAGER_SECRETS_KEY` (même valeur → même dérivation, jetons déjà
+stockés déchiffrables sans réécriture). Sans clé : la feature est entièrement
+désactivée (toutes les routes en 503 actionnable). **Clé perdue = jetons à ressaisir**
 (aucune récupération possible).
 
 ## Gamme Proxmox supportée
