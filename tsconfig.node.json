@@ -66,6 +66,32 @@
     // Express : testé avec DocumentStore réel + stub d'inventaire. Les routes (WifiModule.ts,
     // Express) restent HORS test, comme api.ts et VmModule.
     "src-server/src/wifi/WifiSyncService.ts",
+    // Module `issues/` AMOVIBLE (« remote issue tracker » : miroir des tickets SUIVIS d'un tracker
+    // distant — Atlassian Jira Cloud en 1re implémentation, la marque n'étant qu'un adaptateur
+    // derrière `kind`). ⚠ Assiette INVERSÉE par rapport à vm/ et wifi/ : c'est le DOCUMENT qui
+    // énumère, et l'adaptateur RÉSOUT (`resolve(extIds)`), d'où un pivot testé pour son ÉGALITÉ avec
+    // la frontière partagée src-shared/IssueSync.
+    // Contrats purs (pivot + adaptateur + config) : aucun runtime hors la liste canonique des champs
+    // du pivot, qui est justement ce que le test d'invariant compare au partagé.
+    "src-server/src/issues/IssueProvider.ts",
+    // Validation PAR PROVIDER (classe PURE) : champs COMMUNS + branche d'options par `kind` — c'est
+    // le point d'extension « nouvelle marque » côté validation, donc testé pour lui-même.
+    "src-server/src/issues/IssueProviderConfigValidate.ts",
+    // Stockage DB des providers (issue-providers.db, jetons chiffrés via SecretBox, table UNIQUE et
+    // SANS matériel TLS — un tracker SaaS a un certificat public) : CRUD + lecture pour la synchro ;
+    // testé avec better-sqlite3 RÉEL (driver injecté).
+    "src-server/src/issues/IssueProviderConfigDb.ts",
+    // Décodage Jira PUR (fixtures JSON → IssueRecord, alias de champs, catégorie d'état, lien
+    // d'INTERFACE composé — jamais `self`, ADF de création) + pagination pure TOLÉRANTE aux DEUX
+    // formes d'API (jeton `nextPageToken` / décalage `startAt`) : testés en isolation, sans réseau.
+    "src-server/src/issues/JiraParse.ts",
+    // Client HTTP Jira : `fetch` INJECTÉ (patron notify/WebhookNotifier, PAS le node:https de
+    // vm//wifi/ — cf. l'écart documenté dans le fichier), donc TOUT y est testable sans réseau,
+    // parties pures comprises (en-tête Basic, `Retry-After`, extraction du message d'erreur Jira).
+    "src-server/src/issues/JiraHttp.ts",
+    // Adaptateur Jira — l'ORCHESTRATION (résolution PAR LOTS, pagination, création + ADF, test de
+    // connexion) est testée avec un client HTTP stub (`JiraJsonClient` injecté).
+    "src-server/src/issues/JiraAdapter.ts",
     // Coffre à secrets serveur PARTAGÉ (AES-256-GCM, node:crypto) des secrets stockés en DB
     // (jetons providers VM, jetons webhooks notify) — testé en isolation (aller-retour, clé
     // différente, altération, format inconnu, repli d'environnement legacy).
