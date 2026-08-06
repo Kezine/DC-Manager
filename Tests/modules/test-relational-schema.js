@@ -217,9 +217,18 @@ module.exports = async () => {
       // (findBy à chaque passe) et `ap_equipment_id` la FK que la cascade `equipments` détache.
       'CREATE INDEX IF NOT EXISTS "idx_wifiClients_provider_id" ON "wifiClients" ("provider_id")',
       'CREATE INDEX IF NOT EXISTS "idx_wifiClients_ap_equipment_id" ON "wifiClients" ("ap_equipment_id")',
+      // issues (chantier remote issue tracker) : `ext_id` est l'identité STABLE côté tracker (clé de
+      // réconciliation — la clé lisible `key` bouge, cf. D2), `provider_id` délimite le périmètre d'un
+      // provider, `status_category` porte le filtre/tri sémantique. ⚠ `targets` figure bien dans
+      // INDEX_SPEC (index CLIENT élément par élément, lu par les 4 `custom` de cascade) mais N'A PAS
+      // d'index SQL : c'est un `string[]`, donc une colonne TEXT JSON — le contrôle POSITIF plus bas
+      // vérifie précisément qu'il est écarté.
+      'CREATE INDEX IF NOT EXISTS "idx_issues_ext_id" ON "issues" ("ext_id")',
+      'CREATE INDEX IF NOT EXISTS "idx_issues_provider_id" ON "issues" ("provider_id")',
+      'CREATE INDEX IF NOT EXISTS "idx_issues_status_category" ON "issues" ("status_category")',
     ];
     const allIndexes = RelationalSchema.allIndexDdls();
-    ck.eq(JSON.stringify(allIndexes), JSON.stringify(expectedIndexes), "index : liste exacte (39 index, ordre COLLECTIONS)");
+    ck.eq(JSON.stringify(allIndexes), JSON.stringify(expectedIndexes), "index : liste exacte (42 index, ordre COLLECTIONS)");
     // Et la phase TABLES ne contient QUE des CREATE TABLE, une par collection (le phasage tables → index
     // est la condition de l'évolution additive — cf. test-relational-evolution.js).
     const allTables = RelationalSchema.allTableDdls();

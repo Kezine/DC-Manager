@@ -32,6 +32,13 @@ import { RackDepthPolicy } from "./RackDepthPolicy.js";
 // GÉOMÉTRIE D'ÉTAGÈRE : SOURCE UNIQUE partagée avec le rendu (`RackGeometry` la réutilise).
 // ⚠ Extension `.js` IMPÉRATIVE (même raison que ci-dessus).
 import { TrayGeometry } from "./TrayGeometry.js";
+// CATÉGORIES d'état d'un ticket : énumération FERMÉE déclarée à la FRONTIÈRE DE SYNCHRO (d'où elle
+// naît) et non dans le bloc d'enums ci-dessous, réservé aux énumérations alignées sur les registres
+// FRONT. La spec `issues.status_category` la consomme — une seule liste, jamais deux.
+import { ISSUE_STATUS_CATEGORIES } from "./IssueSync.js";
+// CIBLES d'un ticket : règle de composition/décomposition des clés « famille:id » — partagée avec la
+// CASCADE (qui recompose la clé d'un objet supprimé) et avec l'éditeur de liens client.
+import { IssueTargets } from "./IssueTargets.js";
 
 /* ---- énumérations canoniques (alignées au domaine front — cf. test anti-divergence) ---- */
 /** Statuts de câble (cycle de vie). = `CABLE_STATUSES.map(s => s.id)` côté front. */
@@ -1082,6 +1089,65 @@ const SPEC_FIELDS = {
       notes: { type: "string" },                               // notes libres (multi-lignes) — aucune contrainte
       description: { type: "string", default: "" },            // héritée d'Entity (présente sur tout enregistrement)
   },
+  issues: {
+      // TICKET d'un tracker distant (Jira Cloud en 1re implémentation — la marque n'est QU'un
+      // adaptateur, cf. cadrage D9 repris du chantier wifi). Frontière SOURCE/LOCAUX :
+      // `src-shared/IssueSync.ts`, source de vérité PARTAGÉE des défauts ci-dessous (une divergence
+      // produirait de faux deltas à chaque passe de synchro, donc une réécriture EN BOUCLE).
+      // ⚠ ASSIETTE INVERSÉE (cadrage §3) : c'est le DOCUMENT qui énumère les tickets suivis, la source
+      // n'est interrogée que sur ces clés-là. La synchro ne CRÉE donc jamais d'enregistrement — seuls
+      // « Suivre un ticket » et « Ouvrir un ticket » en produisent — et ne SUPPRIME jamais rien.
+      // ---- champs SOURCE (écrasés à chaque passe) ----
+      // 🚨 `ext_id` = identifiant INTERNE du ticket, JAMAIS la clé lisible (décision D2, risque n°1) :
+      // une clé « INFRA-123 » CHANGE au déplacement de projet → doublon + orphelin silencieux.
+      ext_id:          { type: "string", default: "" },
+      provider_id:     { type: "string", default: "" },   // instance d'adaptateur d'origine (multi-trackers)
+      key:             { type: "string", default: "" },   // clé LISIBLE « INFRA-123 » — AFFICHAGE, re-synchronisée
+      summary:         { type: "string", default: "" },   // titre ("" toléré : on n'invente pas de titre)
+      // status TOLÉRANT : PAS de contrainte `enum` — un workflow Jira est configurable par projet
+      // (« En recette », « Attente client »…) et chaque tracker a le sien. Le libellé est AFFICHÉ TEL
+      // QUEL et jamais traduit (décision D3, doctrine `VmStatus`/`WifiStatus`).
+      status:          { type: "string", default: "" },
+      // status_category : la SEULE énumération FERMÉE du pivot — c'est elle qui porte couleurs, tris et
+      // filtres sémantiques, donc l'abstraction multi-providers. `enum` DÉLIBÉRÉ ici (contrairement à
+      // `status`) : une valeur hors liste n'a aucun sens pour un consommateur qui colore ou trie.
+      // La synchro, elle, ne peut pas la violer — `IssueSync.normalizeCategory` CLAMPE sur `unknown`
+      // (cf. son commentaire) ; l'`enum` protège la porte d'écriture DIRECTE (API/import).
+      status_category: { type: "string", default: "unknown", enum: ISSUE_STATUS_CATEGORIES },
+      issue_type:      { type: "string", default: "" },   // Bug / Tâche / … — libellé brut, tolérant
+      // NULLABLES : « non renseigné par le tracker » ≠ « renseigné à vide ». Un `null` porte cette
+      // distinction ; un "" la perdrait (et ferait afficher une pastille vide plutôt qu'un tiret).
+      priority:        { type: "string", nullable: true, default: null },
+      assignee:        { type: "string", nullable: true, default: null },   // nom AFFICHABLE, pas un id de compte
+      reporter:        { type: "string", nullable: true, default: null },
+      // labels ∈ Schema.ARRAY_FIELDS (filtrables par appartenance, patron `tags_src`). Normalisation
+      // DÉTERMINISTE (tri + dédup) dans IssueSync : sans elle, un réordonnancement côté tracker
+      // produirait un faux delta à chaque passe.
+      labels:          { type: "string[]", default: [] },
+      resolution:      { type: "string", nullable: true, default: null },   // null tant que le ticket est ouvert
+      created_src:     { type: "string", nullable: true, default: null },   // ISO — horodatages DU TRACKER
+      updated_src:     { type: "string", nullable: true, default: null },   //   (suffixe `_src`, cf. vms.description_src)
+      // url : lien CANONIQUE composé UNE FOIS par l'adaptateur et PERSISTÉ (décision D6, surtout pas
+      // reconstruit depuis une variable d'environnement serveur) — c'est ce qui rend les tickets
+      // ouvrables d'un clic en MODE FICHIER, après export, sans serveur ni configuration.
+      url:             { type: "string", nullable: true, default: null },
+      // « orphelin » = ticket NON RÉSOLU à la dernière passe (décision §3) : suppression, projet
+      // archivé ou permission perdue. Mécanique identique aux VMs/clients wifi (patch, JAMAIS de
+      // delete — l'enregistrement porte des notes et des liens), seul le LIBELLÉ UI diffère
+      // (« introuvable », cf. src-client/core/IssueStatus).
+      orphan:          { type: "boolean", default: false },
+      last_sync:       { type: "string", default: "" },
+      // ---- champs LOCAUX (jamais touchés par la synchro) ----
+      notes:           { type: "string", default: "" },
+      description:     { type: "string", default: "" },   // héritée d'Entity
+      // targets : rattachement MANUEL aux objets du modèle (arbitrage A4 — AUCUNE convention imposée
+      // aux utilisateurs du tracker), en clés COMPOSÉES « famille:id » (cf. `IssueTargets`). ∈
+      // Schema.ARRAY_FIELDS ⇒ le filtre « Cible » unifié des listings marche sans code neuf.
+      // ⚠ PAS de `ref` : une clé POLYMORPHE ne désigne pas UNE collection, l'intégrité référentielle
+      // V2 ne sait donc pas la contrôler. Sa FORME est vérifiée par l'invariant ci-dessous, et son
+      // intégrité en SUPPRESSION par les quatre `custom` de `Cascade`.
+      targets:         { type: "string[]", default: [] },
+  },
 } as const satisfies Record<string, Record<string, FieldSpec>>;
 
 /* Types d'ENREGISTREMENT (formes REST partagées, NORMALISÉES) dérivés de SPEC_FIELDS — SOURCE UNIQUE = la spec.
@@ -1113,6 +1179,7 @@ export namespace Records {
   export type Vm         = RecordOf<typeof SPEC_FIELDS.vms>;
   export type WifiClient = RecordOf<typeof SPEC_FIELDS.wifiClients>;
   export type Contact    = RecordOf<typeof SPEC_FIELDS.contacts>;
+  export type Issue      = RecordOf<typeof SPEC_FIELDS.issues>;
 }
 
 export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
@@ -1717,6 +1784,26 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       // extensions, séparateurs de lisibilité). On ne refuse qu'un contenu HORS de ce jeu (typiquement des
       // lettres). Un vide passe (champ optionnel). Reste tolérant par principe (cf. e-mail ci-dessus).
       { path: "phone", message: "Le téléphone ne doit contenir que des chiffres et les séparateurs + . - ( ) et espaces.", holds: (c) => !c.phone || /^[0-9+\s().-]+$/.test(String(c.phone)) },
+    ],
+  },
+  issues: {
+    // TICKETS miroir d'un tracker distant (collection AMOVIBLE, comme `vms`/`wifiClients`). Presque
+    // tous les champs source sont des chaînes TOLÉRANTES (le pivot isole l'app des marques) : la seule
+    // contrainte de VALEUR est l'`enum` de `status_category`, déclarative, portée par V1.
+    // AUCUN `ref` dans la spec, donc AUCUNE règle référentielle V2 : le seul lien vers le document
+    // passe par `targets`, dont les clés sont POLYMORPHES (« famille:id ») — V2 ne sait contrôler
+    // qu'un champ désignant UNE collection. On valide donc leur FORME (invariant ci-dessous), et
+    // l'intégrité en SUPPRESSION est tenue par les quatre `custom` de `Cascade`.
+    fields: SPEC_FIELDS.issues,
+    invariants: [
+      // FORME des clés de cible : « famille:id » avec une famille CONNUE et un id non vide. Le moteur
+      // ne valide pas élément par élément un `string[]` (il ne contrôle que « ce sont bien des
+      // chaînes ») — on le fait donc ici, même style que l'invariant `ipNetworks.dns_servers`.
+      // ⚠ On valide la FORME, PAS l'EXISTENCE de la cible : une clé mal formée ne serait détachée par
+      // AUCUNE règle de cascade et resterait une référence pendante SILENCIEUSE, alors qu'une cible
+      // absente est, elle, un état transitoire légitime (l'objet peut être créé après le lien).
+      { path: "targets", message: `Chaque cible doit s'écrire « famille:id » avec une famille connue (${IssueTargets.KINDS.join(", ")}).`,
+        holds: (issue) => !Array.isArray(issue.targets) || issue.targets.every((target: any) => IssueTargets.isValidKey(target)) },
     ],
   },
 };

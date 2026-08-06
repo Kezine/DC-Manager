@@ -191,6 +191,11 @@ export const lists = {
     // MEANING — a Wi-Fi client leaving is ordinary, not an incident (cf. core/WifiStatus, D2).
     // ⚠ LOCKED by test against the shared catalogue `SEARCH_CATALOGS.wifiDisconnected`.
     disconnected: "disconnected",
+    // Issue counterpart of « orphan »/« disconnected »: SAME mechanics (unresolved on the last pass),
+    // a THIRD meaning — an issue we can no longer retrieve signals a deletion, an archived project or
+    // a lost permission (cf. core/IssueStatus, cadrage §3).
+    // ⚠ LOCKED by test against the shared catalogue `SEARCH_CATALOGS.issueNotFound`.
+    notFound: "not found",
     wifiClient: "(Wi-Fi client)",
     floorLabel: "Floor {{n}}",
     addrCount: "{{count}} addr.",

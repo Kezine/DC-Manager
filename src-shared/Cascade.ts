@@ -32,14 +32,20 @@
    Capacités INJECTÉES (mêmes que la validation V5b/V6) :
      - `find(collection, field, value)` → enregistrements dont `field` vaut `value` (index/where) ;
      - `fetch(collection, id)` → un enregistrement (pour lire un champ, ex. le nom).
-   Ce fichier n'importe rien (aucune dépendance) — l'auto-suffisance de `src-shared/` n'est plus
-   une contrainte de build (cf. CLAUDE.md « Code partagé »), c'est ici un simple constat.
+   Ce fichier n'importe qu'un SEUL module partagé (`IssueTargets`, la règle de composition des clés
+   de cible d'un ticket) : un import ENTRE fichiers de `src-shared/` est AUTORISÉ, à condition
+   IMPÉRATIVE d'écrire le spécificateur avec l'extension `.js` (cf. CLAUDE.md « Code partagé »).
 
    AJOUTER UNE RELATION = AJOUTER UNE ENTRÉE dans `SPEC` (déclaratif), ou un `custom` pour les
    cas non réductibles à une FK simple (multi-réseaux, câbles branchés par DEUX champs, routes de
-   waypoints). ⚠ Un `custom` ne doit PLUS servir à rattraper la transitivité d'une règle voisine :
-   c'est le travail du moteur.
+   waypoints, clés de cible COMPOSÉES). ⚠ Un `custom` ne doit PLUS servir à rattraper la
+   transitivité d'une règle voisine : c'est le travail du moteur.
    ============================================================================ */
+
+// CLÉS DE CIBLE d'un ticket (« famille:id ») : la cascade doit RECOMPOSER exactement la clé qu'un
+// éditeur a écrite pour la retrouver dans `issues.targets` — d'où la règle partagée, jamais réécrite
+// sur place. ⚠ L'extension `.js` est IMPÉRATIVE (NodeNext l'exige côté serveur).
+import { IssueTargets } from "./IssueTargets.js";
 
 /** Capacité de recherche par champ (= `RecordFinder` de la validation). */
 type Find = (collection: string, field: string, value: string) => Array<Record<string, any>>;
@@ -130,6 +136,31 @@ export class Cascade {
     });
   }
 
+  /** DÉTACHE un objet supprimé des TICKETS qui le ciblent : retire la clé composée « <famille>:<id> »
+      du tableau `targets` de toutes les `issues` qui la portent.
+      FABRIQUE COMMUNE aux QUATRE familles liables (equipment / vm / spare / sub_equipment) : les
+      quatre règles de cascade concernées l'appellent avec leur propre famille, plutôt que d'écrire
+      quatre fois le même filtre — quatre copies auraient divergé au premier ajustement (principe n°3).
+      Le ticket, lui, N'EST JAMAIS SUPPRIMÉ : il porte des notes et d'autres liens, et le lien coupé
+      est une information en soi (parité stricte avec `vms.host_equipment_id` / `wifiClients.ap_equipment_id`).
+
+      ⚠ COMPOSE sur le déjà planifié (`pendingValue`), exactement comme `detachGroupFromMembers` et la
+      règle `networks`. La raison est MESURÉE, pas théorique : `planMany` développe PLUSIEURS
+      suppressions dans le MÊME plan, et rien n'empêche un lot de supprimer deux cibles d'un même
+      ticket (un équipement ET la VM qu'il héberge, ou un équipement ET l'un de ses sous-équipements —
+      ce dernier cas arrivant même par RÉCURSION, sans lot). Chaque valeur de détachement étant
+      ABSOLUE et le dernier écrit gagnant chez les deux exécuteurs, calculer le retrait sur le
+      `targets` d'ORIGINE n'en retirerait QU'UNE : l'autre clé resterait, pointant un objet supprimé —
+      et la perte serait SILENCIEUSE. */
+  private static detachTargetFromIssues(find: Find, kind: string, targetId: string, detaches: CascadeDetach[]): void {
+    const key = IssueTargets.key(kind, targetId);
+    for (const issue of find("issues", "targets", key)) {
+      const declared = Array.isArray(issue.targets) ? issue.targets : [];
+      const current = Cascade.pendingValue(detaches, "issues", issue.id, "targets", declared);
+      detaches.push({ c: "issues", id: issue.id, key: "targets", value: (current || []).filter((x: string) => x !== key) });
+    }
+  }
+
   /** Retire un ENSEMBLE de waypoints des ROUTES (`waypoint_ids`) des câbles ET faisceaux qui les référencent.
       UN SEUL détachement par câble/faisceau touché, retirant TOUS les ids d'un coup : plusieurs détachements
       sur le même `waypoint_ids` s'ÉCRASERAIENT (Store comme serveur fusionnent par clé — le dernier gagne)
@@ -174,6 +205,8 @@ export class Cascade {
           detaches.push({ c: "spares", id: sp.id, key: "assigned_free", value: sp.assigned_free || name });
           detaches.push({ c: "spares", id: sp.id, key: "assigned_equipment_id", value: null });
         });
+        // TICKETS ciblant cet équipement : clé composée retirée de `targets` (le ticket survit).
+        Cascade.detachTargetFromIssues(find, "equipment", id, detaches);
       },
     },
     ports: {
@@ -188,7 +221,19 @@ export class Cascade {
     aggregates: { detach: [{ coll: "ports", fk: "aggregate_id" }] },
     // Sous-équipement supprimé → ses ports sont DÉTACHÉS, jamais supprimés : le port appartient au MAÎTRE et
     // lui survit (le sous-équipement n'était qu'une étiquette de destination). Strictement parité `aggregates`.
-    subEquipments: { detach: [{ coll: "ports", fk: "sub_equipment_id" }] },
+    // ⚠ Cette règle est aussi atteinte par RÉCURSION depuis `equipments` (qui SUPPRIME ses sous-équipements) :
+    // supprimer un équipement détache donc aussi les tickets qui ciblaient ses sous-équipements — et c'est
+    // précisément le cas « deux cibles d'un même ticket dans un seul plan » que `detachTargetFromIssues` compose.
+    subEquipments: {
+      detach: [{ coll: "ports", fk: "sub_equipment_id" }],
+      custom: (find, _fetch, id, _deletes, detaches) => Cascade.detachTargetFromIssues(find, "sub_equipment", id, detaches),
+    },
+    // SPARE (pièce de rechange) : la collection n'avait AUCUNE règle jusqu'ici — rien du document ne pointait
+    // vers un spare (c'est LUI qui pointe un équipement, cf. `equipments.custom`). Elle en gagne une, et une
+    // seule : retirer la clé « spare:<id> » des tickets qui la ciblent.
+    spares: {
+      custom: (find, _fetch, id, _deletes, detaches) => Cascade.detachTargetFromIssues(find, "spare", id, detaches),
+    },
     networks: {
       // multi-réseaux : retire l'id de network_ids et repointe le principal. S'applique aux CÂBLES (legacy, champs
       // dormants) ET aux PORTS terminaux (source unique actuelle du réseau) — même logique de détachement.
@@ -270,7 +315,11 @@ export class Cascade {
     // VM (collection AMOVIBLE) : supprimer une VM DÉTACHE ses adresses IP rattachées (vm_id → null), sans les
     // supprimer — le lien IPAM est LÉGER (parité stricte avec equipments.detach ipAddresses/equipment_id : l'adresse
     // survit, juste « non attribuée »), jamais une suppression. Reste sans `delete` (rien à supprimer en cascade).
-    vms: { delete: [], detach: [{ coll: "ipAddresses", fk: "vm_id" }] },
+    vms: {
+      delete: [],
+      detach: [{ coll: "ipAddresses", fk: "vm_id" }],
+      custom: (find, _fetch, id, _deletes, detaches) => Cascade.detachTargetFromIssues(find, "vm", id, detaches),
+    },
     // CLIENT WIFI (collection AMOVIBLE) : RIEN ne pointe vers un client wifi dans le document — ni FK de
     // spec, ni champ libre. Supprimer un client n'entraîne donc AUCUN effet : pas de suppression enfant,
     // pas de détachement. La règle est déclarée VIDE plutôt qu'omise, à dessein : une collection ABSENTE
@@ -279,6 +328,15 @@ export class Cascade {
     // ⚠ L'autre sens du lien — supprimer un ÉQUIPEMENT → détacher `wifiClients.ap_equipment_id` — vit,
     // lui, dans la règle `equipments` ci-dessus (c'est l'équipement qui est supprimé, pas le client).
     wifiClients: { delete: [], detach: [] },
+    // TICKET d'un tracker distant (collection AMOVIBLE) : RIEN ne pointe vers une issue dans le
+    // document — ni FK de spec, ni champ libre. Le lien qu'elle porte va dans l'AUTRE sens (`targets`
+    // pointe équipements/VMs/spares/sous-équipements), et c'est la suppression de CES objets-là qui
+    // déclenche un détachement — via les quatre `custom` ci-dessus, pas ici. Supprimer un ticket
+    // n'entraîne donc AUCUN effet. La règle est déclarée VIDE plutôt qu'omise, à dessein : une
+    // collection ABSENTE de cette table est indiscernable d'un oubli à la relecture, alors qu'une
+    // entrée vide COMMENTÉE dit « examiné, rien à faire » (`vms` et `wifiClients` ont exactement la
+    // même intention).
+    issues: { delete: [], detach: [] },
   };
 
   /** DÉTACHE les équipements POSÉS sur l'étagère `trayId` (placement_mode "tray") : retour « non placé »

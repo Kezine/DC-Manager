@@ -100,6 +100,21 @@ export const INDEX_SPEC: Record<string, string[]> = {
   // alors que sa synchro fait le même `findBy` : asymétrie CONSTATÉE, non reproduite ici (l'aligner côté
   // vms est un ajustement à part, hors périmètre de ce chantier).
   wifiClients:   ["provider_id", "ap_equipment_id"],
+  // TICKETS d'un tracker distant : quatre chemins CHAUDS, aucun décoratif.
+  // - `ext_id` : identité STABLE côté tracker, donc la clé de RÉCONCILIATION que la synchro interroge
+  //   à chaque passe (⚠ décision D2 : la clé lisible `key` BOUGE au déplacement de projet, elle ne
+  //   peut pas jouer ce rôle — c'est le risque n°1 du cadrage). ÉCART VOLONTAIRE avec `vms`/
+  //   `wifiClients`, qui n'indexent pas leur `ext_id` : là-bas la réconciliation part de l'inventaire
+  //   COMPLET d'un provider (un seul `findBy` par passe), ici l'assiette est INVERSÉE — on résout des
+  //   tickets NOMMÉS, donc on interroge par identité.
+  // - `provider_id` : périmètre d'UN provider (même usage que `wifiClients.provider_id`).
+  // - `status_category` : dimension de filtre/tri SÉMANTIQUE des listings (décision D3) — la seule
+  //   colonne d'état qu'un `where` puisse tester, `status` étant un libellé libre.
+  // - `targets` : interrogé par les QUATRE `custom` de cascade à CHAQUE suppression d'équipement, VM,
+  //   spare ou sous-équipement. Champ `string[]` : indexé élément par élément CÔTÉ CLIENT ; côté SQL
+  //   il est ÉCARTÉ du DDL d'index par `indexDdls` (colonne TEXT JSON, l'appartenance passe par
+  //   `json_each`), exactement comme `cables.waypoint_ids` et `equipments.group_ids`.
+  issues:        ["ext_id", "provider_id", "status_category", "targets"],
 };
 
 /** GÉNÉRATEUR de DDL relationnel (méthodes statiques — cf. CLAUDE.md). Toutes les chaînes émises quotent

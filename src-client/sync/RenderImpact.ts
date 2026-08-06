@@ -57,6 +57,11 @@ export const COLLECTION_THREE_IMPACT: Record<string, ThreeImpact> = {
   // rattachement `ap_equipment_id` ne change RIEN au dessin de l'AP.
   wifiClients:  "none",
   contacts:     "none",      // carnet de destinataires des notifications (email/sms) — vue liste, jamais dessiné
+  // Tickets d'un tracker distant : `none` n'est pas ici un classement PRUDENT mais une propriété du
+  // modèle — la collection n'a ni placement, ni dimension, ni port, donc AUCUN mesh, label ou texture
+  // ne peut en dépendre. Ses CIBLES (`targets`), elles, sont des équipements/VMs/spares/sous-équipements
+  // ordinaires : lier ou délier un ticket ne change RIEN à leur dessin (aucun attribut rendu n'en dérive).
+  issues:       "none",
 };
 
 /** Accès à la carte d'impact de rendu (méthodes statiques regroupées — cf. CLAUDE.md). */
