@@ -160,9 +160,19 @@ export class FloorLayout {
     // Étages effectivement DESSINÉS (portée) : ceux des salles affichées ∪ les étages « nus » de leurs
     // bâtiments. Sert UNIQUEMENT à filtrer l'émission des plans, jamais au calcul des positions.
     const dcLocs = new Set(dcs.map((d: any) => d.location || ""));
+    // ⚠ BÂTIMENTS SANS AUCUNE SALLE — ils sont TOUJOURS dessinés. La portée de la Vue étage s'exprime en
+    // SALLES (`visibleDcIds`, et la salle active `cur`) : un bâtiment qui n'en porte AUCUNE ne peut donc
+    // être désigné par aucun réglage. Le filtrer par `dcLocs` ne le retire pas d'une portée — il le rend
+    // invisible POUR TOUJOURS, dès qu'une salle est active (c'est-à-dire presque toujours, `current()`
+    // repliant sur la première salle du document). Un bâtiment est un fait du MODÈLE : c'est §6.8 de
+    // docs/placement.md — la portée décide de ce qu'on VOIT, jamais de ce qui EXISTE.
+    const modelRoomLocs = new Set(all.map((d: any) => d.location || ""));
     const shownFloors = new Set<string>();
     dcs.forEach((d: any) => shownFloors.add((d.location || "") + FLOOR_KEY_SEP + String(d.floor == null ? "" : d.floor)));
-    this.allFloorKeys().forEach((k) => { if (cur == null || dcLocs.has(k.location || "")) shownFloors.add((k.location || "") + FLOOR_KEY_SEP + String(k.floor == null ? "" : k.floor)); });
+    this.allFloorKeys().forEach((k) => {
+      const loc = k.location || "";
+      if (cur == null || dcLocs.has(loc) || !modelRoomLocs.has(loc)) shownFloors.add(loc + FLOOR_KEY_SEP + String(k.floor == null ? "" : k.floor));
+    });
     // Ordre des bâtiments STABLE : trier en plaçant la salle ACTIVE en premier encodait un souci
     // d'AFFICHAGE dans la GÉOMÉTRIE — le x0 d'un bâtiment sautait dès qu'on cliquait ailleurs. C'est la
     // CAMÉRA qui va sur la salle active, pas le monde qui se réarrange autour d'elle.

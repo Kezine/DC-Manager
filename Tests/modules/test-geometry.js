@@ -1614,6 +1614,22 @@ module.exports = async () => {
     // …mais la PORTÉE reste pleinement effective sur ce qui est DESSINÉ (repère ⊥ portée).
     ck(etroit.rooms.length === 1 && large.rooms.length === 3, "la portée filtre bien les salles DESSINÉES");
     ck(etroit.floorPlanes.length < large.floorPlanes.length, "la portée filtre bien les plans d'étage DESSINÉS");
+    /* ── BÂTIMENT SANS AUCUNE SALLE : ses étages sont TOUJOURS dessinés ──────────────────────────────
+       La portée s'exprime en SALLES (`visibleDcIds` + salle active) : un bâtiment qui n'en porte AUCUNE
+       n'est désignable par AUCUN réglage. Le filtrer comme les autres ne le retire pas d'une portée, il
+       le rend invisible pour toujours — dès qu'une salle est active, c'est-à-dire presque toujours
+       (`current()` replie sur la première salle du document). Symptôme signalé par l'utilisateur :
+       « les étages des sites sans salles ne sont pas affichés ». */
+    await s.create("floors", { location: "seraing", floor: "0", width_mm: 18000, depth_mm: 12000 });
+    await s.create("floors", { location: "seraing", floor: "1", width_mm: 18000, depth_mm: 12000 });
+    const plansDe = (mm, loc) => mm.floorPlanes.filter((fp) => fp.loc === loc).map((fp) => fp.floor).sort().join(",");
+    ck.eq(plansDe(fl.multiLayout(null, {}), "seraing"), "0,1", "bâtiment sans salle : ses 2 étages sont dessinés en vue d'ensemble");
+    ck.eq(plansDe(fl.multiLayout(dcA, {}), "seraing"), "0,1", "bâtiment sans salle : ses étages RESTENT dessinés quand une salle d'un AUTRE bâtiment est active");
+    ck.eq(plansDe(fl.multiLayout(dcA, { visibleDcIds: new Set([dcA.id]) }), "seraing"), "0,1",
+      "bâtiment sans salle : ses étages survivent à une portée RESTREINTE (aucune salle ne peut le désigner)");
+    // …sans rouvrir la porte : un bâtiment QUI A des salles reste, lui, filtré par la portée.
+    ck.eq(plansDe(fl.multiLayout(dcA, { visibleDcIds: new Set([dcA.id]) }), "herstal"), "",
+      "bâtiment AVEC salles : ses étages restent soumis à la portée (aucune régression du filtre)");
     // décor (5c.16.3) : plans d'étage (un par bâtiment × étage) + position monde d'un OOB
     ck(m.floorPlanes.length >= 2, "multiLayout : ≥ 2 plans d'étage (Liège ét.0 + ét.1)");
     const fpA = m.floorPlanes.find((fp) => fp.floor === "0"); ck(!!fpA && fpA.off.z === 0, "floorPlane ét.0 → z = 0");
@@ -1926,9 +1942,12 @@ module.exports = async () => {
     const w0 = FloorLayout.roomToWorld(roomA, locA);
     ck(t.linePts[0].x === w0.x && t.linePts[0].y === w0.y && t.linePts[0].z === w0.z, "bout de salle : inchangé — chaque bout est porté par SON conteneur");
 
-    /* D3 — un ÉTAGE est un conteneur AFFICHABLE : masqué, le câble disparaît, comme pour une salle. Un
-       bâtiment dont aucune salle n'est affichée ne voit pas son plan d'étage émis (filtre `shownFloors`). */
+    /* D3 — un ÉTAGE est un conteneur AFFICHABLE : hors portée, le câble disparaît, comme pour une salle.
+       ⚠ La portée s'exprime en SALLES : le bâtiment témoin doit donc EN PORTER UNE, sinon on ne mesure pas
+       une portée mais le trou qu'elle laissait (un bâtiment sans salle n'est désignable par aucun réglage —
+       il est TOUJOURS dessiné, cf. la section « bâtiment sans salle » plus haut). */
     const site2 = await s.create("sites", { name: "Namur" });
+    const dcN = await s.create("datacenters", { name: "N", width_mm: 3000, depth_mm: 3000, location: site2.id, floor: "0", floor_x: 0, floor_y: 0 });
     const eqF2 = await s.create("equipments", { name: "EF2", placement_mode: "floor", location: site2.id, floor: "0", floor_x: 1000, floor_y: 1000, width_mm: 400, height_mm: 300, depth_mm: 200 });
     const pF2 = (await s.create("ports", { equipment_id: eqF2.id, name: "pf2", face_x: 0.5, face_y: 0.5, face_side: "front" })).id;
     const pin2 = await s.create("waypoints", { name: "gaine2", wp_type: "oob", location: site2.id, floor: "0", floor_x: 900, floor_y: 900 });
@@ -1938,13 +1957,12 @@ module.exports = async () => {
     const rHors = s.cableRoute(s.get("cables", s.all("cables").find((c) => c.name === "baie→autre bâtiment").id));
     ck(rHors.valid && rHors.hasExits, "route vers un posé d'un AUTRE bâtiment : grammaticalement valide");
     const m2 = floor.multiLayout(dcA, { visibleDcIds: new Set([dcA.id]) });
-    ck.eq(FloorLayout.floorShown(m2, site2.id, "0"), false, "portée : l'étage de l'autre bâtiment n'est PAS affiché (aucune salle ne l'y fait entrer)");
+    ck.eq(FloorLayout.floorShown(m2, site2.id, "0"), false, "portée : l'étage de l'autre bâtiment n'est PAS affiché (sa salle est hors portée)");
     ck.eq(routing.interDcRoutes(m2, true).length, 1, "D3 : seul le câble dont l'étage est AFFICHÉ est tracé — l'autre disparaît, comme pour une salle masquée");
     ck.eq(FloorLayout.floorShown(m2, site.id, "1"), true, "…et l'étage de la salle affichée, lui, est bien émis");
-    /* La garde OUVRE aussi bien qu'elle FERME : une salle du second bâtiment entre dans la portée, son plan
+    /* La garde OUVRE aussi bien qu'elle FERME : la salle du second bâtiment entre dans la portée, son plan
        d'étage est émis, et le câble apparaît. Deux mesures comparées entre elles (« affiché ? » ⇄ « tracé ? »)
        plutôt qu'un seul décompte épinglé à une constante. */
-    const dcN = await s.create("datacenters", { name: "N", width_mm: 3000, depth_mm: 3000, location: site2.id, floor: "0", floor_x: 0, floor_y: 0 });
     const m3 = floor.multiLayout(dcA, { visibleDcIds: new Set([dcA.id, dcN.id]) });
     ck.eq(FloorLayout.floorShown(m3, site2.id, "0"), true, "portée élargie : l'étage de l'autre bâtiment devient AFFICHÉ");
     ck.eq(routing.interDcRoutes(m3, true).length, 2, "…et le second câble est alors tracé (la garde ouvre comme elle ferme)");
