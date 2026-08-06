@@ -31,6 +31,19 @@
   13. le STOCKAGE chiffré (better-sqlite3 RÉEL) : CRUD sans fuite de jeton, compte RELU, sentinelle ;
   14. les INVARIANTS : pivot serveur ≡ `ISSUE_SOURCE_FIELDS`, et AGNOSTICISME de marque (aucun
       littéral « jira » hors des points d'extension) — l'exigence n°1 du chantier, donc TESTÉE.
+
+   Le lot L3 ajoute la RÉCONCILIATION, le SERVICE et les ROUTES. C'est là que l'écart structurant du
+   chantier devient exécutable, d'où l'insistance des tests dessus :
+  15. `IssueReconcile` — 🚨 la variante INVERSÉE : AUCUN `creates`, JAMAIS (y compris quand la source
+      rend un ticket que le document ne suit pas) · orphelinat ALLER **ET RETOUR** · patchs MINIMAUX ·
+      IDEMPOTENCE (une passe sans changement ne produit aucune opération) · `last_sync` hors diff ;
+  16. `IssueSyncService.passScope` — le PLAFOND de passe et son ROULEMENT (aucune zone morte) ;
+  17. `IssueSyncService` de bout en bout sur `DocumentStore` RÉEL : « Suivre un ticket » (dont le
+      piège n°1 — un ticket DÉPLACÉ de projet garde son identité), triptyque révision+SSE, absence
+      totale d'écriture quand rien ne change, introuvable aller-retour, anti-chevauchement,
+      anti-rafale, statut, `ProblemReporter`, plafond ET sa journalisation, multi-providers.
+   ⚠ Les routes Express (`IssueModule.ts`) restent HORS test, comme `api.ts`/`VmModule`/`WifiModule` :
+   c'est la convention du dépôt. La logique qu'elles exposent vit, elle, dans le service — testée.
    Harnais et assertions : harness.js. Cadrage : .notes/toDos/remote-issue-tracker-jira-cadrage-2026-08-06.md. */
 "use strict";
 const { ck, section, path, D, SHARED, SERVER, Validation, Cascade, SharedSchema, EntityRegistry, COLLECTION_THREE_IMPACT } = require("./harness.js");
@@ -1140,6 +1153,410 @@ module.exports = async () => {
     }
   });
 
+  /* ============ SERVEUR : réconciliation PURE — la variante INVERSÉE ============ */
+
+  await section("Serveur : IssueReconcile — AUCUN creates, orphelinat ALLER-RETOUR, patch minimal, idempotence", async () => {
+  {
+    const { IssueReconcile } = SERVER("issues/IssueReconcile.js");
+    const NOW = "2026-08-07T12:00:00.000Z";
+    const OLD = "2026-08-01T08:00:00.000Z";
+
+    /** Pivot d'adaptateur (les 17 champs source), surchargeable champ par champ. */
+    const pivot = (over) => ({
+      ext_id: "10042", provider_id: "p1", key: "INFRA-123", summary: "Panne de la baie B12",
+      status: "En cours", status_category: "in_progress", issue_type: "Bug", priority: "Haute",
+      assignee: "Alice", reporter: "Bob", labels: ["reseau", "urgent"], resolution: null,
+      created_src: "2026-08-01T10:00:00.000Z", updated_src: "2026-08-02T10:00:00.000Z",
+      url: "https://exemple.atlassian.net/browse/INFRA-123", orphan: false, last_sync: "", ...over,
+    });
+    /** Enregistrement du DOCUMENT : champs source NORMALISÉS (mêmes valeurs que produirait la
+        synchro — c'est tout l'objet de la frontière partagée) + champs LOCAUX renseignés. */
+    const stored = (over, lastSync) => ({
+      id: "issue-1", created_date: OLD, updated_date: OLD,
+      ...IssueReconcile.sourceOf(pivot(), lastSync === undefined ? OLD : lastSync),
+      notes: "ma note", description: "ma description", targets: ["equipment:eq-1"], ...over,
+    });
+    const plan = (found, missing, existing) => IssueReconcile.plan({
+      providerId: "p1", resolution: { found, missing }, existingIssues: existing, nowIso: NOW,
+    });
+    const base = stored();
+
+    // -- 1) 🚨 L'INVARIANT DU CHANTIER : la synchro ne PEUPLE JAMAIS le document (assiette inversée).
+    const unfollowed = plan([pivot()], [], []);
+    ck(!("creates" in unfollowed), "plan : le résultat ne porte MÊME PAS de champ `creates` — l'assiette vient du DOCUMENT, jamais de la source (§3 du cadrage)");
+    ck.eq(unfollowed.updates.length + unfollowed.orphans.length, 0, "ticket rendu par la SOURCE sans être suivi → AUCUNE opération");
+    ck.eq(unfollowed.untracked, 1, "… il est COMPTÉ (observable dans les journaux : un adaptateur qui répond à côté est une anomalie), jamais matérialisé");
+
+    // -- 2) IDEMPOTENCE : re-planifier sur l'état écrit ne produit AUCUNE opération. --
+    const idem = plan([pivot()], [], [base]);
+    ck(idem.updates.length === 0 && idem.orphans.length === 0, "idempotence : état inchangé → AUCUNE opération (donc ni révision, ni SSE, ni bruit d'undo)");
+    ck.eq(idem.unchanged, 1, "idempotence : compté « inchangé »");
+    ck.eq(plan([pivot()], [], [stored({}, "")]).updates.length, 0,
+      "`last_sync` HORS diff : un ticket jamais estampillé (last_sync \"\") ne devient pas une écriture à lui seul — c'est LA condition de l'idempotence");
+
+    // -- 3) PATCH MINIMAL : seuls les champs modifiés (+ last_sync) ; les LOCAUX jamais touchés. --
+    const closed = plan([pivot({ status: "Terminé", status_category: "done", resolution: "Corrigé" })], [], [base]).updates;
+    ck.eq(closed.length, 1, "patch : 1 mise à jour");
+    ck.eq(Object.keys(closed[0].patch).sort().join(","), "last_sync,resolution,status,status_category",
+      "patch MINIMAL : les 3 champs modifiés + last_sync, rien d'autre");
+    ck.eq(closed[0].patch.last_sync, NOW, "`last_sync` est POSÉ dès qu'il y a une écriture réelle (et seulement là)");
+    ck(!("notes" in closed[0].patch) && !("description" in closed[0].patch) && !("targets" in closed[0].patch),
+      "patch : les champs LOCAUX (notes, description, targets) ne sont JAMAIS dans un patch de synchro");
+
+    // -- 4) ORPHELINAT — ALLER. Dérivé des `missing`, jamais d'une suppression. --
+    const gone = plan([], ["10042"], [base]);
+    ck.eq(gone.orphans.length, 1, "identifiant rendu MANQUANT → 1 « introuvable »");
+    ck(gone.orphans[0].id === "issue-1" && gone.orphans[0].patch.orphan === true && gone.orphans[0].patch.last_sync === NOW,
+      "introuvable : patch { orphan, last_sync } — l'enregistrement SURVIT (il porte des notes et des liens que le tracker ignore)");
+    const already = plan([], ["10042"], [stored({ orphan: true })]);
+    ck.eq(already.orphans.length, 0, "introuvable DÉJÀ marqué → aucune op (idempotence)");
+    ck.eq(already.unchanged, 1, "… et compté « inchangé »");
+
+    // -- 5) ORPHELINAT — RETOUR. LE cas qu'on oublie : le drapeau doit retomber tout seul. --
+    const back = plan([pivot()], [], [stored({ orphan: true })]).updates;
+    ck.eq(back.length, 1, "RETOUR d'orphelinat : 1 mise à jour");
+    ck.eq(back[0].patch.orphan, false, "🚨 RETOUR : orphan true → false dès que le ticket est de nouveau résolu");
+    ck.eq(Object.keys(back[0].patch).sort().join(","), "last_sync,orphan", "RETOUR : patch minimal — seuls le drapeau et l'horodatage bougent");
+
+    // -- 6) NON DEMANDÉ ≠ INTROUVABLE. Le service PLAFONNE l'assiette : un ticket suivi qui n'a pas
+    //       été interrogé doit rester INTACT. C'est pourquoi les orphelins viennent des `missing` et
+    //       surtout PAS d'une différence d'ensembles « suivi mais pas revenu ». --
+    const untouched = plan([], [], [base]);
+    ck(untouched.updates.length === 0 && untouched.orphans.length === 0 && untouched.unchanged === 0,
+      "ticket suivi mais NON interrogé à cette passe (plafond) → INTACT, jamais marqué introuvable");
+
+    // -- 7) PÉRIMÈTRE : un autre provider n'est pas touché. --
+    const other = { ...stored(), id: "issue-2", provider_id: "p2", ext_id: "99" };
+    const scoped = plan([], ["10042", "99"], [base, other]);
+    ck.eq(scoped.orphans.length, 1, "périmètre : seuls les tickets de CE provider peuvent devenir introuvables");
+    ck.eq(scoped.orphans[0].id, "issue-1", "périmètre : … et c'est bien celui du provider réconcilié");
+    ck.eq(plan([pivot({ provider_id: "p2" })], [], [base]).updates.length, 0, "périmètre : record estampillé d'un AUTRE provider → écarté (garde-fou d'appelant)");
+
+    // -- 8) TOLÉRANCE : record inexploitable, doublons, `missing` exotiques. --
+    ck.eq(plan([pivot({ ext_id: "" })], [], [base]).untracked, 0, "record sans ext_id → écarté (inréconciliable), pas même compté comme « non suivi »");
+    const dup = plan([pivot({ summary: "premier" }), pivot({ summary: "second" })], [], [base]).updates;
+    ck.eq(dup.length, 1, "doublon d'ext_id dans la résolution → une seule opération");
+    ck.eq(dup[0].patch.summary, "premier", "doublon : le PREMIER gagne");
+    ck.eq(plan([], ["", "   ", "inconnu"], [base]).orphans.length, 0, "`missing` vide/blanc/non suivi → ignoré, aucune exception");
+
+    // -- 9) NORMALISATION PARTAGÉE : jamais réécrite sur place (verrou posé au lot L1). --
+    ck.eq(JSON.stringify(IssueReconcile.sourceOf(pivot(), NOW)),
+      JSON.stringify(IssueSync.normalizeSource({ ...pivot(), orphan: false, last_sync: NOW })),
+      "sourceOf DÉLÈGUE à `IssueSync.normalizeSource` — aucune normalisation réécrite ici (deux normalisations divergentes = faux delta à CHAQUE passe)");
+    ck.eq(plan([pivot({ labels: ["urgent", "reseau", "reseau"] })], [], [base]).updates.length, 0,
+      "étiquettes réordonnées/dupliquées côté tracker → AUCUN delta (normalisation déterministe du partagé)");
+    ck.eq(plan([pivot({ status_category: "en-recette-maison" })], [], [base]).updates[0].patch.status_category, "unknown",
+      "catégorie inconnue → CLAMPÉE sur `unknown` par la frontière partagée (une passe entière ne tombe pas pour un ticket mal classé)");
+    ck.eq(IssueReconcile.sourceOf(pivot({ orphan: true, last_sync: "vieux" }), NOW).orphan, false,
+      "sourceOf : un ticket RÉSOLU est orphan:false quoi qu'en dise l'adaptateur — le drapeau appartient au SERVICE");
+    ck.eq(IssueReconcile.sourceOf(pivot({ last_sync: "vieux" }), NOW).last_sync, NOW,
+      "sourceOf : c'est la PASSE qui date (l'adaptateur ne voit qu'un lot, il ne peut pas dater une passe)");
+  }
+  });
+
+  /* ============ SERVEUR : périmètre d'une passe (plafond + roulement) ============ */
+
+  await section("Serveur : IssueSyncService.passScope — plafond de passe, ordre stable et ROULEMENT (aucune zone morte)", async () => {
+  {
+    const { IssueSyncService } = SERVER("issues/IssueSyncService.js");
+    const t = (extId, lastSync) => ({ id: "x-" + extId, ext_id: extId, last_sync: lastSync });
+    const assiette = [t("a", "2026-08-05"), t("b", ""), t("c", "2026-08-01")];
+
+    // -- Ordre STABLE : jamais synchronisés d'abord — la priorité SENSÉE du premier tour. --
+    const full = IssueSyncService.passScope(assiette, 10);
+    ck.eq(full.batch.join(","), "b,c,a", "ordre : `last_sync` CROISSANT — les jamais synchronisés (\"\") passent en tête");
+    ck.eq(full.skipped, 0, "sous le plafond → rien de reporté");
+    ck.eq(full.nextStart, 0, "sous le plafond → aucun roulement à mémoriser");
+
+    // -- PLAFOND + ROULEMENT : l'assiette entière défile en ⌈N/plafond⌉ passes, MÊME si rien ne
+    //    change (l'idempotence n'avance pas `last_sync`, donc un simple tri ne suffirait PAS). --
+    const p1 = IssueSyncService.passScope(assiette, 2, 0);
+    ck.eq(p1.batch.join(","), "b,c", "plafond : seuls N identifiants sont interrogés");
+    ck.eq(p1.skipped, 1, "plafond : le reliquat est COMPTÉ (il sera journalisé et remonté au statut)");
+    const p2 = IssueSyncService.passScope(assiette, 2, p1.nextStart);
+    ck.eq(p2.batch.join(","), "a,b", "ROULEMENT : la passe suivante reprend où la précédente s'est arrêtée (fenêtre circulaire)");
+    ck(p2.batch.includes("a"), "ROULEMENT : … donc le ticket reporté EST interrogé — aucune zone morte, quoi qu'il arrive aux données");
+    const p3 = IssueSyncService.passScope(assiette, 2, p2.nextStart);
+    ck.eq(p3.batch.join(","), "c,a", "ROULEMENT : le tour se poursuit indéfiniment");
+
+    // -- Robustesse : curseur périmé, doublons, identités vides, plafond absurde. --
+    ck.eq(IssueSyncService.passScope(assiette, 2, 999).batch.length, 2, "curseur hors bornes (tickets retirés depuis) → ramené dans les bornes, jamais d'exception");
+    ck.eq(IssueSyncService.passScope(assiette, 2, -5).batch.length, 2, "curseur négatif → idem (modulo positif)");
+    ck.eq(IssueSyncService.passScope([t("a", ""), t("a", ""), t("", "")], 10).batch.join(","), "a", "assiette : doublon d'ext_id dédupliqué, ext_id vide écarté");
+    ck.eq(IssueSyncService.passScope([t("a", "")], 0).batch.length, 1, "plafond absurde (0) → AUCUN plafond, plutôt qu'une passe morte");
+    ck.eq(IssueSyncService.passScope([], 10).batch.length, 0, "assiette vide → rien à demander");
+  }
+  });
+
+  /* ============ SERVEUR : synchro + suivi de bout en bout (DocumentStore RÉEL) ============ */
+
+  await section("Serveur : IssueSyncService — bout en bout (suivi, triptyque, idempotence, introuvable, plafond, anti-rafale)", async () => {
+    let Sqlite = null;
+    try {
+      const Candidate = require(path.join(__dirname, "..", "..", "src-server", "node_modules", "better-sqlite3"));
+      const probe = new Candidate(":memory:"); probe.close();
+      Sqlite = Candidate;
+    } catch (_) { /* module/binaire absent → section sautée */ }
+    if (!Sqlite) { ck(true, "better-sqlite3 indisponible → section IssueSyncService sautée"); return; }
+
+    const fs = require("fs"), os = require("os");
+    const { DocumentStore } = SERVER("documents.js");
+    const { IssueSyncService } = SERVER("issues/IssueSyncService.js");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dcm-issuesync-"));
+    try {
+      const docs = new DocumentStore(dir, Sqlite);
+      const doc = docs.create("infra-test");
+      const repo = docs.repo(doc.id);
+
+      const cfg = (id) => ({ id, kind: "jira", url: "https://exemple.atlassian.net", token: "K", account: "svc@exemple.be", interval_sec: 0, timeout_sec: 20, options: {} });
+      let configured = [cfg("tracker-1")];
+      const providers = {
+        configuredDocIds: () => [doc.id],
+        providersFor: (d) => (d === doc.id ? configured : []),
+        summariesFor: (d) => providers.providersFor(d).map((c) => ({ id: c.id, kind: c.kind, interval_sec: c.interval_sec })),
+      };
+
+      // Tickets CONNUS du tracker, par instance de provider. Le stub ESTAMPILLE `provider_id` au
+      // retour, exactement comme le fait tout adaptateur réel (le décodeur pur, lui, l'ignore).
+      const remote = new Map([["tracker-1", new Map()], ["tracker-2", new Map()]]);
+      const MOVED = { key: "OPS-45", url: "https://exemple.atlassian.net/browse/OPS-45" };
+      const ticket = (over) => ({
+        ext_id: "10042", provider_id: "", key: "INFRA-123", summary: "Panne de la baie B12",
+        status: "En cours", status_category: "in_progress", issue_type: "Bug", priority: "Haute",
+        assignee: "Alice", reporter: "Bob", labels: ["reseau"], resolution: null,
+        created_src: "2026-08-01T10:00:00.000Z", updated_src: "2026-08-02T10:00:00.000Z",
+        url: "https://exemple.atlassian.net/browse/INFRA-123", orphan: false, last_sync: "", ...over,
+      });
+      remote.get("tracker-1").set("10042", ticket());
+
+      const calls = { resolve: [], lookup: [] };
+      let failResolve = false, failLookup = false, gate = null;
+      const makeAdapter = (config) => ({
+        kind: config.kind, config,
+        test: async () => ({ ok: true, kind: config.kind, version: null, supported: true, message: "" }),
+        resolve: async (extIds) => {
+          calls.resolve.push({ provider: config.id, ids: extIds.slice() });
+          if (gate) await gate;
+          if (failResolve) throw new Error("Tracker : délai dépassé (20000 ms)");
+          const known = remote.get(config.id) || new Map();
+          const found = [], missing = [];
+          for (const id of extIds) {
+            const r = known.get(id);
+            if (r) found.push({ ...r, provider_id: config.id }); else missing.push(id);
+          }
+          return { found, missing };
+        },
+        lookup: async (reference) => {
+          calls.lookup.push({ provider: config.id, reference });
+          if (failLookup) throw new Error("Tracker : 401 — jeton refusé");
+          for (const r of (remote.get(config.id) || new Map()).values()) {
+            if (r.key === reference || r.ext_id === reference || r.url === reference) return { ...r, provider_id: config.id };
+          }
+          return null;
+        },
+        createIssue: async () => { throw new Error("hors périmètre du lot L3"); },
+      });
+
+      const live = { events: [], publish(docId, data) { this.events.push({ docId, data }); } };
+      const logged = [];
+      const log = { info: (...a) => logged.push("info " + a.join(" ")), warn: (...a) => logged.push("warn " + a.join(" ")), error: (...a) => logged.push("error " + a.join(" ")) };
+      // minIntervalSec 0 : anti-rafale neutralisé pour dérouler le scénario (testé à part plus bas).
+      const service = new IssueSyncService(docs, live, providers, log, makeAdapter, 0);
+
+      // -- 1) ASSIETTE VIDE : un provider fraîchement configuré n'est PAS en erreur, et surtout on
+      //       n'appelle même pas le tracker (contraste net avec vm//wifi/, qui inventorient toujours).
+      const rev0 = docs.getRev(doc.id);
+      const r0 = await service.syncDocument(doc.id);
+      ck(r0.length === 1 && r0[0].ok === true, "assiette VIDE : la passe RÉUSSIT (rien à rafraîchir n'est pas une erreur)");
+      ck(/aucun ticket suivi/.test(r0[0].message), "… et le statut renvoie vers « Suivre un ticket »");
+      ck.eq(calls.resolve.length, 0, "assiette vide → le tracker n'est même PAS appelé (l'assiette vient du DOCUMENT)");
+      ck.eq(docs.getRev(doc.id), rev0, "assiette vide → aucune révision consommée");
+
+      // -- 2) « SUIVRE UN TICKET » : la porte d'entrée n°1 (décision D4). --
+      const f1 = await service.followReference(doc.id, "INFRA-123");
+      ck(f1.ok === true && f1.already === false, "suivi : référence reconnue → enregistrement CRÉÉ");
+      ck.eq(f1.provider_id, "tracker-1", "suivi : le provider qui a RECONNU la référence est rendu");
+      ck.eq(f1.issue.ext_id, "10042", "🚨 suivi : c'est l'identifiant INTERNE qui est persisté, jamais la clé saisie (risque n°1 du chantier)");
+      ck.eq(f1.issue.key, "INFRA-123", "suivi : la clé lisible est conservée comme champ d'AFFICHAGE");
+      ck(f1.issue.notes === "" && f1.issue.description === "" && JSON.stringify(f1.issue.targets) === "[]", "suivi : champs LOCAUX à leur défaut (l'utilisateur les enrichit ensuite)");
+      ck(f1.issue.last_sync !== "" && f1.issue.orphan === false, "suivi : l'enregistrement est estampillé par la passe, et résolu");
+      ck(docs.getRev(doc.id) > rev0, "suivi : révision consommée — le triptyque COMPLET, comme toute écriture");
+      ck.eq(live.events.length, 1, "suivi : 1 événement SSE publié");
+      ck(live.events[0].data.changeset.collections.join(",") === "issues" && live.events[0].data.origin === "issue-sync",
+        "suivi : changeset ciblé sur `issues` (les autres clients rechargent en granulaire)");
+
+      // -- 3) IDEMPOTENCE de la porte d'entrée : re-suivre ne crée pas de doublon. --
+      const revAfterFollow = docs.getRev(doc.id);
+      const sseAfterFollow = live.events.length;
+      const f2 = await service.followReference(doc.id, "INFRA-123");
+      ck(f2.ok === true && f2.already === true, "re-suivi : signalé « déjà suivi » (l'UI ne doit pas annoncer une création fantôme)");
+      ck.eq(repo.findBy("issues", "provider_id", "tracker-1").length, 1, "re-suivi : AUCUN doublon créé");
+      ck.eq(docs.getRev(doc.id), revAfterFollow, "re-suivi sans changement : aucune révision consommée");
+      ck.eq(live.events.length, sseAfterFollow, "re-suivi sans changement : aucun SSE");
+
+      // -- 4) 🚨 DÉPLACEMENT DE PROJET : la clé change, l'identité NON (risque n°1 du cadrage). --
+      remote.get("tracker-1").set("10042", ticket(MOVED));
+      const f3 = await service.followReference(doc.id, "OPS-45");
+      ck(f3.ok === true && f3.already === true, "déplacement de projet : la NOUVELLE clé désigne le MÊME ticket (identité = ext_id) → « déjà suivi »");
+      ck.eq(repo.findBy("issues", "provider_id", "tracker-1").length, 1, "déplacement : toujours UN seul enregistrement — ni doublon, ni orphelin (le défaut qui serait resté silencieux)");
+      ck.eq(f3.issue.key, "OPS-45", "déplacement : la clé, simple champ d'affichage, est rafraîchie au passage");
+
+      // -- 5) SUIVI PAR URL (ce que l'utilisateur a réellement sous la main). --
+      ck.eq((await service.followReference(doc.id, MOVED.url)).already, true, "suivi par URL collée : même ticket reconnu (la référence peut être une clé OU une URL)");
+
+      // -- 6) RÉFÉRENCE INCONNUE : refus ACTIONNABLE et surtout AUCUN enregistrement fantôme. --
+      const revBeforeBad = docs.getRev(doc.id);
+      const lookupsBefore = calls.lookup.length;
+      const bad = await service.followReference(doc.id, "NEXISTE-PAS-1");
+      ck.eq(bad.ok, false, "référence inconnue → REFUS");
+      ck.eq(bad.issue, null, "référence inconnue : rien n'est rendu…");
+      ck.eq(repo.findBy("issues", "provider_id", "tracker-1").length, 1, "… et surtout RIEN n'est créé (on ne persiste pas un ticket fantôme)");
+      ck(/introuvable ou inaccessible/.test(bad.message) && /droits/.test(bad.message), "référence inconnue : message ACTIONNABLE (vérifier la clé/URL ET les droits du compte de service)");
+      ck.eq(docs.getRev(doc.id), revBeforeBad, "référence inconnue : aucune révision consommée");
+      const blank = await service.followReference(doc.id, "   ");
+      ck(blank.ok === false && /INFRA-123/.test(blank.message), "référence VIDE : refus qui montre la forme attendue");
+      ck.eq(calls.lookup.length, lookupsBefore + 1, "référence vide : le tracker n'est même pas interrogé");
+
+      // -- 7) PROVIDER EN PANNE ≠ TICKET INTROUVABLE : le message doit envoyer au bon endroit. --
+      failLookup = true;
+      const down = await service.followReference(doc.id, "INFRA-999");
+      ck(down.ok === false && /jeton refusé/.test(down.message), "provider en PANNE : le message porte l'échec du provider, pas un « introuvable » qui ferait corriger la saisie");
+      failLookup = false;
+
+      // -- 8) SYNCHRO IDEMPOTENTE de bout en bout : ni révision, ni SSE. --
+      const revBeforeSync = docs.getRev(doc.id);
+      const sseBeforeSync = live.events.length;
+      const s1 = await service.syncDocument(doc.id);
+      ck(s1[0].ok === true && s1[0].counts.unchanged === 1, "synchro : le ticket suivi est déjà à jour");
+      ck.eq(s1[0].counts.tracked, 1, "compteurs : l'assiette SUIVIE est remontée (elle est pilotée par l'utilisateur, donc à surveiller)");
+      ck.eq(docs.getRev(doc.id), revBeforeSync, "IDEMPOTENCE : rien de changé → AUCUNE révision");
+      ck.eq(live.events.length, sseBeforeSync, "IDEMPOTENCE : … et AUCUN événement SSE");
+      ck.eq(calls.resolve[calls.resolve.length - 1].ids.join(","), "10042", "résolution : les identifiants INTERNES du document partent EN UN LOT (jamais un appel par ticket)");
+
+      // -- 9) Champs SOURCE écrasés, champs LOCAUX (dont le rattachement manuel) préservés. --
+      const one = repo.findBy("issues", "provider_id", "tracker-1")[0];
+      repo.transact({ updates: [{ collection: "issues", record: { ...one, notes: "à traiter lundi", targets: ["equipment:eq-x"] } }] }, docs.markChanged(doc.id));
+      remote.get("tracker-1").set("10042", ticket({ ...MOVED, status: "Terminé", status_category: "done", resolution: "Corrigé", assignee: null }));
+      const s2 = await service.syncDocument(doc.id);
+      ck.eq(s2[0].counts.updated, 1, "synchro : 1 ticket mis à jour");
+      const after = repo.getOne("issues", one.id);
+      ck(after.status === "Terminé" && after.status_category === "done" && after.resolution === "Corrigé" && after.assignee === null,
+        "champs SOURCE écrasés par la passe (y compris un retour à null)");
+      ck(after.notes === "à traiter lundi" && JSON.stringify(after.targets) === '["equipment:eq-x"]',
+        "champs LOCAUX préservés : notes ET rattachement MANUEL `targets` (la relecture au moment d'écrire les protège d'une édition concurrente)");
+
+      // -- 10) 🚨 INVARIANT DE BOUT EN BOUT : un ticket que le tracker connaît mais que le document
+      //        ne SUIT PAS n'entre jamais par la synchro. --
+      remote.get("tracker-1").set("777", ticket({ ext_id: "777", key: "INFRA-777", url: "https://exemple.atlassian.net/browse/INFRA-777" }));
+      const revBeforeExtra = docs.getRev(doc.id);
+      await service.syncDocument(doc.id);
+      ck.eq(repo.findBy("issues", "provider_id", "tracker-1").length, 1, "🚨 ticket connu du tracker mais NON suivi → il n'entre JAMAIS par une passe de synchro");
+      ck.eq(calls.resolve[calls.resolve.length - 1].ids.join(","), "10042", "… il n'est d'ailleurs même pas demandé : la synchro interroge l'assiette du DOCUMENT");
+      ck.eq(docs.getRev(doc.id), revBeforeExtra, "… et la passe ne consomme aucune révision");
+
+      // -- 11) INTROUVABLE (aller) : drapeau posé, enregistrement CONSERVÉ. --
+      remote.get("tracker-1").delete("10042");
+      const s4 = await service.syncDocument(doc.id);
+      ck.eq(s4[0].counts.missing, 1, "ticket disparu du tracker → 1 « introuvable »");
+      const lost = repo.getOne("issues", one.id);
+      ck(lost.orphan === true && lost.notes === "à traiter lundi", "introuvable : drapeau posé, enregistrement CONSERVÉ avec ses enrichissements (JAMAIS de delete)");
+      ck(/introuvable/.test(s4[0].message), "le résumé parle d'« introuvable(s) » — un ticket suivi qui disparaît est un incident, pas une déconnexion banale");
+      ck.eq((await service.syncDocument(doc.id))[0].counts.missing, 0, "introuvable DÉJÀ marqué → aucune nouvelle opération (idempotence)");
+
+      // -- 12) INTROUVABLE (retour) : le drapeau retombe tout seul. --
+      remote.get("tracker-1").set("10042", ticket({ ...MOVED, status: "Terminé", status_category: "done", resolution: "Corrigé", assignee: null }));
+      const s6 = await service.syncDocument(doc.id);
+      ck.eq(s6[0].counts.updated, 1, "retour : le ticket redevenu résolu est mis à jour");
+      ck.eq(repo.getOne("issues", one.id).orphan, false, "🚨 RETOUR D'ORPHELINAT de bout en bout : le drapeau retombe sans cas particulier");
+
+      // -- 13) CATÉGORIE inconnue : la passe ABOUTIT (le clamp partagé la rend valide par construction). --
+      remote.get("tracker-1").set("10042", ticket({ ...MOVED, status_category: "en-recette-maison" }));
+      const s7 = await service.syncDocument(doc.id);
+      ck(s7[0].ok === true, "catégorie d'état inconnue : la passe ABOUTIT (autorité serveur satisfaite PAR CONSTRUCTION)");
+      ck.eq(repo.getOne("issues", one.id).status_category, "unknown", "… et la valeur est rangée sur `unknown` plutôt que de faire refuser le lot entier");
+
+      // -- 14) RÉSOLUTION EN ÉCHEC : statut en erreur, document INTACT, last_success conservé. --
+      failResolve = true;
+      const revBeforeFail = docs.getRev(doc.id);
+      const s8 = await service.syncDocument(doc.id);
+      ck(s8[0].ok === false && /délai dépassé/.test(s8[0].message), "échec de résolution → statut en erreur (message du tracker)");
+      ck(s8[0].last_success !== null, "last_success CONSERVÉ malgré l'échec (« en erreur depuis…, dernière réussite à… »)");
+      ck.eq(docs.getRev(doc.id), revBeforeFail, "document INTACT après échec (aucune écriture partielle)");
+      failResolve = false;
+
+      // -- 15) STATUT : fusion config × runtime, purge des fantômes, document non configuré. --
+      const st = service.statusFor(doc.id);
+      ck(st.length === 1 && st[0].provider_id === "tracker-1", "statusFor : fusion config déclarée × état runtime");
+      ck.eq(service.statusFor("doc-inexistant").length, 0, "document non configuré → aucun provider (feature dormante)");
+      configured = [];
+      ck.eq(service.statusFor(doc.id).length, 0, "provider RETIRÉ de la config → statut purgé (aucun fantôme en mémoire)");
+      configured = [cfg("tracker-1")];
+
+      // -- 16) PLAFOND DE PASSE : borné, JOURNALISÉ, remonté au statut, et à ROULEMENT. --
+      await service.followReference(doc.id, "INFRA-777");   // second ticket dans l'assiette
+      ck.eq(repo.findBy("issues", "provider_id", "tracker-1").length, 2, "assiette : 2 tickets suivis (entrés par la SEULE porte qui existe)");
+      const capLog = [];
+      const capLogger = { info: () => {}, warn: (...a) => capLog.push(a.join(" ")), error: () => {} };
+      const capped = new IssueSyncService(docs, live, providers, capLogger, makeAdapter, 0, undefined, 1);
+      const c1 = await capped.syncDocument(doc.id);
+      ck.eq(c1[0].counts.queried, 1, "PLAFOND : une seule demande par passe");
+      ck.eq(c1[0].counts.skipped, 1, "PLAFOND : le reliquat est COMPTÉ");
+      ck(/PLAFOND DE PASSE ATTEINT/.test(c1[0].message), "PLAFOND : le statut le DIT — un cap silencieux se lirait « tout est à jour » alors que la moitié n'a pas été regardée");
+      ck(capLog.some((l) => /PLAFOND/.test(l)), "PLAFOND : … et il est JOURNALISÉ côté serveur");
+      const asked1 = calls.resolve[calls.resolve.length - 1].ids.join(",");
+      await capped.syncDocument(doc.id);
+      const asked2 = calls.resolve[calls.resolve.length - 1].ids.join(",");
+      ck(asked1 !== asked2, "PLAFOND : la passe suivante interroge l'AUTRE ticket (roulement — aucune zone morte, même si rien ne change)");
+
+      // -- 17) ANTI-CHEVAUCHEMENT : timer + clic manuel ne doublent pas la passe. --
+      let release = null;
+      gate = new Promise((r) => { release = r; });
+      const overlapping = new IssueSyncService(docs, live, providers, log, makeAdapter, 0);
+      const inflight = overlapping.syncDocument(doc.id);
+      const concurrent = await overlapping.syncDocument(doc.id);
+      ck(/déjà en cours/.test(concurrent[0].message), "anti-chevauchement : la seconde passe n'en lance PAS une nouvelle");
+      ck.eq(concurrent[0].last_attempt, null, "… et son statut synthétique n'est PAS stocké (il masquerait le résultat réel de la passe en cours)");
+      release();
+      gate = null;
+      await inflight;
+
+      // -- 18) ANTI-RAFALE : deux clics quasi simultanés = UNE seule résolution. --
+      const before = calls.resolve.length;
+      const throttled = new IssueSyncService(docs, live, providers, log, makeAdapter, 3600);
+      const t1 = await throttled.syncDocument(doc.id);
+      const t2 = await throttled.syncDocument(doc.id);
+      ck.eq(calls.resolve.length, before + 1, "relance sous le délai minimal → UNE seule résolution");
+      ck(/relance ignorée/.test(t2[0].message), "… la seconde reçoit le dernier statut, annoté « relance ignorée »");
+      ck.eq(t1[0].last_attempt, t2[0].last_attempt, "… même horodatage de tentative (aucune nouvelle passe)");
+      ck(!/relance ignorée/.test(throttled.statusFor(doc.id)[0].message), "… l'annotation n'est PAS stockée dans le statut persistant");
+
+      // -- 19) PRODUCTEUR de problèmes (pont vers notify) : raise en échec, resolve au retour. --
+      const problems = { raised: [], resolved: [], raise(k, e) { this.raised.push({ k, e }); }, resolve(k) { this.resolved.push(k); } };
+      const reported = new IssueSyncService(docs, live, providers, log, makeAdapter, 0, problems);
+      failResolve = true;
+      await reported.syncDocument(doc.id);
+      ck.eq(problems.raised.length, 1, "échec → 1 signalement levé");
+      ck.eq(problems.raised[0].k, "issue-sync:" + doc.id + ":tracker-1", "clé STABLE par couple document×provider (le moteur notify déduplique dessus)");
+      ck.eq(problems.raised[0].e.event_type, "issue-sync-failure", "type d'événement dédié à la feature");
+      failResolve = false;
+      await reported.syncDocument(doc.id);
+      ck.eq(problems.resolved.length, 1, "retour à la normale → clôture (resolve)");
+
+      // -- 20) MULTI-PROVIDERS : la référence est résolue par celui qui la RECONNAÎT. --
+      remote.get("tracker-2").set("55", ticket({ ext_id: "55", key: "SUP-9", url: "https://autre.atlassian.net/browse/SUP-9" }));
+      configured = [cfg("tracker-1"), cfg("tracker-2")];
+      const f4 = await service.followReference(doc.id, "SUP-9");
+      ck(f4.ok === true && f4.provider_id === "tracker-2", "multi-providers : c'est le provider qui RECONNAÎT la référence qui l'emporte (premier reconnaissant, ordre de configuration)");
+      ck.eq(repo.findBy("issues", "provider_id", "tracker-2").length, 1, "multi-providers : l'enregistrement est estampillé du BON provider (c'est lui qui délimitera son périmètre de synchro)");
+      const multi = await service.syncDocument(doc.id);
+      ck.eq(multi.length, 2, "multi-providers : chaque instance fait sa propre passe");
+      ck(multi.every((s) => s.ok), "multi-providers : … et chacune ne voit QUE ses tickets (périmètre par provider_id)");
+      configured = [cfg("tracker-1")];
+    } finally {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* dossier temp (handles longs sous Windows) */ }
+    }
+  });
+
   /* ============ INVARIANTS : pivot ⇄ frontière partagée, et AGNOSTICISME de marque ============ */
 
   await section("Serveur : invariants — pivot ≡ ISSUE_SOURCE_FIELDS, agnosticisme de marque (aucun « jira » hors des points d'extension)", async () => {
@@ -1182,7 +1599,10 @@ module.exports = async () => {
       return offenders;
     };
 
-    for (const file of ["IssueProvider.ts", "IssueProviderConfigDb.ts"]) {
+    // ⚠ `IssueSyncService.ts` n'est PAS de la liste : il PORTE la fabrique `adapterFor`, qui EST le
+    // point d'extension marque (même exemption que `WifiSyncService`). Tout le reste du module —
+    // contrats, réconciliation, stockage, routes — doit rester muet sur les marques.
+    for (const file of ["IssueProvider.ts", "IssueProviderConfigDb.ts", "IssueReconcile.ts", "IssueModule.ts"]) {
       ck.eq(brandOffenders(file, null).length, 0, "agnosticisme : « " + file + " » ne nomme AUCUNE marque dans son code (fautifs : " + brandOffenders(file, null).join(", ") + ")");
     }
     const validateOffenders = brandOffenders("IssueProviderConfigValidate.ts", "KIND_OPTION_SPECS");
@@ -1194,10 +1614,19 @@ module.exports = async () => {
     ck(brandOffenders("JiraParse.ts", null).length > 0, "discrimination : le détecteur repère bien la marque dans le module qui la porte (sinon les tests ci-dessus seraient vacuous)");
     ck(brandOffenders("IssueProviderConfigValidate.ts", null).length > 0, "discrimination : … et la branche `KIND_OPTION_SPECS` nomme bien une marque — l'exemption n'est pas décorative");
 
-    // -- 3) COHÉRENCE marque ⇄ table d'options : le `kind` que l'adaptateur déclare doit être
-    //       VALIDABLE, sinon on enregistrerait un provider que rien ne sait construire. La
-    //       confrontation complète avec la FABRIQUE viendra avec le service de synchro (lot L3). --
+    // -- 3) COHÉRENCE marque ⇄ table d'options ⇄ FABRIQUE. Les DEUX sens comptent : un `kind`
+    //       validable SANS adaptateur donnerait un provider enregistrable mais MORT, et un
+    //       adaptateur sans branche d'options serait inaccessible depuis l'UI. --
+    const { IssueSyncService } = SERVER("issues/IssueSyncService.js");
     ck(SUPPORTED_KINDS.includes(new JiraAdapter(CFG, mkJiraStub({})).kind), "cohérence : le `kind` déclaré par l'adaptateur a bien une branche d'options");
+    for (const kind of SUPPORTED_KINDS) {
+      let built = null;
+      try { built = IssueSyncService.adapterFor({ ...CFG, kind }); } catch (_) { built = null; }
+      ck(!!built && built.kind === kind, "cohérence : le kind « " + kind + " » (table d'options) a bien un adaptateur dans la FABRIQUE");
+    }
+    let threw = false;
+    try { IssueSyncService.adapterFor({ ...CFG, kind: "marque-inconnue" }); } catch (e) { threw = /inconnu/.test(e.message); }
+    ck(threw, "cohérence : un kind SANS entrée d'options est REFUSÉ par la fabrique, avec un message actionnable");
     ck.eq(Object.keys(KIND_OPTION_SPECS).length, 1, "v1 : une seule marque implémentée — le mécanisme, lui, en accepte N");
   }
   });

@@ -92,6 +92,17 @@
     // Adaptateur Jira — l'ORCHESTRATION (résolution PAR LOTS, pagination, création + ADF, test de
     // connexion) est testée avec un client HTTP stub (`JiraJsonClient` injecté).
     "src-server/src/issues/JiraAdapter.ts",
+    // Moteur de réconciliation PUR — ⚠ variante INVERSÉE : (résolution du tracker, tickets SUIVIS du
+    // document) → ops {update/introuvable} et JAMAIS de création ; dépendances injectées (horloge).
+    // La frontière source/locaux vient de src-shared/IssueSync. C'est LE fichier où le chantier se
+    // joue, donc celui qu'on teste le plus finement (invariant « aucun creates », orphelinat
+    // ALLER-RETOUR, patchs minimaux, idempotence).
+    "src-server/src/issues/IssueReconcile.ts",
+    // Moteur de SYNCHRO (assiette du document → résolution par lots → réconciliation → écriture
+    // transactionnelle + SSE) et porte d'entrée « Suivre un ticket » — sans Express : testé avec
+    // DocumentStore réel + adaptateur stub. Les routes (IssueModule.ts, Express) restent HORS test,
+    // comme api.ts, VmModule et WifiModule.
+    "src-server/src/issues/IssueSyncService.ts",
     // Coffre à secrets serveur PARTAGÉ (AES-256-GCM, node:crypto) des secrets stockés en DB
     // (jetons providers VM, jetons webhooks notify) — testé en isolation (aller-retour, clé
     // différente, altération, format inconnu, repli d'environnement legacy).

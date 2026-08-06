@@ -14,6 +14,7 @@ import { WifiModule } from "./wifi/WifiModule.js";   // module OPTIONNEL (featur
 import { NotifyModule } from "./notify/NotifyModule.js";   // module OPTIONNEL (feature amovible) — seul câblage hors de notify/
 import { CertsModule } from "./certs/CertsModule.js";   // module OPTIONNEL (feature amovible) — seul câblage hors de certs/
 import { InterventionsModule } from "./interventions/InterventionsModule.js";   // module OPTIONNEL (feature amovible) — seul câblage hors de interventions/
+import { IssueModule } from "./issues/IssueModule.js";   // module OPTIONNEL (feature amovible) — seul câblage hors de issues/
 
 /* Bootstrap : lit l'environnement, ouvre le registre multi-documents (driver better-sqlite3) et démarre le serveur. */
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -79,12 +80,24 @@ const certs = CertsModule.create({ docs, live, dataDir: DOCS_DIR, sqlite: Databa
 // dès qu'un objet démarre/se clôt/s'annule ou est supprimé.
 const interventions = InterventionsModule.create({ docs, live, dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, log: log.child("interventions"),
   problems: { raise: (k, e) => notify.raise(k, e), resolve: (k) => notify.resolve(k) } });
-new Server({ docs, auth, live, resolver: userResolver, clientDir: CLIENT_DIR, apiBase: API_BASE, loginUrl: SSO_LOGIN_URL, log, extensions: [vm.extension(), wifi.extension(), notify.extension(), certs.extension(), interventions.extension()] }).listen(PORT);
+// Tickets d'un tracker distant (Atlassian Jira Cloud en 1re implémentation — la marque n'est qu'un
+// adaptateur derrière `kind`) : providers PAR DOCUMENT, dans DOCS_DIR/issue-providers.db (même driver
+// better-sqlite3 injecté que DocumentStore). Prérequis IDENTIQUE à vm/, wifi/ et notify/ :
+// DCMANAGER_SECRETS_KEY (SecretBox PARTAGÉ — une seule clé d'infrastructure, c'est VOULU) ; absente →
+// module inactif (toutes les routes en 503 actionnable, cf. IssueModule).
+// ⚠ ASSIETTE INVERSÉE par rapport à vm/ et wifi/ : c'est le DOCUMENT qui énumère les tickets SUIVIS,
+// la synchro ne fait que les rafraîchir — elle n'en crée jamais (seul « Suivre un ticket » le fait).
+// PONT vers notify (typage STRUCTUREL — issues/ n'importe RIEN de notify/, les deux features restent
+// amovibles) : chaque échec de synchro persistant est signalé (raise), chaque retour à la normale le clôt.
+const issues = IssueModule.create({ docs, live, dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, log: log.child("issues"),
+  problems: { raise: (k, e) => notify.raise(k, e), resolve: (k) => notify.resolve(k) } });
+new Server({ docs, auth, live, resolver: userResolver, clientDir: CLIENT_DIR, apiBase: API_BASE, loginUrl: SSO_LOGIN_URL, log, extensions: [vm.extension(), wifi.extension(), notify.extension(), certs.extension(), interventions.extension(), issues.extension()] }).listen(PORT);
 vm.start();   // synchros périodiques (interval_sec > 0) — après l'écoute : le serveur répond pendant une 1re synchro lente
 wifi.start();   // synchros périodiques des clients wifi — même raison que vm.start()
 notify.start();   // timer de rappels (tick 60 s, unref) — après l'écoute, comme vm
 certs.start();    // suivi d'échéances (passe immédiate + tick horaire, unref)
 interventions.start();   // veilleur de rappels (passe immédiate + tick 5 min, unref)
+issues.start();   // synchros périodiques des tickets suivis — même raison que vm.start()
 
 // ARRÊT PROPRE (SIGINT = Ctrl-C · SIGTERM = docker stop / systemd) : ferme les dépôts SQLite et le registre
 // (optimize + checkpoint des -wal — cf. DocumentStore.closeAll) avant de quitter. Sans ça, l'OS ferme les fd
@@ -92,12 +105,13 @@ interventions.start();   // veilleur de rappels (passe immédiate + tick 5 min, 
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.on(sig, () => {
     log.info("signal reçu, arrêt propre", sig);
-    // Modules optionnels d'abord (timers + bases dédiées vm-providers.db / wifi-providers.db / notify.db), cœur ensuite.
+    // Modules optionnels d'abord (timers + bases dédiées vm-providers.db / wifi-providers.db / issue-providers.db / notify.db), cœur ensuite.
     try { vm.stop(); } catch (e) { log.warn("vm.stop a échoué", (e as any) && (e as any).message); }
     try { wifi.stop(); } catch (e) { log.warn("wifi.stop a échoué", (e as any) && (e as any).message); }
     try { notify.stop(); } catch (e) { log.warn("notify.stop a échoué", (e as any) && (e as any).message); }
     try { certs.stop(); } catch (e) { log.warn("certs.stop a échoué", (e as any) && (e as any).message); }
     try { interventions.stop(); } catch (e) { log.warn("interventions.stop a échoué", (e as any) && (e as any).message); }
+    try { issues.stop(); } catch (e) { log.warn("issues.stop a échoué", (e as any) && (e as any).message); }
     try { usersDb?.close(); } catch (e) { log.warn("usersDb.close a échoué", (e as any) && (e as any).message); }
     try { docs.closeAll(); } catch (e) { log.warn("closeAll a échoué", (e as any) && (e as any).message); }
     process.exit(0);
