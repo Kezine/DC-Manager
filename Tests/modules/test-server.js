@@ -535,7 +535,7 @@ module.exports = async () => {
   }
   });
 
-  await section("Serveur : ProxmoxParse.clusterStatusInfo — nom + quorate (quorate 1/0, nœud isolé → null, tolérance)", async () => {
+  await section("Serveur : ProxmoxParse.clusterStatusInfo — nom + quorate + composition (nodes_expected, ip/nodeid/online, tolérance)", async () => {
   {
     const { ProxmoxParse } = SERVER("vm/ProxmoxParse.js");
     // Cluster nommé, quorate 1 → name + quorate true.
@@ -560,6 +560,51 @@ module.exports = async () => {
     ck(bare.name === "c" && bare.quorate === true, "tolérance : tableau déjà déballé accepté");
     ck(ProxmoxParse.clusterStatusInfo(null).name === null && ProxmoxParse.clusterStatusInfo(null).quorate === null, "réponse nulle → { name:null, quorate:null } (pas de throw)");
     ck.eq(ProxmoxParse.clusterStatusInfo({}).name, null, "objet sans data → name null");
+
+    /* ---- COMPOSITION du cluster : nœuds ATTENDUS + adresse/nodeid/online par nœud ----
+       /cluster/status est la SEULE source de l'ADRESSE d'un nœud (absente de /cluster/resources) et
+       du nombre de MEMBRES déclarés — ce que la vue Clusters affiche en « x/y nœuds » et en colonne IP. */
+    const full = ProxmoxParse.clusterStatusInfo({ data: [
+      { type: "cluster", id: "cluster", name: "prod-cluster", version: 7, nodes: 3, quorate: 1 },
+      { type: "node", id: "node/pve1", name: "pve1", nodeid: 1, ip: "10.4.0.11", level: "", local: 1, online: 1 },
+      { type: "node", id: "node/pve2", name: "pve2", nodeid: 2, ip: "10.4.0.12", level: "", local: 0, online: 1 },
+      { type: "node", id: "node/pve3", name: "pve3", nodeid: 3, ip: "10.4.0.13", level: "", local: 0, online: 0 },
+    ] });
+    ck.eq(full.nodes_expected, 3, "nodes_expected = champ `nodes` de l'entrée cluster (MEMBRES déclarés)");
+    ck.eq(full.nodes.length, 3, "les 3 entrées type:'node' sont décodées (composition du cluster)");
+    const s1 = full.nodes.find((n) => n.name === "pve1");
+    ck(s1.ip === "10.4.0.11" && s1.nodeid === 1 && s1.online === true, "nœud : ip + nodeid + online:1 → true");
+    const s3 = full.nodes.find((n) => n.name === "pve3");
+    ck(s3.online === false && s3.ip === "10.4.0.13", "online:0 → false, l'adresse reste remontée (membre éteint mais déclaré)");
+    // Un membre ÉTEINT peut MANQUER de la réponse : nodes_expected (déclaré) ≠ nodes.length (répondants).
+    // C'est justement l'écart qui informe — on ne recalcule donc JAMAIS l'un depuis l'autre.
+    const partial = ProxmoxParse.clusterStatusInfo({ data: [
+      { type: "cluster", name: "prod-cluster", nodes: 5, quorate: 1 },
+      { type: "node", name: "pve1", ip: "10.4.0.11", online: 1 },
+    ] });
+    ck(partial.nodes_expected === 5 && partial.nodes.length === 1, "nodes_expected DÉCLARÉ (5) ≠ nœuds listés (1) — jamais recalculé l'un depuis l'autre");
+    // FORMES CREUSES : entrée cluster sans `nodes`, nœuds sans ip/nodeid/online.
+    const sparse = ProxmoxParse.clusterStatusInfo({ data: [
+      { type: "cluster", name: "prod-cluster", quorate: 1 },
+      { type: "node", name: "pve1" },
+    ] });
+    ck.eq(sparse.nodes_expected, null, "entrée cluster SANS champ `nodes` → nodes_expected null (jamais deviné)");
+    ck(sparse.nodes[0].ip === null && sparse.nodes[0].nodeid === null && sparse.nodes[0].online === false, "nœud creux : ip/nodeid null, online false (prudence)");
+    ck.eq(solo.nodes_expected, null, "nœud isolé (aucune entrée cluster) → nodes_expected null");
+    ck(solo.nodes.length === 1 && solo.nodes[0].name === "pve-solo", "…et sa composition = le nœud unique lui-même");
+    // MALFORMÉ : entrées non-objet, nœud anonyme, valeurs illisibles — écartées/ramenées à null, jamais de throw.
+    const junk = ProxmoxParse.clusterStatusInfo({ data: [
+      { type: "cluster", name: "c", nodes: "deux", quorate: 1 },   // compte non numérique → null
+      null, 42, "x",                                                // entrées non-objet → sautées
+      { type: "node", name: "" },                                   // nom vide → écarté (clé de fusion)
+      { type: "node", ip: "10.0.0.9" },                             // nœud anonyme → écarté
+      { type: "node", name: "pve9", ip: 42, nodeid: "3", online: "1" },
+    ] });
+    ck.eq(junk.nodes_expected, null, "`nodes` non numérique → nodes_expected null (tolérance)");
+    ck.eq(junk.nodes.length, 1, "entrées non-objet / nœuds anonymes écartés (seul le nœud NOMMÉ est retenu)");
+    ck(junk.nodes[0].ip === null && junk.nodes[0].nodeid === 3 && junk.nodes[0].online === true, "ip mal typée → null ; nodeid/online en CHAÎNE tolérés (« 3 », « 1 »)");
+    ck.eq(ProxmoxParse.clusterStatusInfo(null).nodes.length, 0, "réponse nulle → nodes [] (jamais de throw)");
+    ck.eq(ProxmoxParse.clusterStatusInfo(null).nodes_expected, null, "réponse nulle → nodes_expected null");
   }
   });
 
@@ -1136,6 +1181,61 @@ module.exports = async () => {
     const inv2 = await new ProxmoxAdapter({ ...cfg, management_url: null }, mkPveStub(routes)).inventory();
     ck.eq(inv2.cluster.management_url, null, "config sans management_url → cluster.management_url null (pas de bouton)");
     ck(inv2.cluster.nodes[0].management_url.startsWith("https://pve1.exemple.lan:8006/#v1:0:=node/"), "…les liens PAR nœud restent générés (indépendants du bouton cluster)");
+  }
+  });
+
+  await section("Serveur : ProxmoxAdapter.inventory — FUSION des nœuds PAR NOM (adresse de /cluster/status ⊕ métriques de /cluster/resources)", async () => {
+  {
+    const { ProxmoxAdapter } = SERVER("vm/ProxmoxAdapter.js");
+    // Les deux endpoints décrivent le même cluster SOUS DEUX ANGLES : /cluster/status connaît
+    // l'ADRESSE (et lui seul), /cluster/resources connaît les MÉTRIQUES (et lui seul). Les deux
+    // réponses sont DÉJÀ obtenues par la passe existante — la fusion ne coûte AUCUN appel de plus.
+    // Trois cas de figure, volontairement présents ensemble : nœud vu des DEUX côtés (pveA), nœud vu
+    // de /cluster/resources SEUL (pveB), nœud vu de /cluster/status SEUL (pveC).
+    const routes = {
+      "/api2/json/version": { data: { version: "8.4.1" } },
+      "/api2/json/cluster/status": { data: [
+        { type: "cluster", name: "prod-cluster", nodes: 3, quorate: 1 },
+        { type: "node", name: "pveA", nodeid: 1, ip: "10.4.0.11", online: 1 },
+        { type: "node", name: "pveC", nodeid: 3, ip: "10.4.0.13", online: 1 },
+      ] },
+      "/api2/json/cluster/resources": { data: [
+        { type: "node", id: "node/pveA", node: "pveA", status: "online", cpu: 0.25, maxcpu: 8, mem: 4294967296, maxmem: 17179869184, uptime: 3600 },
+        { type: "node", id: "node/pveB", node: "pveB", status: "offline", cpu: null, maxcpu: 4, mem: 0, maxmem: 8589934592, uptime: 0 },
+      ] },
+    };
+    const stub = mkPveStub(routes);
+    const inv = await new ProxmoxAdapter(PVE_CFG, stub).inventory();
+    const nodes = inv.cluster.nodes;
+    ck.eq(nodes.length, 3, "les 3 nœuds sont conservés (aucune des deux réponses ne fait autorité sur la composition)");
+    ck.eq(nodes.map((n) => n.name).join(","), "pveA,pveB,pveC", "ORDRE déterministe : /cluster/resources d'abord, puis les nœuds vus du SEUL /cluster/status");
+    // (1) Vu des DEUX côtés : adresse ET métriques réunies sur la MÊME ligne (fusion par nom).
+    const a = nodes.find((n) => n.name === "pveA");
+    ck(a.ip === "10.4.0.11" && a.cpu_used === 0.25 && a.mem_total_mb === 16384 && a.uptime_sec === 3600, "nœud des deux côtés : ip (status) + métriques (resources) fusionnées");
+    ck.eq(a.online, true, "…état repris de /cluster/resources (statut 'online'), inchangé par la fusion");
+    // (2) /cluster/resources SEUL : conservé avec ses métriques, adresse simplement inconnue.
+    const b = nodes.find((n) => n.name === "pveB");
+    ck(b.ip === null && b.cpu_total === 4 && b.online === false, "nœud absent de /cluster/status : CONSERVÉ, ip null, métriques et état intacts");
+    // (3) /cluster/status SEUL : conservé aussi — métriques inconnues (null), état = son drapeau `online`.
+    const c = nodes.find((n) => n.name === "pveC");
+    ck(c.ip === "10.4.0.13" && c.online === true, "nœud absent de /cluster/resources : CONSERVÉ, ip + online de /cluster/status");
+    ck(c.cpu_used === null && c.cpu_total === null && c.mem_used_mb === null && c.mem_total_mb === null && c.uptime_sec === null, "…toutes ses métriques null (jamais devinées : elles vivent dans l'AUTRE réponse)");
+    ck(c.management_url.endsWith("/#v1:0:=node/pveC"), "…et son lien de management est GÉNÉRÉ comme pour les autres (posé après la fusion)");
+    // Composition déclarée par le cluster : dénominateur du « x/y nœuds » de la vue (2 en ligne / 3 attendus).
+    ck.eq(inv.cluster.nodes_expected, 3, "cluster.nodes_expected propagé depuis /cluster/status (membres DÉCLARÉS)");
+    // ZÉRO APPEL RÉSEAU NOUVEAU : la passe reste /version + /cluster/status + /cluster/resources.
+    ck.eq(stub.calls.length, 3, "3 appels au total (version, status, resources) — l'enrichissement n'en ajoute AUCUN");
+    ck.eq(stub.calls.filter((p) => p === "/api2/json/cluster/status").length, 1, "/cluster/status appelé UNE seule fois (les nœuds sortent de cette même réponse)");
+
+    // TOLÉRANCE : /cluster/status répond mais SANS entrée de nœud (droits partiels, forme inattendue)
+    // → la table des nœuds reste celle de /cluster/resources, adresses simplement inconnues.
+    const inv2 = await new ProxmoxAdapter(PVE_CFG, mkPveStub({
+      ...routes,
+      "/api2/json/cluster/status": { data: [ { type: "cluster", name: "prod-cluster", quorate: 1 } ] },
+    })).inventory();
+    ck.eq(inv2.cluster.nodes.length, 2, "status sans entrée de nœud → les nœuds de /cluster/resources restent intacts");
+    ck(inv2.cluster.nodes.every((n) => n.ip === null), "…toutes les adresses null (inconnues), aucun nœud perdu");
+    ck.eq(inv2.cluster.nodes_expected, null, "…et nodes_expected null → la vue n'affichera aucun ratio inventé");
   }
   });
 

@@ -122,6 +122,9 @@ export const vm = {
     periodAuto: "automatique · toutes les {{n}} s",
     periodManual: "manuelle",
     counts: "{{created}} créée(s) · {{updated}} mise(s) à jour · {{orphaned}} orpheline(s) · {{unchanged}} inchangée(s)",
+    gIdentity: "Identité",
+    identityTitle: "Préfixe des identifiants externes (ext_id) des VMs de ce provider",
+    identityHint: "Préfixe d'identité des VMs de ce provider : s'il change, la synchro suivante recrée TOUT l'inventaire sous la nouvelle identité — les VMs se dédoublent et les anciennes passent orphelines.",
     gPeriod: "Période",
     gLastAttempt: "Dernière tentative",
     gLastSuccess: "Dernière réussite",
@@ -134,6 +137,10 @@ export const vm = {
     quorumOk: "Quorum OK",
     quorumLost: "Quorum PERDU",
     quorumUnknown: "Quorum inconnu",
+    /* Variantes CHIFFRÉES du quorum : nœuds en ligne / nœuds membres DÉCLARÉS par le cluster.
+       Employées seulement quand la composition est connue (sinon les libellés ci-dessus). */
+    quorumOkCount: "Quorum OK ({{online}}/{{expected}} nœuds)",
+    quorumLostCount: "Quorum PERDU ({{online}}/{{expected}} nœuds)",
     nodesSection: "Nœuds ({{count}})",
     online: "en ligne",
     offline: "hors ligne",
@@ -141,6 +148,7 @@ export const vm = {
     nodeMgmtTitle: "Ouvrir l'UI de management du nœud",
     notMatched: "non rapproché",
     colNode: "Nœud",
+    colIp: "IP",
     colState: "État",
     colCpu: "CPU",
     colRam: "RAM",

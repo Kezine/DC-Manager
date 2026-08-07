@@ -34,6 +34,38 @@ export interface ParsedNet {
   ip: string | null;
 }
 
+/** UN nœud tel que `/cluster/status` le décrit — structure de travail INTERMÉDIAIRE (comme
+    `ParsedNet`), pas le pivot. Cet endpoint est le SEUL à porter l'ADRESSE du lien de cluster et
+    l'identifiant de membre, mais il ignore TOUTE métrique ; `/cluster/resources` fait l'inverse.
+    C'est l'adaptateur qui fusionne les deux vues PAR NOM pour bâtir le pivot `VmClusterNode`
+    (cf. `ProxmoxAdapter.mergeNodesByName`) — le parseur pur ne rapproche rien. */
+export interface ParsedStatusNode {
+  /** Nom COURT du nœud — champ `name` ICI (c'est `node` dans `/cluster/resources`). Clé de fusion. */
+  name: string;
+  /** Adresse du lien de cluster (corosync) du nœud. null = non remontée. */
+  ip: string | null;
+  /** Identifiant de membre corosync (`nodeid`). null = non remonté / illisible. */
+  nodeid: number | null;
+  /** Membre JOIGNABLE du cluster (`online` 0/1). Absent/illisible → false, même prudence que
+      `nodesFromClusterResources` (un nœud dont l'état est inconnu n'est pas déclaré en ligne). */
+  online: boolean;
+}
+
+/** Ce que `/cluster/status` livre en UNE réponse : l'IDENTITÉ du cluster, son QUORUM et sa
+    COMPOSITION. Tout est nullable/vide par tolérance — l'appelant décide de ce qui est vital
+    (seul le `name` l'est, cf. `ProxmoxAdapter.requireClusterName`). */
+export interface ParsedClusterStatus {
+  /** Nom du cluster (préfixe des `ext_id`), ou nom du nœud UNIQUE d'une installation isolée. */
+  name: string | null;
+  /** Quorum : true/false ; null = pas d'entrée cluster (nœud isolé) ou drapeau illisible. */
+  quorate: boolean | null;
+  /** Nombre de nœuds MEMBRES déclaré au niveau cluster (champ `nodes` de l'entrée `type:"cluster"`) —
+      DÉNOMINATEUR du « x/y nœuds en ligne » de la vue Clusters. null = non remonté / nœud isolé. */
+  nodes_expected: number | null;
+  /** Nœuds décrits par CET endpoint (adresse, nodeid), SANS métrique. */
+  nodes: ParsedStatusNode[];
+}
+
 /** Clés de configuration réseau qui NE sont JAMAIS un modèle de carte : sans cela,
     une clé au format keyword porteuse d'une valeur MAC pourrait être confondue avec
     un modèle. Les clés traitées explicitement (bridge/tag/name/hwaddr/ip) sont déjà
@@ -166,6 +198,9 @@ export class ProxmoxParse {
         // Le lien profond de l'UI est GÉNÉRÉ par l'adaptateur (il connaît le pool d'endpoints et le
         // schéma d'URL Proxmox) — le parseur PUR ignore la config, il pose donc null ici.
         management_url: null,
+        // L'ADRESSE n'existe PAS dans /cluster/resources : elle vient de /cluster/status, fusionnée
+        // PAR NOM par l'adaptateur (mergeNodesByName). null ici = « pas encore fusionnée ».
+        ip: null,
       });
     }
     return nodes;
@@ -175,28 +210,58 @@ export class ProxmoxParse {
      2ter) IDENTITÉ + QUORUM DU CLUSTER (GET /cluster/status)
      -------------------------------------------------------------------------- */
 
-  /** Décode `/cluster/status` : NOM du cluster + état de QUORUM. PUR et tolérant — le décodage
-      JSON vit ici (testable par fixtures), l'adaptateur ne garde que la CONDUITE À TENIR quand le
-      nom manque (avorter la passe : ce nom est le socle d'identité des ext_id). Choix de cadrage :
-      l'extraction du nom vivait dans l'adaptateur ; on la SORT ici pour la mutualiser avec
-      l'extraction du quorate (même réponse, même logique tolérante) — l'adaptateur ne conserve que
-      ce qu'il est SEUL à savoir.
+  /** Décode `/cluster/status` : NOM du cluster, état de QUORUM, nombre de nœuds ATTENDUS et
+      COMPOSITION (adresse + nodeid par nœud). PUR et tolérant — le décodage JSON vit ici (testable
+      par fixtures), l'adaptateur ne garde que la CONDUITE À TENIR quand le nom manque (avorter la
+      passe : ce nom est le socle d'identité des ext_id). Choix de cadrage : l'extraction du nom
+      vivait dans l'adaptateur ; on la SORT ici pour la mutualiser avec le reste de la réponse
+      (même appel, même logique tolérante) — l'adaptateur ne conserve que ce qu'il est SEUL à savoir.
       - name : entrée `type:"cluster"` nommée ; sinon nœud UNIQUE (installation isolée : son nom
         est une identité stable) ; sinon null — « pas d'identité », JAMAIS remplacé par une valeur
         de secours (cf. ProxmoxAdapter.requireClusterName : la passe avorte) ;
       - quorate : champ `quorate` (0/1) de l'entrée cluster → booléen ; PAS d'entrée cluster
-        (nœud isolé) → null (le quorum n'a pas de sens hors cluster : inconnu, pas « faux »). */
-  static clusterStatusInfo(json: any): { name: string | null; quorate: boolean | null } {
+        (nœud isolé) → null (le quorum n'a pas de sens hors cluster : inconnu, pas « faux ») ;
+      - nodes_expected : champ `nodes` de l'entrée cluster (nœuds MEMBRES déclarés) → dénominateur
+        du « x/y nœuds en ligne » de la vue Clusters ; absent → null (on n'en devine pas le compte
+        à partir des entrées listées : un membre ÉTEINT peut manquer de la réponse) ;
+      - nodes : entrées `type:"node"` avec leur `ip` (lien de cluster) et leur `nodeid` — la seule
+        source de l'ADRESSE d'un nœud, que `/cluster/resources` n'expose pas.
+      TOLÉRANT de bout en bout : entrée malformée ignorée, champ absent → null, JAMAIS de throw. */
+  static clusterStatusInfo(json: any): ParsedClusterStatus {
     const items = ProxmoxParse.asArray(ProxmoxParse.unwrapData(json));
     const cluster = items.find((i) => i && typeof i === "object" && i.type === "cluster");
-    // quorate n'a de sens qu'AVEC une entrée cluster : un nœud isolé n'a pas de quorum → inconnu (null).
-    const quorate = cluster ? ProxmoxParse.quorateFlag(cluster.quorate) : null;
+    // quorate/nodes_expected n'ont de sens qu'AVEC une entrée cluster : un nœud isolé n'a ni quorum
+    // ni composition déclarée → inconnus (null), à distinguer d'un quorum perdu ou d'un cluster à 0 nœud.
+    const quorate = cluster ? ProxmoxParse.boolFlag(cluster.quorate) : null;
+    const nodes_expected = cluster ? ProxmoxParse.toNum(cluster.nodes) : null;
+    const nodes = ProxmoxParse.statusNodes(items);
     if (cluster && typeof cluster.name === "string" && cluster.name !== "") {
-      return { name: cluster.name, quorate };
+      return { name: cluster.name, quorate, nodes_expected, nodes };
     }
     // Sans cluster nommé : installation isolée → le nom du nœud UNIQUE sert d'identité stable.
-    const nodes = items.filter((i) => i && typeof i === "object" && i.type === "node" && typeof i.name === "string" && i.name !== "");
-    return { name: nodes.length === 1 ? nodes[0].name : null, quorate };
+    // Le même décodage `nodes` sert de source : un nœud anonyme/malformé y est déjà écarté, donc
+    // « exactement un nœud NOMMÉ » se lit directement (aucun second filtre à tenir en phase).
+    return { name: nodes.length === 1 ? nodes[0].name : null, quorate, nodes_expected, nodes };
+  }
+
+  /** Nœuds d'une réponse `/cluster/status` déjà déballée. Écarte les entrées non-objet, les entrées
+      d'un autre `type` et les nœuds ANONYMES (le nom est la clé de fusion : sans lui, le nœud est
+      inexploitable). Les autres champs sont « au mieux » : absents → null / false. */
+  private static statusNodes(items: any[]): ParsedStatusNode[] {
+    const nodes: ParsedStatusNode[] = [];
+    for (const item of items) {
+      if (!item || typeof item !== "object") continue;
+      if (item.type !== "node") continue;
+      const name = typeof item.name === "string" && item.name !== "" ? item.name : null;
+      if (name === null) continue; // nœud sans identité → écarté (name n'est PAS nullable)
+      nodes.push({
+        name,
+        ip: typeof item.ip === "string" && item.ip !== "" ? item.ip : null,
+        nodeid: ProxmoxParse.toNum(item.nodeid),
+        online: ProxmoxParse.boolFlag(item.online) === true, // inconnu → PAS en ligne (prudence)
+      });
+    }
+    return nodes;
   }
 
   /* --------------------------------------------------------------------------
@@ -322,9 +387,11 @@ export class ProxmoxParse {
     return /^\d+$/.test(value) ? parseInt(value, 10) : null;
   }
 
-  /** Drapeau quorate Proxmox (0/1, parfois déjà booléen) → booléen ; absent/illisible → null
-      (inconnu — on ne confond pas « quorum perdu » avec « quorum non renseigné »). */
-  private static quorateFlag(value: any): boolean | null {
+  /** Drapeau BOOLÉEN Proxmox (0/1, parfois déjà booléen) → booléen ; absent/illisible → null
+      (inconnu — on ne confond pas « quorum perdu » avec « quorum non renseigné »). Décodeur UNIQUE
+      des drapeaux de `/cluster/status` : `quorate` (au niveau cluster) ET `online` (par nœud)
+      partagent exactement la même convention — deux décodages seraient deux tolérances à tenir. */
+  private static boolFlag(value: any): boolean | null {
     if (value === 1 || value === "1" || value === true) return true;
     if (value === 0 || value === "0" || value === false) return false;
     return null;

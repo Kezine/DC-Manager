@@ -21,6 +21,9 @@ export interface VmSyncCounts { created: number; updated: number; orphaned: numb
 export interface VmClusterNode {
   name: string;
   online: boolean;
+  /** Adresse du nœud sur le lien de cluster (Proxmox : remontée par /cluster/status seul).
+      null = non remontée pour ce nœud → l'UI affiche « — ». */
+  ip: string | null;
   /** Fraction d'usage CPU 0..1 (telle que remontée par Proxmox). */
   cpu_used: number | null;
   cpu_total: number | null;
@@ -41,6 +44,9 @@ export interface VmClusterInfo {
   supported: boolean;
   /** Quorum : true/false, null = inconnu (nœud isolé sans cluster). */
   quorate: boolean | null;
+  /** Nœuds MEMBRES déclarés par le cluster — dénominateur du « x/y nœuds en ligne » affiché à côté
+      du quorum. À distinguer de `nodes.length` (nœuds RÉPONDANTS). null = inconnu → aucun ratio. */
+  nodes_expected: number | null;
   nodes: VmClusterNode[];
   /** URL de l'outil de management du CLUSTER (Proxmox Datacenter Manager), recopiée de la config
       côté serveur — matière du bouton « Management » d'en-tête. null = non renseignée. */

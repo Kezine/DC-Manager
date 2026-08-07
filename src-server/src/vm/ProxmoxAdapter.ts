@@ -1,5 +1,5 @@
-import type { VmProviderAdapter, ProviderConfig, ProviderInfo, VmInventory, VmClusterInfo } from "./VmProvider.js";
-import { ProxmoxParse } from "./ProxmoxParse.js";
+import type { VmProviderAdapter, ProviderConfig, ProviderInfo, VmInventory, VmClusterInfo, VmClusterNode } from "./VmProvider.js";
+import { ProxmoxParse, type ParsedClusterStatus, type ParsedStatusNode } from "./ProxmoxParse.js";
 import { PveHttpPool } from "./PveHttpPool.js";
 
 /* =============================================================================
@@ -9,8 +9,9 @@ import { PveHttpPool } from "./PveHttpPool.js";
    aux échecs partiels et l'estampillage de l'instance (`provider_id`).
 
    Séquence de inventory() :
-     1. /cluster/status        → nom du cluster (préfixe de l'ext_id) + quorate ;
-                                 nom NON RÉSOLU → passe AVORTÉE (cf. requireClusterName) ;
+     1. /cluster/status        → nom du cluster (préfixe de l'ext_id) + quorate + nœuds ATTENDUS
+                                 + adresse/nodeid par nœud ; nom NON RÉSOLU → passe AVORTÉE
+                                 (cf. requireClusterName) ;
      2. /cluster/resources     → squelettes VmRecord ET nœuds du cluster (1 appel
                                  cluster-wide, SANS filtre : une seule réponse porte les deux) ;
      3. /version               → version + gamme supportée (informatif, TOLÉRANT) ;
@@ -106,9 +107,11 @@ export class ProxmoxAdapter implements VmProviderAdapter {
       //    (fromClusterResources ignore les items sans vmid) ET les nœuds — zéro appel de plus.
       const resources = await this.http.getJson("/api2/json/cluster/resources");
       let records = ProxmoxParse.fromClusterResources(clusterName, resources);
-      // URL de management PAR nœud GÉNÉRÉE ICI (le parseur pur ne connaît pas la config) : chaque
-      // adaptateur connaît le schéma d'URL de son UI (cf. nodeManagementUrl).
-      const nodes = ProxmoxParse.nodesFromClusterResources(resources)
+      // FUSION des deux vues du même nœud (métriques de l'appel 2 + adresse de l'appel 1) : les deux
+      // réponses sont DÉJÀ là, la fusion ne coûte aucun appel. Puis URL de management PAR nœud
+      // GÉNÉRÉE ICI (le parseur pur ne connaît pas la config) : chaque adaptateur connaît le schéma
+      // d'URL de son UI (cf. nodeManagementUrl).
+      const nodes = ProxmoxAdapter.mergeNodesByName(ProxmoxParse.nodesFromClusterResources(resources), status.nodes)
         .map((node) => ({ ...node, management_url: this.nodeManagementUrl(node.name) }));
 
       // 3) Version + gamme (1 appel léger, INFORMATIF) : un échec donne version null / supported
@@ -116,7 +119,7 @@ export class ProxmoxAdapter implements VmProviderAdapter {
       const version = await this.clusterVersion();
       // management_url du CLUSTER = RECOPIE de la config (l'URL du Proxmox Datacenter Manager, un
       // service distinct des nœuds, non déductible de l'API) — à ne pas confondre avec les liens par nœud.
-      const cluster: VmClusterInfo = { name: clusterName, version: version.version, supported: version.supported, quorate: status.quorate, nodes, management_url: this.config.management_url };
+      const cluster: VmClusterInfo = { name: clusterName, version: version.version, supported: version.supported, quorate: status.quorate, nodes_expected: status.nodes_expected, nodes, management_url: this.config.management_url };
 
       // Filtre LXC AVANT les appels de détail : pas d'appels réseau pour des records écartés.
       if (!this.config.include_lxc) records = records.filter((r) => r.vm_type !== "lxc");
@@ -164,23 +167,60 @@ export class ProxmoxAdapter implements VmProviderAdapter {
      Helpers privés
      -------------------------------------------------------------------------- */
 
-  /** Identité + quorum du cluster depuis /cluster/status (1 appel). Le décodage JSON (nom +
-      quorate, y compris le repli « nœud unique ») vit dans ProxmoxParse.clusterStatusInfo — ici
-      ne reste que la CAPTURE de l'échec d'appel (`failure`), que requireClusterName transforme en
-      message actionnable. Le quorum, lui, reste TOLÉRANT (inconnu → null) : il n'entre dans aucune
-      identité, seulement dans l'affichage de la vue Clusters.
+  /** Identité + quorum + COMPOSITION du cluster depuis /cluster/status (1 appel). Le décodage JSON
+      (nom, quorate, nœuds attendus, adresses par nœud, y compris le repli « nœud unique ») vit dans
+      ProxmoxParse.clusterStatusInfo — ici ne reste que la CAPTURE de l'échec d'appel (`failure`),
+      que requireClusterName transforme en message actionnable. Tout SAUF le nom reste TOLÉRANT
+      (inconnu → null / liste vide) : rien de cela n'entre dans une identité, seulement dans
+      l'affichage de la vue Clusters.
       ⚠ Si un nœud isolé rejoint plus tard un cluster, le préfixe d'ext_id change et la synchro
       recrée les VMs (les anciennes passent orphelines) — assumé : événement d'infra rare et
       DÉLIBÉRÉ, purge manuelle des orphelines. Ce qui n'est PAS assumé, et que requireClusterName
       empêche, c'est le même effet provoqué par un simple ALÉA (un appel en échec une passe sur mille). */
-  private async clusterStatus(): Promise<{ name: string | null; quorate: boolean | null; failure: string | null }> {
+  private async clusterStatus(): Promise<ParsedClusterStatus & { failure: string | null }> {
     try {
       return { ...ProxmoxParse.clusterStatusInfo(await this.http.getJson("/api2/json/cluster/status")), failure: null };
     } catch (e) {
       // /cluster/status indisponible (droits restreints, nœud injoignable, 5xx…) : la CAUSE est
       // conservée pour le message d'avortement (les messages PveHttp ne portent jamais le jeton).
-      return { name: null, quorate: null, failure: e instanceof Error ? e.message : String(e) };
+      return { name: null, quorate: null, nodes_expected: null, nodes: [], failure: e instanceof Error ? e.message : String(e) };
     }
+  }
+
+  /** FUSION des DEUX vues d'un même nœud, PAR NOM COURT : `/cluster/resources` porte l'état et les
+      MÉTRIQUES (cpu/mem/uptime), `/cluster/status` porte l'ADRESSE du lien de cluster (et lui seul).
+      Les deux réponses sont déjà obtenues dans la passe — la fusion ne coûte AUCUN appel.
+
+      POURQUOI le nom comme clé : c'est déjà la clé d'identité d'un nœud PARTOUT ailleurs
+      (`VmRecord.host_node`, rapprochement nœud→équipement), et Proxmox rend le MÊME nom court sur
+      les deux endpoints (`node` ici, `name` là) — aucune normalisation à inventer, qui ne ferait
+      qu'ouvrir une divergence avec le rapprochement existant.
+
+      POURQUOI conserver un nœud vu d'UN SEUL côté (champ manquant → null) : aucune des deux
+      réponses ne fait autorité sur la COMPOSITION du cluster. Un nœud fraîchement ajouté, ou un
+      membre éteint, peut n'être connu que de l'une — l'écarter ferait DISPARAÎTRE de la table un
+      nœud qui existe, ce qui est un mensonge d'affichage bien plus coûteux qu'une ligne aux
+      métriques vides. ORDRE déterministe (donc table stable d'une passe à l'autre) : l'ordre de
+      `/cluster/resources` d'abord, puis les nœuds vus du SEUL `/cluster/status`. */
+  private static mergeNodesByName(fromResources: VmClusterNode[], fromStatus: ParsedStatusNode[]): VmClusterNode[] {
+    const statusByName = new Map<string, ParsedStatusNode>();
+    // Premier gagnant sur doublon de nom (réponse aberrante) : une seule ligne par nom, comme côté resources.
+    for (const node of fromStatus) if (!statusByName.has(node.name)) statusByName.set(node.name, node);
+
+    const merged = fromResources.map((node) => ({ ...node, ip: statusByName.get(node.name)?.ip ?? null }));
+    const seen = new Set(merged.map((node) => node.name));
+    for (const node of fromStatus) {
+      if (seen.has(node.name)) continue;
+      seen.add(node.name);
+      // Nœud connu du SEUL /cluster/status : aucune métrique disponible (elles vivent dans l'autre
+      // réponse) → null partout, et son état vient de son propre drapeau `online`.
+      merged.push({
+        name: node.name, online: node.online, ip: node.ip,
+        cpu_used: null, cpu_total: null, mem_used_mb: null, mem_total_mb: null, uptime_sec: null,
+        management_url: null, // posée juste après par l'appelant (elle dépend de la config)
+      });
+    }
+    return merged;
   }
 
   /** SOCLE D'IDENTITÉ de la passe : le nom du cluster, préfixe de TOUS les `ext_id`. Résolu → rendu ;

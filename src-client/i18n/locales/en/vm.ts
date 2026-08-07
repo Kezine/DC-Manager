@@ -118,6 +118,9 @@ export const vm = {
     periodAuto: "automatic · every {{n}} s",
     periodManual: "manual",
     counts: "{{created}} created · {{updated}} updated · {{orphaned}} orphaned · {{unchanged}} unchanged",
+    gIdentity: "Identity",
+    identityTitle: "Prefix of this provider's VM external identifiers (ext_id)",
+    identityHint: "Identity prefix of this provider's VMs: if it changes, the next sync recreates the WHOLE inventory under the new identity — VMs are duplicated and the previous ones turn orphan.",
     gPeriod: "Period",
     gLastAttempt: "Last attempt",
     gLastSuccess: "Last success",
@@ -130,6 +133,10 @@ export const vm = {
     quorumOk: "Quorum OK",
     quorumLost: "Quorum LOST",
     quorumUnknown: "Quorum unknown",
+    /* NUMBERED quorum variants: online nodes / member nodes DECLARED by the cluster.
+       Used only when the composition is known (otherwise the labels above). */
+    quorumOkCount: "Quorum OK ({{online}}/{{expected}} nodes)",
+    quorumLostCount: "Quorum LOST ({{online}}/{{expected}} nodes)",
     nodesSection: "Nodes ({{count}})",
     online: "online",
     offline: "offline",
@@ -137,6 +144,7 @@ export const vm = {
     nodeMgmtTitle: "Open the node's management UI",
     notMatched: "not matched",
     colNode: "Node",
+    colIp: "IP",
     colState: "State",
     colCpu: "CPU",
     colRam: "RAM",
