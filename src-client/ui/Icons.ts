@@ -285,8 +285,8 @@ export class Icons {
       molette = un travail qu'on planifie et qu'on exécute NOUS) : ici l'objet est un ticket qui vit
       CHEZ UN TIERS. Distincte aussi des `ISSUE_*` de la PKI, où « issue » veut dire « émettre » (un
       certificat) et non « incident ».
-      ⚠ Sans consommateur depuis le pivot du 2026-08-07 (l'onglet « Tickets » a été démoli) — conservée
-      pour le bloc « Ticket Jira » des fiches d'intervention, qui portera exactement la même intention. */
+      Consommée par le bloc « Ticket » des fiches d'intervention (pont de réplication), qui porte
+      exactement cette intention : l'objet désigné vit chez le tracker, pas chez nous. */
   static readonly TICKET = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16v4a2 2 0 0 0 0 4v4H4v-4a2 2 0 0 0 0-4z"/><path d="M9.5 6v12" stroke-dasharray="2 2.5"/></svg>';
 
   /** Notifications : cloche. */

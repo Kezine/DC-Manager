@@ -14,12 +14,13 @@ export { VmSyncClient } from "./forms/VmSyncClient";
 export { WifiForms } from "./forms/WifiForms";
 export { WifiProvidersForm } from "./forms/WifiProvidersForm";
 export { WifiSyncClient } from "./forms/WifiSyncClient";
-// COUCHE TRACKER (feature AMOVIBLE) — hors chaîne `Forms`, branchés directement. ⚠ DÉBRANCHÉS au
-// pivot du 2026-08-07 : plus aucun appelant tant que le lot P3 ne les aura pas rattachés à la vue
-// Interventions (le miroir de tickets qui les instanciait a été démoli). Exportés quand même, pour
-// que la barrière de modules reste le seul point d'entrée le jour où ils reviennent.
-export { IssueProvidersForm } from "./forms/IssueProvidersForm";
-export { IssueSyncClient } from "./forms/IssueSyncClient";
+// PONT « interventions ⇄ tracker distant » (feature AMOVIBLE, mode API) — client REST détachable,
+// INSTANCIÉ par main.ts puis injecté dans la vue Interventions. La modale des providers
+// (`forms/TrackerProvidersForm`) et le bloc « Ticket » des fiches (`forms/TrackerTicketBlock`) ne
+// passent PAS par ce barrel : seule la vue Interventions les monte, elle les importe donc en direct.
+// Retirer la feature = supprimer ces trois fichiers + `core/TrackerStatus`/`core/TrackerReplication`
+// + leurs branchements dans `InterventionsAdminView`/`main.ts`, sans cicatrice ailleurs.
+export { TrackerSyncClient } from "./forms/TrackerSyncClient";
 // Sous-onglet « Clusters » de la feature VM (AMOVIBLE, mode API) — vue dédiée détachable.
 export { VmClustersView } from "./VmClustersView";
 export type { VmClustersHost } from "./VmClustersView";

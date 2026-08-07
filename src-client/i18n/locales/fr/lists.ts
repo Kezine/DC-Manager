@@ -127,16 +127,6 @@ export const lists = {
     host: "Hôte",
     tags: "Tags",
     hostname: "Hostname",
-    // Colonnes du listing des TICKETS. `key` = la clé LISIBLE du ticket (« INFRA-123 »), pas une
-    // clé technique ; `updatedSrc` porte le suffixe du pivot (`_src`) parce qu'elle date la
-    // modification CÔTÉ TRACKER, distincte de la modification de l'enregistrement local.
-    key: "Clé",
-    summary: "Titre",
-    priority: "Priorité",
-    assignee: "Assigné",
-    targets: "Cibles",
-    provider: "Provider",
-    updatedSrc: "Mis à jour",
   },
   empty: {
     equipments: "Aucun équipement.",
@@ -159,7 +149,6 @@ export const lists = {
     vms: "Aucune VM. Les équipements virtuels sont alimentés par la synchronisation d'un cluster de management (Proxmox).",
     wifiClients: "Aucun client wifi. Les clients sont alimentés par la synchronisation d'un contrôleur wifi (onglet Wifi → « Providers… », mode API).",
     subEquipments: "Aucun sous-équipement. Un sous-équipement se crée depuis la fiche de son équipement maître (pas de bouton « + » ici, v1).",
-    issues: "Aucun ticket suivi. Un ticket entre au document par « Suivre un ticket » (onglet Tickets, mode API) — la synchronisation ne fait que rafraîchir ceux qui ont été choisis.",
   },
   filter: {
     room: "Salle",
@@ -171,16 +160,7 @@ export const lists = {
     equipmentPlaceholder: "Rechercher un équipement…",
     targetEquipment: "Équip.",
     targetVm: "VM",
-    targetSpare: "Spare",
-    targetSubEquipment: "Sous-équip.",
     targetMissing: "(supprimé)",
-    // Dimension CIBLE du listing des TICKETS : « les tickets qui visent CET objet ». Famille
-    // POLYMORPHE (équipement / VM / spare / sous-équipement), d'où les badges ci-dessus.
-    issueTarget: "Cible",
-    issueTargetPlaceholder: "Équipement, VM, spare, sous-équipement…",
-    // Dimension d'ÉTAT du listing des tickets : elle porte sur la CATÉGORIE normalisée, jamais sur
-    // le statut brut du tracker (qui, lui, dépend d'un workflow configurable — cf. décision D3).
-    issueCategory: "État",
   },
   opt: {
     dataFilter: "Data",
@@ -219,11 +199,10 @@ export const lists = {
     disconnected: "déconnecté",
     // Pendant TICKET de « orpheline »/« déconnecté » : MÊME mécanique (non résolu à la dernière
     // passe), TROISIÈME sens — un ticket qu'on ne retrouve plus signale une suppression, un projet
-    // archivé ou une permission perdue (cf. core/IssueStatus, cadrage §3).
-    // ⚠ VERROUILLÉ par test contre le catalogue partagé `SEARCH_CATALOGS.issueNotFound`.
+    // archivé ou une permission perdue. AFFICHÉ par le bloc « Ticket » d'une intervention répliquée,
+    // à la place de la sentinelle brute écrite par le pont (cf. core/TrackerStatus).
     notFound: "introuvable",
     wifiClient: "(client wifi)",
-    issue: "(ticket)",
     floorLabel: "Étage {{n}}",
     addrCount: "{{count}} adr.",
     points_one: "{{count}} point",

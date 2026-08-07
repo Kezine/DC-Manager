@@ -121,16 +121,6 @@ export const lists = {
     host: "Host",
     tags: "Tags",
     hostname: "Hostname",
-    // Columns of the ISSUES listing. `key` = the READABLE issue key (“INFRA-123”), not a technical
-    // key; `updatedSrc` keeps the pivot suffix (`_src`) because it dates the change ON THE TRACKER
-    // side, which is distinct from the change of the local record.
-    key: "Key",
-    summary: "Summary",
-    priority: "Priority",
-    assignee: "Assignee",
-    targets: "Targets",
-    provider: "Provider",
-    updatedSrc: "Updated",
   },
   empty: {
     equipments: "No equipment.",
@@ -153,7 +143,6 @@ export const lists = {
     vms: "No VM. Virtual machines are fed by the synchronisation of a management cluster (Proxmox).",
     wifiClients: "No Wi-Fi client. Clients are fed by the synchronisation of a Wi-Fi controller (Wi-Fi tab → “Providers…”, API mode).",
     subEquipments: "No sub-equipment. A sub-equipment is created from its master equipment's detail sheet (no « + » button here in v1).",
-    issues: "No issue followed. An issue enters the document through “Follow an issue” (Issues tab, API mode) — synchronisation only refreshes the ones that were chosen.",
   },
   filter: {
     room: "Room",
@@ -165,16 +154,7 @@ export const lists = {
     equipmentPlaceholder: "Search an equipment…",
     targetEquipment: "Equip.",
     targetVm: "VM",
-    targetSpare: "Spare",
-    targetSubEquipment: "Sub-equip.",
     targetMissing: "(deleted)",
-    // TARGET dimension of the ISSUES listing: “the issues aimed at THIS object”. POLYMORPHIC family
-    // (equipment / VM / spare / sub-equipment), hence the badges above.
-    issueTarget: "Target",
-    issueTargetPlaceholder: "Equipment, VM, spare, sub-equipment…",
-    // STATE dimension of the issues listing: it applies to the normalised CATEGORY, never to the
-    // tracker's raw status (which depends on a configurable workflow — cf. decision D3).
-    issueCategory: "State",
   },
   opt: {
     dataFilter: "Data",
@@ -213,11 +193,10 @@ export const lists = {
     disconnected: "disconnected",
     // Issue counterpart of « orphan »/« disconnected »: SAME mechanics (unresolved on the last pass),
     // a THIRD meaning — an issue we can no longer retrieve signals a deletion, an archived project or
-    // a lost permission (cf. core/IssueStatus, cadrage §3).
-    // ⚠ LOCKED by test against the shared catalogue `SEARCH_CATALOGS.issueNotFound`.
+    // a lost permission. DISPLAYED by the “Issue” block of a replicated intervention, in place of the
+    // raw sentinel written by the bridge (cf. core/TrackerStatus).
     notFound: "not found",
     wifiClient: "(Wi-Fi client)",
-    issue: "(issue)",
     floorLabel: "Floor {{n}}",
     addrCount: "{{count}} addr.",
     points_one: "{{count}} point",

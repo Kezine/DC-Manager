@@ -9,7 +9,7 @@ import { EntityRegistry } from "../models";
 import { BrowserStorageAdapter, RestAdapter } from "../data";
 import { Store } from "../store";
 import { RuntimeConfigLoader } from "./RuntimeConfig";
-import { GraphView, ListView, ListConfigs, Forms, DatacenterView, VmForms, VmProvidersForm, VmSyncClient, VmClustersView, WifiForms, WifiProvidersForm, WifiSyncClient, NotificationsAdminView, NotifyClient, CertsAdminView, CertsClient, InterventionsAdminView, InterventionsClient } from "../views";
+import { GraphView, ListView, ListConfigs, Forms, DatacenterView, VmForms, VmProvidersForm, VmSyncClient, VmClustersView, WifiForms, WifiProvidersForm, WifiSyncClient, NotificationsAdminView, NotifyClient, CertsAdminView, CertsClient, InterventionsAdminView, InterventionsClient, TrackerSyncClient } from "../views";
 import type { InterventionTargetSource, InterventionFicheHooks } from "../views";
 import { FormBase } from "../views/forms/FormBase";
 import { GlobalSearchPalette } from "../views/GlobalSearchPalette";   // palette de recherche globale (loupe topbar + Ctrl+K)
@@ -109,6 +109,12 @@ const certsClient = REST_MODE ? new CertsClient(adapter as RestAdapter) : null;
 // fichier/viewer : la page affiche alors un message d'indisponibilité). Le RestAdapter satisfait
 // `InterventionsRestContext` (dataBase/docId/headers/clientId publics) ; routes SCOPÉES PAR DOCUMENT (`<dataBase>/interventions`).
 const interventionsClient = REST_MODE ? new InterventionsClient(adapter as RestAdapter) : null;
+// Client du PONT « interventions ⇄ tracker distant » (module serveur tracker/ AMOVIBLE) — mode API
+// SEULEMENT, donc jamais en viewer (REST_MODE l'exclut) : la réplication et la configuration des
+// providers ÉCRIVENT. null ⇒ la vue Interventions n'affiche ni actions de pont, ni bloc « Ticket »,
+// ni pastille de statut, sans une condition de plus dans son code. Le RestAdapter satisfait
+// `TrackerRestContext` ; routes SCOPÉES PAR DOCUMENT (`<dataBase>/tracker`).
+const trackerClient = REST_MODE ? new TrackerSyncClient(adapter as RestAdapter) : null;
 // Annuaire utilisateurs (service CORE, mode API SEULEMENT — null en mode fichier/viewer : aucune identité serveur,
 // donc aucune ligne « Créé/Modifié par » dans les fiches). Le RestAdapter satisfait `UserResolverClient`
 // (méthode `resolveUsers` → endpoint batch GET /users/resolve). Injecté dans les fiches via FormHost. Cf. docs/user-resolver.md.
@@ -987,7 +993,7 @@ async function boot(): Promise<void> {
     countClass: REST_MODE ? () => (interventionsCriticalOpen ? "err" : null) : undefined,   // ≥ 1 ouverte critique → alerte rouge
     onShow: () => { interventionsView.show(); void refreshInterventionsCount(); },
   });
-  interventionsView = new InterventionsAdminView(interventionsContainer, interventionsClient, formHost, interventionTargets);   // formulaires dans LA modale de l'app (principe n°11)
+  interventionsView = new InterventionsAdminView(interventionsContainer, interventionsClient, formHost, interventionTargets, trackerClient);   // formulaires dans LA modale de l'app (principe n°11)
   interventionsView.onCountsChanged = () => { void refreshInterventionsCount(); };   // après création/clôture/suppression → recompte les ouvertes
   // INTÉGRATION « FICHES » (badge + déclaration depuis équipement/VM/spare) : hooks injectés dans les fiches
   // via FormHost (contrat découplé — les formulaires n'importent NI la vue NI le client interventions). null

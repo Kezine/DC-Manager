@@ -2,18 +2,18 @@ import { FormControls } from "../../ui/FormControls";
 import { Notify } from "../../ui/Notify";
 import { Dialog } from "../../ui/Dialog";
 import { Html } from "../../core/Html";
-import { IssueSyncError } from "./IssueSyncClient";
-import type { IssueSyncClient, IssueProviderSummary, IssueProviderInfo, IssueProviderInput, IssueProviderOptions } from "./IssueSyncClient";
+import { TrackerSyncError } from "./TrackerSyncClient";
+import type { TrackerSyncClient, TrackerProviderSummary, TrackerProviderInfo, TrackerProviderInput, TrackerProviderOptions } from "./TrackerSyncClient";
 import type { FormHost } from "./shared";
 import { I18n } from "../../i18n/I18n";
 
 /* =============================================================================
-   MODALE DE GESTION DES PROVIDERS DE TICKETS — feature AMOVIBLE (mode API, non-viewer).
+   MODALE DE GESTION DES PROVIDERS DE RÉPLICATION — feature AMOVIBLE (mode API, non-viewer).
 
-   Classe DÉDIÉE et AUTONOME (hors chaîne d'héritage `Forms`, à CÔTÉ d'`IssueForms`) :
-   la retirer = supprimer ce fichier + l'action « Providers… » de l'en-tête de l'onglet
-   Tickets (main.ts), sans cicatrice ailleurs. N'a besoin QUE de `FormHost.openModal`
-   (modale partagée) et de l'`IssueSyncClient` (routes CRUD/test) — aucun accès au store.
+   Classe DÉDIÉE et AUTONOME (hors chaîne d'héritage `Forms`, à CÔTÉ de `TrackerTicketBlock`) :
+   la retirer = supprimer ce fichier + l'action « Providers… » de l'en-tête de la vue
+   Interventions, sans cicatrice ailleurs. N'a besoin QUE de `FormHost.openModal`
+   (modale partagée) et du `TrackerSyncClient` (routes CRUD/test) — aucun accès au store.
 
    Ergonomie (calquée sur `WifiProvidersForm`) : UNE seule modale, pied de page MASQUÉ
    (`hideFooter`) — les actions sont PROPRES à chaque écran. Le corps bascule entre
@@ -37,7 +37,7 @@ import { I18n } from "../../i18n/I18n";
    ── AGNOSTICISME DE MARQUE (exigence n°1 du chantier) ─────────────────────────
    Les champs propres à une marque ne sont PAS écrits en dur dans le formulaire : ils
    sont DÉCLARÉS dans `KIND_FIELDS` (une entrée par `kind`) et rendus dynamiquement,
-   en MIROIR de `IssueProviderConfigValidate.KIND_OPTION_SPECS` côté serveur. Ajouter
+   en MIROIR de `TrackerProviderConfigValidate.KIND_OPTION_SPECS` côté serveur. Ajouter
    une marque = ajouter une entrée ici (+ ses libellés i18n) et une option du `<select>`,
    rien d'autre dans ce fichier.
    ⚠ Les deux tables doivent rester en phase — un champ affiché mais non déclaré côté
@@ -53,8 +53,8 @@ import { I18n } from "../../i18n/I18n";
    clé n'est pas là, il n'y a tout simplement rien à configurer.
    ============================================================================= */
 
-/** Déclaration d'UN champ d'option propre à une marque (miroir client d'`IssueOptionSpec`). */
-export interface IssueKindFieldSpec {
+/** Déclaration d'UN champ d'option propre à une marque (miroir client de `TrackerOptionSpec`). */
+export interface TrackerKindFieldSpec {
   /** Nom de l'option — DOIT correspondre au `name` déclaré côté serveur. */
   name: string;
   /** Contrôle rendu. `text` ⇄ spec serveur `string`, `toggle` ⇄ `boolean`. */
@@ -63,16 +63,16 @@ export interface IssueKindFieldSpec {
       DOIT être le `default` de la spec serveur : autrement le formulaire proposerait autre chose
       que ce que le serveur applique en l'absence de saisie. */
   fallback: string | boolean;
-  /** Clés i18n du libellé et de l'aide — dans le domaine `issues.providers.opt`. */
+  /** Clés i18n du libellé et de l'aide — dans le domaine `tracker.providers.opt`. */
   labelKey: string;
   hintKey: string;
   /** Placeholder du champ texte (clé i18n), facultatif. */
   placeholderKey?: string;
 }
 
-export class IssueProvidersForm {
-  /** TYPES de tracker proposés — miroir de la fabrique `IssueSyncService.adapterFor` et de
-      `IssueProviderConfigValidate.KIND_OPTION_SPECS`. Un seul aujourd'hui : le `<select>` existe
+export class TrackerProvidersForm {
+  /** TYPES de tracker proposés — miroir de la fabrique `TrackerSyncService.adapterFor` et de
+      `TrackerProviderConfigValidate.KIND_OPTION_SPECS`. Un seul aujourd'hui : le `<select>` existe
       quand même, parce que c'est LUI qui rend l'ajout d'une marque non structurant (cf. en-tête).
       Le LIBELLÉ est une marque commerciale, donc écrit tel quel et NON traduit (comme « Proxmox »
       côté VM et « UniFi » côté wifi). */
@@ -82,14 +82,14 @@ export class IssueProvidersForm {
 
   /** Champs d'option PAR TYPE — le point d'extension « marque » côté UI (cf. en-tête). PUBLIC parce
       qu'un test le confronte à `KIND_OPTION_SPECS` (serveur) : le miroir est VÉRIFIÉ, pas affirmé. */
-  static readonly KIND_FIELDS: Readonly<Record<string, readonly IssueKindFieldSpec[]>> = {
+  static readonly KIND_FIELDS: Readonly<Record<string, readonly TrackerKindFieldSpec[]>> = {
     jira: [
-      { name: "project_key", type: "text", fallback: "", labelKey: "issues.providers.opt.projectField", hintKey: "issues.providers.opt.projectHint", placeholderKey: "issues.providers.opt.projectPlaceholder" },
+      { name: "project_key", type: "text", fallback: "", labelKey: "tracker.providers.opt.projectField", hintKey: "tracker.providers.opt.projectHint", placeholderKey: "tracker.providers.opt.projectPlaceholder" },
       // Un type de ticket PAR NATURE d'objet DC Manager : les incidents et les interventions ne se
       // traitent pas de la même façon côté tracker, et le projet leur a souvent deux types distincts.
-      { name: "type_incident", type: "text", fallback: "Incident", labelKey: "issues.providers.opt.typeIncidentField", hintKey: "issues.providers.opt.typeIncidentHint", placeholderKey: "issues.providers.opt.typeIncidentPlaceholder" },
-      { name: "type_intervention", type: "text", fallback: "Infrastructure", labelKey: "issues.providers.opt.typeInterventionField", hintKey: "issues.providers.opt.typeInterventionHint", placeholderKey: "issues.providers.opt.typeInterventionPlaceholder" },
-      { name: "auto_replicate", type: "toggle", fallback: true, labelKey: "issues.providers.opt.autoReplicateField", hintKey: "issues.providers.opt.autoReplicateHint" },
+      { name: "type_incident", type: "text", fallback: "Incident", labelKey: "tracker.providers.opt.typeIncidentField", hintKey: "tracker.providers.opt.typeIncidentHint", placeholderKey: "tracker.providers.opt.typeIncidentPlaceholder" },
+      { name: "type_intervention", type: "text", fallback: "Infrastructure", labelKey: "tracker.providers.opt.typeInterventionField", hintKey: "tracker.providers.opt.typeInterventionHint", placeholderKey: "tracker.providers.opt.typeInterventionPlaceholder" },
+      { name: "auto_replicate", type: "toggle", fallback: true, labelKey: "tracker.providers.opt.autoReplicateField", hintKey: "tracker.providers.opt.autoReplicateHint" },
     ],
   };
 
@@ -98,21 +98,21 @@ export class IssueProvidersForm {
 
   private constructor(
     private readonly host: FormHost,
-    private readonly client: IssueSyncClient,
+    private readonly client: TrackerSyncClient,
     /** Appelé après TOUTE écriture réussie (enregistrement / suppression) — l'appelant s'en sert
         pour rafraîchir ce qui doit l'être (la config vit côté serveur, sans push SSE). */
     private readonly onChanged: () => void,
   ) {}
 
-  /** Ouvre la modale de gestion (en-tête de l'onglet Tickets, mode API + non-viewer). */
-  static open(host: FormHost, client: IssueSyncClient, onChanged: () => void): void {
-    const form = new IssueProvidersForm(host, client, onChanged);
+  /** Ouvre la modale de gestion (en-tête de la vue Interventions, mode API + non-viewer). */
+  static open(host: FormHost, client: TrackerSyncClient, onChanged: () => void): void {
+    const form = new TrackerProvidersForm(host, client, onChanged);
     const root = document.createElement("div");
     form.panel = document.createElement("div");
     root.appendChild(form.panel);
     form.host.openModal({
-      title: I18n.t("issues.providers.title"),
-      subtitle: I18n.t("issues.providers.subtitle"),
+      title: I18n.t("tracker.providers.title"),
+      subtitle: I18n.t("tracker.providers.subtitle"),
       body: root, wide: true, hideFooter: true,
     });
     void form.loadList();
@@ -122,43 +122,43 @@ export class IssueProvidersForm {
      ÉCRAN LISTE
      -------------------------------------------------------------------------- */
 
-  /** Charge `GET …/issues/providers` puis rend la liste. 503 (clé absente / config invalide) → bandeau. */
+  /** Charge `GET …/tracker/providers` puis rend la liste. 503 (clé absente / config invalide) → bandeau. */
   private async loadList(): Promise<void> {
-    this.message(I18n.t("issues.providers.loading"));
+    this.message(I18n.t("tracker.providers.loading"));
     try {
       this.renderList(await this.client.providers());
     } catch (e) {
       // 503 = gestion désactivée (clé de chiffrement absente) OU module en erreur : on montre le
       // détail actionnable du serveur AU LIEU des contrôles d'édition (rien à configurer sans clé).
-      if (e instanceof IssueSyncError && e.status === 503) { this.renderDisabled(e); return; }
-      this.message(I18n.t("issues.providers.loadError", { detail: IssueProvidersForm.errText(e) }), true);
+      if (e instanceof TrackerSyncError && e.status === 503) { this.renderDisabled(e); return; }
+      this.message(I18n.t("tracker.providers.loadError", { detail: TrackerProvidersForm.errText(e) }), true);
     }
   }
 
   /** Liste des providers (id, type, URL, compte, intervalle, timeout) + bouton « Ajouter ». */
-  private renderList(providers: IssueProviderSummary[]): void {
+  private renderList(providers: TrackerProviderSummary[]): void {
     this.panel.innerHTML = "";
     const intro = document.createElement("div"); intro.className = "form-hint";
-    intro.textContent = I18n.t("issues.providers.intro");
+    intro.textContent = I18n.t("tracker.providers.intro");
     this.panel.appendChild(intro);
 
     if (!providers.length) {
       const empty = document.createElement("div"); empty.className = "form-hint"; empty.style.fontStyle = "italic"; empty.style.marginTop = "8px";
-      empty.textContent = I18n.t("issues.providers.empty");
+      empty.textContent = I18n.t("tracker.providers.empty");
       this.panel.appendChild(empty);
     } else {
       const rows = providers.map((p) => [
         `<span style="font-family:var(--mono)">${Html.escape(p.id)}</span>`,
-        Html.escape(IssueProvidersForm.kindLabel(p.kind)),
+        Html.escape(TrackerProvidersForm.kindLabel(p.kind)),
         `<span style="font-family:var(--mono)">${Html.escape(p.url)}</span>`,
         Html.escape(p.account || ""),
-        p.interval_sec > 0 ? (p.interval_sec + " s") : I18n.t("issues.providers.intervalManual"),
+        p.interval_sec > 0 ? (p.interval_sec + " s") : I18n.t("tracker.providers.intervalManual"),
         p.timeout_sec + " s",
         `<button class="btn btn-ghost btn-sm" data-edit="${Html.escape(p.id)}">${Html.escape(I18n.t("lists.chrome.rowEdit"))}</button>`,
       ]);
       const tw = this.table([
-        I18n.t("issues.providers.colProvider"), I18n.t("issues.providers.colType"), I18n.t("issues.providers.colUrl"),
-        I18n.t("issues.providers.colAccount"), I18n.t("issues.providers.colInterval"), I18n.t("issues.providers.colTimeout"), "",
+        I18n.t("tracker.providers.colProvider"), I18n.t("tracker.providers.colType"), I18n.t("tracker.providers.colUrl"),
+        I18n.t("tracker.providers.colAccount"), I18n.t("tracker.providers.colInterval"), I18n.t("tracker.providers.colTimeout"), "",
       ], rows);
       // Liaison des boutons « Modifier » après injection du HTML (l'id est la clé, pas l'index).
       tw.querySelectorAll("[data-edit]").forEach((el) => {
@@ -171,7 +171,7 @@ export class IssueProvidersForm {
     }
 
     const add = document.createElement("button"); add.type = "button"; add.className = "btn btn-primary btn-sm";
-    add.textContent = I18n.t("issues.providers.add"); add.style.marginTop = "12px";
+    add.textContent = I18n.t("tracker.providers.add"); add.style.marginTop = "12px";
     add.onclick = () => this.renderForm(null);
     this.panel.appendChild(add);
   }
@@ -181,48 +181,48 @@ export class IssueProvidersForm {
      -------------------------------------------------------------------------- */
 
   /** Formulaire de création (`existing === null`) ou d'édition. `id` immuable en édition. */
-  private renderForm(existing: IssueProviderSummary | null): void {
+  private renderForm(existing: TrackerProviderSummary | null): void {
     this.panel.innerHTML = "";
     const editing = existing !== null;
 
     // -- Fil d'Ariane : retour à la liste. --
     const back = document.createElement("button"); back.type = "button"; back.className = "btn btn-ghost btn-sm";
-    back.textContent = I18n.t("issues.providers.back"); back.onclick = () => void this.loadList();
+    back.textContent = I18n.t("tracker.providers.back"); back.onclick = () => void this.loadList();
     this.panel.appendChild(back);
 
     const heading = document.createElement("div"); heading.className = "section-divider";
-    heading.textContent = editing ? I18n.t("issues.providers.headingEdit", { id: existing!.id }) : I18n.t("issues.providers.headingNew");
+    heading.textContent = editing ? I18n.t("tracker.providers.headingEdit", { id: existing!.id }) : I18n.t("tracker.providers.headingNew");
     this.panel.appendChild(heading);
 
     // -- id (immuable en édition — c'est la clé référencée par `provider_id` des tickets suivis). --
-    const idInput = FormControls.text(existing ? existing.id : "", I18n.t("issues.providers.idPlaceholder"));
+    const idInput = FormControls.text(existing ? existing.id : "", I18n.t("tracker.providers.idPlaceholder"));
     if (editing) { idInput.readOnly = true; idInput.style.opacity = "0.7"; }
-    this.panel.appendChild(FormControls.fieldRow(I18n.t("issues.providers.idField"), idInput,
-      editing ? I18n.t("issues.providers.idHintEdit") : I18n.t("issues.providers.idHintNew")));
+    this.panel.appendChild(FormControls.fieldRow(I18n.t("tracker.providers.idField"), idInput,
+      editing ? I18n.t("tracker.providers.idHintEdit") : I18n.t("tracker.providers.idHintNew")));
 
     // -- TYPE de tracker : c'est LUI qui décide des champs d'option affichés plus bas. --
-    const kindSel = FormControls.select(IssueProvidersForm.KINDS.map((k) => ({ value: k.value, label: k.label })), existing ? existing.kind : IssueProvidersForm.KINDS[0].value);
-    this.panel.appendChild(FormControls.fieldRow(I18n.t("issues.providers.typeField"), kindSel, I18n.t("issues.providers.typeHint")));
+    const kindSel = FormControls.select(TrackerProvidersForm.KINDS.map((k) => ({ value: k.value, label: k.label })), existing ? existing.kind : TrackerProvidersForm.KINDS[0].value);
+    this.panel.appendChild(FormControls.fieldRow(I18n.t("tracker.providers.typeField"), kindSel, I18n.t("tracker.providers.typeHint")));
 
     // -- URL de l'instance (https obligatoire côté serveur : le jeton voyage en en-tête). --
-    const urlInput = FormControls.text(existing ? existing.url : "", I18n.t("issues.providers.urlPlaceholder"));
-    this.panel.appendChild(FormControls.fieldRow(I18n.t("issues.providers.urlField"), urlInput, I18n.t("issues.providers.urlHint")));
+    const urlInput = FormControls.text(existing ? existing.url : "", I18n.t("tracker.providers.urlPlaceholder"));
+    this.panel.appendChild(FormControls.fieldRow(I18n.t("tracker.providers.urlField"), urlInput, I18n.t("tracker.providers.urlHint")));
 
     // -- COMPTE de service : moitié PUBLIQUE de l'identification → PRÉ-REMPLI en édition. --
-    const accountInput = FormControls.text(existing ? existing.account : "", I18n.t("issues.providers.accountPlaceholder"));
-    this.panel.appendChild(FormControls.fieldRow(I18n.t("issues.providers.accountField"), accountInput, I18n.t("issues.providers.accountHint")));
+    const accountInput = FormControls.text(existing ? existing.account : "", I18n.t("tracker.providers.accountPlaceholder"));
+    this.panel.appendChild(FormControls.fieldRow(I18n.t("tracker.providers.accountField"), accountInput, I18n.t("tracker.providers.accountHint")));
 
     // -- Jeton : champ password JAMAIS pré-rempli. En édition, vide = conserver le jeton stocké. --
-    const tokenInput = FormControls.text("", editing ? I18n.t("issues.providers.tokenPlaceholderEdit") : I18n.t("issues.providers.tokenPlaceholderNew"));
+    const tokenInput = FormControls.text("", editing ? I18n.t("tracker.providers.tokenPlaceholderEdit") : I18n.t("tracker.providers.tokenPlaceholderNew"));
     tokenInput.type = "password"; tokenInput.autocomplete = "new-password";   // empêche l'autofill du navigateur
-    this.panel.appendChild(FormControls.fieldRow(I18n.t("issues.providers.tokenField"), tokenInput,
-      editing ? I18n.t("issues.providers.tokenHintEdit") : I18n.t("issues.providers.tokenHintNew")));
+    this.panel.appendChild(FormControls.fieldRow(I18n.t("tracker.providers.tokenField"), tokenInput,
+      editing ? I18n.t("tracker.providers.tokenHintEdit") : I18n.t("tracker.providers.tokenHintNew")));
 
     // -- CHAMPS PROPRES AU TYPE : re-rendus quand le type change (cf. en-tête). L'état des valeurs
     //    vit dans `optionValues`, hors du DOM, pour SURVIVRE au changement de type (revenir au type
     //    précédent ne doit pas avoir effacé ce qui y était saisi). --
     const optionValues: Record<string, string | boolean> = {};
-    for (const [kind, fields] of Object.entries(IssueProvidersForm.KIND_FIELDS)) {
+    for (const [kind, fields] of Object.entries(TrackerProvidersForm.KIND_FIELDS)) {
       for (const field of fields) {
         const stored = existing && existing.kind === kind ? existing.options[field.name] : undefined;
         optionValues[kind + "." + field.name] = (typeof stored === "string" || typeof stored === "boolean") ? stored : field.fallback;
@@ -231,10 +231,10 @@ export class IssueProvidersForm {
     const optionsWrap = document.createElement("div");
     const renderOptions = (): void => {
       optionsWrap.innerHTML = "";
-      const fields = IssueProvidersForm.KIND_FIELDS[kindSel.value] || [];
+      const fields = TrackerProvidersForm.KIND_FIELDS[kindSel.value] || [];
       if (!fields.length) return;
       const title = document.createElement("div"); title.className = "section-divider";
-      title.textContent = I18n.t("issues.providers.opt.section", { kind: IssueProvidersForm.kindLabel(kindSel.value) });
+      title.textContent = I18n.t("tracker.providers.opt.section", { kind: TrackerProvidersForm.kindLabel(kindSel.value) });
       optionsWrap.appendChild(title);
       for (const field of fields) {
         const key = kindSel.value + "." + field.name;
@@ -259,35 +259,35 @@ export class IssueProvidersForm {
     // -- interval_sec / timeout_sec. L'intervalle est à régler HAUT : la passe coûte une requête par
     //    centaine de tickets suivis, et l'état d'un ticket n'a pas la volatilité d'un client wifi. --
     const intervalInput = FormControls.number(existing ? existing.interval_sec : 0, { min: 0, step: 1, placeholder: "0" });
-    this.panel.appendChild(FormControls.fieldRow(I18n.t("issues.providers.intervalField"), intervalInput, I18n.t("issues.providers.intervalHint")));
-    const timeoutInput = FormControls.number(existing ? existing.timeout_sec : IssueProvidersForm.DEFAULT_TIMEOUT_SEC, { min: 1, step: 1, placeholder: String(IssueProvidersForm.DEFAULT_TIMEOUT_SEC) });
-    this.panel.appendChild(FormControls.fieldRow(I18n.t("issues.providers.timeoutField"), timeoutInput, I18n.t("issues.providers.timeoutHint")));
+    this.panel.appendChild(FormControls.fieldRow(I18n.t("tracker.providers.intervalField"), intervalInput, I18n.t("tracker.providers.intervalHint")));
+    const timeoutInput = FormControls.number(existing ? existing.timeout_sec : TrackerProvidersForm.DEFAULT_TIMEOUT_SEC, { min: 1, step: 1, placeholder: String(TrackerProvidersForm.DEFAULT_TIMEOUT_SEC) });
+    this.panel.appendChild(FormControls.fieldRow(I18n.t("tracker.providers.timeoutField"), timeoutInput, I18n.t("tracker.providers.timeoutHint")));
 
     // -- Zone de RÉSULTAT du test + zone d'ERREUR (messages français du serveur). --
     const testBox = document.createElement("div"); testBox.style.marginTop = "10px";
     const errBox = document.createElement("div"); errBox.className = "form-hint err"; errBox.style.cssText = "margin-top:10px;white-space:pre-line;display:none";
     const showError = (e: unknown): void => {
       errBox.style.display = "block"; testBox.innerHTML = "";
-      errBox.textContent = IssueProvidersForm.errText(e);
+      errBox.textContent = TrackerProvidersForm.errText(e);
     };
 
-    const collectInput = (): IssueProviderInput => {
+    const collectInput = (): TrackerProviderInput => {
       const intervalStr = intervalInput.value.trim();
       const timeoutStr = timeoutInput.value.trim();
       // Seules les options DU TYPE COURANT partent : envoyer celles d'un autre type serait au
       // mieux ignoré côté serveur (les options inconnues sont écartées), au pire trompeur en relecture.
-      const options: IssueProviderOptions = {};
-      for (const field of IssueProvidersForm.KIND_FIELDS[kindSel.value] || []) {
+      const options: TrackerProviderOptions = {};
+      for (const field of TrackerProvidersForm.KIND_FIELDS[kindSel.value] || []) {
         const value = optionValues[kindSel.value + "." + field.name];
         options[field.name] = typeof value === "boolean" ? value : String(value ?? "");
       }
-      const input: IssueProviderInput = {
+      const input: TrackerProviderInput = {
         id: (editing ? existing!.id : idInput.value.trim()),
         kind: kindSel.value,
         url: urlInput.value.trim(),
         account: accountInput.value.trim(),
         interval_sec: intervalStr === "" ? 0 : Number(intervalStr),
-        timeout_sec: timeoutStr === "" ? IssueProvidersForm.DEFAULT_TIMEOUT_SEC : Number(timeoutStr),
+        timeout_sec: timeoutStr === "" ? TrackerProvidersForm.DEFAULT_TIMEOUT_SEC : Number(timeoutStr),
         options,
       };
       // Le jeton ne part QUE s'il est (re)saisi (écriture seule) — vide = conserver côté serveur.
@@ -299,10 +299,10 @@ export class IssueProvidersForm {
     const actions = document.createElement("div"); actions.style.cssText = "display:flex;flex-wrap:wrap;gap:8px;margin-top:14px";
 
     const testBtn = document.createElement("button"); testBtn.type = "button"; testBtn.className = "btn btn-ghost";
-    testBtn.textContent = I18n.t("issues.providers.test");
+    testBtn.textContent = I18n.t("tracker.providers.test");
     testBtn.onclick = async () => {
       errBox.style.display = "none";
-      testBox.innerHTML = ""; testBox.appendChild(IssueProvidersForm.hint(I18n.t("issues.providers.testing")));
+      testBox.innerHTML = ""; testBox.appendChild(TrackerProvidersForm.hint(I18n.t("tracker.providers.testing")));
       testBtn.disabled = true;
       try {
         this.renderTestResult(testBox, await this.client.testProvider(collectInput()));
@@ -318,11 +318,11 @@ export class IssueProvidersForm {
     saveBtn.onclick = async () => {
       errBox.style.display = "none";
       const input = collectInput();
-      if (!editing && input.id === "") { showError(new IssueSyncError(I18n.t("issues.providers.idRequired"), 0, null)); return; }
+      if (!editing && input.id === "") { showError(new TrackerSyncError(I18n.t("tracker.providers.idRequired"), 0, null)); return; }
       saveBtn.disabled = true;
       try {
         await this.client.saveProvider(input.id, input);
-        Notify.toast(editing ? I18n.t("issues.providers.savedUpdated") : I18n.t("issues.providers.savedCreated"), "ok");
+        Notify.toast(editing ? I18n.t("tracker.providers.savedUpdated") : I18n.t("tracker.providers.savedCreated"), "ok");
         this.onChanged();          // la config a changé à chaud
         await this.loadList();     // retour à la liste, rechargée
       } catch (e) {
@@ -339,15 +339,15 @@ export class IssueProvidersForm {
       delBtn.textContent = I18n.t("ui.action.delete"); delBtn.style.marginLeft = "auto";
       delBtn.onclick = async () => {
         const ok = await Dialog.confirm({
-          title: I18n.t("issues.providers.deleteTitle"),
-          message: I18n.t("issues.providers.deleteMessage", { id: existing!.id }),
+          title: I18n.t("tracker.providers.deleteTitle"),
+          message: I18n.t("tracker.providers.deleteMessage", { id: existing!.id }),
           confirmLabel: I18n.t("ui.action.delete"), danger: true,
         });
         if (!ok) return;
         delBtn.disabled = true;
         try {
           await this.client.deleteProvider(existing!.id);
-          Notify.toast(I18n.t("issues.providers.deleted"), "ok");
+          Notify.toast(I18n.t("tracker.providers.deleted"), "ok");
           this.onChanged();
           await this.loadList();
         } catch (e) {
@@ -362,16 +362,16 @@ export class IssueProvidersForm {
     setTimeout(() => { if (!editing) idInput.focus(); else urlInput.focus(); }, 30);
   }
 
-  /** Rend le résultat d'un test (`IssueProviderInfo`) : pastilles + message serveur. */
-  private renderTestResult(box: HTMLElement, info: IssueProviderInfo): void {
+  /** Rend le résultat d'un test (`TrackerProviderInfo`) : pastilles + message serveur. */
+  private renderTestResult(box: HTMLElement, info: TrackerProviderInfo): void {
     box.innerHTML = "";
     const pills = document.createElement("div"); pills.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;align-items:center";
     pills.innerHTML = [
-      IssueProvidersForm.pill(info.ok ? I18n.t("issues.providers.testConnOk") : I18n.t("issues.providers.testConnFail"), info.ok ? "ok" : "err"),
+      TrackerProvidersForm.pill(info.ok ? I18n.t("tracker.providers.testConnOk") : I18n.t("tracker.providers.testConnFail"), info.ok ? "ok" : "err"),
       // `supported` = « l'API attendue répond bien ». On le rend en clair plutôt qu'en jargon : c'est
       // le seul indicateur qui distingue « ça s'authentifie » de « ça va vraiment savoir résoudre ».
-      IssueProvidersForm.pill(info.supported ? I18n.t("issues.providers.testApiOk") : I18n.t("issues.providers.testApiWarn"), info.supported ? "ok" : "warn"),
-      info.version ? IssueProvidersForm.pill(info.version, "neutral") : "",
+      TrackerProvidersForm.pill(info.supported ? I18n.t("tracker.providers.testApiOk") : I18n.t("tracker.providers.testApiWarn"), info.supported ? "ok" : "warn"),
+      info.version ? TrackerProvidersForm.pill(info.version, "neutral") : "",
     ].filter(Boolean).join(" ");
     box.appendChild(pills);
     if (info.message) {
@@ -386,15 +386,15 @@ export class IssueProvidersForm {
 
   /** 503 : la gestion est indisponible côté serveur → on montre le détail actionnable, pas les
       contrôles d'édition (clé `DCMANAGER_SECRETS_KEY` absente, ou config en erreur). */
-  private renderDisabled(err: IssueSyncError): void {
+  private renderDisabled(err: TrackerSyncError): void {
     this.panel.innerHTML = "";
     const box = document.createElement("div");
     box.style.cssText = "border:1px solid var(--warn);border-radius:6px;padding:14px;background:var(--bg-2)";
     const title = document.createElement("div"); title.style.cssText = "font-weight:600;color:var(--warn);margin-bottom:6px";
-    title.textContent = err.message || I18n.t("issues.providers.disabledTitle");
+    title.textContent = err.message || I18n.t("tracker.providers.disabledTitle");
     box.appendChild(title);
     const detail = document.createElement("div"); detail.className = "form-hint"; detail.style.whiteSpace = "pre-line";
-    detail.textContent = err.detail || I18n.t("issues.providers.disabledDetail");
+    detail.textContent = err.detail || I18n.t("tracker.providers.disabledDetail");
     box.appendChild(detail);
     this.panel.appendChild(box);
   }
@@ -404,14 +404,14 @@ export class IssueProvidersForm {
      -------------------------------------------------------------------------- */
 
   /** Délai par requête proposé à la création — MÊME valeur que le défaut serveur
-      (`IssueProviderConfigValidate.DEFAULT_TIMEOUT_SEC`), plus généreux que les 15 s des modules
+      (`TrackerProviderConfigValidate.DEFAULT_TIMEOUT_SEC`), plus généreux que les 15 s des modules
       VM/wifi : une requête est ici une RECHERCHE côté SaaS traversant Internet, pas une lecture LAN. */
   private static readonly DEFAULT_TIMEOUT_SEC = 20;
 
   /** Libellé lisible d'un type de tracker (repli : l'identifiant brut — une base peut porter un
       `kind` d'une version future que cette UI ne connaît pas encore). */
   private static kindLabel(kind: string): string {
-    const known = IssueProvidersForm.KINDS.find((k) => k.value === kind);
+    const known = TrackerProvidersForm.KINDS.find((k) => k.value === kind);
     return known ? known.label : kind;
   }
 
@@ -445,9 +445,9 @@ export class IssueProvidersForm {
     return `<span class="pill"${style}>${Html.escape(text)}</span>`;
   }
 
-  /** Message d'erreur lisible : `IssueSyncError` porte code HTTP + `detail` (issues 400 / config 503). */
+  /** Message d'erreur lisible — DÉLÉGUÉ au transport (`TrackerSyncError.text`), qui sait ce que
+      portent ses codes (issues 400 / config 503) : une seule formulation pour toute la feature. */
   private static errText(e: unknown): string {
-    if (e instanceof IssueSyncError) return e.message + (e.detail ? "\n" + e.detail : "");
-    return e instanceof Error ? e.message : String(e);
+    return TrackerSyncError.text(e);
   }
 }

@@ -45,6 +45,31 @@ export interface InterventionRecord {
   planned_end: string | null;
   jira_ref: string | null;
   closed_date: string | null;
+  /* ---- ÉTAT DE RÉPLICATION vers un tracker distant (module serveur `tracker/`, AMOVIBLE) ----
+     Ces colonnes sont SERVIES par le listing et le détail mais n'ont AUCUNE place dans un corps de
+     PUT : le serveur les ignore à l'écriture, exactement comme les champs d'audit (cf.
+     `InterventionInput`). Toutes VIDES quand le pont n'est pas installé — l'UI n'affiche alors
+     simplement rien. Miroir des colonnes `tracker_*` d'`InterventionsDb.ts` ; la logique de lecture
+     vit dans `core/TrackerReplication` (état de réplication) et `core/TrackerStatus` (état du ticket). */
+  /** Provider de réplication (null = intervention non répliquée). */
+  tracker_provider_id: string | null;
+  /** 🚨 Identifiant INTERNE du ticket distant — JAMAIS sa clé (qui bouge au déplacement de projet).
+      C'est LUI qui atteste la réplication. */
+  tracker_ext_id: string | null;
+  /** Libellé BRUT du statut distant, affiché tel quel et jamais traduit (décision D3). */
+  tracker_status: string | null;
+  /** Catégorie FERMÉE du statut (`todo`/`in_progress`/`done`/`unknown`) — pastille et tri. */
+  tracker_status_category: string | null;
+  /** Assigné côté tracker (affichage seul — DC Manager n'a pas d'assignation). */
+  tracker_assignee: string | null;
+  /** Lien d'INTERFACE du ticket, persisté tel que composé par l'adaptateur. */
+  tracker_url: string | null;
+  /** Dernier retour d'état RÉUSSI (ISO). */
+  tracker_last_sync: string | null;
+  /** État de POUSSÉE du contenu : `synced` | `pending` | `error` (null = jamais poussée). */
+  tracker_push_state: string | null;
+  /** Dernier message d'échec de poussée — ACTIONNABLE (celui du tracker, intact). */
+  tracker_push_error: string | null;
   links: InterventionLink[];
 }
 

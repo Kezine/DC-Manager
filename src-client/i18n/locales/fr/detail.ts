@@ -83,7 +83,6 @@ export const detail = {
     contact: "Contact introuvable",
     vm: "VM introuvable",
     wifiClient: "Client wifi introuvable",
-    issue: "Ticket introuvable",
     type: "Type introuvable",
   },
   cable: {
@@ -214,36 +213,6 @@ export const detail = {
     notMatched: "non rapproché",
     localSection: "Enrichissements locaux",
     locateAp: "Localiser le point d'accès (le client lui-même n'est pas dans la scène)",
-  },
-  // TICKET d'un tracker distant (feature AMOVIBLE). ⚠ `notFoundTitle` explique la MÊME mécanique que
-  // `vm.orphanTitle` et `wifi.disconnectedTitle`, avec un TROISIÈME sens : un ticket qu'on ne résout
-  // plus signale une suppression, un projet archivé ou une permission perdue (cadrage §3).
-  issue: {
-    title: "Ticket",
-    notFoundTitle: "Non résolu à la dernière synchronisation — supprimé, projet archivé ou permission perdue. L'enregistrement local est conservé et reviendra si l'accès est rétabli.",
-    reporter: "Rapporteur",
-    labels: "Étiquettes",
-    resolution: "Résolution",
-    link: "Lien du ticket",
-    createdSrc: "Créé (tracker)",
-    updatedSrc: "Modifié (tracker)",
-    lastSync: "Dernière synchro",
-    providerId: "Identité source",
-    targetsSection: "Objets ciblés ({{count}})",
-    targetsEmpty: "Aucun objet ciblé. Liez-en depuis « Modifier ».",
-    colFamily: "Famille",
-    colTarget: "Objet",
-    openTarget: "Ouvrir la fiche de l'objet ciblé",
-    localSection: "Enrichissements locaux",
-    // « NE PLUS SUIVRE » — geste symétrique de « Suivre un ticket ». ⚠ La confirmation dit DEUX
-    // choses, et les deux comptent : que le ticket n'est PAS supprimé chez le tracker (sans quoi
-    // l'utilisateur n'osera pas), et ce qui est réellement perdu ici (notes, description, cibles).
-    unfollow: "Ne plus suivre ce ticket…",
-    unfollowTitle: "Retire le ticket de ce document. Le ticket n'est pas supprimé chez le tracker.",
-    unfollowConfirmTitle: "Ne plus suivre ce ticket ?",
-    unfollowConfirmMsg: "Retirer « {{key}} » du suivi de ce document ? Le ticket N'EST PAS supprimé chez le tracker : seul son suivi ici cesse, et il ne sera plus rafraîchi par la synchronisation. Les notes, la description locale et les objets ciblés de cet enregistrement sont perdus. Vous pourrez le suivre à nouveau plus tard avec « Suivre un ticket ».",
-    unfollowConfirm: "Ne plus suivre",
-    unfollowed: "Ticket retiré du suivi",
   },
   vm: {
     orphanTitle: "Disparue à la dernière synchronisation",

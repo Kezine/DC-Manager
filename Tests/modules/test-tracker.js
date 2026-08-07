@@ -8,9 +8,10 @@
    TRAITEMENT relu (statut, assigné).
 
    Ce qui est couvert, du plus pur au plus intégré :
-   1. `core/IssueStatus` — classification d'un état de ticket (catégorie FERMÉE, priorité de
-      l'introuvable, clé de tri, libellés) et ses PASTILLES avec leur échappement. Le lot P3
-      affichera le statut du tracker d'une intervention répliquée avec exactement ces règles ;
+   1. `core/TrackerStatus` — classification d'un état de ticket (catégorie FERMÉE, priorité de
+      l'introuvable reconnu à la SENTINELLE du pont, clé de tri, libellés) et sa PASTILLE avec son
+      échappement, plus `core/TrackerReplication` — état de RÉPLICATION d'une intervention (répliquée
+      ou non, état de POUSSÉE, arbitrage de l'URL du ticket). Les deux pilotent l'UI du lot P3 ;
    2. `Html.externalLink` — un lien sortant ne peut pas être un vecteur XSS (primitive GÉNÉRIQUE,
       utile à toute donnée d'origine tierce affichée en lien) ;
    3. le miroir `KIND_FIELDS` (formulaire providers) ⇄ `KIND_OPTION_SPECS` (serveur) — un miroir
@@ -50,104 +51,151 @@
 const { ck, section, path, D, SHARED, SERVER, Validation, Cascade, SharedSchema, EntityRegistry, COLLECTION_THREE_IMPACT, makeStore } = require("./harness.js");
 
 module.exports = async () => {
-  const { IssueStatus, ISSUE_STATUS_CATEGORIES } = D("core/IssueStatus.js");
+  const { TrackerStatus, TRACKER_STATUS_CATEGORIES } = D("core/TrackerStatus.js");
+  const { TrackerReplication, TRACKER_PUSH_STATES } = D("core/TrackerReplication.js");
 
-  await section("client : IssueStatus — catégories, PRIORITÉ de l'introuvable, clé de tri, libellés", async () => {
+  await section("client : TrackerStatus — catégories, PRIORITÉ de l'introuvable, clé de tri, libellés", async () => {
   {
     // -- CATÉGORIE : ensemble FERMÉ, repli `unknown` sur tout ce qui n'en est pas (le module ne fait
     //    jamais confiance à ce qui vient d'un tiers, même si la synchro serveur clampe déjà). --
     // ⚠ Attente EXPLICITE (jamais dérivée du module) : la liste est l'ABSTRACTION multi-marques
     //    elle-même — c'est elle qui rend un GitHub ou un Redmine affichable sans toucher une vue.
     //    L'ORDRE compte autant que le contenu : il EST l'ordre de tri sémantique des listings.
-    ck.eq(ISSUE_STATUS_CATEGORIES.join(","), "todo,in_progress,done,unknown",
-      "ISSUE_STATUS_CATEGORIES : les 4 valeurs fermées, dans l'ordre SÉMANTIQUE (à faire → terminé → inclassable)");
-    ck.eq(IssueStatus.CATEGORIES.join(","), ISSUE_STATUS_CATEGORIES.join(","), "CATEGORIES : reprise TELLE QUELLE de la liste (pas de seconde table)");
-    ck.eq(IssueStatus.categoryOf({ status_category: "in_progress" }), "in_progress", "categoryOf : catégorie connue conservée");
-    ck.eq(IssueStatus.categoryOf({ status_category: "  done  " }), "done", "categoryOf : catégorie rognée");
-    ck.eq(IssueStatus.categoryOf({ status_category: "En recette" }), "unknown", "categoryOf : valeur hors ensemble → unknown");
-    ck.eq(IssueStatus.categoryOf(null), "unknown", "categoryOf : null toléré → unknown");
+    ck.eq(TRACKER_STATUS_CATEGORIES.join(","), "todo,in_progress,done,unknown",
+      "TRACKER_STATUS_CATEGORIES : les 4 valeurs fermées, dans l'ordre SÉMANTIQUE (à faire → terminé → inclassable)");
+    ck.eq(TrackerStatus.CATEGORIES.join(","), TRACKER_STATUS_CATEGORIES.join(","), "CATEGORIES : reprise TELLE QUELLE de la liste (pas de seconde table)");
+    ck.eq(TrackerStatus.categoryOf({ status_category: "in_progress" }), "in_progress", "categoryOf : catégorie connue conservée");
+    ck.eq(TrackerStatus.categoryOf({ status_category: "  done  " }), "done", "categoryOf : catégorie rognée");
+    ck.eq(TrackerStatus.categoryOf({ status_category: "En recette" }), "unknown", "categoryOf : valeur hors ensemble → unknown");
+    ck.eq(TrackerStatus.categoryOf(null), "unknown", "categoryOf : null toléré → unknown");
 
     // -- STATUT BRUT : affiché TEL QUEL, jamais traduit (décision D3 — le workflow est configurable). --
-    ck.eq(IssueStatus.raw({ status: "  En recette  " }), "En recette", "raw : statut rogné, restitué TEL QUEL (aucune traduction, aucune énumération)");
-    ck.eq(IssueStatus.raw({}), "", "raw : statut absent → \"\"");
+    ck.eq(TrackerStatus.raw({ status: "  En recette  " }), "En recette", "raw : statut rogné, restitué TEL QUEL (aucune traduction, aucune énumération)");
+    ck.eq(TrackerStatus.raw({}), "", "raw : statut absent → \"\"");
 
-    // -- INTROUVABLE : c'est l'état COURANT, la catégorie affichée date de la dernière résolution
-    //    réussie → l'orphelinat PRIME, en couleur d'AVERTISSEMENT (pas d'erreur : rien n'est perdu). --
-    ck.eq(IssueStatus.isNotFound({ orphan: true }), true, "isNotFound : orphan levé → introuvable");
-    ck.eq(IssueStatus.isNotFound({}), false, "isNotFound : sans orphan → résolu");
-    ck.eq(IssueStatus.COLOR_NOT_FOUND, "var(--warn)", "couleur : introuvable = AVERTISSEMENT (l'enregistrement local est intact et reviendra tout seul)");
-    ck.eq(IssueStatus.color({ orphan: true, status_category: "done" }), IssueStatus.COLOR_NOT_FOUND,
-      "color : l'orphelinat PRIME sur la catégorie (patron VmStatus.swatchColor)");
-    ck(IssueStatus.color({ status_category: "done" }) !== IssueStatus.color({ status_category: "todo" }),
+    // -- INTROUVABLE : reconnu à la SENTINELLE écrite par le pont, et à RIEN D'AUTRE. La catégorie
+    //    `unknown` seule ne suffirait pas — un statut de workflow que l'adaptateur n'a pas su classer
+    //    y retombe aussi, alors que CE ticket-là est bien résolu. --
+    ck.eq(TrackerStatus.isNotFound({ status: TrackerStatus.NOT_FOUND_STATUS, status_category: "unknown" }), true, "isNotFound : sentinelle du pont → introuvable");
+    ck.eq(TrackerStatus.isNotFound({ status: "En recette", status_category: "unknown" }), false,
+      "isNotFound : catégorie `unknown` SANS la sentinelle → résolu (un statut inclassable n'est pas un ticket perdu)");
+    ck.eq(TrackerStatus.isNotFound({}), false, "isNotFound : rien du tout → résolu");
+    ck.eq(TrackerStatus.COLOR_NOT_FOUND, "var(--warn)", "couleur : introuvable = AVERTISSEMENT (l'intervention locale est intacte et le ticket reviendra tout seul)");
+    ck.eq(TrackerStatus.color({ status: TrackerStatus.NOT_FOUND_STATUS, status_category: "done" }), TrackerStatus.COLOR_NOT_FOUND,
+      "color : l'introuvable PRIME sur la catégorie (patron VmStatus.swatchColor)");
+    ck(TrackerStatus.color({ status_category: "done" }) !== TrackerStatus.color({ status_category: "todo" }),
       "color : deux catégories distinctes → deux couleurs distinctes (la catégorie fermée est la SEULE à colorer)");
-    ck.eq(IssueStatus.color({ status_category: "vocabulaire-maison" }), IssueStatus.color({ status_category: "unknown" }),
+    ck.eq(TrackerStatus.color({ status_category: "vocabulaire-maison" }), TrackerStatus.color({ status_category: "unknown" }),
       "color : catégorie inconnue → couleur de `unknown` (neutre : on ne colore pas ce qu'on n'a pas su classer)");
 
     // -- TRI : introuvables groupés à part, puis ordre SÉMANTIQUE des catégories, puis statut brut. --
     const rows = [
       { name: "clos", status_category: "done" },
-      { name: "introuvable", status_category: "todo", orphan: true },
+      { name: "introuvable", status_category: "unknown", status: TrackerStatus.NOT_FOUND_STATUS },
       { name: "en cours", status_category: "in_progress" },
       { name: "ouvert-b", status_category: "todo", status: "B" },
       { name: "ouvert-a", status_category: "todo", status: "A" },
     ];
-    const sorted = rows.slice().sort((a, b) => (IssueStatus.sortKey(a) < IssueStatus.sortKey(b) ? -1 : IssueStatus.sortKey(a) > IssueStatus.sortKey(b) ? 1 : 0)).map((r) => r.name);
+    const sorted = rows.slice().sort((a, b) => (TrackerStatus.sortKey(a) < TrackerStatus.sortKey(b) ? -1 : TrackerStatus.sortKey(a) > TrackerStatus.sortKey(b) ? 1 : 0)).map((r) => r.name);
     ck.eq(sorted.join(","), "ouvert-a,ouvert-b,en cours,clos,introuvable",
       "sortKey : ordre sémantique todo → in_progress → done, statut brut en départage, INTROUVABLES groupés à part");
 
     // -- LIBELLÉS : la CATÉGORIE est traduite, le STATUT ne l'est jamais. Locale du harnais = fr. --
     const frLists = D("i18n/locales/fr/lists.js").lists, frDomain = D("i18n/locales/fr/domain.js").domain;
-    ck.eq(IssueStatus.notFoundLabel(), frLists.ph.notFound, "notFoundLabel : résolu via I18n (lists.ph.notFound), jamais une chaîne en dur");
-    ck.eq(IssueStatus.categoryLabel("done"), frDomain.issueStatusCategory.done, "categoryLabel : libellé localisé de la catégorie");
-    ck.eq(IssueStatus.categoryLabel("En recette"), frDomain.issueStatusCategory.unknown,
+    ck.eq(TrackerStatus.notFoundLabel(), frLists.ph.notFound, "notFoundLabel : résolu via I18n (lists.ph.notFound), jamais une chaîne en dur");
+    ck.eq(TrackerStatus.categoryLabel("done"), frDomain.trackerStatusCategory.done, "categoryLabel : libellé localisé de la catégorie");
+    ck.eq(TrackerStatus.categoryLabel("En recette"), frDomain.trackerStatusCategory.unknown,
       "categoryLabel : valeur non normalisée ramenée à `unknown` — la clé i18n demandée existe TOUJOURS");
-    ck.eq(IssueStatus.categoryLabel(null), frDomain.issueStatusCategory.unknown, "categoryLabel : null toléré");
+    ck.eq(TrackerStatus.categoryLabel(null), frDomain.trackerStatusCategory.unknown, "categoryLabel : null toléré");
   }
   });
 
   /* ==========================================================================================
-     LOT L4 — UI DE LECTURE : ce qui est PUR et testable sans navigateur
+     LOT P3 — UI DU PONT : ce qui est PUR et testable sans navigateur
      (les vues DOM restent hors test, comme partout dans le dépôt).
      ========================================================================================== */
 
-  await section("client L4 : IssueStatus — PASTILLES (échappement, priorité de l'introuvable, couleur par catégorie)", async () => {
+  await section("client P3 : TrackerStatus — PASTILLE (échappement, priorité de l'introuvable, couleur par catégorie)", async () => {
   {
     const frLists = D("i18n/locales/fr/lists.js").lists, frDomain = D("i18n/locales/fr/domain.js").domain;
 
     // -- STATUT : le libellé BRUT est rendu TEL QUEL… mais ÉCHAPPÉ. C'est une donnée d'ORIGINE
     //    DISTANTE posée en innerHTML : un statut de workflow contenant du balisage ne doit pas
     //    devenir du HTML. Les couleurs, elles, sont des constantes internes — jamais une donnée. --
-    const plain = IssueStatus.statusPill({ status: "En recette", status_category: "in_progress" });
+    const plain = TrackerStatus.statusPill({ status: "En recette", status_category: "in_progress" });
     ck(plain.indexOf("En recette") >= 0, "statusPill : le libellé BRUT du tracker est affiché tel quel (jamais traduit — décision D3)");
-    const nasty = IssueStatus.statusPill({ status: '<img src=x onerror="alert(1)">', status_category: "todo" });
+    const nasty = TrackerStatus.statusPill({ status: '<img src=x onerror="alert(1)">', status_category: "todo" });
     ck(nasty.indexOf("<img") === -1, "statusPill : un statut porteur de balisage est ÉCHAPPÉ (donnée distante en innerHTML)");
     ck(nasty.indexOf("&lt;img") >= 0, "statusPill : … et reste LISIBLE sous forme échappée (on n'efface pas la donnée)");
     ck(nasty.indexOf("onerror=\"") === -1, "statusPill : aucun attribut d'événement ne survit à l'échappement");
 
     // -- COULEUR : portée par la CATÉGORIE (le seul axe commun à tous les providers), jamais par le
     //    libellé libre. Deux catégories distinctes ⇒ deux pastilles distinctes. --
-    ck(IssueStatus.statusPill({ status: "X", status_category: "done" }) !== IssueStatus.statusPill({ status: "X", status_category: "todo" }),
+    ck(TrackerStatus.statusPill({ status: "X", status_category: "done" }) !== TrackerStatus.statusPill({ status: "X", status_category: "todo" }),
       "statusPill : MÊME libellé, catégories différentes → pastilles différentes (c'est la catégorie qui colore)");
 
-    // -- STATUT VIDE (toléré par le pivot) : repli sur le LIBELLÉ DE CATÉGORIE, qui est traduisible.
+    // -- STATUT VIDE (jamais synchronisé) : repli sur le LIBELLÉ DE CATÉGORIE, qui est traduisible.
     //    On n'a PAS traduit un libellé du tracker (D3 tient), on affiche la classification. --
-    ck(IssueStatus.statusPill({ status: "", status_category: "todo" }).indexOf(frDomain.issueStatusCategory.todo) >= 0,
+    ck(TrackerStatus.statusPill({ status: "", status_category: "todo" }).indexOf(frDomain.trackerStatusCategory.todo) >= 0,
       "statusPill : statut vide → libellé de CATÉGORIE (jamais une pastille vide)");
 
-    // -- INTROUVABLE : pastille PROPRE, en tête, et les DEUX sont rendues (savoir qu'un ticket
-    //    introuvable était « En cours » est précisément ce qui aide à décider quoi en faire). --
-    ck.eq(IssueStatus.notFoundPill({}), "", "notFoundPill : ticket résolu → aucune pastille");
-    const notFound = IssueStatus.notFoundPill({ orphan: true });
-    ck(notFound.indexOf(frLists.ph.notFound) >= 0, "notFoundPill : libellé « introuvable » (et non « orphelin » ni « déconnecté »)");
-    ck(notFound.indexOf("var(--warn)") >= 0, "notFoundPill : couleur d'AVERTISSEMENT — l'enregistrement local est intact");
-    ck(/title="/.test(IssueStatus.notFoundPill({ orphan: true }, "explication")), "notFoundPill : infobulle posée quand elle est fournie (la fiche l'utilise, le listing non)");
-    ck(!/title="/.test(notFound), "notFoundPill : aucune infobulle sans titre (colonne étroite du listing)");
-    ck(IssueStatus.notFoundPill({ orphan: true }, '"><script>').indexOf("<script") === -1, "notFoundPill : l'infobulle est échappée (elle finit dans un ATTRIBUT)");
+    // -- INTROUVABLE : la SENTINELLE du pont ne s'affiche JAMAIS brute — elle est remplacée par le
+    //    libellé LOCALISÉ (notre constat, pas un libellé de workflow) et peinte en avertissement. --
+    const notFound = TrackerStatus.statusPill({ status: TrackerStatus.NOT_FOUND_STATUS, status_category: "unknown" });
+    ck(notFound.indexOf(frLists.ph.notFound) >= 0, "statusPill : introuvable → libellé « introuvable » (et non « orphelin » ni « déconnecté »)");
+    ck(notFound.indexOf("var(--warn)") >= 0, "statusPill : … en couleur d'AVERTISSEMENT et non au neutre de sa catégorie `unknown`");
+    ck(/title="/.test(TrackerStatus.statusPill({ status: "X", status_category: "todo" }, "explication")), "statusPill : infobulle posée quand elle est fournie (la fiche l'utilise, le listing non)");
+    ck(!/title="/.test(notFound), "statusPill : aucune infobulle sans titre (colonne étroite du listing)");
+    ck(TrackerStatus.statusPill({ status: "X" }, '"><script>').indexOf("<script") === -1, "statusPill : l'infobulle est échappée (elle finit dans un ATTRIBUT)");
+  }
+  });
 
-    const both = IssueStatus.pills({ orphan: true, status: "En cours", status_category: "in_progress" });
-    ck(both.indexOf(frLists.ph.notFound) >= 0 && both.indexOf("En cours") >= 0,
-      "pills : les DEUX pastilles sont rendues, jamais l'une À LA PLACE de l'autre");
-    ck(both.indexOf(frLists.ph.notFound) < both.indexOf("En cours"), "pills : l'introuvable passe EN TÊTE (c'est l'état COURANT, la catégorie date de la dernière résolution)");
+  await section("client P3 : TrackerReplication — répliquée ?, état de POUSSÉE, URL du ticket", async () => {
+  {
+    // -- RÉPLIQUÉE : décidé sur l'identifiant INTERNE, et sur rien d'autre. Une référence saisie à la
+    //    main (champ hérité, éditable) ne prouve RIEN — c'est même le cas qui bascule l'UI vers
+    //    l'ADOPTION plutôt que la création. --
+    ck.eq(TrackerReplication.isReplicated({ tracker_ext_id: "10500" }), true, "isReplicated : identifiant distant présent → répliquée");
+    ck.eq(TrackerReplication.isReplicated({ tracker_ext_id: "   " }), false, "isReplicated : identifiant blanc → NON répliquée (une colonne vide n'est pas une identité)");
+    ck.eq(TrackerReplication.isReplicated({ tracker_provider_id: "jira-infra" }), false,
+      "isReplicated : un provider posé sans identifiant distant (poussée en cours) ne vaut PAS réplication");
+    ck.eq(TrackerReplication.isReplicated(null), false, "isReplicated : null toléré");
+
+    // -- ÉTAT DE POUSSÉE : ensemble fermé + `none` pour l'absence. Une valeur exotique retombe sur
+    //    `none` — mieux vaut n'afficher aucun état qu'un état inventé. --
+    ck.eq(TRACKER_PUSH_STATES.join(","), "synced,pending,error", "TRACKER_PUSH_STATES : les 3 états PERSISTÉS (`none` n'en est pas un — c'est l'absence)");
+    ck.eq(TrackerReplication.pushState({ tracker_push_state: "pending" }), "pending", "pushState : valeur connue conservée");
+    ck.eq(TrackerReplication.pushState({ tracker_push_state: "  error  " }), "error", "pushState : valeur rognée");
+    ck.eq(TrackerReplication.pushState({ tracker_push_state: "en-cours-peut-etre" }), "none", "pushState : valeur hors ensemble → `none`");
+    ck.eq(TrackerReplication.pushState({}), "none", "pushState : colonne vide → `none`");
+    ck.eq(TrackerReplication.hasPushError({ tracker_push_state: "error" }), true, "hasPushError : seul `error` appelle une action de l'utilisateur…");
+    ck.eq(TrackerReplication.hasPushError({ tracker_push_state: "pending" }), false, "hasPushError : … `pending` se résorbe seul à la passe suivante");
+    ck.eq(TrackerReplication.pushError({ tracker_push_error: "  le champ X est requis  " }), "le champ X est requis",
+      "pushError : message du tracker rogné et rendu INTACT (c'est lui qui dit quoi corriger)");
+    ck.eq(TrackerReplication.pushError({}), "", "pushError : aucun message → \"\"");
+
+    // -- Clés i18n et classes de badge : le module reste i18n-AGNOSTIQUE (il ne rend que des clés,
+    //    comme InterventionsFormat) — mais les clés doivent EXISTER, sinon elles s'afficheraient
+    //    telles quelles. Le régime NORMAL (`synced`) est DISCRET : il ne doit pas attirer l'œil. --
+    const { I18n } = D("i18n/I18n.js");
+    for (const state of [...TRACKER_PUSH_STATES, "none"]) {
+      const key = TrackerReplication.pushStateLabelKey(state);
+      ck(I18n.t(key) !== key, "i18n : libellé présent pour l'état de poussée « " + state + " »");
+    }
+    ck.eq(TrackerReplication.pushStateClass("synced"), "dim", "pushStateClass : « à jour » est DISCRET (c'est le régime normal)");
+    ck.eq(TrackerReplication.pushStateClass("pending"), "warn", "pushStateClass : « en attente » attire modérément l'œil");
+    ck.eq(TrackerReplication.pushStateClass("error"), "err", "pushStateClass : « en échec » est une erreur");
+    ck.eq(TrackerReplication.pushStateClass("none"), "dim", "pushStateClass : sans état → discret");
+
+    // -- URL : le lien PERSISTÉ par le pont PRIME sur le montage local. Le montage suppose que la
+    //    base d'URL configurée à part désigne la MÊME instance que celle réellement interrogée — ce
+    //    que rien ne garantit ; le lien persisté, lui, a été composé par l'adaptateur. --
+    ck.eq(TrackerReplication.ticketUrl("https://tracker.example.net/browse/INFRA-1", "https://autre.example.net/browse/INFRA-1"), "https://tracker.example.net/browse/INFRA-1",
+      "ticketUrl : le lien persisté par le pont l'emporte sur le montage local");
+    ck.eq(TrackerReplication.ticketUrl(null, "https://autre.example.net/browse/INFRA-1"), "https://autre.example.net/browse/INFRA-1",
+      "ticketUrl : sans lien persisté (intervention non répliquée), le montage hérité sert de repli");
+    ck.eq(TrackerReplication.ticketUrl("   ", null), null, "ticketUrl : rien d'exploitable → null (la vue affiche alors du texte brut)");
+    ck.eq(TrackerReplication.ticketUrl(undefined, undefined), null, "ticketUrl : valeurs absentes tolérées");
   }
   });
 
@@ -196,15 +244,15 @@ module.exports = async () => {
     // Un miroir que personne ne contrôle DIVERGE : un champ affiché mais non déclaré côté serveur
     // serait silencieusement ignoré (les options inconnues sont écartées) et un champ déclaré mais
     // non affiché resterait figé sur son défaut. Les deux défauts sont MUETS à l'exécution.
-    const { IssueProvidersForm } = D("views/forms/IssueProvidersForm.js");
+    const { TrackerProvidersForm } = D("views/forms/TrackerProvidersForm.js");
     const { I18n } = D("i18n/I18n.js");
     const { KIND_OPTION_SPECS } = SERVER("tracker/TrackerProviderConfigValidate.js");
     const TYPE_OF_SPEC = { string: "text", boolean: "toggle" };   // spec serveur → contrôle client
 
-    ck.eq(Object.keys(IssueProvidersForm.KIND_FIELDS).sort().join(","), Object.keys(KIND_OPTION_SPECS).sort().join(","),
+    ck.eq(Object.keys(TrackerProvidersForm.KIND_FIELDS).sort().join(","), Object.keys(KIND_OPTION_SPECS).sort().join(","),
       "miroir : MÊMES marques déclarées des deux côtés (ajouter une marque = 1 entrée ici + 1 branche là-bas)");
     for (const kind of Object.keys(KIND_OPTION_SPECS)) {
-      const server = KIND_OPTION_SPECS[kind], client = IssueProvidersForm.KIND_FIELDS[kind] || [];
+      const server = KIND_OPTION_SPECS[kind], client = TrackerProvidersForm.KIND_FIELDS[kind] || [];
       ck.eq(client.map((f) => f.name).join(","), server.map((s) => s.name).join(","),
         "miroir « " + kind + " » : mêmes options, dans le MÊME ordre");
       for (const spec of server) {
@@ -395,7 +443,7 @@ module.exports = async () => {
     ck.eq(categoryOf("cosmic"), "unknown", "catégorie INCONNUE → `unknown` (la passe ne doit pas échouer pour une donnée d'affichage)");
     ck.eq(categoryOf("undefined"), "unknown", "catégorie « undefined » (la « No category » de Jira) → `unknown`");
     ck.eq(JiraParse.statusCategory(null), "unknown", "statusCategory : entrée nulle tolérée");
-    ck(ISSUE_STATUS_CATEGORIES.includes(categoryOf("cosmic")), "catégorie : la valeur produite appartient TOUJOURS à l'ensemble FERMÉ affiché côté client");
+    ck(TRACKER_STATUS_CATEGORIES.includes(categoryOf("cosmic")), "catégorie : la valeur produite appartient TOUJOURS à l'ensemble FERMÉ affiché côté client");
 
     // -- PERSONNES : un identifiant opaque n'est PAS un nom affichable. --
     ck.eq(JiraParse.ticketState(fixtureIssue("9", "K-9", { assignee: { accountId: "5b10a2…" } }), BASE).assignee, null,
@@ -1685,7 +1733,12 @@ module.exports = async () => {
 
   await section("Serveur : invariants — décodeur ≡ pivot, agnosticisme de marque (aucun « jira » hors des points d'extension)", async () => {
   {
-    const { TRACKER_TICKET_STATE_FIELDS, TRACKER_TICKET_STATE_FIELDS_ARE_EXHAUSTIVE, TRACKER_STATUS_CATEGORIES, OPTION_AUTO_REPLICATE } = SERVER("tracker/TrackerProvider.js");
+    // ⚠ Les ensembles fermés du SERVEUR sont aliasés : leurs jumeaux CLIENTS portent le même nom
+    //    (c'est tout l'objet des verrous ci-dessous) et se masqueraient l'un l'autre sans cela.
+    const {
+      TRACKER_TICKET_STATE_FIELDS, TRACKER_TICKET_STATE_FIELDS_ARE_EXHAUSTIVE, OPTION_AUTO_REPLICATE,
+      TRACKER_STATUS_CATEGORIES: SERVER_STATUS_CATEGORIES, TRACKER_PUSH_STATES: SERVER_PUSH_STATES,
+    } = SERVER("tracker/TrackerProvider.js");
     const { KIND_OPTION_SPECS, SUPPORTED_KINDS } = SERVER("tracker/TrackerProviderConfigValidate.js");
     const { TrackerSyncService } = SERVER("tracker/TrackerSyncService.js");
 
@@ -1698,8 +1751,16 @@ module.exports = async () => {
     ck.eq(Object.keys(decoded).sort().join(","), [...TRACKER_TICKET_STATE_FIELDS].sort().join(","),
       "décodeur : un état produit porte EXACTEMENT les champs du pivot (ni manque, ni champ fantôme)");
     ck(TRACKER_TICKET_STATE_FIELDS.every((f) => decoded[f] !== undefined), "décodeur : aucun champ laissé `undefined` (les défauts sont explicites)");
-    ck.eq(TRACKER_STATUS_CATEGORIES.join(","), ISSUE_STATUS_CATEGORIES.join(","),
+    ck.eq(SERVER_STATUS_CATEGORIES.join(","), TRACKER_STATUS_CATEGORIES.join(","),
       "catégories : l'ensemble FERMÉ du serveur et celui qu'affiche le client sont IDENTIQUES, ordre compris (sans quoi une pastille tomberait sur « unknown » sans raison)");
+    // MIROIRS CLIENT ⇄ SERVEUR des DEUX autres duplications assumées du lot P3. Elles vivent dans
+    // `interventions.db`, base SERVEUR hors du schéma partagé : aucun canal `src-shared/` par où les
+    // faire transiter, donc un verrou de test — sans quoi une divergence serait parfaitement muette
+    // (un état de poussée lu comme « aucun », ou la sentinelle affichée BRUTE au lieu du libellé).
+    ck.eq(SERVER_PUSH_STATES.join(","), TRACKER_PUSH_STATES.join(","),
+      "états de poussée : l'ensemble FERMÉ du serveur et celui que lit le client sont IDENTIQUES");
+    ck.eq(TrackerSyncService.NOT_FOUND_STATUS, TrackerStatus.NOT_FOUND_STATUS,
+      "sentinelle « introuvable » : la valeur ÉCRITE par le pont et celle RECONNUE par l'affichage sont la MÊME chaîne");
     ck.eq(OPTION_AUTO_REPLICATE, "auto_replicate",
       "option COMMUNE : le service lit la réplication automatique par un nom GÉNÉRIQUE, jamais par marque");
     ck(KIND_OPTION_SPECS.jira.some((s) => s.name === OPTION_AUTO_REPLICATE && s.type === "boolean"),
@@ -1779,16 +1840,18 @@ module.exports = async () => {
       // — CLIENT : classification d'état, client REST, formulaire de providers. Seul ce dernier
       //   nomme les marques, dans les DEUX tables du point d'extension n°4 (`KINDS` = option du
       //   <select>, `KIND_FIELDS` = miroir des options de la marque).
-      ["src-client/core/IssueStatus.ts", []],
-      ["src-client/views/forms/IssueSyncClient.ts", []],
-      ["src-client/views/forms/IssueProvidersForm.ts", ["KINDS", "KIND_FIELDS"]],
+      ["src-client/core/TrackerStatus.ts", []],
+      ["src-client/core/TrackerReplication.ts", []],
+      ["src-client/views/forms/TrackerSyncClient.ts", []],
+      ["src-client/views/forms/TrackerTicketBlock.ts", []],
+      ["src-client/views/forms/TrackerProvidersForm.ts", ["KINDS", "KIND_FIELDS"]],
       // — CATALOGUES i18n : AUCUN libellé traduit ne nomme un tracker (le libellé « Jira » du
       //   <select> est un nom propre et vit dans le code du formulaire, non traduit). Seule
       //   exemption, NOMMÉE : `idPlaceholder`, un EXEMPLE d'identifiant de provider (« ex.
       //   jira-infra »). Purement cosmétique — il illustre une convention de nommage dans un champ
       //   libre, ne pilote aucun comportement, et le retirer ne changerait rien au code.
-      ["src-client/i18n/locales/fr/issues.ts", ["idPlaceholder"]],
-      ["src-client/i18n/locales/en/issues.ts", ["idPlaceholder"]],
+      ["src-client/i18n/locales/fr/tracker.ts", ["idPlaceholder"]],
+      ["src-client/i18n/locales/en/tracker.ts", ["idPlaceholder"]],
     ];
     for (const [relPath, exempt, allowExact] of AGNOSTIC_SOURCES) {
       const offenders = brandOffenders(relPath, exempt, allowExact);

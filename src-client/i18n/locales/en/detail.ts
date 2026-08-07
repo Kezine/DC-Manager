@@ -76,7 +76,6 @@ export const detail = {
     contact: "Contact not found",
     vm: "VM not found",
     wifiClient: "Wi-Fi client not found",
-    issue: "Issue not found",
     type: "Type not found",
   },
   cable: {
@@ -207,36 +206,6 @@ export const detail = {
     notMatched: "not matched",
     localSection: "Local enrichments",
     locateAp: "Locate the access point (the client itself is not in the scene)",
-  },
-  // Remote tracker ISSUE (REMOVABLE feature). ⚠ `notFoundTitle` explains the SAME mechanics as
-  // `vm.orphanTitle` and `wifi.disconnectedTitle`, with a THIRD meaning: an issue that can no longer
-  // be resolved signals a deletion, an archived project or a lost permission (cadrage §3).
-  issue: {
-    title: "Issue",
-    notFoundTitle: "Not resolved at the last synchronisation — deleted, archived project or lost permission. The local record is kept and will return if access is restored.",
-    reporter: "Reporter",
-    labels: "Labels",
-    resolution: "Resolution",
-    link: "Issue link",
-    createdSrc: "Created (tracker)",
-    updatedSrc: "Updated (tracker)",
-    lastSync: "Last sync",
-    providerId: "Source identity",
-    targetsSection: "Targeted objects ({{count}})",
-    targetsEmpty: "No targeted object. Link some from “Edit”.",
-    colFamily: "Family",
-    colTarget: "Object",
-    openTarget: "Open the targeted object's record",
-    localSection: "Local enrichments",
-    // “STOP TRACKING” — the symmetric gesture of “Follow an issue”. ⚠ The confirmation says TWO
-    // things, and both matter: the issue is NOT deleted from the tracker (otherwise nobody dares),
-    // and what is actually lost here (notes, local description, targets).
-    unfollow: "Stop tracking this issue…",
-    unfollowTitle: "Removes the issue from this document. The issue is not deleted from the tracker.",
-    unfollowConfirmTitle: "Stop tracking this issue?",
-    unfollowConfirmMsg: "Remove “{{key}}” from this document's tracking? The issue is NOT deleted from the tracker: only its local tracking stops, and it will no longer be refreshed by synchronisation. The notes, local description and targeted objects of this record are lost. You will be able to follow it again later with “Follow an issue”.",
-    unfollowConfirm: "Stop tracking",
-    unfollowed: "Issue no longer tracked",
   },
   vm: {
     orphanTitle: "Disappeared at the last synchronisation",

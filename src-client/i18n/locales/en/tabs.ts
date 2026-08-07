@@ -22,11 +22,6 @@ export const tabs = {
     title: "Wi-Fi clients",
     subtitle: "Clients connected to the access points, fed by synchronisation with a controller. Source fields are read-only; local enrichments are made from the record. A client missing from the last inventory is flagged “disconnected”, never deleted.",
   },
-  issues: {
-    label: "Issues",
-    title: "Issues",
-    subtitle: "Issues followed from a remote tracker, refreshed by synchronisation. An issue only enters the document through “Follow an issue” — a pass never creates one. Source fields are read-only; targets and local enrichments are edited from the record. An issue that can no longer be resolved is flagged “not found”, never deleted.",
-  },
   racks: {
     label: "Racks",
     subtitle: "Racks: location, size (U), depth, faces, doors and covers. Use « ▦ Contents » to mount equipment into the U slots.",

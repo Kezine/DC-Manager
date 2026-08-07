@@ -80,12 +80,11 @@ export const domain = {
     transceiver: "Transceiver",
     other: "Other",
   },
-  // Issue state CATEGORY — CLOSED enumeration (`ISSUE_STATUS_CATEGORIES`), the ONLY translatable part
-  // of the state. ⚠ The tracker's own `status` label is displayed AS IS and NEVER translated (D3:
-  // workflows are configurable per project). Resolved at render time by `core/IssueStatus.categoryLabel`.
-  // The first three entries are LOCKED by test against the shared search catalogue
-  // `SEARCH_CATALOGS.issueStatusCategory`.
-  issueStatusCategory: {
+  // Replicated issue state CATEGORY — CLOSED enumeration (`TRACKER_STATUS_CATEGORIES`), the ONLY
+  // translatable part of the state. ⚠ The tracker's own `status` label is displayed AS IS and NEVER
+  // translated (D3: workflows are configurable per project). Resolved at render time by
+  // `core/TrackerStatus.categoryLabel`.
+  trackerStatusCategory: {
     todo: "Open",
     in_progress: "In progress",
     done: "Closed",

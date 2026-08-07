@@ -174,7 +174,11 @@ export class TrackerSyncService {
   /** Libellé de statut posé sur une intervention dont le ticket est INTROUVABLE. Écrit dans le
       champ « statut BRUT », ce qui est assumé : la colonne porte ce que l'opérateur doit LIRE, et
       « introuvable » est un fait, pas une traduction du vocabulaire d'un workflow. La CATÉGORIE,
-      elle, retombe sur `unknown` — c'est elle qui pilote pastilles et tris. */
+      elle, retombe sur `unknown` — c'est elle qui pilote pastilles et tris.
+      ⚠ SENTINELLE : le client la RECONNAÎT pour peindre la pastille en avertissement et afficher le
+      libellé LOCALISÉ à sa place (`core/TrackerStatus.NOT_FOUND_STATUS`). Duplication assumée et
+      signalée des deux côtés (principe n°3) — aucun canal `src-shared/` ne relie `interventions.db`
+      au front —, VERROUILLÉE par test : les deux constantes sont comparées. */
   static readonly NOT_FOUND_STATUS = "introuvable";
 
   /** docId → providerId → dernier état connu. */
