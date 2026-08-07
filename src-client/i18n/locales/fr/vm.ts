@@ -106,7 +106,7 @@ export const vm = {
     savedUpdated: "Provider mis à jour",
     savedCreated: "Provider créé",
     deleteTitle: "Supprimer ce provider ?",
-    deleteMessage: "Supprimer le provider « {{id}} » ? Les VMs déjà synchronisées restent dans le document (elles deviendront orphelines).",
+    deleteMessage: "Supprimer le provider « {{id}} » ? Les VMs déjà synchronisées restent dans le document, FIGÉES dans leur dernier état : plus aucune synchro ne les couvre — elles ne seront PAS marquées orphelines.",
     deleted: "Provider supprimé",
     testConnOk: "Connexion OK",
     testConnFail: "Connexion en échec",

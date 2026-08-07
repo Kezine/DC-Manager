@@ -81,7 +81,7 @@ export const wifi = {
     savedUpdated: "Provider updated",
     savedCreated: "Provider created",
     deleteTitle: "Delete this provider?",
-    deleteMessage: "Delete provider “{{id}}”? Clients already synchronised stay in the document (they will show as disconnected).",
+    deleteMessage: "Delete provider “{{id}}”? Clients already synchronised stay in the document, frozen in their last state: no sync covers them any more (a client shown as connected will stay so).",
     deleted: "Provider deleted",
     disabledTitle: "Provider management unavailable",
     disabledDetail: "Provider management from the UI is disabled server-side. Set the secrets encryption key (DCMANAGER_SECRETS_KEY) in the server environment to enable it.",
