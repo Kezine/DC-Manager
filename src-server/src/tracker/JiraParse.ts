@@ -283,9 +283,16 @@ export class JiraParse {
     for (const id of Array.isArray(ids) ? ids : []) {
       const raw = typeof id === "string" ? id.trim() : typeof id === "number" ? String(id) : "";
       if (raw === "") continue;
-      parts.push(/^\d+$/.test(raw) ? raw : '"' + raw.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"');
+      parts.push(/^\d+$/.test(raw) ? raw : JiraParse.jqlString(raw));
     }
     return parts.join(", ");
+  }
+
+  /** Cite une valeur TEXTE pour une clause JQL (`project = "INFRA"`) : guillemets doubles +
+      échappement de `\` et `"` — la MÊME règle d'anti-injection que les identifiants non
+      numériques de `jqlIdList` (qui délègue ici depuis l'ajout de la sonde bornée). */
+  static jqlString(value: string): string {
+    return '"' + String(value == null ? "" : value).replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
   }
 
   /* --------------------------------------------------------------------------

@@ -619,6 +619,9 @@ module.exports = async () => {
     ck.eq(JiraParse.jqlIdList([" 10001 ", "", null, 10002]), "10001, 10002", "jqlIdList : rognage, vides et non-chaînes écartés, nombres acceptés");
     ck.eq(JiraParse.jqlIdList(["INFRA-1"]), '"INFRA-1"', "jqlIdList : une CLÉ est citée (elle n'est pas numérique)");
     ck.eq(JiraParse.jqlIdList(['a"b\\c']), '"a\\"b\\\\c"', "jqlIdList : guillemets et contre-obliques ÉCHAPPÉS");
+    ck.eq(JiraParse.jqlString("INFRA"), '"INFRA"', "jqlString : citation simple d'une clé de projet");
+    ck.eq(JiraParse.jqlString('a"b\\c'), '"a\\"b\\\\c"', "jqlString : guillemets et contre-obliques échappés (même règle anti-injection que jqlIdList)");
+    ck.eq(JiraAdapter.probeJql("INFRA"), 'project = "INFRA" ORDER BY created DESC', "probeJql : sonde BORNÉE sur le projet (constat instance réelle : l'endpoint refuse les JQL non bornées)");
     const injected = JiraParse.jqlIdList(['1) OR project = "SECRET"']);
     ck(injected.startsWith('"') && injected.endsWith('"') && !/^\d/.test(injected),
       "jqlIdList : 🚨 une valeur forgée reste ENTIÈREMENT citée — elle ne peut pas refermer la parenthèse et poursuivre la requête");
@@ -930,6 +933,12 @@ module.exports = async () => {
     ck(/Compte de service/.test(ok.message), "test : le message nomme le compte reconnu");
     ck.eq(ok.version, null, "test : version null (le chemin du compte ne la porte pas — on n'ajoute pas un appel pour un champ cosmétique)");
     ck.eq(okStub.calls[1].body.maxResults, 1, "test : la sonde de recherche est VOLONTAIREMENT minuscule (maxResults 1)");
+    // ⚠ CONSTAT sur instance réelle (2026-08-07) : `/search/jql` REFUSE les JQL non bornées
+    // (400 « Les requêtes JQL non liées ne sont pas autorisées ici ») — la sonde DOIT porter une
+    // restriction. Elle est bornée sur le projet configuré, ce qui fait AUSSI vérifier au test
+    // que `project_key` existe et est visible du compte.
+    ck(/^project = /.test(String(okStub.calls[1].body.jql)), "test : la sonde est BORNÉE (restriction `project = …` — une JQL nue est refusée par l'endpoint réel)");
+    ck(String(okStub.calls[1].body.jql).includes('"INFRA"'), "test : … sur le projet CONFIGURÉ du provider, cité entre guillemets");
 
     // La sonde échoue → l'AUTH est prouvée, donc `ok` reste vrai : c'est un AVERTISSEMENT précis.
     const probeKo = await new JiraAdapter(CFG, mkJiraStub({

@@ -48,6 +48,14 @@ import { JiraHttp } from "./JiraHttp.js";
    3. 🚨 RECHERCHE PAR LOTS sur `POST /rest/api/3/search/jql`, corps
       `{ jql, fields, maxResults }`, pagination par **`nextPageToken`**. Atlassian a
       REMPLACÉ l'ancien `POST /rest/api/3/search` (`startAt`/`total`) par celui-ci.
+      ✅ CONSTATS sur instance réelle le 2026-08-07 : le chemin EXISTE (pas de 404),
+      l'authentification Basic y passe, et il EXIGE une JQL **BORNÉE** — HTTP 400
+      « Les requêtes JQL non liées ne sont pas autorisées ici » sur une clause sans
+      restriction. D'où la sonde `probeJql` bornée sur le projet ; la clause
+      `id IN (…)` de la synchro EST une restriction et passe ce contrôle.
+      Reste à constater : la forme de pagination réelle et le sort d'un id INEXISTANT
+      dans `id IN (…)` (omission attendue — c'est le fondement de la détection
+      « introuvable » ; s'il produisait un 400, il faudrait le traiter).
       C'est l'hypothèse la plus fragile du lot, donc la plus isolée :
       - le chemin est la constante `PATH_SEARCH` — si l'instance répond 404, c'est
         `PATH_SEARCH_LEGACY` qu'il faut y mettre, et RIEN d'autre à toucher ;
@@ -146,10 +154,17 @@ export class JiraAdapter implements TrackerProviderAdapter {
       instance qui plafonnerait `maxResults` bien plus bas, tout en restant très loin d'une boucle. */
   static readonly MAX_PAGES_PER_BATCH = 10;
 
-  /** JQL de SONDE du test de connexion : la clause vide est valide et l'ordre explicite évite toute
-      dépendance à un projet particulier. Associée à `maxResults: 1`, elle coûte quasi rien et
-      VÉRIFIE l'hypothèse la plus fragile de l'intégration (le chemin de recherche). */
-  static readonly PROBE_JQL = "order by created DESC";
+  /** JQL de SONDE du test de connexion — BORNÉE sur le projet configuré.
+      ⚠ CONSTAT sur instance réelle (2026-08-07) : le nouvel endpoint `/search/jql` REFUSE les
+      requêtes NON BORNÉES (HTTP 400 « Les requêtes JQL non liées ne sont pas autorisées ici ») —
+      la sonde historique sans restriction (`order by created DESC`) échouait donc TOUJOURS,
+      alors que la synchro réelle, elle, passe : sa clause `id IN (…)` EST une restriction.
+      Borner sur `project = <clé>` règle le 400 ET enrichit le test : un `project_key` erroné
+      (projet inexistant ou invisible du compte) se voit au « Tester », plus à la première
+      réplication — le message de Jira nomme le projet en cause. */
+  static probeJql(projectKey: string): string {
+    return "project = " + JiraParse.jqlString(projectKey) + " ORDER BY created DESC";
+  }
 
   /** Nom du champ Jira dont un REFUS déclenche la retente en mode dégradé (cf. hypothèse 11). UNE
       constante nommée plutôt qu'un littéral disséminé : c'est une décision de comportement, elle
@@ -211,7 +226,7 @@ export class JiraAdapter implements TrackerProviderAdapter {
     let supported = true;
     let warning = "";
     try {
-      await this.http.postJson(JiraAdapter.PATH_SEARCH, { jql: JiraAdapter.PROBE_JQL, fields: ["summary"], maxResults: 1 });
+      await this.http.postJson(JiraAdapter.PATH_SEARCH, { jql: JiraAdapter.probeJql(this.options().project_key), fields: ["summary"], maxResults: 1 });
     } catch (e) {
       supported = false;
       warning = " — ⚠ l'API de RECHERCHE (" + JiraAdapter.PATH_SEARCH + ") n'a pas répondu comme attendu : "
