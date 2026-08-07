@@ -225,6 +225,17 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   `DCMANAGER_SECRETS_KEY` partagée avec vm/notify), transport `node:https` + pagination, API UniFi
   VALIDÉE sur console réelle le 2026-08-04 (limite mesurée : le SSID n'est pas exposé par le contrat
   officiel), script de suppression).
+- [`issue-tracker.md`](docs/issue-tracker.md) — **TICKETS d'un tracker distant** (module serveur AMOVIBLE
+  `issues/`, collection `issues`, pivot `IssueRecord` et contrat d'adaptateur AGNOSTIQUES de la marque —
+  Atlassian Jira Cloud n'est que la 1re implémentation, ajout d'une marque en 4 points ; 🚨 **assiette
+  INVERSÉE** par rapport à `vm/`/`wifi/` — c'est le DOCUMENT qui énumère les tickets SUIVIS et l'adaptateur
+  qui RÉSOUT (`resolve(extIds)`), la synchro ne CRÉE jamais d'enregistrement, « orphelin » = INTROUVABLE ;
+  `ext_id` = id INTERNE et jamais la clé (qui bouge au déplacement de projet) ; statut = libellé BRUT +
+  catégorie FERMÉE ; rattachement MANUEL `targets` en clés « famille:id » partagées avec les interventions
+  SANS dépendance de code, intégrité par 4 `custom` de cascade ; création de ticket (ordre tracker→local,
+  échec PARTIEL, ADF, modèle de menace élargi) ; providers PAR document dans `issue-providers.db` chiffrée
+  (clé `DCMANAGER_SECRETS_KEY` partagée avec vm/wifi/notify), transport `fetch` INJECTÉ + 429 ;
+  ⚠ hypothèses d'API Jira NON validées sur instance réelle + procédure de re-validation ; script de suppression).
 - [`notifications.md`](docs/notifications.md) — **service de notifications** (module serveur AMOVIBLE
   `notify/`, alertes persistantes anti-spam `raise`/`resolve`, moteur pur `NotifyEngine`, schéma
   `notify.db` à 5 tables, routage par abonnements, webhooks, coffre `SecretBox` partagé, producteurs
