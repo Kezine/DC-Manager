@@ -174,7 +174,7 @@ voir [`docs/reverse-proxy.md`](docs/reverse-proxy.md).
 
 ## 4. Configuration (variables d'environnement)
 
-Lues par le serveur au démarrage — cœur dans [`src-server/src/index.ts`](src-server/src/index.ts) ; la **clé de chiffrement** des secrets, elle, est lue par le coffre partagé [`SecretBox`](src-server/src/SecretBox.ts) (utilisé par les modules VM / wifi / tickets / notifications).
+Lues par le serveur au démarrage — cœur dans [`src-server/src/index.ts`](src-server/src/index.ts) ; la **clé de chiffrement** des secrets, elle, est lue par le coffre partagé [`SecretBox`](src-server/src/SecretBox.ts) (utilisé par les modules VM / wifi / réplication vers un tracker / notifications).
 
 | Variable | Défaut | Rôle |
 |---|---|---|
@@ -188,8 +188,8 @@ Lues par le serveur au démarrage — cœur dans [`src-server/src/index.ts`](src
 | `SSO_LOGIN_URL` | *(vide)* | URL de connexion SSO du bouton « Connexion » (écran d'accueil, si non authentifié). Macro `${clbkUrl}` → URL courante encodée (retour après login). Vide = pas de bouton. |
 | `DEV_USER` | — | Nom de l'utilisateur factice (mode dev). |
 | `BASIC_AUTH` | — | `"user:pass"` → impose une Basic Auth navigateur (dev). Prioritaire sur le SSO. |
-| `DCMANAGER_SECRETS_KEY` | — | **Clé de chiffrement** des secrets serveur (coffre `SecretBox` partagé, lu par les modules — pas par `index.ts`). Requise par les modules **VM/Proxmox** (jetons des providers), **clients wifi** (clés d'API des contrôleurs), **tickets** (jetons d'API des trackers) et **notifications** (jetons de webhook) : absente → ces modules se désactivent et le signalent (**503 explicite**) ; le serveur démarre quand même. **Doit être un secret LONG et ALÉATOIRE (≥ 16 caractères** — refusé au démarrage du module sinon, car la clé en est un simple SHA-256 sans sel : une passphrase courte rendrait un backup de la base force-brutable hors ligne). La générer, p. ex. `openssl rand -base64 32`. **Seule variable lue** pour ce coffre : aucun autre nom n'est reconnu. La PKI/certs est *zéro-connaissance* (chiffrement navigateur) et **n'en dépend pas**. |
-| `JIRA_BASE_URL` | *(vide)* | **Base d'URL Jira** (module **interventions**) pour fabriquer un lien vers un ticket depuis une clé (ex. `https://monorg.atlassian.net/browse/`). Trimmée ; vide/absente → le client masque le lien. Exposée par `GET …/interventions/meta` ; simple RÉFÉRENCE (aucun appel Jira côté serveur). |
+| `DCMANAGER_SECRETS_KEY` | — | **Clé de chiffrement** des secrets serveur (coffre `SecretBox` partagé, lu par les modules — pas par `index.ts`). Requise par les modules **VM/Proxmox** (jetons des providers), **clients wifi** (clés d'API des contrôleurs), **réplication des interventions vers un tracker** (jetons d'API des trackers — jetons en **ÉCRITURE**, cf. `docs/jira-interventions.md`) et **notifications** (jetons de webhook) : absente → ces modules se désactivent et le signalent (**503 explicite**) ; le serveur démarre quand même. **Doit être un secret LONG et ALÉATOIRE (≥ 16 caractères** — refusé au démarrage du module sinon, car la clé en est un simple SHA-256 sans sel : une passphrase courte rendrait un backup de la base force-brutable hors ligne). La générer, p. ex. `openssl rand -base64 32`. **Seule variable lue** pour ce coffre : aucun autre nom n'est reconnu. La PKI/certs est *zéro-connaissance* (chiffrement navigateur) et **n'en dépend pas**. |
+| `JIRA_BASE_URL` | *(vide)* | **Base d'URL Jira** (module **interventions**) pour fabriquer un lien vers un ticket depuis une clé saisie à la main (ex. `https://monorg.atlassian.net/browse/`). Trimmée ; vide/absente → le client masque le lien. Exposée par `GET …/interventions/meta` ; simple RÉFÉRENCE (aucun appel Jira côté serveur). ⚠ **Sans rapport avec le pont de réplication** (`docs/jira-interventions.md`), qui PERSISTE le lien de chaque ticket au moment de la synchro et n'a donc aucune variable d'environnement propre. |
 
 **Authentification.** L'app **ne gère pas le login** : elle transmet les cookies de
 session au backend, qui valide via un SSO externe (ou le proxifie).
@@ -233,7 +233,7 @@ session au backend, qui valide via un SSO externe (ou le proxifie).
 - [`docs/notifications.md`](docs/notifications.md) — service de notifications et d'alertes.
 - [`docs/certs.md`](docs/certs.md) — PKI interne zéro-connaissance.
 - [`docs/interventions.md`](docs/interventions.md) — incidents & interventions.
-- [`docs/issue-tracker.md`](docs/issue-tracker.md) — tickets d'un tracker distant (Jira Cloud).
+- [`docs/jira-interventions.md`](docs/jira-interventions.md) — réplication des incidents & interventions vers un tracker distant (Jira Cloud).
 
 **Transverse**
 

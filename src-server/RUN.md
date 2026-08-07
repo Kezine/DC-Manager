@@ -157,7 +157,8 @@ docker compose start dc-manager        # redémarrer le serveur après
 
 Bases dans `/data/documents/` : `registry.db` (documents), un `<doc>.db` par document, `certs.db`
 (PKI), `notify.db`, `interventions.db`, `users.db` (annuaire), `vm-providers.db`,
-`wifi-providers.db`, `issue-providers.db` (trackers de tickets). Le service ouvre **`certs.db`**
+`wifi-providers.db`, `tracker-providers.db` (trackers de destination de la réplication des
+interventions). Le service ouvre **`certs.db`**
 par défaut — `.open <base>.db` pour changer (chemins relatifs à `/data/documents`, ex.
 `.open registry.db`).
 
@@ -181,8 +182,8 @@ par défaut — `.open <base>.db` pour changer (chemins relatifs à `/data/docum
 | `COOKIE_NAME` | *(vide)* | nom du cookie contenant le jeton à proxifier au SSO (`""` = en-tête `Cookie` complet) |
 | `SSO_LOGIN_URL` | *(vide)* | URL de connexion SSO du bouton « Connexion » (écran d'accueil, si non authentifié) ; macro `${clbkUrl}` → URL courante encodée. Vide = pas de bouton |
 | `DEV_USER` | `dev` | nom de l'utilisateur factice en mode dev |
-| `DCMANAGER_SECRETS_KEY` | *(vide)* | passphrase de chiffrement des secrets stockés en base (coffre `SecretBox` **partagé**), **≥ 16 caractères**. Consommée par les modules **VM/Proxmox**, **clients wifi**, **tickets** et **notifications** ; absente → ces modules sont inactifs et leurs routes répondent **503 actionnable**, le serveur démarre quand même. La générer p. ex. par `openssl rand -base64 32` (cf. `README.md` § 4) |
-| `JIRA_BASE_URL` | *(vide)* | base d'URL Jira du module **interventions** (ex. `https://monorg.atlassian.net/browse/`) pour lier une clé à son ticket ; vide/absente → pas de lien. Simple référence, aucun appel Jira (cf. `docs/interventions.md`). ⚠ **Sans rapport avec le module tickets** (`docs/issue-tracker.md`), qui persiste le lien de chaque ticket au moment de la synchro et n'a donc aucune variable d'environnement propre |
+| `DCMANAGER_SECRETS_KEY` | *(vide)* | passphrase de chiffrement des secrets stockés en base (coffre `SecretBox` **partagé**), **≥ 16 caractères**. Consommée par les modules **VM/Proxmox**, **clients wifi**, **réplication des interventions vers un tracker** et **notifications** ; absente → ces modules sont inactifs et leurs routes répondent **503 actionnable**, le serveur démarre quand même (les interventions, elles, restent pleinement fonctionnelles). La générer p. ex. par `openssl rand -base64 32` (cf. `README.md` § 4) |
+| `JIRA_BASE_URL` | *(vide)* | base d'URL Jira du module **interventions** (ex. `https://monorg.atlassian.net/browse/`) pour lier une clé **saisie à la main** à son ticket ; vide/absente → pas de lien. Simple référence, aucun appel Jira (cf. `docs/interventions.md`). ⚠ **Sans rapport avec le pont de réplication** (`docs/jira-interventions.md`), qui persiste le lien de chaque ticket au moment de la synchro et n'a donc aucune variable d'environnement propre |
 
 ### Authentification (SSO)
 
@@ -246,5 +247,5 @@ node scripts/import-json.mjs doc.json --url http://host:3000 --basic dev:secret
 | **`Cannot connect to the Docker daemon`** | Docker Desktop n'est pas démarré. |
 | **Conteneur en `Restarting`/`Exited`** | `docker compose logs --tail 50` pour voir l'erreur de démarrage. |
 | **`Client introuvable`** (503 sur `/`) | Le build du client a échoué : `docker compose up --build` et regarder les logs de build. |
-| **Aucun cluster affiché / test provider VM en échec** (logs : `SecretBox : déchiffrement refusé … le secret doit être ressaisi`) | La valeur de `DCMANAGER_SECRETS_KEY` a **changé** (c'est la **seule** variable lue pour ce coffre) → les jetons chiffrés au repos ne sont plus déchiffrables. Même symptôme et même correctif pour les providers **wifi** et **tickets**, qui partagent ce coffre. La vue Clusters montre désormais le provider en **« Provider en erreur »** et « Tester » renvoie le message. **Solution** : ré-ouvrir le provider (Providers… → Modifier), **ressaisir le jeton**, Enregistrer — ou restaurer l'ancienne valeur de la clé. Détails : [`docs/vm-proxmox.md`](../docs/vm-proxmox.md) § Dépannage. |
+| **Aucun cluster affiché / test provider VM en échec** (logs : `SecretBox : déchiffrement refusé … le secret doit être ressaisi`) | La valeur de `DCMANAGER_SECRETS_KEY` a **changé** (c'est la **seule** variable lue pour ce coffre) → les jetons chiffrés au repos ne sont plus déchiffrables. Même symptôme et même correctif pour les providers **wifi** et les providers de **réplication vers un tracker**, qui partagent ce coffre. La vue Clusters montre désormais le provider en **« Provider en erreur »** et « Tester » renvoie le message. **Solution** : ré-ouvrir le provider (Providers… → Modifier), **ressaisir le jeton**, Enregistrer — ou restaurer l'ancienne valeur de la clé. Détails : [`docs/vm-proxmox.md`](../docs/vm-proxmox.md) § Dépannage. |
 | **Repartir totalement de zéro** | `docker compose down -v && docker compose up -d --build`. |

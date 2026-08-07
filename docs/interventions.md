@@ -56,9 +56,11 @@ dénormalisée, et surveille les fenêtres à démarrer.
   / complexité** (PAS une gravité d'incident). Sert de **rang de tri sémantique** (cf. « Tris »).
 - **`planned_start` / `planned_end`** : fenêtre d'intervention **OPTIONNELLE** (ISO 8601).
   `planned_end` **exige** `planned_start` et doit lui être **postérieur ou égal**.
-- **`jira_ref`** : clé (`INFRA-123`) ou URL — **simple RÉFÉRENCE**, AUCUN appel Jira n'est
-  fait côté serveur. Le client fabrique un lien en la préfixant par `JIRA_BASE_URL` (cf. route
-  `/meta`).
+- **`jira_ref`** : clé (`INFRA-123`) ou URL — **simple RÉFÉRENCE** saisie à la main : le module
+  interventions ne fait AUCUN appel Jira. Le client fabrique un lien en la préfixant par
+  `JIRA_BASE_URL` (cf. route `/meta`). ⚠ Le **pont de réplication OPTIONNEL** (`tracker/`, cf.
+  [`jira-interventions.md`](jira-interventions.md)), s'il est branché, **écrit** ce champ : il y
+  pose la clé du ticket qu'il a créé ou lié, là où l'utilisateur la cherche déjà.
 - **`description`** : markdown (rendu côté client dans la **modale de détail**, via `core/Markdown`/
   micromark), bornée à 100 000 caractères.
 - **Audit** (`created_by`/`created_date`, `updated_by`/`updated_date`) : posé **PAR LE
@@ -96,8 +98,23 @@ pour l'avenir** (pattern `CertsDb`).
   `created_date`, `updated_by`, `updated_date`, `planned_start`, `planned_end`, `jira_ref`,
   `closed_date`, **`search`** (colonne DÉNORMALISÉE `TEXT NOT NULL DEFAULT ''` =
   `normSearch(title + description + jira_ref)`, recalculée à CHAQUE save avec la MÊME
-  normalisation partagée que le cœur — `Schema.normSearch`). Index : `(doc_id, search)`
-  (filtre `query` — LIKE), `(doc_id, status)`, `planned_start` (balayage du veilleur).
+  normalisation partagée que le cœur — `Schema.normSearch`), plus les **neuf colonnes
+  `tracker_*`** ci-dessous. Index : `(doc_id, search)` (filtre `query` — LIKE),
+  `(doc_id, status)`, `planned_start` (balayage du veilleur), et les deux index du pont
+  `(doc_id, tracker_ext_id)` / `(doc_id, tracker_push_state)`.
+- **Colonnes `tracker_*`** (`tracker_provider_id`, `tracker_ext_id`, `tracker_status`,
+  `tracker_status_category`, `tracker_assignee`, `tracker_url`, `tracker_last_sync`,
+  `tracker_push_state`, `tracker_push_error`) — l'**état de réplication** vers un tracker
+  distant. Toutes `TEXT` nullables, ajoutées par `ensureColumn` sur une base antérieure (« null »
+  = « pas répliquée », l'état initial correct : aucun backfill n'a de sens). Ce module les
+  DÉCLARE et les SERT, mais n'en produit **aucune** : elles sont écrites par le module
+  **`tracker/`** (AMOVIBLE et OPTIONNEL, cf. [`jira-interventions.md`](jira-interventions.md)),
+  et lui seul, via `applyTrackerState`. Deux garanties les gouvernent : `save()` **ne les touche
+  jamais** (absentes du `DO UPDATE SET` — un client qui les enverrait dans un `PUT` est ignoré,
+  comme l'audit), et `applyTrackerState()` **ne touche jamais** `updated_by`/`updated_date` (le
+  retour d'état n'est pas une édition de l'utilisateur : les estampiller ferait remonter en tête
+  d'un listing trié par activité des objets que personne n'a modifiés). Module `tracker/` absent
+  ⇒ colonnes vides, comportement **strictement inchangé**.
 - **`intervention_links`** — cibles liées en **table ORDONNÉE** : `doc_id`,
   `intervention_id`, `position` (**PK composite**), `target_kind` (`equipment`/`vm`/`spare`/`sub_equipment`
   — ce dernier ajouté SANS migration : la colonne est un `TEXT` contrôlé par l'enum de validation, pas par la DB),
@@ -209,9 +226,9 @@ module vit normalement, simplement sans notifications.
 | Fichier | Rôle |
 |---|---|
 | `InterventionsValidate.ts` | **Validation PURE** (ni DB ni réseau), griefs GROUPÉS, messages français uniques (mêmes principes que `CertsValidate`/`NotifyValidate`). Porte les tables `INTERVENTION_KINDS`/`INTERVENTION_STATUSES`/`INTERVENTION_PRIORITIES`/`INTERVENTION_TARGET_KINDS`, les invariants de fenêtre (`end` exige `start`, `end ≥ start`) et le bornage des liens (≤ 200, `target_id` non vide ≤ 200). **Ignore** les champs d'audit envoyés par le client. Héberge aussi `jiraBaseUrl(env)` (normalisation de `JIRA_BASE_URL`), placée ICI — module PUR, sans Express — pour rester **testable en isolation** ; la route `/meta` ne fait que la RELAYER. |
-| `InterventionsDb.ts` | **Persistance SQLite dédiée** (`interventions.db`), possédée par le module. **2 tables** (cf. « Schéma »). CRUD + **estampillage d'audit SERVEUR** + gestion auto de `closed_date` + **remplacement intégral des liens** + colonne `search` (`normSearch` partagé). **Listing PAGINÉ SQL** (`listPage` — LIMIT/OFFSET, filtres query/kinds/statuses/priorities, tris à **rang sémantique**). `listReminderCandidates` pour le veilleur. Migrations `ensureColumn` prêtes. Driver SQLite **injecté**. **Pas de `SecretBox`** : rien à chiffrer côté serveur. |
+| `InterventionsDb.ts` | **Persistance SQLite dédiée** (`interventions.db`), possédée par le module. **2 tables** (cf. « Schéma »). CRUD + **estampillage d'audit SERVEUR** + gestion auto de `closed_date` + **remplacement intégral des liens** + colonne `search` (`normSearch` partagé). **Listing PAGINÉ SQL** (`listPage` — LIMIT/OFFSET, filtres query/kinds/statuses/priorities, tris à **rang sémantique**). `listReminderCandidates` pour le veilleur. Migrations `ensureColumn` prêtes. Driver SQLite **injecté**. **Pas de `SecretBox`** : rien à chiffrer côté serveur. Porte aussi les **colonnes `tracker_*`** et les **trois surfaces** que consomme le pont de réplication (`listTracked`/`listPushDue`/`applyTrackerState`) — déclarées ici, jamais produites ici (cf. « Schéma »). |
 | `InterventionReminderWatcher.ts` | **Veilleur de rappels** (producteur `intervention-reminder`) : balaye `planned_start`, `raise` les fenêtres sous seuil (gravité croissante 24 h/1 h/H), `resolve` celles qui démarrent/disparaissent. Déclare **chez lui** l'interface `InterventionProblemReporter` (dépendance INVERSÉE) — n'importe RIEN de `notify/`. Horloge et seuils injectables (tests). |
-| `InterventionsModule.ts` | **Façade et POINT DE BRANCHEMENT UNIQUE** (amovible, pattern `CertsModule`) : assemble `interventions.db` + routes REST (`ApiExtension`) + timer de 5 min. Module « en erreur » (base illisible) → routes **503** détaillé sans faire tomber le serveur. Rapporteur de problèmes **OPTIONNEL**. |
+| `InterventionsModule.ts` | **Façade et POINT DE BRANCHEMENT UNIQUE** (amovible, pattern `CertsModule`) : assemble `interventions.db` + routes REST (`ApiExtension`) + timer de 5 min. Module « en erreur » (base illisible) → routes **503** détaillé sans faire tomber le serveur. Rapporteur de problèmes **OPTIONNEL**. Expose deux surfaces au **pont de réplication** : le hook d'écriture **OPTIONNEL `onWrite`** (`(docId, id, "put" \| "delete")`, appelé APRÈS chaque écriture réussie, sous `try/catch` — une réplication en panne ne doit jamais empêcher d'enregistrer) et les **relais** d'état de réplication vers `InterventionsDb`. ⚠ Ce module n'importe **RIEN** de `tracker/` : la correspondance se fait par typage **STRUCTUREL** dans `index.ts`, chacun restant amovible seul. |
 
 **Branchement au cœur** : point d'extension GÉNÉRIQUE `ApiExtension` (`api.ts`, le même que
 `vm/`/`notify/`/`certs/`) ; le câblage concret tient en quelques lignes dans `index.ts`
@@ -352,8 +369,13 @@ spare, et y **voir d'un coup d'œil** les interventions ouvertes.
 - **Pas d'assignation** (qui traite quoi) : l'audit note seulement le dernier auteur d'écriture.
 - **Pas de vue calendrier** côté serveur : le listing trie/filtre, l'agenda est l'affaire du
   client s'il vient un jour.
-- **Jira = simple RÉFÉRENCE** : aucune intégration (pas d'appel API, pas de synchro d'état) —
-  juste une clé/URL et une base d'URL (`JIRA_BASE_URL`) pour fabriquer un lien côté client.
+- **Jira = simple RÉFÉRENCE dans CE module** : aucune intégration ici (pas d'appel API, pas de
+  synchro d'état) — juste une clé/URL et une base d'URL (`JIRA_BASE_URL`) pour fabriquer un lien
+  côté client. ⚠ Cette limite est **levée par le pont OPTIONNEL `tracker/`**
+  ([`jira-interventions.md`](jira-interventions.md)) : branché, il **réplique** incidents et
+  interventions dans un projet de tracker partagé et en relit le **traitement** (statut, assigné)
+  en lecture seule. Il reste **amovible** et n'inverse aucune dépendance — sans lui, tout ce qui
+  précède est exact à la lettre.
 - **Liens sans intégrité référentielle** (bases séparées) : orphelins tolérés (cf. « Liens
   sans FK »).
 - **Paliers de rappel FIXES** (24 h/1 h/H), non configurables par document (les intervalles de
@@ -372,13 +394,16 @@ spare, et y **voir d'un coup d'œil** les interventions ouvertes.
 ## Suppression de la feature (script d'amovibilité)
 
 Aucun autre module ne dépend de `interventions/` (revue d'imports : le cœur serveur ne
-l'importe jamais).
+l'importe jamais). ⚠ **Un seul préalable** : si le pont de réplication `tracker/` est branché,
+le retirer **d'abord** (son script d'amovibilité est dans
+[`jira-interventions.md`](jira-interventions.md)) — il consomme la façade de ce module.
 
 1. **Serveur** : supprimer `src-server/src/interventions/` en entier. Dans `index.ts`, retirer
    l'import et la création de `InterventionsModule`, son `interventions.extension()` du tableau
-   `extensions`, `interventions.start()`/`interventions.stop()`, **et le pont
-   `problems: { … }`** passé à `InterventionsModule.create` (les ponts `notify` de `vm/` et
-   `certs/` restent inchangés). Supprimer le fichier `interventions.db` s'il existe.
+   `extensions`, `interventions.start()`/`interventions.stop()`, **le pont
+   `problems: { … }`** et le hook **`onWrite: { … }`** passés à `InterventionsModule.create`
+   (les ponts `notify` de `vm/` et `certs/` restent inchangés). Supprimer le fichier
+   `interventions.db` s'il existe.
 2. **Client** : supprimer `src-client/views/InterventionsAdminView.ts`,
    `src-client/views/forms/InterventionsClient.ts`, `src-client/core/InterventionsFormat.ts`,
    `src-client/core/TargetSearch.ts`, `src-client/views/InterventionFicheHooks.ts`,

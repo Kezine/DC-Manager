@@ -306,32 +306,15 @@ est ordinaire). Tout le reste (nom, MAC, IP, SSID, type, nom d'AP brut) est une 
 couverte par `ownText` — d'où l'absence de `own` pour cette collection. Côté palette, elle a sa propre
 **portée « wifi: »** : un client wifi n'est ni un sous-réseau ni une adresse, c'est un objet de présence.
 
-### Tickets
+### Interventions et tickets répliqués
 
-La collection `issues` (cf. `docs/issue-tracker.md`) fait partie de la spec partagée. Elle apporte
-**deux catalogues** et **aucun `links`** :
-
-- `issueNotFound` — **« introuvable »/« not found »**, versé quand `orphan` est vrai. C'est le
-  **troisième** libellé pour la MÊME mécanique : une VM disparue est « orpheline », un client wifi parti
-  est « déconnecté », un ticket non résolu est « introuvable » (suppression, projet archivé, permission
-  perdue). Chercher « introuvable » doit ramener des tickets, pas des VMs ;
-- `issueStatusCategory` — la **catégorie** normalisée de l'état (`todo`/`in_progress`/`done`). ⚠ À ne pas
-  confondre avec `status`, qui porte le libellé BRUT du tracker : celui-là s'affiche tel quel, n'est
-  JAMAIS traduit, et est déjà cherchable comme colonne plate. Seule la catégorie fermée est traduisible,
-  donc catalogable — taper « clos » ramène les tickets terminés quel que soit le vocabulaire du workflow.
-  `unknown` n'a **volontairement pas** d'entrée : c'est la valeur par défaut de la spec, donc celle de
-  tout ticket mal classé — lui donner des termes ferait ressortir la moitié du corpus.
-
-Tout le reste (clé, titre, statut brut, assigné, étiquettes) est une **colonne plate** déjà couverte par
-`ownText`, tableau `labels` compris. ⚠ **Limite MESURÉE, pas un oubli** : les **libellés des cibles
-liées** ne sont pas dérivés. `TermLink` suit un champ dont la valeur EST un id vers UNE collection fixe,
-alors que `targets` est **polymorphe** et porte des clés **composées** « famille:id » ; et
-`dependentQueries` dérivant l'invalidation de ces mêmes liens, elle produirait « les issues dont
-`targets` = *id de l'équipement* » — requête qui ne matcherait jamais la clé composée, donc un dérivé qui
-**ne s'invalide pas** : pire qu'une absence. Le dérivé par cible reste ouvert (il demanderait une forme
-de lien à clé composée avec sa requête inverse). Côté palette, la collection a sa propre **portée
-« ticket: »** — c'est le mot que l'exploitant prononce, et « issue » désigne déjà autre chose dans
-l'app (émettre un certificat).
+Les **interventions** ne sont **pas** une collection du document : elles vivent dans une base SERVEUR
+séparée (`interventions.db`), avec leur propre colonne `search` et leur propre listing paginé
+(cf. `docs/interventions.md`). Elles sont donc **hors** de la spec partagée `SearchTerms`, et **hors**
+de la palette Ctrl+K. L'état de leur **réplication** vers un tracker distant
+(cf. `docs/jira-interventions.md`) suit la même règle : les colonnes `tracker_*` ne sont ni dans le
+corpus de la palette, ni dans le texte cherché du listing — seule la **référence** du ticket (`jira_ref`)
+entre dans la colonne `search` de `interventions.db`.
 
 ## Invariants testés
 

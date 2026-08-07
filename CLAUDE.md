@@ -225,17 +225,20 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   `DCMANAGER_SECRETS_KEY` partagée avec vm/notify), transport `node:https` + pagination, API UniFi
   VALIDÉE sur console réelle le 2026-08-04 (limite mesurée : le SSID n'est pas exposé par le contrat
   officiel), script de suppression).
-- [`issue-tracker.md`](docs/issue-tracker.md) — **TICKETS d'un tracker distant** (module serveur AMOVIBLE
-  `issues/`, collection `issues`, pivot `IssueRecord` et contrat d'adaptateur AGNOSTIQUES de la marque —
-  Atlassian Jira Cloud n'est que la 1re implémentation, ajout d'une marque en 4 points ; 🚨 **assiette
-  INVERSÉE** par rapport à `vm/`/`wifi/` — c'est le DOCUMENT qui énumère les tickets SUIVIS et l'adaptateur
-  qui RÉSOUT (`resolve(extIds)`), la synchro ne CRÉE jamais d'enregistrement, « orphelin » = INTROUVABLE ;
-  `ext_id` = id INTERNE et jamais la clé (qui bouge au déplacement de projet) ; statut = libellé BRUT +
-  catégorie FERMÉE ; rattachement MANUEL `targets` en clés « famille:id » partagées avec les interventions
-  SANS dépendance de code, intégrité par 4 `custom` de cascade ; création de ticket (ordre tracker→local,
-  échec PARTIEL, ADF, modèle de menace élargi) ; providers PAR document dans `issue-providers.db` chiffrée
-  (clé `DCMANAGER_SECRETS_KEY` partagée avec vm/wifi/notify), transport `fetch` INJECTÉ + 429 ;
-  ⚠ hypothèses d'API Jira NON validées sur instance réelle + procédure de re-validation ; script de suppression).
+- [`jira-interventions.md`](docs/jira-interventions.md) — **RÉPLICATION des incidents & interventions vers un
+  tracker distant** (module serveur AMOVIBLE `tracker/` — un PONT, AUCUNE collection ; Atlassian Jira Cloud
+  n'est que la 1re implémentation, contrats/service/config/routes/UI AGNOSTIQUES, ajout d'une marque en
+  4 points ; 🚨 **PARTAGE DES VÉRITÉS** — DC Manager fait foi sur le CONTENU (poussé, il ÉCRASE le ticket),
+  le tracker fait foi sur le TRAITEMENT (statut/assigné, LECTURE SEULE), le `status` DCM n'est JAMAIS poussé ;
+  **poussée TOLÉRANTE** `pending→synced/error` en colonnes PERSISTÉES — jamais bloquante pour le PUT, reprise
+  par passe périodique + action manuelle, clé créée écrite AVANT tout le reste ; 🚨 étiquettes **`DCM-<FAM>-<NOM>`**
+  gérées par VERBES add/remove — les labels des AUTRES sources d'un projet PARTAGÉ ne sont jamais touchés ;
+  retour d'état `resolve` par LOTS à plafond ROULANT (`TrackerPassScope`), idempotent, introuvable = sentinelle
+  sans jamais rien supprimer ; dépendance INVERSÉE des DEUX côtés avec `interventions/` (colonnes `tracker_*` +
+  hook `onWrite`, câblage `index.ts` par typage structurel) ; providers PAR document dans `tracker-providers.db`
+  chiffrée (clé `DCMANAGER_SECRETS_KEY` partagée avec vm/wifi/notify), `project_key` REQUIS, modèle de menace
+  ÉLARGI (jeton en ÉCRITURE ⇒ compte de service dédié) ; ⚠ 11 hypothèses d'API Jira NON validées sur instance
+  réelle + procédure de re-validation ; script de suppression).
 - [`notifications.md`](docs/notifications.md) — **service de notifications** (module serveur AMOVIBLE
   `notify/`, alertes persistantes anti-spam `raise`/`resolve`, moteur pur `NotifyEngine`, schéma
   `notify.db` à 5 tables, routage par abonnements, webhooks, coffre `SecretBox` partagé, producteurs
@@ -251,7 +254,9 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   `interventions/`, base `interventions.db` à 2 tables, objets liés aux équipements/VMs/spares SANS FK
   inter-bases — orphelins tolérés ; audit posé SERVEUR via helper partagé `RequestAuthor`, `closed_date`
   auto, listing paginé SQL à tris sémantiques, veilleur `intervention-reminder` paliers 24 h/1 h/heure H,
-  Jira = simple référence via `JIRA_BASE_URL`, limites v1 et script de suppression). Lot CLIENT à venir.
+  page « Interventions » localisée + intégration « fiches » (badge, mini-listing, filtre CIBLE) ; `jira_ref` =
+  simple référence MANUELLE via `JIRA_BASE_URL` — limite LEVÉE par le pont OPTIONNEL `tracker/` (colonnes
+  `tracker_*` + hook `onWrite`, cf. `jira-interventions.md`) ; limites v1 et script de suppression).
 - [`recherche.md`](docs/recherche.md) — **recherche** (palette Ctrl+K, scoring client à paliers, termes
   PARTAGÉS `src-shared/SearchTerms` — exécution DOUBLE n°15 : corpus local en mode fichier, route
   transverse `GET …/search` serveur-pilotée en mode API avec debounce/abort/repli, caps assumés,

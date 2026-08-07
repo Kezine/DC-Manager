@@ -179,8 +179,7 @@ modèle », capacités/rpm — cf. `docs/recherche.md` pour le périmètre exact
   (`GlobalSearchSources`) — parité des termes entre les deux modes garantie par le module unique.
 - **CATALOGUES fr+en** (`SEARCH_CATALOGS`) : le serveur ignore la langue de l'utilisateur → la colonne porte les DEUX
   (un spare `hdd` se trouve par « disque dur » ET « hard drive »). Seuls les catalogues RÉELLEMENT cherchés y sont
-  (types d'équipement/groupe/spare, orphelinat VM, déconnexion wifi, « introuvable » et catégorie d'état des
-  tickets). La duplication avec les locales client est ASSUMÉE et VERROUILLÉE
+  (types d'équipement/groupe/spare, orphelinat VM, déconnexion wifi). La duplication avec les locales client est ASSUMÉE et VERROUILLÉE
   par test (`test-search-terms.js` : chaque libellé d'affichage fr/en doit apparaître dans les termes partagés).
 - **INVALIDATION** : les dépendances INVERSES sont DÉRIVÉES de la même spec (`SearchTerms.dependentQueries` — jamais
   une seconde table). Après CHAQUE écriture (upsert, delete, `/transact`, snapshot), un **post-pass dans la MÊME
