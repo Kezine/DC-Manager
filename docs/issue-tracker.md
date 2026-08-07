@@ -24,7 +24,9 @@ Ce que la feature fait :
 - **rattache** chaque ticket à des objets du modèle (`targets`), à la main, et rend ce
   rattachement filtrable dans les listings et lisible dans les fiches ;
 - conserve les tickets qu'il ne résout plus en les marquant **« introuvables »** — jamais
-  de suppression ;
+  de suppression **automatique** ;
+- laisse l'utilisateur **cesser de suivre** un ticket, depuis sa fiche (cf. § « Ne plus
+  suivre un ticket ») ;
 - laisse l'utilisateur enrichir chaque ticket (`description`, `notes`, `targets`) sans que
   la synchro ne l'écrase jamais.
 
@@ -61,6 +63,8 @@ Conséquences portées par tout le module :
   côté de la demande se voit dans les journaux) et **ignoré** ;
 - les **deux seules portes d'entrée** de l'assiette sont des ACTES utilisateur, et elles
   vivent dans le service : `IssueSyncService.followReference` et `IssueSyncService.openIssue` ;
+  la **sortie** en est un aussi (« Ne plus suivre », cf. § dédié) — ce qui n'entre que par un
+  geste ne peut sortir que par un geste ;
 - une assiette **vide** n'appelle même pas le tracker — il n'y a rien à demander ;
 - le volume n'est pas borné par la source mais par l'utilisateur, d'où le **plafond de
   passe** (`IssueSyncService.MAX_ISSUES_PER_PASS = 500`) et son **roulement** (cf. § « Le
@@ -73,6 +77,34 @@ Conséquences portées par tout le module :
 > **projet archivé** ou une **permission perdue**. D'où le libellé UI « **introuvable** »,
 > une couleur d'**avertissement**, et **aucune suppression automatique** de l'enregistrement
 > local — il porte des notes et des liens que le tracker ne connaît pas.
+
+### Ne plus suivre un ticket (la sortie de l'assiette)
+
+« Suivre » sans « Ne plus suivre » serait une asymétrie coûteuse : une clé mal saisie
+entrerait au document **définitivement** (et serait redemandée au tracker à chaque passe), et
+un ticket réellement supprimé chez le tracker resterait affiché « introuvable » pour toujours.
+Le geste existe donc, calqué sur « Supprimer cette VM orpheline » (`docs/vm-proxmox.md`) :
+**depuis la FICHE du ticket**, bouton du pied, **confirmation obligatoire**.
+
+- il passe par le chemin de suppression **STANDARD** de la collection (`store.remove`, donc
+  API ou fichier selon le mode) : la **cascade** partagée et le SSE jouent normalement, et il
+  n'existe aucun chemin de suppression parallèle à maintenir ;
+- il emporte **tout l'enregistrement** — `notes`, `description` locale et `targets`
+  compris. C'est ce qui justifie la confirmation, et la confirmation le **dit** ;
+- la confirmation dit aussi, et surtout, que le ticket **n'est PAS supprimé chez le
+  tracker** : seul le suivi local cesse. Sans cette phrase, un bouton rouge sur la fiche d'un
+  ticket se lit « détruire le ticket Jira » et personne n'ose le toucher ;
+- **rien ne garde de trace** du ticket retiré : son `ext_id` redevient libre, donc le
+  re-suivre plus tard repart proprement (`followReference` cherche l'existant par `ext_id` —
+  il n'y en a plus, il recrée) ;
+- disponible **hors viewer**, et **AUSSI en mode fichier** : retirer un enregistrement du
+  document ne demande aucun serveur, exactement comme l'édition des champs locaux et des
+  cibles (cf. § « Mode local »). Il n'est donc **pas** conditionné au client REST.
+
+> **Limite assumée** : le geste n'existe **que depuis la fiche**, pas comme action de ligne du
+> listing (qui reste en lecture, `actions: { view: true }`) ni en suppression de masse. Même
+> arbitrage que la purge d'une VM orpheline : une sortie d'assiette se décide en regardant le
+> ticket, pas en balayant une liste.
 
 ## Architecture — qui fait quoi
 
@@ -132,7 +164,8 @@ donc écrit avec l'extension `.js` — impérative (cf. `CLAUDE.md` § « Code p
 - `views/forms/IssueSyncClient.ts` — client REST dédié des routes du module ;
 - `views/forms/IssueFicheRow.ts` — la rangée « Tickets » des fiches (équipement / VM / spare /
   sous-équipement) ;
-- `views/forms/DetailForms.issueDetail` — la fiche d'un ticket ;
+- `views/forms/DetailForms.issueDetail` — la fiche d'un ticket, d'où partent « Modifier » et
+  « Ne plus suivre » ;
 - `views/GlobalSearchSources` — famille `issues` + portée **« ticket: »** de la palette Ctrl+K.
 
 ## Frontière SOURCE / LOCAUX
@@ -471,7 +504,9 @@ passe suivante là où celle-ci s'arrête. Sans lui, une assiette plafonnée don
 resterait **figée** : l'idempotence n'écrit `last_sync` que sur un ticket qui a changé, donc
 l'ordre de priorité ne bougerait plus et la queue de l'assiette ne serait jamais interrogée.
 Avec le roulement, l'assiette entière défile en ⌈N/plafond⌉ passes, que quelque chose change
-ou non.
+ou non. Ce curseur est un état **runtime**, au même titre que le statut par provider : il est
+**purgé avec lui** dans `statusFor` dès que le provider disparaît de la configuration — les
+deux vieillissent selon la même règle, sans quoi l'asymétrie piègerait la relecture.
 
 Les `orphans` sont dérivés des `missing` **rendus par l'adaptateur**, et surtout **pas**
 d'une différence d'ensembles « suivi mais pas revenu » : la passe étant plafonnée, un ticket
@@ -508,6 +543,20 @@ tracker. Alors, et dans cet ordre d'importance :
 
 L'incident est journalisé en **erreur** côté serveur : c'est un écart durable entre le
 tracker et le document, pas un incident passager.
+
+🚨 **La garantie est STRUCTURELLE, pas limitée au refus d'écriture.** Dès que la création
+distante a réussi, **tout** le reste d'`openIssue` — construction de l'enregistrement,
+validation partagée et les lecteurs de dépôt qu'elle reçoit, écriture, relecture — est sous
+un `try/catch` qui aboutit au **même** résultat : nature `partial`, `created_key`, message
+unique. La raison de ne pas s'en remettre à l'inventaire des chemins d'erreur connus est
+mesurable : la spec `issues` n'a aujourd'hui ni `ref` ni invariant lisant le dépôt, donc ces
+lecteurs ne sont même pas appelés — mais c'est un **état de la spec**, pas une propriété du
+code, et il changera sans que personne ne repense à ce chemin. Une exception qui s'échapperait
+là remonterait au `.catch` de la route, qui répond `500 { error }` **sans la clé** : le ticket
+existerait chez le tracker sans que personne ne sache lequel. Corollairement,
+`IssueSyncService.writeIssues` est **totale** (elle rend `null` ou un message, elle ne jette
+jamais) — ce dont dépend aussi la promesse « une passe de synchro ne jette jamais, elle
+aboutit à un statut ».
 
 ### Les champs obligatoires par projet ne sont pas devinés
 
@@ -670,6 +719,9 @@ manquante — et il est ici **en écriture**, ce qui aggrave l'enjeu.
   entièrement **lisible, filtrable et cherchable** (palette Ctrl+K comprise, portée
   « ticket: », via la spec partagée `SearchTerms`) ;
 - les champs **LOCAUX** restent éditables (`description`, `notes`) ;
+- **« Ne plus suivre »** reste disponible : retirer un enregistrement du document ne demande
+  aucun serveur. C'est la seule action de la feature qui écrive dans le document sans le
+  tracker, et elle est donc offerte dans les **deux** modes ;
 - les **CIBLES** restent éditables : ce sont des données du document, pas du tracker. C'est
   pourquoi `FormHost.issueTargets` est injecté dans les **deux** modes, contrairement aux
   hooks d'interventions et de certificats — la source de candidats se rabat simplement sur le
@@ -768,8 +820,30 @@ côté client tout vit dans les fichiers dédiés ci-dessus.
 C'est l'**exigence structurante** du chantier : le pivot, la réconciliation, le service de
 synchro, la base de config, les routes et l'UI sont **agnostiques de la marque**. Ajouter un
 tracker (GitHub, GitLab, Redmine, Jira Data Center…) se fait en **quatre** points, et **rien
-d'autre** ne bouge — un test d'invariant relit les sources et vérifie qu'aucun module
-agnostique ne nomme une marque hors des points d'extension.
+d'autre** ne bouge.
+
+Ce n'est pas seulement affirmé : un test d'invariant (`Tests/modules/test-issues.js`) **relit
+les sources** — les **six** modules serveur génériques, les **deux** modules partagés
+(`IssueSync`, `IssueTargets`), les **neuf** fichiers client `Issue*` et les **deux**
+catalogues i18n `issues.ts` — et refuse toute mention de marque en dehors d'une **déclaration
+nommément exemptée**. Trois précisions qui font tout le travail :
+
+- l'exemption porte sur une **déclaration**, jamais sur un fichier entier. `IssueSyncService`
+  n'est exempté que pour sa fabrique `adapterFor` (plus l'`import` de l'adaptateur qu'elle
+  instancie — la fabrique doit bien pouvoir le nommer) ; `IssueProviderConfigValidate` que
+  pour `KIND_OPTION_SPECS` ; `IssueProvidersForm` que pour `KINDS` et `KIND_FIELDS`. Ce sont
+  **exactement** les quatre points d'extension ci-dessous ;
+- une **cinquième** exemption, cosmétique et nommée, subsiste : la clé i18n
+  `providers.idPlaceholder` (« ex. jira-infra ») illustre une convention de nommage dans un
+  champ libre. Elle ne pilote aucun comportement ; les autres libellés, eux, ne nomment aucun
+  tracker (le « Jira » du `<select>` est un nom propre, écrit dans le code du formulaire) ;
+- le test **se contrôle lui-même** : des extraits synthétiques prouvent qu'il voit bien les
+  chaînes, les **morceaux de gabarit** (`` `… ${x} … ` ``, la forme la plus courante du code
+  client), les identifiants et les imports, et que chaque exemption est **load-bearing**. Un
+  détecteur qui ne voit rien passerait partout, et une exemption décorative masquerait un
+  point d'extension déplacé.
+
+Les **commentaires** restent libres de citer la première implémentation — ils l'expliquent.
 
 1. **L'adaptateur.** Écrire `XxxAdapter` implémentant `IssueProviderAdapter` (`test()`,
    **`resolve(extIds)`**, `lookup(reference)`, `createIssue(input)`), avec le même découpage
@@ -842,10 +916,13 @@ statut du tracker (seule `status_category` est traduisible).
   idempotence ;
 - **`passScope`** : plafond de passe, ordre stable et **roulement** (aucune zone morte) ;
 - **le service de bout en bout** sur `DocumentStore` réel : suivi, triptyque d'écriture,
-  idempotence, introuvable, plafond, anti-rafale ; puis `openIssue` (ordre tracker → local,
-  **échec partiel**, message du tracker intact, choix du provider) ;
+  idempotence, introuvable, plafond, **purge du statut ET du curseur** au retrait d'un
+  provider, anti-rafale ; puis `openIssue` (ordre tracker → local, **échec partiel** par refus
+  d'écriture **et par exception d'un lecteur**, message du tracker intact, choix du provider) ;
 - **les invariants** : pivot `IssueRecord` ≡ `ISSUE_SOURCE_FIELDS`, et **agnosticisme de
-  marque** (aucun littéral « jira » hors des points d'extension).
+  marque** — aucun littéral « jira » hors des points d'extension, sur les sources **serveur,
+  partagées, clientes et i18n**, avec des exemptions par **déclaration** dont chacune est
+  prouvée load-bearing (cf. § « Ajouter un provider d'une autre marque »).
 
 Les routes (`IssueModule.ts`, Express) restent hors test, comme `api.ts`, `VmModule.ts` et
 `WifiModule.ts`.

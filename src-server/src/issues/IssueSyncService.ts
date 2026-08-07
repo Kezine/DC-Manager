@@ -238,12 +238,23 @@ export class IssueSyncService {
   statusFor(docId: string): IssueProviderStatus[] {
     const summaries = this.providers.summariesFor(docId);
     const runtime = this.status.get(docId);
-    // PURGE DES STATUTS FANTÔMES : un provider RETIRÉ de la config laisserait indéfiniment son état
+    // PURGE DES ÉTATS FANTÔMES : un provider RETIRÉ de la config laisserait indéfiniment son état
     // runtime ici — fuite mémoire lente, et entrée obsolète qui pourrait resurgir. `statusFor` est le
     // point de passage naturel de la purge (il connaît la config DÉCLARÉE).
+    const configured = new Set(summaries.map((s) => s.id));
     if (runtime) {
-      const configured = new Set(summaries.map((s) => s.id));
       for (const id of [...runtime.keys()]) if (!configured.has(id)) runtime.delete(id);
+    }
+    // MÊME RÈGLE pour le CURSEUR de roulement du plafond : il est indexé par le MÊME couple
+    // document×provider, et un provider retiré y laisserait sinon son entrée pour toujours. La fuite
+    // est bornée et sans effet fonctionnel (une entrée orpheline n'est plus jamais relue), mais
+    // purger un état runtime et pas l'autre est un piège de relecture — les deux vieillissent
+    // ensemble ou pas du tout. ⚠ La clé est un JSON `[docId, providerId]` (cf. `doSync`) : on la
+    // DÉCODE plutôt que de la découper, une concaténation n'aurait pas de séparateur sûr.
+    for (const cursorKey of [...this.cursors.keys()]) {
+      let pair: unknown;
+      try { pair = JSON.parse(cursorKey); } catch { continue; }   // clé illisible (jamais produite ici) : on n'y touche pas
+      if (Array.isArray(pair) && pair[0] === docId && !configured.has(String(pair[1]))) this.cursors.delete(cursorKey);
     }
     return summaries.map((summary) =>
       (runtime && runtime.get(summary.id)) || {
@@ -530,40 +541,69 @@ export class IssueSyncService {
       return refused("tracker", message, provider.id);
     }
 
-    // 2) ÉCRITURE LOCALE. Même construction d'enregistrement que « Suivre un ticket » (champs source
-    //    par la normalisation PARTAGÉE, locaux à leur défaut) à une différence près : les CIBLES
-    //    fournies par l'appelant sont posées d'emblée, et la description SAISIE ICI est conservée.
-    const created: Rec = {
-      id: randomUUID(),
-      created_date: nowIso,
-      updated_date: nowIso,
-      ...IssueReconcile.sourceOf(record, nowIso),
-      provider_id: provider.id,   // estampille DÉFENSIVE (cf. `followReference`)
-      notes: "",
-      // La description est celle que l'utilisateur a TAPÉE ICI, pas une description RAPATRIÉE du
-      // tracker (que la v1 ne lit pas, cf. §7 du cadrage). La garder évite qu'une fiche paraisse
-      // vide juste après l'avoir remplie ; c'est un champ LOCAL, donc éditable ensuite, et le
-      // tracker reste la référence — le lien `url` y mène en un clic.
-      description: typeof input?.description === "string" ? input.description : "",
-      targets,
-    };
-    const error = this.writeIssues(docId, repo, [created], [], "Ouverture de ticket · " + provider.id);
-    if (error) {
-      // 🚨 ÉCHEC PARTIEL — le point délicat de ce chemin (cf. l'en-tête). Journalisé en ERREUR :
-      // c'est un écart durable entre le tracker et le document, pas un incident passager.
-      const key = (record.key || record.ext_id || "").trim();
-      this.log.error("ouverture de ticket : ÉCHEC PARTIEL — ticket CRÉÉ chez le tracker, écriture locale refusée", docId, provider.id, key, error);
-      return refused("partial",
-        "le ticket " + (key ? "« " + key + " » " : "") + "a été créé chez le tracker mais n'a PAS pu être enregistré ici ("
-        + error + ")" + (key ? " — utilisez « Suivre un ticket » avec la clé « " + key + " » pour le rattacher au document" : ""),
-        provider.id, key || null);
-    }
+    // 🚨 À PARTIR D'ICI LE TICKET EXISTE CHEZ LE TRACKER. La clé est donc calculée TOUT DE SUITE,
+    //    avant la moindre autre opération : c'est la seule information qui rende la situation
+    //    rattrapable, et elle ne doit dépendre d'aucune étape susceptible d'échouer.
+    const createdKey = (record.key || record.ext_id || "").trim();
 
-    this.log.info("ouverture de ticket : créé et suivi", docId, provider.id, record.key + " (ext_id " + record.ext_id + ")");
-    return {
-      ok: true, issue: repo.getOne("issues", created.id), provider_id: provider.id, failure: null, created_key: null,
-      message: "ticket « " + (record.key || record.ext_id) + " » créé et suivi",
-    };
+    // 🚨 GARANTIE STRUCTURELLE DE L'ÉCHEC PARTIEL. Tout le reste de la méthode est sous ce `try` —
+    //    construction de l'enregistrement, écriture (validation partagée et lecteurs de dépôt
+    //    compris), relecture, journalisation. Motif : un `throw` qui s'en échapperait remonterait au
+    //    `.catch` de la route, qui répond « ouverture du ticket en échec » SANS `created_key` — un
+    //    ticket existerait alors chez le tracker sans que PERSONNE ne sache lequel, c'est-à-dire le
+    //    pire scénario de la feature. On ne fait donc pas reposer cette garantie sur l'inventaire des
+    //    chemins d'erreur CONNUS : aujourd'hui la spec `issues` n'a ni `ref` ni invariant lisant le
+    //    dépôt, donc le validateur n'appelle même pas ses lecteurs — mais c'est un ÉTAT de la spec,
+    //    pas une propriété du code, et il changera sans que personne ne repense à ce chemin.
+    try {
+      // ÉCRITURE LOCALE. Même construction d'enregistrement que « Suivre un ticket » (champs source
+      // par la normalisation PARTAGÉE, locaux à leur défaut) à une différence près : les CIBLES
+      // fournies par l'appelant sont posées d'emblée, et la description SAISIE ICI est conservée.
+      const created: Rec = {
+        id: randomUUID(),
+        created_date: nowIso,
+        updated_date: nowIso,
+        ...IssueReconcile.sourceOf(record, nowIso),
+        provider_id: provider.id,   // estampille DÉFENSIVE (cf. `followReference`)
+        notes: "",
+        // La description est celle que l'utilisateur a TAPÉE ICI, pas une description RAPATRIÉE du
+        // tracker (que la v1 ne lit pas, cf. §7 du cadrage). La garder évite qu'une fiche paraisse
+        // vide juste après l'avoir remplie ; c'est un champ LOCAL, donc éditable ensuite, et le
+        // tracker reste la référence — le lien `url` y mène en un clic.
+        description: typeof input?.description === "string" ? input.description : "",
+        targets,
+      };
+      const error = this.writeIssues(docId, repo, [created], [], "Ouverture de ticket · " + provider.id);
+      if (error) {
+        // ÉCHEC PARTIEL par refus PROPRE de l'écriture. Journalisé en ERREUR : c'est un écart durable
+        // entre le tracker et le document, pas un incident passager.
+        this.log.error("ouverture de ticket : ÉCHEC PARTIEL — ticket CRÉÉ chez le tracker, écriture locale refusée", docId, provider.id, createdKey, error);
+        return refused("partial", IssueSyncService.partialMessage(createdKey, error), provider.id, createdKey || null);
+      }
+
+      this.log.info("ouverture de ticket : créé et suivi", docId, provider.id, record.key + " (ext_id " + record.ext_id + ")");
+      return {
+        ok: true, issue: repo.getOne("issues", created.id), provider_id: provider.id, failure: null, created_key: null,
+        message: "ticket « " + (record.key || record.ext_id) + " » créé et suivi",
+      };
+    } catch (e) {
+      // ÉCHEC PARTIEL par EXCEPTION (le filet ci-dessus). Même issue que le refus propre : même
+      // nature, même message, même clé — l'utilisateur n'a pas à connaître la différence, il a
+      // besoin de la clé et de la marche à suivre.
+      const message = e instanceof Error ? e.message : String(e);
+      this.log.error("ouverture de ticket : ÉCHEC PARTIEL — ticket CRÉÉ chez le tracker, exception après création distante", docId, provider.id, createdKey, message);
+      this.log.error("ouverture de ticket : pile d'erreur\n" + IssueSyncService.stackOf(e));
+      return refused("partial", IssueSyncService.partialMessage(createdKey, message), provider.id, createdKey || null);
+    }
+  }
+
+  /** Message d'ÉCHEC PARTIEL — UNE seule formulation pour les deux chemins qui y mènent (refus propre
+      de l'écriture, exception inattendue) : ce que l'utilisateur doit lire est identique, et laisser
+      deux textes vivre côte à côte finirait par n'en faire corriger qu'un. Il DIT ce qui s'est passé
+      et la suite à donner, et porte la CLÉ créée dès qu'on la connaît. */
+  private static partialMessage(createdKey: string, detail: string): string {
+    return "le ticket " + (createdKey ? "« " + createdKey + " » " : "") + "a été créé chez le tracker mais n'a PAS pu être enregistré ici ("
+      + detail + ")" + (createdKey ? " — utilisez « Suivre un ticket » avec la clé « " + createdKey + " » pour le rattacher au document" : "");
   }
 
   /* --------------------------------------------------------------------------
@@ -671,32 +711,40 @@ export class IssueSyncService {
       révision, SSE. Rend `null` en cas de succès, un message d'erreur LISIBLE sinon.
       MUTUALISÉ entre la passe de synchro et « Suivre un ticket » : les deux doivent produire
       exactement la même trace (révision + événement) sous peine de laisser des clients désynchronisés
-      dans un cas sur deux. Lot vide → aucun effet, aucune révision, aucun SSE. */
+      dans un cas sur deux. Lot vide → aucun effet, aucune révision, aucun SSE.
+
+      🚨 TOTALE : cette méthode NE JETTE JAMAIS — elle rend `null` ou un message. Le `try` couvre donc
+      AUSSI la validation partagée et les lecteurs de dépôt qu'elle reçoit, pas seulement le triptyque
+      d'écriture. Ses DEUX appelants en dépendent : `doSync` promet un STATUT quoi qu'il arrive (« ne
+      jette jamais ») et `openIssue` promet de rendre la CLÉ du ticket déjà créé chez le tracker.
+      Protéger le seul `transact` laisserait ces deux promesses tenir par accident — parce que la spec
+      `issues` n'a aujourd'hui ni `ref` ni invariant lisant le dépôt, donc que ces lecteurs ne sont
+      jamais appelés. C'est un état de la spec, pas une garantie. */
   private writeIssues(docId: string, repo: RepositoryContract, createRecords: Rec[], updateRecords: Rec[], author: string): string | null {
     if (!createRecords.length && !updateRecords.length) return null;
-    const creates = createRecords.map((record) => ({ collection: "issues", record }));
-    const updates = updateRecords.map((record) => ({ collection: "issues", record }));
-
-    // AUTORITÉ SERVEUR : normalisation + validation partagées (même discipline que /transact).
-    const fetch = (collection: string, id: string) => repo.getOne(collection, id);
-    const find = (collection: string, field: string, value: any) => repo.findBy(collection, field, String(value));
-    const errors: ValidationError[] = [];
-    for (const entry of [...creates, ...updates]) {
-      const result = DataValidator.normalizeAndValidate("issues", entry.record, fetch, find);
-      errors.push(...result.errors);
-      entry.record = result.record;
-    }
-    if (errors.length) {
-      // Données irrecevables : on n'écrit RIEN (jamais d'écriture partielle) — détail au log, résumé
-      // à l'appelant. Jamais le jeton (les messages de validation citent les champs).
-      const detail = errors.slice(0, 3).map((e) => e.path + " : " + e.message).join(" · ");
-      this.log.warn("issues : données invalides, écriture refusée", docId, detail, "(" + errors.length + " erreur(s))");
-      return "données de tickets invalides — " + detail;
-    }
-
-    // Écriture transactionnelle + révision + SSE — le même triptyque que la couche HTTP (les autres
-    // clients rechargent `issues` en granulaire via leur ReloadPlanner).
     try {
+      const creates = createRecords.map((record) => ({ collection: "issues", record }));
+      const updates = updateRecords.map((record) => ({ collection: "issues", record }));
+
+      // AUTORITÉ SERVEUR : normalisation + validation partagées (même discipline que /transact).
+      const fetch = (collection: string, id: string) => repo.getOne(collection, id);
+      const find = (collection: string, field: string, value: any) => repo.findBy(collection, field, String(value));
+      const errors: ValidationError[] = [];
+      for (const entry of [...creates, ...updates]) {
+        const result = DataValidator.normalizeAndValidate("issues", entry.record, fetch, find);
+        errors.push(...result.errors);
+        entry.record = result.record;
+      }
+      if (errors.length) {
+        // Données irrecevables : on n'écrit RIEN (jamais d'écriture partielle) — détail au log, résumé
+        // à l'appelant. Jamais le jeton (les messages de validation citent les champs).
+        const detail = errors.slice(0, 3).map((e) => e.path + " : " + e.message).join(" · ");
+        this.log.warn("issues : données invalides, écriture refusée", docId, detail, "(" + errors.length + " erreur(s))");
+        return "données de tickets invalides — " + detail;
+      }
+
+      // Écriture transactionnelle + révision + SSE — le même triptyque que la couche HTTP (les autres
+      // clients rechargent `issues` en granulaire via leur ReloadPlanner).
       const rev = this.docs.markChanged(docId);
       repo.transact({ creates, updates }, rev);
       this.live.publish(docId, {

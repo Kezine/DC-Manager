@@ -1748,6 +1748,29 @@ module.exports = async () => {
       const asked2 = calls.resolve[calls.resolve.length - 1].ids.join(",");
       ck(asked1 !== asked2, "PLAFOND : la passe suivante interroge l'AUTRE ticket (roulement — aucune zone morte, même si rien ne change)");
 
+      // -- 16 bis) PURGE DU CURSEUR DE ROULEMENT au retrait du provider. Le statut fantôme est déjà
+      //       purgé (cas 15) ; le CURSEUR de plafond est indexé par le MÊME couple document×provider
+      //       et doit vieillir selon la MÊME règle — sinon il survit indéfiniment à un
+      //       `DELETE /providers/:id`. La fuite est bornée et sans effet fonctionnel (une entrée
+      //       orpheline n'est plus jamais relue), mais purger un état runtime et pas l'autre est un
+      //       piège de relecture.
+      //       OBSERVABLE : après purge, une passe plafonnée REPART DU DÉBUT de l'assiette au lieu de
+      //       poursuivre le roulement. Il faut donc TROIS tickets pour distinguer les deux — avec
+      //       deux, le roulement revient au premier tout seul et le test serait vacuous.
+      remote.get("tracker-1").set("888", ticket({ ext_id: "888", key: "INFRA-888", url: "https://exemple.atlassian.net/browse/INFRA-888" }));
+      await service.followReference(doc.id, "INFRA-888");
+      ck.eq(repo.findBy("issues", "provider_id", "tracker-1").length, 3, "assiette : 3 tickets suivis (le minimum pour distinguer « roulement » de « remise à zéro »)");
+      const rolling = new IssueSyncService(docs, live, providers, capLogger, makeAdapter, 0, undefined, 1);
+      const askedRoll = [];
+      for (let pass = 0; pass < 2; pass++) { await rolling.syncDocument(doc.id); askedRoll.push(calls.resolve[calls.resolve.length - 1].ids.join(",")); }
+      ck(askedRoll[0] !== askedRoll[1], "roulement : deux passes plafonnées consécutives n'interrogent pas le même ticket");
+      configured = [];
+      rolling.statusFor(doc.id);   // point de passage de la purge — il connaît la config DÉCLARÉE
+      configured = [cfg("tracker-1")];
+      await rolling.syncDocument(doc.id);
+      ck.eq(calls.resolve[calls.resolve.length - 1].ids.join(","), askedRoll[0],
+        "🚨 curseur PURGÉ avec le statut au retrait du provider : la passe suivante REPART DU DÉBUT de l'assiette (sans purge, elle poursuivrait le roulement sur le 3ᵉ ticket)");
+
       // -- 17) ANTI-CHEVAUCHEMENT : timer + clic manuel ne doublent pas la passe. --
       let release = null;
       gate = new Promise((r) => { release = r; });
@@ -1898,6 +1921,35 @@ module.exports = async () => {
       ck.eq(repo.findBy("issues", "key", "INFRA-500").length, 1, "ÉCHEC PARTIEL : aucun enregistrement local n'a été créé (seul celui du cas 1 subsiste)");
       ck(logged.some((l) => /^error .*ÉCHEC PARTIEL/.test(l)), "ÉCHEC PARTIEL : journalisé en ERREUR côté serveur — c'est un écart durable tracker ⇄ document, pas un incident passager");
 
+      // -- 2 bis) 🚨 LA GARANTIE EST STRUCTURELLE, pas limitée au `transact`. Un `transact` qui
+      //       échoue (cas 2) n'est qu'UN des chemins d'après-création : la validation partagée, les
+      //       LECTEURS de dépôt qu'elle reçoit et la relecture de l'enregistrement écrit en sont
+      //       d'autres. Tout ce qui suit une création distante RÉUSSIE doit rendre la CLÉ — sinon
+      //       l'exception remonte au `.catch` de la route, qui répond « ouverture du ticket en
+      //       échec » SANS la clé : le ticket existe chez le tracker et personne ne sait lequel.
+      //       ⚠ Ici c'est un LECTEUR qui jette (`getOne`), pas l'écriture : `transact` réussit (à
+      //       vide, pour isoler l'échec de lecture) et c'est la RELECTURE qui casse. Le même
+      //       `getOne` est aussi le lecteur passé à la validation partagée — il ne sert pas
+      //       aujourd'hui (la spec `issues` n'a ni `ref` ni invariant lisant le dépôt), et c'est
+      //       précisément pour ça que la protection ne doit pas dépendre de cet état de la spec.
+      const readerRepo = {
+        findBy: (c, f, v) => realRepo.findBy(c, f, v),
+        getOne: () => { throw new Error("dépôt : lecture impossible (fichier verrouillé)"); },
+        transact: () => { /* écriture « réussie » à vide : on isole l'échec du LECTEUR */ },
+      };
+      const readerDocs = { get: (id) => docs.get(id), repo: () => readerRepo, markChanged: (id) => docs.markChanged(id) };
+      const readerService = new IssueSyncService(readerDocs, live, providers, log, makeAdapter, 0);
+      const createsBeforeReader = calls.filter((c) => c.m === "createIssue").length;
+      const readerPartial = await readerService.openIssue(doc.id, { summary: "Ticket au lecteur cassé", description: "", targets: [] });
+      ck.eq(readerPartial.ok, false, "lecteur qui JETTE après création distante : l'opération est un échec…");
+      ck.eq(readerPartial.failure, "partial", "… de nature « partial » — donc un 500 PORTEUR de la clé, et non le 500 muet du `.catch` de la route");
+      ck.eq(readerPartial.created_key, "INFRA-500",
+        "🚨 … et la CLÉ créée est rendue MALGRÉ L'EXCEPTION : la garantie ne dépend pas de l'inventaire des chemins d'erreur connus");
+      ck(/créé chez le tracker/.test(readerPartial.message) && /Suivre un ticket/.test(readerPartial.message) && /INFRA-500/.test(readerPartial.message),
+        "… avec EXACTEMENT la même marche à suivre que l'échec partiel « propre » (un seul texte, cf. `partialMessage`)");
+      ck.eq(calls.filter((c) => c.m === "createIssue").length, createsBeforeReader + 1, "… le ticket a bien été créé chez le tracker (c'est tout le problème)");
+      ck.eq(calls.filter((c) => c.m === "deleteIssue").length, 0, "… et toujours AUCUNE suppression compensatoire");
+
       // -- 3) 🚨 REFUS DU TRACKER : son message traverse le service MOT POUR MOT. --
       refusal = "Tracker : HTTP 400 sur /rest/api/3/issue — customfield_10010 : Le champ « Équipe » est requis";
       const revBefore = docs.getRev(doc.id);
@@ -1993,41 +2045,109 @@ module.exports = async () => {
     ck(ISSUE_SOURCE_FIELDS.every((f) => decoded[f] !== undefined), "décodeur : aucun champ laissé `undefined` (les défauts sont explicites)");
 
     // -- 2) AGNOSTICISME DE MARQUE — l'exigence n°1 du chantier, donc TESTÉE et pas seulement
-    //       affirmée. On relit les SOURCES (c'est le code ÉCRIT qu'on contrôle) et on refuse toute
-    //       mention de marque hors commentaires : ceux-ci DOIVENT pouvoir citer la première
-    //       implémentation, ils l'expliquent. Seule la branche `KIND_OPTION_SPECS` y échappe, par
-    //       construction : elle EST le point d'extension. --
+    //       affirmée. On relit les SOURCES (c'est le code ÉCRIT qu'on contrôle) de TOUT ce que la
+    //       doc déclare agnostique : le SERVEUR (pivot, réconciliation, stockage, routes, service),
+    //       le PARTAGÉ (frontière source/locaux, clés de cible) et le CLIENT (modèle, règles pures,
+    //       vues, formulaires, catalogues i18n). Les COMMENTAIRES sont libres de citer la première
+    //       implémentation — ils l'expliquent, et le détecteur ne les voit pas.
+    //
+    //       ⚠ Les exemptions sont NOMMÉES et CIBLÉES — une DÉCLARATION, jamais un fichier entier.
+    //       Exempter un fichier entier (ce que faisait la version précédente pour `IssueSyncService`)
+    //       laisse une marque fuir n'importe où dedans, c'est-à-dire précisément ce qu'on veut
+    //       interdire. Il n'y a que les QUATRE points d'extension du chantier, plus un placeholder
+    //       i18n d'exemple.
     const fs = require("fs");
     const ts = require("typescript");
-    /** Littéraux et identifiants nommant une marque dans un fichier, hors d'une déclaration exemptée. */
-    const brandOffenders = (file, exemptDeclaration) => {
-      const full = path.join(__dirname, "..", "..", "src-server", "src", "issues", file);
-      const source = ts.createSourceFile(file, fs.readFileSync(full, "utf8"), ts.ScriptTarget.ES2020, true, ts.ScriptKind.TS);
+    /** Littéraux (chaîne ET morceaux de gabarit) et identifiants nommant une marque dans un extrait,
+        hors des déclarations exemptées. Les morceaux de gabarit comptent parce que le code CLIENT en
+        est truffé : une marque glissée dans un `${}` y passerait sinon totalement inaperçue. */
+    const offendersInText = (text, exempt, fileName) => {
+      const exempted = new Set(exempt || []);
+      const source = ts.createSourceFile(fileName || "extrait.ts", text, ts.ScriptTarget.ES2020, true, ts.ScriptKind.TS);
       const offenders = [];
+      const declName = (node) => (node.name && (ts.isIdentifier(node.name) || ts.isStringLiteralLike(node.name)) ? node.name.text : null);
       const visit = (node) => {
-        if (exemptDeclaration && ts.isVariableDeclaration(node) && node.name && ts.isIdentifier(node.name) && node.name.text === exemptDeclaration) return;
+        // Déclaration EXEMPTÉE (variable, propriété de classe, méthode, propriété d'objet littéral) :
+        // on ne descend pas dedans — c'est un point d'extension, il NOMME les marques par contrat.
+        if (exempted.size
+          && (ts.isVariableDeclaration(node) || ts.isPropertyDeclaration(node) || ts.isMethodDeclaration(node) || ts.isPropertyAssignment(node))
+          && exempted.has(declName(node))) return;
+        // IMPORTS exemptés (`"*imports*"`) : réservé au fichier qui porte la FABRIQUE — elle doit
+        // bien importer l'adaptateur qu'elle instancie, et cette ligne fait partie du même point
+        // d'extension. Partout ailleurs, importer un module de marque EST la faute qu'on traque.
+        if (exempted.has("*imports*") && ts.isImportDeclaration(node)) return;
         if (ts.isStringLiteralLike(node) && /jira/i.test(node.text)) offenders.push(node.text);
+        if ((ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node)) && /jira/i.test(node.text)) offenders.push(node.text);
         if (ts.isIdentifier(node) && /jira/i.test(node.text)) offenders.push(node.text);
         ts.forEachChild(node, visit);
       };
       visit(source);
       return offenders;
     };
+    /** Idem, sur un fichier du dépôt désigné par son chemin RELATIF À LA RACINE. */
+    const brandOffenders = (relPath, exempt) =>
+      offendersInText(fs.readFileSync(path.join(__dirname, "..", "..", ...relPath.split("/")), "utf8"), exempt, relPath);
 
-    // ⚠ `IssueSyncService.ts` n'est PAS de la liste : il PORTE la fabrique `adapterFor`, qui EST le
-    // point d'extension marque (même exemption que `WifiSyncService`). Tout le reste du module —
-    // contrats, réconciliation, stockage, routes — doit rester muet sur les marques.
-    for (const file of ["IssueProvider.ts", "IssueProviderConfigDb.ts", "IssueReconcile.ts", "IssueModule.ts"]) {
-      ck.eq(brandOffenders(file, null).length, 0, "agnosticisme : « " + file + " » ne nomme AUCUNE marque dans son code (fautifs : " + brandOffenders(file, null).join(", ") + ")");
+    // Ce que la doc déclare agnostique, avec les exemptions de chacun. Les QUATRE points d'extension
+    // du chantier sont exactement les quatre exemptions non vides ci-dessous.
+    const AGNOSTIC_SOURCES = [
+      // — SERVEUR. `IssueSyncService` porte la FABRIQUE `adapterFor` (point d'extension n°2) : elle
+      //   seule (et l'import de l'adaptateur qu'elle instancie) a le droit de nommer une marque.
+      ["src-server/src/issues/IssueProvider.ts", []],
+      ["src-server/src/issues/IssueProviderConfigDb.ts", []],
+      ["src-server/src/issues/IssueReconcile.ts", []],
+      ["src-server/src/issues/IssueModule.ts", []],
+      ["src-server/src/issues/IssueSyncService.ts", ["adapterFor", "*imports*"]],
+      ["src-server/src/issues/IssueProviderConfigValidate.ts", ["KIND_OPTION_SPECS"]],   // point d'extension n°3
+      // — PARTAGÉ : la frontière source/locaux et les clés de cible ne connaissent aucune marque.
+      ["src-shared/IssueSync.ts", []],
+      ["src-shared/IssueTargets.ts", []],
+      // — CLIENT : modèle, règles pures, contrats d'intégration, formulaires, fiche de rangée. Seul
+      //   le formulaire de PROVIDERS nomme les marques, dans les DEUX tables du point d'extension
+      //   n°4 (`KINDS` = option du <select>, `KIND_FIELDS` = miroir des options de la marque).
+      ["src-client/models/Issue.ts", []],
+      ["src-client/core/IssueStatus.ts", []],
+      ["src-client/core/IssueTargetSummary.ts", []],
+      ["src-client/views/IssueTargetSource.ts", []],
+      ["src-client/views/IssueFicheHooks.ts", []],
+      ["src-client/views/forms/IssueForms.ts", []],
+      ["src-client/views/forms/IssueSyncClient.ts", []],
+      ["src-client/views/forms/IssueFicheRow.ts", []],
+      ["src-client/views/forms/IssueProvidersForm.ts", ["KINDS", "KIND_FIELDS"]],
+      // — CATALOGUES i18n : AUCUN libellé traduit ne nomme un tracker (le libellé « Jira » du
+      //   <select> est un nom propre et vit dans le code du formulaire, non traduit). Seule
+      //   exemption, NOMMÉE : `idPlaceholder`, un EXEMPLE d'identifiant de provider (« ex.
+      //   jira-infra »). Purement cosmétique — il illustre une convention de nommage dans un champ
+      //   libre, ne pilote aucun comportement, et le retirer ne changerait rien au code.
+      ["src-client/i18n/locales/fr/issues.ts", ["idPlaceholder"]],
+      ["src-client/i18n/locales/en/issues.ts", ["idPlaceholder"]],
+    ];
+    for (const [relPath, exempt] of AGNOSTIC_SOURCES) {
+      const offenders = brandOffenders(relPath, exempt);
+      ck.eq(offenders.length, 0, "agnosticisme : « " + relPath + " » ne nomme aucune marque hors de ses points d'extension (fautifs : " + offenders.join(", ") + ")");
     }
-    const validateOffenders = brandOffenders("IssueProviderConfigValidate.ts", "KIND_OPTION_SPECS");
-    ck.eq(validateOffenders.length, 0, "agnosticisme : « IssueProviderConfigValidate.ts » ne nomme aucune marque HORS de sa branche d'options (fautifs : " + validateOffenders.join(", ") + ")");
 
-    // CONTRÔLE DE DISCRIMINATION : sans lui, les assertions ci-dessus pourraient être vides de sens
-    // (un détecteur qui ne voit rien passe partout). On prouve qu'il voit bien une marque là où elle
-    // DOIT être, et que l'exemption ci-dessus est LOAD-BEARING.
-    ck(brandOffenders("JiraParse.ts", null).length > 0, "discrimination : le détecteur repère bien la marque dans le module qui la porte (sinon les tests ci-dessus seraient vacuous)");
-    ck(brandOffenders("IssueProviderConfigValidate.ts", null).length > 0, "discrimination : … et la branche `KIND_OPTION_SPECS` nomme bien une marque — l'exemption n'est pas décorative");
+    // CONTRÔLE DE DISCRIMINATION n°1 — le DÉTECTEUR lui-même, sur des extraits synthétiques. Sans
+    // lui, une forme non couverte (le morceau de gabarit, très fréquent côté client) passerait
+    // inaperçue et TOUTES les assertions ci-dessus seraient vides de sens.
+    ck.eq(offendersInText('const s = "jira";', []).length, 1, "détecteur : littéral de chaîne");
+    ck.eq(offendersInText("const s = `avant ${x} Jira ${y} après`;", []).length, 1, "détecteur : MORCEAU de littéral de gabarit (la forme la plus courante du code client)");
+    ck.eq(offendersInText("const jiraThing = 1;", []).length, 1, "détecteur : identifiant");
+    ck.eq(offendersInText('import { JiraAdapter } from "./JiraAdapter.js";', []).length, 2, "détecteur : import d'un module de marque (identifiant + spécificateur)");
+    ck.eq(offendersInText('const KINDS = ["jira"];', ["KINDS"]).length, 0, "détecteur : une déclaration EXEMPTÉE est ignorée…");
+    ck.eq(offendersInText('const KINDS = ["jira"]; const ailleurs = "jira";', ["KINDS"]).length, 1, "détecteur : … et l'exemption ne DÉBORDE PAS sur le reste du fichier (c'est tout l'intérêt d'exempter une déclaration plutôt qu'un fichier)");
+
+    // CONTRÔLE DE DISCRIMINATION n°2 — chaque exemption est LOAD-BEARING : sans elle, le détecteur
+    // trouve bien une marque là où le point d'extension la pose. Une exemption décorative masquerait
+    // un point d'extension DÉPLACÉ sans que rien ne le signale.
+    for (const [relPath, exempt] of AGNOSTIC_SOURCES.filter(([, e]) => e.length)) {
+      ck(brandOffenders(relPath, []).length > 0,
+        "discrimination : l'exemption de « " + relPath + " » (" + exempt.join(", ") + ") n'est pas décorative — sans elle, une marque y est bien détectée");
+    }
+    ck(brandOffenders("src-server/src/issues/IssueSyncService.ts", ["*imports*"]).length > 0,
+      "discrimination : … et dans le service, l'exemption `adapterFor` compte À ELLE SEULE (la fabrique nomme bien la marque, imports mis à part)");
+    ck(brandOffenders("src-server/src/issues/JiraParse.ts", []).length > 0,
+      "discrimination : le détecteur repère bien la marque dans le module qui la porte (sinon les tests ci-dessus seraient vacuous)");
 
     // -- 3) COHÉRENCE marque ⇄ table d'options ⇄ FABRIQUE. Les DEUX sens comptent : un `kind`
     //       validable SANS adaptateur donnerait un provider enregistrable mais MORT, et un

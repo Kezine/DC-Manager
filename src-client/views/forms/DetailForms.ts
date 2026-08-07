@@ -966,11 +966,46 @@ export class DetailForms extends IpamForms {
     ]));
     AuditLine.attach(root, issue, host.userDirectory);   // « Créé/Modifié par » (mode API)
 
-    // Pied d'actions : « Modifier » (champs LOCAUX + cibles) SEULEMENT. Pas de « Localiser » (un
-    // ticket n'existe nulle part dans la scène et ses cibles peuvent être multiples — laquelle
-    // viser ?) et pas de suppression : « ne plus suivre » est un geste à cadrer, pas un effet de
-    // bord d'une fiche (l'enregistrement porte des notes et des liens que le tracker ignore).
-    const footerActions = this.footer(() => IssueForms.edit(store, host, id, onChanged));
+    // Pied d'actions : « Ne plus suivre » + « Modifier » (champs LOCAUX + cibles). Pas de
+    // « Localiser » (un ticket n'existe nulle part dans la scène et ses cibles peuvent être
+    // multiples — laquelle viser ?).
+    //
+    // « NE PLUS SUIVRE » — le geste SYMÉTRIQUE de « Suivre un ticket », sans lequel l'assiette n'a
+    // qu'une porte d'entrée : une clé mal saisie entrait au document DÉFINITIVEMENT (et était
+    // redemandée au tracker à chaque passe), et un ticket réellement supprimé chez le tracker
+    // restait « introuvable » pour toujours. Calqué sur la suppression d'une VM orpheline plus haut :
+    // fiche → confirmation → chemin de suppression STANDARD de la collection.
+    // ⚠ Disponible AUSSI en mode FICHIER, contrairement à « Suivre »/« Ouvrir » : retirer un
+    // enregistrement du document ne demande AUCUN serveur — même raison que l'édition des champs
+    // locaux et des cibles (cf. docs/issue-tracker.md § « Mode local »). On ne le conditionne donc
+    // pas au client REST, seulement au fait de ne pas être en lecture seule.
+    // ⚠ La confirmation DOIT lever la crainte naturelle devant un bouton rouge sur un ticket : le
+    // ticket n'est PAS supprimé chez le tracker, seul le suivi local cesse. Elle dit aussi ce qui
+    // est réellement perdu (notes, description locale, cibles) — c'est ce qui justifie de confirmer.
+    const footerActions: HTMLElement[] = [];
+    if (!this.isViewer()) {
+      const unfollowBtn = document.createElement("button"); unfollowBtn.type = "button"; unfollowBtn.className = "btn btn-danger";
+      unfollowBtn.textContent = I18n.t("detail.issue.unfollow");
+      unfollowBtn.title = I18n.t("detail.issue.unfollowTitle");
+      unfollowBtn.onclick = async () => {
+        const ok = await Dialog.confirm({
+          title: I18n.t("detail.issue.unfollowConfirmTitle"),
+          message: I18n.t("detail.issue.unfollowConfirmMsg", { key: label }),
+          confirmLabel: I18n.t("detail.issue.unfollowConfirm"), danger: true,
+        });
+        if (!ok) return;
+        // MÊME chemin que la suppression depuis une liste (store.remove) : la cascade PARTAGÉE et le
+        // pipeline REST/fichier existants s'appliquent — aucun chemin de suppression parallèle.
+        // Rien ne garde de trace du ticket retiré : son `ext_id` redevient LIBRE, donc le re-suivre
+        // plus tard repart proprement (le service cherche l'existant par `ext_id`, et il n'y en a plus).
+        await store.remove("issues", id);
+        host.closeModal?.();   // le ticket n'existe plus → refermer la fiche
+        onChanged?.();          // rafraîchit la liste/vue d'origine
+        Notify.toast(I18n.t("detail.issue.unfollowed"));
+      };
+      footerActions.push(unfollowBtn);
+    }
+    footerActions.push(...this.footer(() => IssueForms.edit(store, host, id, onChanged)));
     host.openModal({
       title: I18n.t("detail.issue.title"), subtitle: Html.escape(label), body: root, footerActions,
       stackKey: "detail:issues/" + id, onResume: () => this.issueDetail(store, host, id, onChanged),
