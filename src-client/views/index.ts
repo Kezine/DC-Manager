@@ -20,6 +20,8 @@ export { IssueProvidersForm } from "./forms/IssueProvidersForm";
 export { IssueSyncClient } from "./forms/IssueSyncClient";
 // Cibles liables d'un ticket — contrat découplé injecté via FormHost (implémenté dans main.ts).
 export type { IssueTargetSource } from "./IssueTargetSource";
+// Intégration « fiches » des tickets — contrat découplé injecté via FormHost (implémenté dans main.ts).
+export type { IssueFicheHooks, IssueFicheItem, IssueFicheDigest } from "./IssueFicheHooks";
 // Sous-onglet « Clusters » de la feature VM (AMOVIBLE, mode API) — vue dédiée détachable.
 export { VmClustersView } from "./VmClustersView";
 export type { VmClustersHost } from "./VmClustersView";

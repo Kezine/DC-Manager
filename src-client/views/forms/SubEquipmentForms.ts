@@ -40,6 +40,7 @@ import { EquipmentTypes } from "../../registries/EquipmentTypes";
 import { I18n } from "../../i18n/I18n";
 import { AuditLine } from "./AuditLine";
 import { InterventionFicheRow } from "./InterventionFicheRow";   // intégration « fiches » de la feature interventions (AMOVIBLE)
+import { IssueFicheRow } from "./IssueFicheRow";   // intégration « fiches » de la feature tickets (AMOVIBLE)
 import { FormSave } from "./FormSave";   // écriture + garde-fou « ne jamais annoncer un succès refusé »
 import { FormBase } from "./FormBase";
 import { EquipmentForms } from "./EquipmentForms";   // rebond vers la fiche du MAÎTRE (usage différé, cf. en-tête)
@@ -129,6 +130,9 @@ export class SubEquipmentForms extends FormBase {
     // mode API) — même rangée que les fiches équipement/VM/spare. Remplacer un drive en panne est LE motif
     // d'intervention type sur ce genre de matériel : la 4ᵉ famille se déclare ici, pas seulement dans l'enum.
     InterventionFicheRow.attach(root, host.interventionHooks, { kind: "sub_equipment", id: se.id, label: se.name || "" }, () => host.closeModal?.());
+    // Intégration « fiches » : tickets du tracker visant ce sous-équipement — même rangée que les
+    // trois autres fiches. ⚠ SYNCHRONE et disponible EN MODE FICHIER (cf. IssueFicheRow).
+    IssueFicheRow.attach(root, host.issueHooks, { kind: "sub_equipment", id: se.id, label: se.name || "" }, () => host.closeModal?.());
 
     AuditLine.attach(root, se, host.userDirectory);   // « Créé/Modifié par » (mode API)
     const footerActions = this.footer(() => this.form(store, host, se.equipment_id, se.id, onChanged));

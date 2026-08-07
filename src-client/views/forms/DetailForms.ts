@@ -34,6 +34,7 @@ import { Issue } from "../../models/Issue";   // libellé « clé sinon titre si
 import { IssueForms } from "./IssueForms";   // édition des champs LOCAUX + des CIBLES (feature tickets AMOVIBLE)
 import { IssueTargets } from "../../../src-shared/IssueTargets";   // clés composées « famille:id » des cibles d'un ticket
 import { InterventionFicheRow } from "./InterventionFicheRow";   // intégration « fiches » de la feature interventions (AMOVIBLE)
+import { IssueFicheRow } from "./IssueFicheRow";   // intégration « fiches » de la feature tickets (AMOVIBLE)
 import { CertFicheRow } from "./CertFicheRow";   // intégration « fiches » du rapprochement certificat ↔ cible (AMOVIBLE)
 import { SubEquipmentForms } from "./SubEquipmentForms";   // fiche + formulaire des sous-équipements (hors chaîne d'héritage, cf. son en-tête)
 import { AuditLine } from "./AuditLine";   // ligne « Créé/Modifié par {auteur} le {date} » (résolue via l'annuaire, mode API)
@@ -539,6 +540,9 @@ export class DetailForms extends IpamForms {
     ]));
     // Intégration « fiches » : badge d'interventions ouvertes + « Déclarer une intervention » (no-op hors mode API).
     InterventionFicheRow.attach(root, host.interventionHooks, { kind: "spare", id, label: (sp.displayName ? sp.displayName() : (sp.name || "")) }, () => host.closeModal?.());
+    // Intégration « fiches » : tickets du tracker visant ce spare. ⚠ SYNCHRONE et disponible EN MODE
+    // FICHIER (les tickets sont une collection du document) — cf. IssueFicheRow.
+    IssueFicheRow.attach(root, host.issueHooks, { kind: "spare", id, label: (sp.displayName ? sp.displayName() : (sp.name || "")) }, () => host.closeModal?.());
     AuditLine.attach(root, sp, host.userDirectory);   // « Créé/Modifié par » (mode API)
     const footerActions = this.footer(() => this.spare(store, host, id, onChanged));
     host.openModal({ title: I18n.t("detail.spare.title"), subtitle: Html.escape(sp.displayName ? sp.displayName() : (sp.name || "")), body: root, footerActions, stackKey: "detail:spares/" + id, onResume: () => this.spareDetail(store, host, id, onChanged), hideFooter: true, wide: true });
@@ -606,6 +610,9 @@ export class DetailForms extends IpamForms {
     //    les réseaux ; « non raccordé » si aucun mapping. IPs constatées = donnée source informative (décision IPAM). --
     // Intégration « fiches » : badge d'interventions ouvertes + « Déclarer une intervention » (no-op hors mode API).
     InterventionFicheRow.attach(root, host.interventionHooks, { kind: "vm", id, label: vm.name || "" }, () => host.closeModal?.());
+    // Intégration « fiches » : tickets du tracker visant cette VM. ⚠ SYNCHRONE et disponible EN MODE
+    // FICHIER (les tickets sont une collection du document) — cf. IssueFicheRow.
+    IssueFicheRow.attach(root, host.issueHooks, { kind: "vm", id, label: vm.name || "" }, () => host.closeModal?.());
     // Intégration « fiches » : certificats TLS rapprochés (calculé, no-op hors mode API).
     CertFicheRow.attach(root, host.certHooks, { kind: "vm", id }, () => host.closeModal?.());
 

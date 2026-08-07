@@ -112,6 +112,20 @@ export class IssueStatus {
     return !!(issue && issue.orphan);
   }
 
+  /** Le ticket est-il OUVERT, c'est-à-dire « pas encore réglé » ? Défini par la NÉGATION de `done`
+      et non par une liste blanche (`todo` + `in_progress`), pour une raison de fond : `unknown` est
+      le repli de tout ce qu'on n'a pas su classer — le compter comme CLOS le ferait disparaître des
+      badges alors que c'est précisément ce qui mérite un coup d'œil. Mieux vaut un ticket signalé de
+      trop qu'un ticket ouvert invisible.
+      ⚠ L'orphelinat n'entre PAS dans la décision : un ticket devenu introuvable garde l'état de sa
+      dernière résolution réussie — s'il était en cours, il reste OUVERT chez nous jusqu'à preuve du
+      contraire. Sa pastille « introuvable », elle, dit à part que quelque chose est à regarder.
+      Règle UNIQUE, consommée par le badge des fiches (`core/IssueTargetSummary`) : la dupliquer
+      laisserait un compteur et une couleur se contredire au premier ajustement. */
+  static isOpen(issue: IssueStatusIssue | null | undefined): boolean {
+    return IssueStatus.categoryOf(issue) !== "done";
+  }
+
   /** Couleur de l'état — l'ORPHELINAT PRIME sur la catégorie (patron `VmStatus.swatchColor`) :
       la catégorie affichée est celle de la dernière résolution réussie, donc potentiellement
       périmée ; « introuvable » est, lui, l'état COURANT et c'est l'information dominante. */

@@ -617,6 +617,71 @@ module.exports = async () => {
   }
   });
 
+  await section("client L5 : IssueTargetSummary — sélection PURE des tickets d'une cible (ouverts, tri, bornage, préfixe)", async () => {
+  {
+    // La rangée « Tickets » des fiches lit cette logique SYNCHRONEMENT dans le Store — c'est tout
+    // l'écart avec la rangée « Interventions », qui interroge le serveur. Elle est donc PURE, donc
+    // testable seule, et c'est précisément pour ça qu'elle n'est pas enfouie dans le helper DOM.
+    const { IssueTargetSummary } = D("core/IssueTargetSummary.js");
+    const mk = (over) => Object.assign({
+      id: "", key: "", summary: "", status: "", status_category: "todo", orphan: false,
+      updated_src: null, updated_date: "2026-01-01T00:00:00.000Z", targets: [],
+    }, over);
+    const issues = [
+      mk({ id: "a", key: "INFRA-1", status_category: "todo", updated_src: "2026-08-01T10:00:00.000Z", targets: ["equipment:E1"] }),
+      mk({ id: "b", key: "INFRA-2", status_category: "done", updated_src: "2026-08-05T10:00:00.000Z", targets: ["equipment:E1", "vm:V9"] }),
+      mk({ id: "c", key: "INFRA-3", status_category: "in_progress", updated_src: "2026-08-03T10:00:00.000Z", targets: ["equipment:E1"] }),
+      mk({ id: "d", key: "INFRA-4", status_category: "unknown", updated_src: "2026-08-04T10:00:00.000Z", targets: ["equipment:E10"] }),
+      // Ticket JAMAIS daté par le tracker : la récence retombe sur l'horodatage LOCAL.
+      mk({ id: "e", key: "INFRA-5", status_category: "todo", updated_src: null, updated_date: "2026-07-01T00:00:00.000Z", targets: ["equipment:E1"] }),
+    ];
+    const order = issues.map((i) => i.id).join(",");
+
+    // -- 1) SÉLECTION : la clé est composée par le module PARTAGÉ, et comparée par ÉGALITÉ. --
+    const forE1 = IssueTargetSummary.of(issues, "equipment", "E1");
+    ck.eq(forE1.map((i) => i.id).sort().join(","), "a,b,c,e", "sélection : les tickets qui portent « equipment:E1 » dans leurs cibles");
+    ck(!forE1.some((i) => i.id === "d"), "🚨 « equipment:E10 » n'est PAS « equipment:E1 » — l'appartenance est une ÉGALITÉ, jamais un préfixe (le piège classique des clés composées)");
+    ck.eq(IssueTargetSummary.of(issues, "vm", "V9").map((i) => i.id).join(","), "b", "sélection : un même ticket peut viser plusieurs familles à la fois");
+    ck.eq(IssueTargetSummary.of(issues, "equipment", "ABSENT").length, 0, "cible sans aucun ticket → aucune ligne (et surtout pas toutes)");
+    ck.eq(IssueTargetSummary.of(issues, "famille-inconnue", "E1").length, 0, "famille INCONNUE → aucune ligne : un slug non prévu ne doit pas se lire comme « pas de filtre »");
+    ck.eq(IssueTargetSummary.of(issues, "equipment", "").length, 0, "id vide → aucune ligne (une clé « equipment: » n'est pas une cible)");
+    ck.eq(IssueTargetSummary.of(null, "equipment", "E1").length, 0, "entrée absente tolérée (aucun ticket chargé) — la rangée d'une fiche ne doit jamais jeter");
+    ck.eq(IssueTargetSummary.of([{ id: "x" }, { id: "y", targets: "pas-un-tableau" }], "equipment", "E1").length, 0, "enregistrement sans `targets` exploitable → ignoré, jamais d'exception");
+
+    // -- 2) OUVERTS : la règle vit dans `IssueStatus.isOpen` (source unique de l'état). --
+    ck.eq(IssueStatus.isOpen({ status_category: "todo" }), true, "« todo » est OUVERT");
+    ck.eq(IssueStatus.isOpen({ status_category: "in_progress" }), true, "« in_progress » est OUVERT");
+    ck.eq(IssueStatus.isOpen({ status_category: "done" }), false, "« done » est le SEUL état clos");
+    ck.eq(IssueStatus.isOpen({ status_category: "categorie-maison" }), true,
+      "🚨 une catégorie inconnue est comptée OUVERTE : elle retombe sur `unknown`, et un ticket qu'on n'a pas su classer doit être VU, pas escamoté");
+    ck.eq(IssueStatus.isOpen({ status_category: "in_progress", orphan: true }), true,
+      "l'orphelinat n'entre PAS dans la décision : un ticket devenu introuvable garde l'état de sa dernière résolution");
+    ck.eq(IssueTargetSummary.openCount(forE1), 3, "comptage : 3 ouverts sur 4 (le ticket « done » est exclu)");
+    ck.eq(IssueTargetSummary.openCount([]), 0, "comptage : aucun ticket → 0");
+
+    // -- 3) TRI et BORNAGE : récence CÔTÉ TRACKER, repli sur l'horodatage local. --
+    ck.eq(IssueTargetSummary.latest(forE1, 3).map((i) => i.id).join(","), "b,c,a",
+      "tri : du plus récemment modifié CHEZ LE TRACKER au plus ancien — tous états confondus (un ticket clos hier fait partie de l'histoire de l'objet)");
+    ck.eq(IssueTargetSummary.latest(forE1, 4).map((i) => i.id).join(","), "b,c,a,e",
+      "récence : sans `updated_src`, on retombe sur l'horodatage LOCAL (ici plus ancien → en queue)");
+    ck.eq(IssueTargetSummary.latest(forE1, 2).length, 2, "bornage : jamais plus que demandé");
+    ck.eq(IssueTargetSummary.latest(forE1, 0).length, 0, "bornage : une limite nulle rend une liste vide (et non « tout »)");
+    ck.eq(issues.map((i) => i.id).join(","), order, "le tableau d'entrée n'est PAS muté (il vient du Store — un tri en place réordonnerait la collection)");
+    // Ordre TOTAL et STABLE : deux tickets de même récence sont départagés par la clé, jamais laissés
+    // à l'ordre d'itération (qui ferait sautiller la rangée d'un rendu à l'autre).
+    const tied = [mk({ id: "z", key: "B-2", updated_src: "2026-08-09T00:00:00.000Z", targets: ["vm:V1"] }), mk({ id: "y", key: "A-1", updated_src: "2026-08-09T00:00:00.000Z", targets: ["vm:V1"] })];
+    ck.eq(IssueTargetSummary.latest(tied, 2).map((i) => i.key).join(","), "A-1,B-2", "égalité de récence → départage par la CLÉ (ordre stable d'un rendu à l'autre)");
+
+    // -- 4) DIGEST : ce que la rangée consomme, en un appel. --
+    const digest = IssueTargetSummary.digest(issues, "equipment", "E1", 3);
+    ck.eq(digest.openCount, 3, "digest : compte d'OUVERTS (le badge)");
+    ck.eq(digest.total, 4, "digest : TOTAL tous états — c'est lui qui décide du « Afficher plus » (une cible dont tout est clos a quand même une histoire)");
+    ck.eq(digest.latest.map((i) => i.id).join(","), "b,c,a", "digest : les N derniers, déjà triés et bornés");
+    const empty = IssueTargetSummary.digest(issues, "spare", "S-404", 3);
+    ck(empty.openCount === 0 && empty.total === 0 && empty.latest.length === 0, "digest d'une cible sans ticket : tout à zéro (la rangée n'affiche alors rien de plus qu'un bouton de création)");
+  }
+  });
+
   /* ==========================================================================================
      LOT L2 — MODULE SERVEUR AMOVIBLE `issues/` : contrats, adaptateur Jira, config chiffrée
      ========================================================================================== */
@@ -1727,6 +1792,181 @@ module.exports = async () => {
       ck.eq(multi.length, 2, "multi-providers : chaque instance fait sa propre passe");
       ck(multi.every((s) => s.ok), "multi-providers : … et chacune ne voit QUE ses tickets (périmètre par provider_id)");
       configured = [cfg("tracker-1")];
+    } finally {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* dossier temp (handles longs sous Windows) */ }
+    }
+  });
+
+  await section("Serveur L5 : IssueSyncService.openIssue — ordre tracker→local, ÉCHEC PARTIEL, message du tracker INTACT, provider", async () => {
+    let Sqlite = null;
+    try {
+      const Candidate = require(path.join(__dirname, "..", "..", "src-server", "node_modules", "better-sqlite3"));
+      const probe = new Candidate(":memory:"); probe.close();
+      Sqlite = Candidate;
+    } catch (_) { /* module/binaire absent → section sautée */ }
+    if (!Sqlite) { ck(true, "better-sqlite3 indisponible → section openIssue sautée"); return; }
+
+    const fs = require("fs"), os = require("os");
+    const { DocumentStore } = SERVER("documents.js");
+    const { IssueSyncService } = SERVER("issues/IssueSyncService.js");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dcm-issueopen-"));
+    try {
+      const docs = new DocumentStore(dir, Sqlite);
+      const doc = docs.create("infra-open");
+      const repo = docs.repo(doc.id);
+
+      const cfg = (id, options) => ({ id, kind: "jira", url: "https://exemple.atlassian.net", token: "K", account: "svc@exemple.be", interval_sec: 0, timeout_sec: 20, options: options || { project_key: "INFRA", issue_type: "Tâche" } });
+      let configured = [cfg("tracker-1")];
+      const providers = {
+        configuredDocIds: () => [doc.id],
+        providersFor: (d) => (d === doc.id ? configured : []),
+        summariesFor: (d) => providers.providersFor(d).map((c) => ({ id: c.id, kind: c.kind, interval_sec: c.interval_sec })),
+      };
+
+      // ADAPTATEUR STUB qui JOURNALISE TOUT ce qu'on lui demande — c'est ce journal qui permet de
+      // prouver l'ORDRE des étapes et, surtout, l'ABSENCE de suppression compensatoire. Le contrat
+      // n'a d'ailleurs AUCUNE méthode de suppression : `deleteIssue` n'existe ici que pour que le
+      // test puisse affirmer qu'on n'a jamais essayé d'en appeler une (une assertion sur une méthode
+      // absente ne prouverait rien).
+      const calls = [];
+      let refusal = null;
+      let nextCreated = null;
+      const makeAdapter = (config) => ({
+        kind: config.kind, config,
+        test: async () => ({ ok: true, kind: config.kind, version: null, supported: true, message: "" }),
+        resolve: async (ids) => { calls.push({ m: "resolve", provider: config.id, ids: ids.slice() }); return { found: [], missing: ids.slice() }; },
+        lookup: async () => { calls.push({ m: "lookup", provider: config.id }); return null; },
+        createIssue: async (input) => {
+          calls.push({ m: "createIssue", provider: config.id, input: { ...input } });
+          if (refusal) throw new Error(refusal);
+          return Object.assign({
+            ext_id: "10500", provider_id: config.id, key: "INFRA-500", summary: input.summary,
+            status: "À faire", status_category: "todo", issue_type: "Tâche", priority: null,
+            assignee: null, reporter: "svc", labels: [], resolution: null,
+            created_src: "2026-08-07T09:00:00.000Z", updated_src: "2026-08-07T09:00:00.000Z",
+            url: "https://exemple.atlassian.net/browse/INFRA-500", orphan: false, last_sync: "",
+          }, nextCreated || {});
+        },
+        deleteIssue: async () => { calls.push({ m: "deleteIssue", provider: config.id }); },
+      });
+
+      const live = { events: [], publish(docId, data) { this.events.push({ docId, data }); } };
+      const logged = [];
+      const log = { info: (...a) => logged.push("info " + a.join(" ")), warn: (...a) => logged.push("warn " + a.join(" ")), error: (...a) => logged.push("error " + a.join(" ")) };
+      const service = new IssueSyncService(docs, live, providers, log, makeAdapter, 0);
+
+      // -- 1) SUCCÈS : création distante PUIS écriture locale, avec les cibles fournies. --
+      const rev0 = docs.getRev(doc.id);
+      const ok = await service.openIssue(doc.id, { summary: "  Panne de la baie B12  ", description: "détail\nsur deux lignes", targets: ["equipment:eq-1", "vm:vm-9"] });
+      ck.eq(ok.ok, true, "ouverture : la création aboutit");
+      ck.eq(calls.filter((c) => c.m === "createIssue").length, 1, "ouverture : UN seul appel de création chez le tracker");
+      ck.eq(calls[0].input.summary, "Panne de la baie B12", "ouverture : le titre est ROGNÉ avant d'être envoyé");
+      ck(!("project" in calls[0].input) && !("issue_type" in calls[0].input),
+        "🚨 ouverture : ni PROJET ni TYPE ne transitent par l'appelant — ce sont des OPTIONS du provider (l'utilisateur n'a pas à connaître la config du tracker, et un client ne doit pas pouvoir viser un autre projet)");
+      ck.eq(ok.issue.ext_id, "10500", "ouverture : l'enregistrement local porte l'identifiant INTERNE du ticket créé");
+      ck.eq(ok.issue.key, "INFRA-500", "ouverture : … et sa clé lisible");
+      ck.eq(ok.issue.provider_id, "tracker-1", "ouverture : estampillé du provider (c'est lui qui délimitera son périmètre de synchro)");
+      ck.eq(JSON.stringify(ok.issue.targets), '["equipment:eq-1","vm:vm-9"]', "ouverture : les CIBLES fournies sont liées D'EMBLÉE (un ticket ouvert depuis une fiche naît rattaché à l'objet)");
+      ck.eq(ok.issue.description, "détail\nsur deux lignes", "ouverture : la description SAISIE ICI est conservée en champ LOCAL (elle n'est pas rapatriée du tracker — la v1 ne la lit pas)");
+      ck.eq(ok.created_key, null, "ouverture réussie : aucune clé d'échec partiel à rattraper");
+      ck(docs.getRev(doc.id) > rev0, "ouverture : révision consommée — le triptyque COMPLET, comme toute écriture");
+      ck.eq(live.events.length, 1, "ouverture : 1 événement SSE publié");
+      ck.eq(live.events[0].data.changeset.collections.join(","), "issues", "ouverture : changeset ciblé sur `issues` (rechargement granulaire des autres clients)");
+      ck.eq(repo.findBy("issues", "ext_id", "10500").length, 1, "ouverture : l'enregistrement est bien DANS le document");
+
+      // -- 2) 🚨 ORDRE : la création DISTANTE précède l'écriture LOCALE. On le prouve par le seul
+      //       moyen honnête : un dépôt qui JETTE à l'écriture. Si l'ordre était inversé, le tracker
+      //       ne serait jamais appelé. --
+      const realRepo = docs.repo(doc.id);
+      const brokenRepo = {
+        findBy: (c, f, v) => realRepo.findBy(c, f, v),
+        getOne: (c, i) => realRepo.getOne(c, i),
+        transact: () => { throw new Error("disque plein"); },
+      };
+      const brokenDocs = { get: (id) => docs.get(id), repo: () => brokenRepo, markChanged: (id) => docs.markChanged(id) };
+      const brokenService = new IssueSyncService(brokenDocs, live, providers, log, makeAdapter, 0);
+      const before = calls.length;
+      const partial = await brokenService.openIssue(doc.id, { summary: "Second ticket", description: "", targets: [] });
+      ck.eq(partial.ok, false, "ÉCHEC PARTIEL : l'opération est un échec…");
+      ck.eq(partial.failure, "partial", "… d'une nature PROPRE (ni « demande invalide », ni « refus du tracker ») — c'est elle qui décide du code HTTP");
+      ck.eq(calls.filter((c) => c.m === "createIssue").length, 2, "🚨 ORDRE PROUVÉ : le tracker A ÉTÉ appelé alors que l'écriture locale échoue (l'inverse laisserait une ligne mensongère dans le document)");
+      ck.eq(partial.created_key, "INFRA-500", "🚨 ÉCHEC PARTIEL : la réponse PORTE LA CLÉ créée — sans elle, un ticket existerait chez le tracker sans que personne ne sache lequel");
+      ck(/créé chez le tracker/.test(partial.message) && /Suivre un ticket/.test(partial.message) && /INFRA-500/.test(partial.message),
+        "ÉCHEC PARTIEL : le message DIT ce qui s'est passé et la suite à donner (« Suivre un ticket » avec cette clé)");
+      ck.eq(calls.slice(before).filter((c) => c.m === "deleteIssue").length, 0,
+        "🚨 ÉCHEC PARTIEL : AUCUNE suppression compensatoire chez le tracker — on ne détruit pas dans un système tiers pour rattraper NOTRE écriture (elle pourrait échouer, et le ticket a pu être vu/assigné)");
+      ck.eq(repo.findBy("issues", "key", "INFRA-500").length, 1, "ÉCHEC PARTIEL : aucun enregistrement local n'a été créé (seul celui du cas 1 subsiste)");
+      ck(logged.some((l) => /^error .*ÉCHEC PARTIEL/.test(l)), "ÉCHEC PARTIEL : journalisé en ERREUR côté serveur — c'est un écart durable tracker ⇄ document, pas un incident passager");
+
+      // -- 3) 🚨 REFUS DU TRACKER : son message traverse le service MOT POUR MOT. --
+      refusal = "Tracker : HTTP 400 sur /rest/api/3/issue — customfield_10010 : Le champ « Équipe » est requis";
+      const revBefore = docs.getRev(doc.id);
+      const refused = await service.openIssue(doc.id, { summary: "Titre", description: "", targets: [] });
+      ck.eq(refused.ok, false, "refus du tracker → échec");
+      ck.eq(refused.failure, "tracker", "refus du tracker : nature « tracker » (→ 422 côté route : la requête est bien formée)");
+      ck.eq(refused.message, refusal,
+        "🚨 le message du tracker remonte INTACT jusqu'à la sortie du service — l'envelopper dans un « échec de création » générique détruirait la seule information exploitable (« le champ X est requis »)");
+      ck.eq(refused.created_key, null, "refus du tracker : rien n'a été créé, donc aucune clé à rattraper");
+      ck.eq(docs.getRev(doc.id), revBefore, "refus du tracker : document INTACT, aucune révision consommée");
+      refusal = null;
+
+      // -- 4) `project_key` ABSENT : la CHAÎNE complète est éprouvée (service → VRAI JiraAdapter →
+      //       garde d'entrée), avec un client HTTP qui compte les appels. Le partage des rôles voulu
+      //       par L2 (le champ n'est pas requis à la SAISIE, le manque se signale à la CRÉATION) ne
+      //       tient que si le message est actionnable ET qu'aucun appel ne part. --
+      const httpProbe = mkJiraStub({});
+      const realAdapterService = new IssueSyncService(docs, live, providers, log, (config) => new JiraAdapter(config, httpProbe), 0);
+      configured = [cfg("tracker-1", { issue_type: "Task" })];   // provider SANS projet de création
+      const noProject = await realAdapterService.openIssue(doc.id, { summary: "Titre", description: "", targets: [] });
+      ck.eq(noProject.ok, false, "provider sans projet de création → refus");
+      ck(/project_key/.test(noProject.message), "… message ACTIONNABLE qui NOMME l'option à remplir (et non un « échec » opaque)");
+      ck.eq(httpProbe.calls.length, 0, "… et AUCUN appel réseau n'a été tenté (la garde est à l'entrée de l'adaptateur)");
+      configured = [cfg("tracker-1")];
+
+      // -- 5) RÉSOLUTION DU PROVIDER : implicite à un, REQUIS au-delà, refusé si inconnu. --
+      const createsBefore = calls.filter((c) => c.m === "createIssue").length;
+      const implicit = await service.openIssue(doc.id, { summary: "Sans provider", description: "", targets: [] });
+      ck(implicit.ok === true && implicit.provider_id === "tracker-1", "un SEUL provider → il est IMPLICITE (rien à choisir n'est pas un choix)");
+
+      configured = [cfg("tracker-1"), cfg("tracker-2")];
+      const ambiguous = await service.openIssue(doc.id, { summary: "Ambigu", description: "", targets: [] });
+      ck.eq(ambiguous.ok, false, "PLUSIEURS providers sans choix → refus");
+      ck.eq(ambiguous.failure, "invalid", "… nature « demande invalide » (→ 400 : c'est corrigeable dans le formulaire)");
+      ck(/tracker-1/.test(ambiguous.message) && /tracker-2/.test(ambiguous.message), "… et le message ÉNUMÈRE les providers configurés (sinon l'utilisateur ne sait pas quoi répondre)");
+      ck.eq(calls.filter((c) => c.m === "createIssue").length, createsBefore + 1,
+        "🚨 ambiguïté → AUCUNE création : créer chez un tiers est IRRÉVERSIBLE, on ne devine pas le destinataire (contrairement à « Suivre », où le provider qui RECONNAÎT la référence tranche tout seul)");
+      const chosen = await service.openIssue(doc.id, { provider_id: "tracker-2", summary: "Chez le second", description: "", targets: [] });
+      ck(chosen.ok === true && chosen.provider_id === "tracker-2", "provider nommé explicitement → c'est chez LUI que le ticket est créé");
+      const unknown = await service.openIssue(doc.id, { provider_id: "tracker-42", summary: "x", description: "", targets: [] });
+      ck(unknown.ok === false && /tracker-42/.test(unknown.message) && unknown.failure === "invalid", "provider INCONNU → refus nommant la valeur reçue");
+      configured = [cfg("tracker-1")];
+
+      // -- 6) CIBLES mal formées : refusées AVANT l'appel distant. Une faute de saisie ne doit pas
+      //       devenir un ÉCHEC PARTIEL — c'est le seul refus de validation prévisible sur ce chemin. --
+      const beforeBadTarget = calls.filter((c) => c.m === "createIssue").length;
+      const badTarget = await service.openIssue(doc.id, { summary: "Titre", description: "", targets: ["equipment:eq-1", "pasunecle"] });
+      ck.eq(badTarget.ok, false, "cible mal formée → refus");
+      ck.eq(badTarget.failure, "invalid", "… nature « demande invalide »");
+      ck(/pasunecle/.test(badTarget.message), "… message citant la clé fautive");
+      ck.eq(calls.filter((c) => c.m === "createIssue").length, beforeBadTarget,
+        "🚨 … et AUCUN appel distant : laisser filer transformerait une faute de saisie en ÉCHEC PARTIEL (ticket créé, enregistrement refusé)");
+
+      // -- 7) GARDES d'entrée : titre vide, document inconnu, aucun provider. --
+      const noTitle = await service.openIssue(doc.id, { summary: "   ", description: "", targets: [] });
+      ck(noTitle.ok === false && noTitle.failure === "invalid" && /titre/i.test(noTitle.message), "titre vide → refus explicite, sans appel distant");
+      const noDoc = await service.openIssue("doc-inexistant", { summary: "x" });
+      ck(noDoc.ok === false && /document inconnu/.test(noDoc.message), "document inconnu → refus");
+      configured = [];
+      const noProvider = await service.openIssue(doc.id, { summary: "x" });
+      ck(noProvider.ok === false && /aucun provider/.test(noProvider.message), "aucun provider configuré → refus qui dit quoi faire (en configurer un)");
+      configured = [cfg("tracker-1")];
+
+      // -- 8) Le ticket créé entre bien dans l'ASSIETTE : la passe suivante le RÉSOUT. --
+      const resolveBefore = calls.filter((c) => c.m === "resolve").length;
+      await service.syncDocument(doc.id);
+      const asked = calls.filter((c) => c.m === "resolve").slice(resolveBefore)[0];
+      ck(!!asked && asked.ids.includes("10500"),
+        "le ticket OUVERT depuis DC Manager est désormais SUIVI : la passe de synchro le demande au tracker (2e porte d'entrée de l'assiette, décision D7)");
     } finally {
       try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* dossier temp (handles longs sous Windows) */ }
     }

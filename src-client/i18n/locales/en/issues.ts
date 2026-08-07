@@ -44,6 +44,42 @@ export const issues = {
     added: "Issue followed",
     already: "This issue is already followed — it has just been refreshed.",
   },
+  // "OPEN AN ISSUE" (decision D7) — DC Manager CREATES the issue in the tracker, then records it.
+  // ⚠ Neither the PROJECT nor the TYPE is asked for: they are provider options (the user does not
+  // have to know the tracker configuration) — they are only RECALLED.
+  create: {
+    title: "Open an issue",
+    intro: "The issue is created in the tracker, then recorded and followed in this document. The project and issue type come from the provider configuration.",
+    summaryField: "Title",
+    summaryPlaceholder: "Short summary of the problem",
+    summaryHint: "Issue title in the tracker. Required.",
+    summaryRequired: "Enter a title for the issue.",
+    descriptionHint: "Description sent to the tracker (plain text). It is also kept here as a local enrichment.",
+    providerField: "Destination tracker",
+    providerHint: "This document is linked to several trackers: pick the one where the issue must be created.",
+    destination: "Destination: {{provider}} · project {{project}} · type {{type}}.",
+    destinationUnknown: "Destination unavailable — the server will pick the configured provider.",
+    noProject: "Provider « {{provider}} » has no creation project configured: creation will be refused as long as the « Creation project » option is empty.",
+    submit: "Open the issue",
+    created: "Issue created",
+    // PARTIAL FAILURE: the issue EXISTS in the tracker but could not be recorded here. The message
+    // carries the KEY — the only thing that makes the situation recoverable.
+    partial: "Issue « {{key}} » was created in the tracker but could NOT be recorded here. Pick it up with « Follow an issue » using the key « {{key}} ». Details: {{detail}}",
+    alreadyCreated: "Issue « {{key}} » has already been created in the tracker. Close this window and pick it up with « Follow an issue » — saving again would create a second issue.",
+  },
+  // "Issues" row of the detail cards (equipment / VM / spare / sub-equipment).
+  // ⚠ Unlike the "Interventions" row, it is SYNCHRONOUS and available in file mode: issues are a
+  // collection of the document. Only "Open an issue" requires API mode.
+  fiche: {
+    section: "Issues",
+    openCount: "{{n}} open",
+    none: "No open issue",
+    create: "Open an issue",
+    createTitle: "Create an issue in the tracker, already linked to this object",
+    showMore: "Show more",
+    showMoreTitle: "Open the Issues tab filtered on this object",
+    openDetail: "Open the issue",
+  },
   providers: {
     title: "Issue providers",
     subtitle: "Manage the trackers queried for this document",

@@ -9,7 +9,7 @@ import { EntityCandidateSource } from "../../core/EntityCandidates";   // DEBOUN
 import { Issue } from "../../models/Issue";
 import { IssueTargets } from "../../../src-shared/IssueTargets";
 import { IssueSyncError } from "./IssueSyncClient";
-import type { IssueSyncClient, IssueProviderStatus } from "./IssueSyncClient";
+import type { IssueSyncClient, IssueProviderStatus, IssueProviderSummary } from "./IssueSyncClient";
 import type { IssueTargetSource } from "../IssueTargetSource";
 import type { FormHost } from "./shared";
 import { I18n } from "../../i18n/I18n";
@@ -255,6 +255,137 @@ export class IssueForms {
       },
     });
     setTimeout(() => refInput.focus(), 30);
+  }
+
+  /* ============================================================================
+     « OUVRIR UN TICKET » — la PORTE D'ENTRÉE n°2 de l'assiette (décision D7)
+     ============================================================================ */
+
+  /** Modale de CRÉATION d'un ticket chez le tracker. Modale standard de l'app (principe n°11),
+      ouverte depuis l'en-tête de l'onglet Tickets (bouton primaire « + Ouvrir un ticket ») ET depuis
+      la rangée « Tickets » des fiches — d'où `prefill`, qui porte le titre suggéré et la cible
+      pré-liée. Mode API et hors viewer uniquement (la création parle au tracker).
+
+      CE QUE LE FORMULAIRE NE DEMANDE PAS, ET POURQUOI : ni le PROJET, ni le TYPE de ticket. Ce sont
+      des OPTIONS du provider, réglées une fois par l'opérateur — les demander à chaque création
+      obligerait l'utilisateur à connaître la configuration du tracker, et permettrait de viser un
+      autre projet que celui qui a été autorisé. Ils sont donc simplement RAPPELÉS, en clair.
+
+      LES TROIS ISSUES, ET POURQUOI ELLES NE SE RESSEMBLENT PAS :
+      - SUCCÈS → toast + `onCreated` (l'appelant rafraîchit ce qui doit l'être) ;
+      - REFUS DU TRACKER (422) → son message s'affiche TEL QUEL dans la modale, qui RESTE OUVERTE :
+        il nomme le champ manquant (« le champ Équipe est requis »), donc il est corrigeable ;
+      - 🚨 ÉCHEC PARTIEL (le ticket EXISTE chez le tracker, l'écriture locale a échoué) → message
+        DÉDIÉ portant la CLÉ créée, et la modale se VERROUILLE : ré-enregistrer créerait un SECOND
+        ticket chez le tracker, ce qui est exactement le contraire de ce qu'il faut faire. La seule
+        suite utile est « Suivre un ticket » avec cette clé, et le message le dit. */
+  static create(
+    host: FormHost,
+    client: IssueSyncClient,
+    prefill?: { summary?: string; targets?: string[]; context?: string },
+    onCreated?: (issueId: string) => void,
+  ): void {
+    const root = document.createElement("div");
+    const note = document.createElement("div"); note.className = "form-hint";
+    note.textContent = I18n.t("issues.create.intro");
+    root.appendChild(note);
+
+    const summaryInput = FormControls.text(prefill?.summary || "", I18n.t("issues.create.summaryPlaceholder"));
+    root.appendChild(FormControls.fieldRow(I18n.t("issues.create.summaryField"), summaryInput, I18n.t("issues.create.summaryHint")));
+    const descriptionInput = FormControls.textArea("");
+    root.appendChild(FormControls.fieldRow(I18n.t("lists.col.description"), descriptionInput, I18n.t("issues.create.descriptionHint")));
+
+    // PROVIDER + rappel de DESTINATION : hôtes vides, remplis quand la liste arrive. Le `<select>`
+    // n'est rendu QUE s'il y a plusieurs providers — un choix unique n'est pas un choix, et c'est
+    // exactement la règle qu'applique le serveur (implicite à un, requis au-delà).
+    const providerHost = document.createElement("div");
+    root.appendChild(providerHost);
+    const destination = document.createElement("div"); destination.className = "form-hint"; destination.style.marginTop = "4px";
+    root.appendChild(destination);
+    // Provider RETENU : "" = « laisse le serveur décider » (cas du provider unique). Muté par le
+    // <select> quand il existe.
+    let providerId = "";
+    let providers: IssueProviderSummary[] = [];
+    const paintDestination = (): void => {
+      const chosen = providers.find((p) => p.id === providerId) || (providers.length === 1 ? providers[0] : null);
+      if (!chosen) { destination.textContent = providers.length ? I18n.t("issues.create.destinationUnknown") : ""; return; }
+      const project = typeof chosen.options?.project_key === "string" ? chosen.options.project_key.trim() : "";
+      const type = typeof chosen.options?.issue_type === "string" ? chosen.options.issue_type.trim() : "";
+      // Projet non configuré : le serveur refusera (message actionnable de l'adaptateur). On le DIT
+      // AVANT la tentative — découvrir la chose après avoir rédigé un ticket est inutilement pénible.
+      destination.textContent = project
+        ? I18n.t("issues.create.destination", { provider: chosen.id, project, type: type || "—" })
+        : I18n.t("issues.create.noProject", { provider: chosen.id });
+      destination.style.color = project ? "" : "var(--warn)";
+    };
+    client.providers().then((list) => {
+      providers = list;
+      if (list.length > 1) {
+        const select = FormControls.select(list.map((p) => ({ value: p.id, label: p.id })), list[0].id);
+        providerId = list[0].id;
+        select.onchange = () => { providerId = select.value; paintDestination(); };
+        providerHost.appendChild(FormControls.fieldRow(I18n.t("issues.create.providerField"), select, I18n.t("issues.create.providerHint")));
+      }
+      paintDestination();
+    }).catch(() => {
+      // Liste indisponible (503, réseau) : on n'empêche RIEN — le serveur tranchera et son refus est
+      // actionnable. Seul le rappel de destination manque, ce qui est un confort, pas une condition.
+      destination.textContent = I18n.t("issues.create.destinationUnknown");
+    });
+
+    // CIBLES : le MÊME éditeur que la fiche (SearchPop unifié, principe n°14). Copie de travail —
+    // la modale peut être annulée, et le tableau du prefill appartient à l'appelant.
+    const targets: string[] = Array.isArray(prefill?.targets) ? prefill!.targets!.slice() : [];
+    root.appendChild(IssueForms.buildTargetsEditor(targets, host.issueTargets || null));
+
+    const errBox = document.createElement("div"); errBox.className = "form-hint err";
+    errBox.style.cssText = "margin-top:10px;white-space:pre-line;display:none";
+    root.appendChild(errBox);
+
+    // VERROU d'après échec PARTIEL (cf. l'en-tête) : une fois le ticket créé chez le tracker, plus
+    // aucun enregistrement ne doit partir depuis cette modale.
+    let partialKey: string | null = null;
+
+    host.openModal({
+      title: I18n.t("issues.create.title"),
+      subtitle: prefill?.context ? Html.escape(prefill.context) : undefined,
+      body: root, wide: true, saveLabel: I18n.t("issues.create.submit"),
+      onSave: async () => {
+        if (partialKey !== null) {
+          // Ré-enregistrer créerait un SECOND ticket chez le tracker : on refuse, en rappelant la clé.
+          IssueForms.showError(errBox, I18n.t("issues.create.alreadyCreated", { key: partialKey }));
+          return false;
+        }
+        errBox.style.display = "none";
+        const summary = summaryInput.value.trim();
+        // Garde LOCALE : inutile de demander au serveur ce qu'on sait déjà (et son message serait le
+        // même). La modale reste ouverte, le champ garde le focus.
+        if (!summary) { IssueForms.showError(errBox, I18n.t("issues.create.summaryRequired")); summaryInput.focus(); return false; }
+        try {
+          const result = await client.createIssue({
+            provider_id: providerId || undefined,
+            summary,
+            description: descriptionInput.value.trim(),
+            targets,
+          });
+          Notify.toast(result.message || I18n.t("issues.create.created"), "ok");
+          onCreated?.(result.issue && typeof result.issue.id === "string" ? result.issue.id : "");
+          return true;
+        } catch (e) {
+          if (e instanceof IssueSyncError && e.createdKey) {
+            // 🚨 ÉCHEC PARTIEL : le ticket EXISTE. Message DÉDIÉ portant la clé + verrou.
+            partialKey = e.createdKey;
+            IssueForms.showError(errBox, I18n.t("issues.create.partial", { key: e.createdKey, detail: e.message }));
+            return false;
+          }
+          // 400 (demande incomplète) ou 422 (refus du tracker) : le message du serveur EST
+          // l'information actionnable → affiché tel quel, sans enveloppe, modale CONSERVÉE.
+          IssueForms.showError(errBox, IssueForms.errText(e));
+          return false;
+        }
+      },
+    });
+    setTimeout(() => summaryInput.focus(), 30);
   }
 
   /* -------------------------------------------------------------------------- */

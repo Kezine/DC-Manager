@@ -133,10 +133,50 @@ export interface IssueFollowResult {
   message: string;
 }
 
+/** CORPS envoyé à `POST …/issues/create` (« Ouvrir un ticket », décision D7).
+    ⚠ Ni PROJET ni TYPE de ticket : ce sont des OPTIONS du provider, côté serveur. L'utilisateur de
+    DC Manager n'a pas à connaître la configuration du tracker pour ouvrir un ticket, et un client ne
+    doit pas pouvoir viser un autre projet que celui que l'opérateur a configuré. */
+export interface IssueCreateInput {
+  /** Instance chez qui créer. FACULTATIF : implicite quand le document n'a qu'UN provider, REQUIS
+      au-delà (le serveur refuse alors avec un message qui nomme les providers configurés). */
+  provider_id?: string;
+  summary: string;
+  description?: string;
+  /** Cibles liées D'EMBLÉE (clés « famille:id ») — un ticket ouvert depuis la fiche d'un équipement
+      naît déjà rattaché à cet équipement. */
+  targets?: string[];
+}
+
+/** Résultat de `POST …/issues/create` — miroir de la réponse de succès.
+    ⚠ Les REFUS ne passent PAS par ici : le serveur rend 400 (demande incomplète), 422 (le TRACKER a
+    refusé — son message est transmis TEL QUEL) ou 500 avec `created_key` (échec PARTIEL : le ticket
+    EXISTE chez le tracker mais n'a pas pu être enregistré ici). Tous trois deviennent un
+    `IssueSyncError` (cf. `createdKey`). */
+export interface IssueCreateResult {
+  /** Enregistrement `issues` créé, tel qu'il est persisté. */
+  issue: Record<string, any> | null;
+  /** Provider chez qui le ticket a été créé. */
+  provider_id: string | null;
+  /** Message lisible du serveur (déjà actionnable). */
+  message: string;
+}
+
 /** Erreur d'un appel `issues` porteuse du CODE HTTP et du `detail` serveur (503 config invalide,
-    400 issues de validation, 422 référence inexploitable), pour que l'UI affiche un message précis. */
+    400 issues de validation, 422 référence/demande inexploitable), pour que l'UI affiche un message
+    précis. */
 export class IssueSyncError extends Error {
-  constructor(message: string, readonly status: number, readonly detail: string | null) {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly detail: string | null,
+    /** 🚨 Clé d'un ticket RÉELLEMENT CRÉÉ chez le tracker alors que son enregistrement LOCAL a
+        échoué (échec PARTIEL de « Ouvrir un ticket », décision D7) — null partout ailleurs.
+        Portée jusqu'ici parce que c'est la SEULE chose qui rende la situation rattrapable :
+        l'utilisateur reprend le ticket par « Suivre un ticket » avec cette clé. Le serveur ne
+        supprime JAMAIS le ticket distant pour compenser. */
+    readonly createdKey: string | null = null,
+  ) {
     super(message);
     this.name = "IssueSyncError";
   }
@@ -179,6 +219,22 @@ export class IssueSyncClient {
     return {
       issue: (json && json.issue) || null,
       already: !!(json && json.already),
+      provider_id: (json && typeof json.provider_id === "string") ? json.provider_id : null,
+      message: (json && typeof json.message === "string") ? json.message : "",
+    };
+  }
+
+  /** « OUVRIR UN TICKET » — la SECONDE porte d'entrée de l'assiette (décision D7). Le serveur crée
+      chez le tracker PUIS enregistre localement, dans cet ordre : au pire un ticket RÉEL n'est pas
+      référencé chez nous (rattrapable par « Suivre un ticket »), jamais l'inverse — un enregistrement
+      local sans ticket en face serait une ligne mensongère dans le document.
+      Trois refus distincts, tous en `IssueSyncError` : 400 (demande incomplète — titre manquant,
+      provider ambigu), 422 (le TRACKER refuse : son message est transmis MOT POUR MOT, il nomme le
+      champ manquant), 500 avec `createdKey` renseigné (échec PARTIEL — cf. `IssueSyncError`). */
+  async createIssue(input: IssueCreateInput): Promise<IssueCreateResult> {
+    const json = await this.call("POST", "/issues/create", input);
+    return {
+      issue: (json && json.issue) || null,
       provider_id: (json && typeof json.provider_id === "string") ? json.provider_id : null,
       message: (json && typeof json.message === "string") ? json.message : "",
     };
@@ -237,7 +293,12 @@ export class IssueSyncClient {
       const detail = (json && typeof json.detail === "string") ? json.detail
         : (json && Array.isArray(json.issues)) ? (json.issues as unknown[]).map(String).join("\n")
         : null;
-      throw new IssueSyncError(message, res.status, detail);
+      // `created_key` : présent UNIQUEMENT sur l'échec PARTIEL de « Ouvrir un ticket » (le ticket
+      // existe chez le tracker, son enregistrement local a été refusé). Relevé ICI plutôt que dans
+      // `createIssue` parce que c'est le seul endroit qui voie le CORPS d'erreur — et l'appelant en
+      // a besoin pour afficher un message dédié qui porte la clé à reprendre.
+      const createdKey = (json && typeof json.created_key === "string" && json.created_key !== "") ? json.created_key : null;
+      throw new IssueSyncError(message, res.status, detail, createdKey);
     }
     return json;
   }

@@ -52,6 +52,42 @@ export const issues = {
     added: "Ticket suivi",
     already: "Ce ticket est déjà suivi — il vient d'être rafraîchi.",
   },
+  // « OUVRIR UN TICKET » (décision D7) — DC Manager CRÉE le ticket chez le tracker, puis l'enregistre.
+  // ⚠ Ni le PROJET ni le TYPE ne sont demandés : ce sont des options du provider (l'utilisateur n'a
+  // pas à connaître la configuration du tracker) — ils sont seulement RAPPELÉS.
+  create: {
+    title: "Ouvrir un ticket",
+    intro: "Le ticket est créé chez le tracker, puis enregistré et suivi dans ce document. Le projet et le type de ticket viennent de la configuration du provider.",
+    summaryField: "Titre",
+    summaryPlaceholder: "Résumé court du problème",
+    summaryHint: "Titre du ticket chez le tracker. Obligatoire.",
+    summaryRequired: "Indiquez un titre pour le ticket.",
+    descriptionHint: "Description envoyée au tracker (texte brut). Elle est aussi conservée ici comme enrichissement local.",
+    providerField: "Tracker de destination",
+    providerHint: "Ce document est relié à plusieurs trackers : indiquez celui chez qui créer le ticket.",
+    destination: "Destination : {{provider}} · projet {{project}} · type {{type}}.",
+    destinationUnknown: "Destination indisponible — le serveur choisira le provider configuré.",
+    noProject: "Le provider « {{provider}} » n'a pas de projet de création configuré : la création sera refusée tant que l'option « Projet de création » est vide.",
+    submit: "Ouvrir le ticket",
+    created: "Ticket créé",
+    // ÉCHEC PARTIEL : le ticket EXISTE chez le tracker mais n'a pas pu être enregistré ici. Le message
+    // porte la CLÉ — c'est la seule chose qui rende la situation rattrapable.
+    partial: "Le ticket « {{key}} » a été créé chez le tracker mais n'a PAS pu être enregistré ici. Reprenez-le avec « Suivre un ticket » en saisissant la clé « {{key}} ». Détail : {{detail}}",
+    alreadyCreated: "Le ticket « {{key}} » a déjà été créé chez le tracker. Fermez cette fenêtre et reprenez-le avec « Suivre un ticket » — réenregistrer créerait un second ticket.",
+  },
+  // Rangée « Tickets » des fiches détail (équipement / VM / spare / sous-équipement).
+  // ⚠ Contrairement à la rangée « Interventions », elle est SYNCHRONE et disponible en mode fichier :
+  // les tickets sont une collection du document. Seul « Ouvrir un ticket » exige le mode API.
+  fiche: {
+    section: "Tickets",
+    openCount: "{{n}} ouvert(s)",
+    none: "Aucun ticket ouvert",
+    create: "Ouvrir un ticket",
+    createTitle: "Créer un ticket chez le tracker, déjà rattaché à cet objet",
+    showMore: "Afficher plus",
+    showMoreTitle: "Ouvrir l'onglet Tickets filtré sur cet objet",
+    openDetail: "Ouvrir le ticket",
+  },
   providers: {
     title: "Providers de tickets",
     subtitle: "Gestion des trackers interrogés pour ce document",

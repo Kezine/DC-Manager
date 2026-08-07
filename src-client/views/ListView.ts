@@ -229,6 +229,27 @@ export class ListView {
     return TargetSearch.parse([...set][0]);
   }
 
+  /** POSE la dimension CIBLE sur une valeur donnée, DEPUIS L'EXTÉRIEUR — c'est ce qu'exige le
+      « Afficher plus » d'une rangée de fiche (« montre-moi les tickets de CET équipement »), qui
+      arrive par `shell.switchView(...)` puis appelle ici.
+      Pourquoi une méthode et non une mutation de l'état par l'appelant : `filterState` est privé, et
+      surtout la barre de filtres tient une RÉFÉRENCE sur le `Set` de chaque dimension — on le MUTE
+      donc en place (jamais de remplacement d'objet, qui laisserait la chip branchée sur l'ancien) et
+      on lui redemande de repeindre ses chips, qu'un simple `render()` ne touche pas (il ne reconstruit
+      la barre que si l'ensemble des OPTIONS a changé).
+      MONO-VALEUR : la dimension cible l'est par construction — on remplace, on n'ajoute pas.
+      No-op si ce listing ne déclare aucune dimension cible. */
+  focusTarget(kind: string, id: string): void {
+    if (!this.targetFilter) return;
+    let set = this.filterState[ListView.TARGET_DIM_KEY];
+    if (!set) { set = new Set(); this.filterState[ListView.TARGET_DIM_KEY] = set; }
+    set.clear();
+    set.add(TargetSearch.key(kind, id));
+    this.page = 1;
+    this.render();                  // bâtit le squelette et la barre si le listing n'a jamais été peint
+    this._filterBar?.syncChips();   // la chip retirable : la barre ne voit pas une mutation externe
+  }
+
   /** Lignes BRUTES du listing (avant filtres de colonne, tri et pagination).
       - source CUSTOM (`items`, hors collections du document) : chemin HISTORIQUE inchangé — relevé
         `searchFields` explicite, jamais le moteur partagé (cf. `ListOptions.searchFields`) ;

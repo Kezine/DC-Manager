@@ -156,6 +156,8 @@ export const app = {
     syncTitle: "Refresh the state of the issues already followed from the trackers configured for this document (no issue is added)",
     follow: "Follow an issue…",
     followTitle: "Add an issue to the document from its key or the URL of its page",
+    // PRIMARY header button (text is reserved for primary buttons, principle #14).
+    create: "+ Open an issue",
     providers: "Providers…",
     providersTitle: "Configure the queried trackers (instance, service account, token, interval)",
   },

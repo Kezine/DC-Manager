@@ -48,6 +48,7 @@ import { PerspectiveEditor } from "../../ui/PerspectiveEditor";
 import { StitchEditor } from "../../ui/StitchEditor";
 import { Download } from "../../core/Download";
 import { InterventionFicheRow } from "./InterventionFicheRow";   // intégration « fiches » de la feature interventions (AMOVIBLE)
+import { IssueFicheRow } from "./IssueFicheRow";   // intégration « fiches » de la feature tickets (AMOVIBLE)
 import { CertFicheRow } from "./CertFicheRow";   // intégration « fiches » du rapprochement certificat ↔ cible (AMOVIBLE)
 
 export class EquipmentForms extends FormBase {
@@ -124,6 +125,9 @@ export class EquipmentForms extends FormBase {
 
     // Intégration « fiches » : badge d'interventions ouvertes + « Déclarer une intervention » (no-op hors mode API).
     InterventionFicheRow.attach(root, host.interventionHooks, { kind: "equipment", id: eq.id, label: eq.name || "" }, () => host.closeModal?.());
+    // Intégration « fiches » : tickets du tracker visant cet équipement. ⚠ SYNCHRONE et disponible
+    // EN MODE FICHIER (les tickets sont une collection du document) — cf. IssueFicheRow.
+    IssueFicheRow.attach(root, host.issueHooks, { kind: "equipment", id: eq.id, label: eq.name || "" }, () => host.closeModal?.());
     // Intégration « fiches » : certificats TLS rapprochés (calculé, no-op hors mode API).
     CertFicheRow.attach(root, host.certHooks, { kind: "equipment", id: eq.id }, () => host.closeModal?.());
 

@@ -42,14 +42,26 @@ import { IssueSyncService, type IssueLivePublisher, type ProblemReporter, type I
    - DELETE /documents/:docId/issues/providers/:id  → supprimer un provider
    - POST   /documents/:docId/issues/providers/test → tester une config candidate
    - POST   /documents/:docId/issues/follow         → « Suivre un ticket » (cf. ci-dessous)
+   - POST   /documents/:docId/issues/create         → « Ouvrir un ticket » (cf. ci-dessous)
 
-   ⚠ `POST …/issues/follow` est la PORTE D'ENTRÉE de l'assiette (décision D4), et la
-   seule route de ce module qui ÉCRIT dans le document. Elle prend une RÉFÉRENCE
-   saisie — clé lisible (« INFRA-123 ») ou URL collée — parce que c'est ce que
-   l'utilisateur a sous la main ; le serveur, lui, persiste l'identifiant INTERNE.
-   Une référence non résolue rend un 422 ACTIONNABLE et ne crée RIEN : on ne
-   persiste pas un ticket fantôme (422 et non 404 — la requête est bien formée,
-   c'est la référence qui est inexploitable).
+   ⚠ `POST …/issues/follow` et `POST …/issues/create` sont les DEUX PORTES D'ENTRÉE
+   de l'assiette (décisions D4 et D7), et les seules routes de ce module qui ÉCRIVENT
+   dans le document. `follow` prend une RÉFÉRENCE saisie — clé lisible
+   (« INFRA-123 ») ou URL collée — parce que c'est ce que l'utilisateur a sous la
+   main ; le serveur, lui, persiste l'identifiant INTERNE. Une référence non résolue
+   rend un 422 ACTIONNABLE et ne crée RIEN : on ne persiste pas un ticket fantôme
+   (422 et non 404 — la requête est bien formée, c'est la référence qui est
+   inexploitable).
+
+   ⚠ POURQUOI `/issues/create` ET NON `POST /documents/:docId/issues`. Ce dernier
+   chemin EXISTE DÉJÀ : c'est la création générique d'un enregistrement du cœur
+   (`data.post("/:collection")` dans `api.ts`). Les extensions étant montées AVANT le
+   routeur de données — précisément pour que leurs segments ne soient pas lus comme
+   des collections —, y déclarer `router.post("/")` MASQUERAIT silencieusement cette
+   création générique pour la seule collection `issues`. Un module AMOVIBLE ne doit
+   pas changer le comportement du cœur : on garde donc un segment d'ACTION, comme
+   toutes les autres routes d'écriture de ce module (`/sync`, `/follow`,
+   `/providers/test`).
 
    Après CHAQUE écriture CRUD : `service.rearmTimers()` (rechargement à chaud de la
    config — plus de redémarrage nécessaire). Une config INVALIDE ne fait PAS tomber
@@ -181,6 +193,46 @@ export class IssueModule {
         .catch((e) => {
           this.log.error("POST /issues/follow : échec inattendu", docId, e instanceof Error ? e.message : String(e));
           res.status(500).json({ error: "suivi du ticket en échec" });
+        });
+    });
+
+    /* ---- « OUVRIR UN TICKET » : la porte d'entrée n°2 de l'assiette (D7) ---- */
+
+    router.post("/create", (req, res) => {
+      const docId = (req.params as any).docId as string;
+      if (!this.docs.get(docId)) { res.status(404).json({ error: "document inconnu" }); return; }
+      if (!this.service) { this.respondUnavailable(res); return; }
+      const body: any = (req.body && typeof req.body === "object") ? req.body : {};
+      this.service.openIssue(docId, {
+        provider_id: typeof body.provider_id === "string" ? body.provider_id : null,
+        summary: typeof body.summary === "string" ? body.summary : "",
+        description: typeof body.description === "string" ? body.description : "",
+        targets: Array.isArray(body.targets) ? body.targets : [],
+      })
+        .then((result) => {
+          if (result.ok) {
+            // AUDIT : la création chez un tiers est un effet IRRÉVERSIBLE — on trace QUI l'a demandée
+            // (id canonique posé par le serveur, jamais le corps de la requête).
+            const author = RequestAuthor.identity(req);
+            this.log.info("POST /issues/create : ticket ouvert", docId, result.provider_id || "", "par " + author.id + " (" + author.name + ")");
+            res.json({ issue: result.issue, provider_id: result.provider_id, message: result.message });
+            return;
+          }
+          // CODE HTTP dérivé de la NATURE du refus (`IssueOpenFailure`), jamais d'une relecture du
+          // message. Le message, lui, est TOUJOURS transmis tel quel : sur un refus du tracker c'est
+          // le sien (« le champ X est requis »), et l'envelopper le rendrait inexploitable.
+          // 🚨 `created_key` n'est présent QUE sur l'échec PARTIEL — c'est la clé du ticket
+          // RÉELLEMENT CRÉÉ, à reprendre par « Suivre un ticket ». Aucune suppression compensatoire
+          // n'est tentée côté tracker (décision D7).
+          const status = result.failure === "invalid" ? 400 : result.failure === "tracker" ? 422 : 500;
+          if (result.failure === "partial") {
+            this.log.error("POST /issues/create : ÉCHEC PARTIEL", docId, result.created_key || "", result.message);
+          }
+          res.status(status).json({ error: result.message, created_key: result.created_key });
+        })
+        .catch((e) => {
+          this.log.error("POST /issues/create : échec inattendu", docId, e instanceof Error ? e.message : String(e));
+          res.status(500).json({ error: "ouverture du ticket en échec" });
         });
     });
 

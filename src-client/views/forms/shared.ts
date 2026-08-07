@@ -3,6 +3,7 @@ import type { ModalOptions } from "../../ui/Modal";
 import type { InterventionFicheHooks } from "../InterventionFicheHooks";
 import type { CertFicheHooks } from "../CertFicheHooks";
 import type { IssueTargetSource } from "../IssueTargetSource";
+import type { IssueFicheHooks } from "../IssueFicheHooks";
 import type { UserDirectory } from "../../core/UserDirectory";
 import { FLOORS } from "../../domain/constants";
 import { Ip } from "../../core/Ip";
@@ -106,4 +107,10 @@ export interface FormHost {
       éditable sans serveur (décision D9 du cadrage). `main.ts` y passe le MÊME descripteur que la
       dimension « Cible » du listing (`ListTargets.issueTarget`) — une seule table de familles. */
   issueTargets?: IssueTargetSource | null;
+  /** Intégration « fiches » de la feature TICKETS (AMOVIBLE) — rangée « Tickets » des fiches détail
+      (équipement/VM/spare/sous-équipement). ⚠ Injecté dans les DEUX modes de données, contrairement
+      aux hooks interventions/certs : `issues` est une collection DU DOCUMENT, donc le badge et le
+      mini-listing se lisent SYNCHRONEMENT dans le Store et marchent en mode fichier. Seule l'action
+      « Ouvrir un ticket » (`createFor`) est conditionnée au mode API. Injecté par `main.ts`. */
+  issueHooks?: IssueFicheHooks | null;
 }

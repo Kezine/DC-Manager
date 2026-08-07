@@ -5,6 +5,7 @@ import { Logger } from "../logger.js";
 import { DataValidator, type ValidationError } from "../../../src-shared/DataValidation.js";
 import { Changeset } from "../../../src-shared/DocumentChangeset.js";
 import type { IssueProviderConfig, IssueProviderConfigSource, IssueProviderAdapter, IssueRecord, IssueResolution } from "./IssueProvider.js";
+import { IssueTargets } from "../../../src-shared/IssueTargets.js";
 import { JiraAdapter } from "./JiraAdapter.js";
 import { IssueReconcile } from "./IssueReconcile.js";
 
@@ -104,6 +105,49 @@ export interface IssueProviderStatus {
   /** Résumé lisible (compteurs) ou message d'erreur — JAMAIS le jeton d'API. */
   message: string;
   counts: IssueSyncCounts | null;
+}
+
+/** Demande d'OUVERTURE d'un ticket (« Ouvrir un ticket », décision D7) — ce que l'appelant fournit.
+    VOLONTAIREMENT réduit : le PROJET et le TYPE de ticket viennent des OPTIONS du provider, jamais
+    du corps de la requête. L'utilisateur de DC Manager n'a pas à connaître la configuration du
+    tracker pour ouvrir un ticket, et un client ne doit pas pouvoir viser un autre projet que celui
+    que l'opérateur a configuré. */
+export interface IssueOpenInput {
+  /** Instance chez qui créer. FACULTATIF : implicite quand le document n'a qu'UN provider ; REQUIS
+      au-delà (aucune règle ne permettrait de choisir un tracker à la place de l'utilisateur). */
+  provider_id?: string | null;
+  summary: string;
+  /** Description en TEXTE BRUT — l'adaptateur l'encode au format de sa marque. */
+  description?: string;
+  /** Cibles à lier D'EMBLÉE (clés « famille:id ») — le geste « Ouvrir un ticket » depuis la fiche
+      d'un équipement doit produire un ticket DÉJÀ rattaché à cet équipement. */
+  targets?: string[];
+}
+
+/** NATURE d'un refus d'ouverture. Existe pour que la ROUTE choisisse son code HTTP sans réinterpréter
+    un message : `invalid` = la demande est incomplète/incohérente (400, corrigeable dans le
+    formulaire) · `tracker` = le tracker a REFUSÉ (422 — la requête est bien formée, c'est la demande
+    qui est inexploitable chez lui) · `partial` = 🚨 le ticket EXISTE chez le tracker mais n'a pas pu
+    être enregistré ici (500 : c'est NOTRE écriture qui a échoué, et l'utilisateur doit le savoir). */
+export type IssueOpenFailure = "invalid" | "tracker" | "partial";
+
+/** Résultat de la porte d'entrée « Ouvrir un ticket » (décision D7). */
+export interface IssueOpenResult {
+  ok: boolean;
+  /** Enregistrement `issues` CRÉÉ, tel qu'il est persisté. null si refus. */
+  issue: Rec | null;
+  /** Provider chez qui la création a été tentée (null si on n'a même pas su le choisir). */
+  provider_id: string | null;
+  /** Nature du refus (null en succès) — cf. `IssueOpenFailure`. */
+  failure: IssueOpenFailure | null;
+  /** 🚨 Clé du ticket RÉELLEMENT CRÉÉ chez le tracker quand l'écriture LOCALE a échoué ensuite
+      (`failure === "partial"`), null partout ailleurs. C'est la seule chose qui permette à
+      l'utilisateur de rattraper la situation par « Suivre un ticket » : sans elle, un ticket
+      existerait chez le tracker sans que personne ne sache lequel. */
+  created_key: string | null;
+  /** Message lisible et ACTIONNABLE — jamais le jeton. Sur un refus du TRACKER, c'est SON message,
+      transmis TEL QUEL (cf. `openIssue`). */
+  message: string;
 }
 
 /** Résultat de la porte d'entrée « Suivre un ticket » (décision D4). */
@@ -397,6 +441,129 @@ export class IssueSyncService {
     if (error) return refused(error);
     this.log.info("suivi de ticket : enregistrement créé", docId, provider.id, record.key + " (ext_id " + record.ext_id + ")");
     return { ok: true, issue: repo.getOne("issues", created.id), already: false, provider_id: provider.id, message: "ticket « " + (record.key || record.ext_id) + " » suivi" };
+  }
+
+  /* --------------------------------------------------------------------------
+     « OUVRIR UN TICKET » — porte d'entrée n°2 de l'assiette (décision D7)
+     -------------------------------------------------------------------------- */
+
+  /** CRÉE un ticket chez le tracker, PUIS l'enregistre dans le document. Deuxième (et dernière)
+      porte d'entrée de l'assiette : une passe de synchro ne crée JAMAIS d'enregistrement.
+      Vit dans le SERVICE pour la même raison que `followReference` — elle exige exactement le même
+      montage (fabrique d'adaptateur, validation partagée, triptyque `markChanged`→`transact`→
+      `publish`) et les routes Express restent hors test.
+
+      🚨 L'ORDRE EST IMPÉRATIF : tracker D'ABORD, écriture locale ENSUITE. L'inverse (écrire puis
+      créer) laisserait, au moindre refus du tracker, un enregistrement local sans ticket en face —
+      c'est-à-dire une ligne MENSONGÈRE dans le document, alors que l'ordre retenu ne peut produire,
+      au pire, qu'un ticket RÉEL non référencé chez nous, que l'utilisateur rattrape en une saisie.
+
+      🚨 ÉCHEC PARTIEL : si l'écriture locale échoue APRÈS une création réussie, le ticket EXISTE
+      chez le tracker. Alors, et dans cet ordre d'importance :
+      - la réponse PORTE LA CLÉ créée (`created_key`) pour que l'utilisateur la reprenne par
+        « Suivre un ticket » — un message sans la clé rendrait la situation irrattrapable ;
+      - JAMAIS de suppression compensatoire du ticket distant. On ne détruit pas dans un système
+        tiers pour rattraper NOTRE propre écriture : la suppression pourrait elle-même échouer, elle
+        serait invisible dans nos journaux, et surtout le ticket peut déjà avoir été vu, commenté ou
+        assigné chez le tracker. Un ticket en trop se ferme ; un ticket supprimé ne revient pas.
+
+      ⚠ REFUS DU TRACKER : son message remonte TEL QUEL (« le champ X est requis »). C'est la seule
+      information exploitable — l'envelopper dans un « échec de création » générique la détruirait.
+      On n'interroge PAS `createmeta` pour deviner les champs obligatoires d'un projet : deviner
+      produirait un formulaire faux, alors que le refus, lui, est juste (décision D7).
+
+      ⚠ Les CIBLES sont validées AVANT l'appel distant. C'est délibéré : une clé mal formée est le
+      SEUL refus de validation prévisible sur ce chemin (les champs source, eux, viennent de
+      l'adaptateur), et la laisser filer transformerait une faute de saisie en échec PARTIEL. */
+  async openIssue(docId: string, input: IssueOpenInput): Promise<IssueOpenResult> {
+    const nowIso = new Date().toISOString();
+    const refused = (failure: IssueOpenFailure, message: string, providerId: string | null = null, createdKey: string | null = null): IssueOpenResult =>
+      ({ ok: false, issue: null, provider_id: providerId, failure, created_key: createdKey, message });
+
+    const repo = this.docs.repo(docId);
+    if (!repo) return refused("invalid", "document inconnu");
+
+    const summary = typeof input?.summary === "string" ? input.summary.trim() : "";
+    if (summary === "") return refused("invalid", "indiquez un titre pour le ticket");
+
+    // CIBLES : filtrées sur le TYPE puis jugées sur la FORME par le module partagé — la même règle
+    // que la validation de la collection et que la cascade (une seule composition de clé dans l'app).
+    const targets = (Array.isArray(input?.targets) ? input!.targets! : []).filter((t) => typeof t === "string");
+    const malformed = targets.filter((t) => !IssueTargets.isValidKey(t));
+    if (malformed.length) {
+      return refused("invalid", "cible(s) mal formée(s) : " + malformed.slice(0, 3).join(", ")
+        + " — attendu « famille:id » avec une famille connue (" + IssueTargets.KINDS.join(", ") + ")");
+    }
+
+    // PROVIDER : explicite s'il est nommé, IMPLICITE s'il n'y en a qu'un, REQUIS au-delà.
+    const configs = this.providers.providersFor(docId);
+    if (configs.length === 0) return refused("invalid", "aucun provider de tickets configuré sur ce document — configurez-en un avant d'ouvrir un ticket");
+    const wanted = typeof input?.provider_id === "string" ? input.provider_id.trim() : "";
+    let provider: IssueProviderConfig | null = null;
+    if (wanted !== "") {
+      provider = configs.find((candidate) => candidate.id === wanted) || null;
+      if (!provider) return refused("invalid", "provider « " + wanted + " » inconnu sur ce document (configurés : " + configs.map((c) => c.id).join(", ") + ")");
+    } else if (configs.length === 1) {
+      provider = configs[0];
+    } else {
+      // Aucun repli « le premier » ici, contrairement à « Suivre un ticket » : là-bas les providers
+      // sont INTERROGÉS et l'un d'eux RECONNAÎT la référence, ce qui tranche tout seul. Créer, au
+      // contraire, produit un effet IRRÉVERSIBLE chez un tiers — on ne devine pas lequel.
+      return refused("invalid", "ce document a plusieurs providers de tickets (" + configs.map((c) => c.id).join(", ")
+        + ") — indiquez celui chez qui créer le ticket");
+    }
+
+    // 1) CRÉATION DISTANTE. Le projet et le type viennent des OPTIONS du provider (contrat
+    //    `IssueCreateInput`) ; un provider sans `project_key` est refusé PAR L'ADAPTATEUR, avec un
+    //    message qui nomme l'option à remplir — et sans le moindre appel réseau.
+    let record: IssueRecord;
+    try {
+      record = await this.makeAdapter(provider).createIssue({
+        summary,
+        description: typeof input?.description === "string" ? input.description : "",
+      });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      this.log.warn("ouverture de ticket : refus du tracker", docId, provider.id, message);
+      this.log.warn("ouverture de ticket : pile d'erreur\n" + IssueSyncService.stackOf(e));
+      // Message NON ENVELOPPÉ (cf. l'en-tête) — il traverse la route jusqu'à l'utilisateur.
+      return refused("tracker", message, provider.id);
+    }
+
+    // 2) ÉCRITURE LOCALE. Même construction d'enregistrement que « Suivre un ticket » (champs source
+    //    par la normalisation PARTAGÉE, locaux à leur défaut) à une différence près : les CIBLES
+    //    fournies par l'appelant sont posées d'emblée, et la description SAISIE ICI est conservée.
+    const created: Rec = {
+      id: randomUUID(),
+      created_date: nowIso,
+      updated_date: nowIso,
+      ...IssueReconcile.sourceOf(record, nowIso),
+      provider_id: provider.id,   // estampille DÉFENSIVE (cf. `followReference`)
+      notes: "",
+      // La description est celle que l'utilisateur a TAPÉE ICI, pas une description RAPATRIÉE du
+      // tracker (que la v1 ne lit pas, cf. §7 du cadrage). La garder évite qu'une fiche paraisse
+      // vide juste après l'avoir remplie ; c'est un champ LOCAL, donc éditable ensuite, et le
+      // tracker reste la référence — le lien `url` y mène en un clic.
+      description: typeof input?.description === "string" ? input.description : "",
+      targets,
+    };
+    const error = this.writeIssues(docId, repo, [created], [], "Ouverture de ticket · " + provider.id);
+    if (error) {
+      // 🚨 ÉCHEC PARTIEL — le point délicat de ce chemin (cf. l'en-tête). Journalisé en ERREUR :
+      // c'est un écart durable entre le tracker et le document, pas un incident passager.
+      const key = (record.key || record.ext_id || "").trim();
+      this.log.error("ouverture de ticket : ÉCHEC PARTIEL — ticket CRÉÉ chez le tracker, écriture locale refusée", docId, provider.id, key, error);
+      return refused("partial",
+        "le ticket " + (key ? "« " + key + " » " : "") + "a été créé chez le tracker mais n'a PAS pu être enregistré ici ("
+        + error + ")" + (key ? " — utilisez « Suivre un ticket » avec la clé « " + key + " » pour le rattacher au document" : ""),
+        provider.id, key || null);
+    }
+
+    this.log.info("ouverture de ticket : créé et suivi", docId, provider.id, record.key + " (ext_id " + record.ext_id + ")");
+    return {
+      ok: true, issue: repo.getOne("issues", created.id), provider_id: provider.id, failure: null, created_key: null,
+      message: "ticket « " + (record.key || record.ext_id) + " » créé et suivi",
+    };
   }
 
   /* --------------------------------------------------------------------------
