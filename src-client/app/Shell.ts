@@ -33,8 +33,13 @@ export interface ShellView {
   onAdd?: () => void;
   /** Boutons secondaires (ghost) de l'en-tête, avant le bouton primaire.
       `onClick` reçoit le bouton rendu → un handler asynchrone peut le désactiver / changer son
-      libellé le temps d'un appel (ex. « Synchroniser » → « Synchronisation… » sur l'onglet VMs). */
-  extraActions?: Array<{ label: string; onClick: (btn: HTMLButtonElement) => void; title?: string }>;
+      libellé le temps d'un appel (ex. « Synchroniser » → « Synchronisation… » sur l'onglet VMs).
+      `visible` (optionnel) = prédicat CONDITIONNANT l'affichage du bouton, réévalué à chaque
+      `refreshCounts()` (donc à chaque changement d'onglet et à chaque rafraîchissement de vue) —
+      MÊME mécanique que la pastille de comptage, masquée à 0. Absent = bouton toujours affiché
+      (comportement historique). Cas d'usage : « Purger… » de l'onglet VMs, qui n'a de sens que
+      s'il existe au moins une VM purgeable (orpheline ou d'un provider disparu). */
+  extraActions?: Array<{ label: string; onClick: (btn: HTMLButtonElement) => void; title?: string; visible?: () => boolean }>;
   /** Appelé à chaque activation (rendu / rafraîchissement) avec le corps de vue. */
   onShow?: (body: HTMLElement) => void;
 }
@@ -156,6 +161,9 @@ export class Shell {
   private tabDropdowns: HTMLElement[] = [];            // TOUS les menus déroulants d'onglets (responsive + groupes)
   private tabGroupEls: HTMLElement[] = [];             // wrappers .tab-group insérés en topbar (retirés/reconstruits par build)
   private countBadges: Array<{ name: string; el: HTMLElement }> = [];
+  /** Boutons d'en-tête à visibilité CONDITIONNELLE (`ViewDef.extraActions[].visible`) — réévalués
+      par `refreshCounts()`, exactement comme les pastilles de comptage. Reconstruit par `build()`. */
+  private conditionalActions: Array<{ el: HTMLElement; visible: () => boolean }> = [];
   private host: ShellHost;
   current: string | null = null;
 
@@ -523,6 +531,7 @@ export class Shell {
   build(): void {
     this.tabsEl.innerHTML = "";
     this.countBadges = [];
+    this.conditionalActions = [];                        // réenregistrés par buildHeader (les anciens boutons partent avec l'en-tête)
     this.tabDropdowns = [];                              // réinitialisé : le listener de clic extérieur lit ce tableau
     this.tabGroupEls.forEach((el) => el.remove()); this.tabGroupEls = [];   // purge d'un éventuel build précédent
     // onglets principaux (vues non secondaires, hors GROUPES), dans l'ordre d'enregistrement
@@ -649,7 +658,12 @@ export class Shell {
       b.onclick = () => this.switchView(ln); acts.appendChild(b);
     });
     // boutons secondaires (ghost) — ex. « Ouvrir un fichier de faces »
-    (def.extraActions || []).forEach((a) => { const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-ghost"; b.textContent = a.label; if (a.title) b.title = a.title; b.onclick = () => a.onClick(b); acts.appendChild(b); });
+    (def.extraActions || []).forEach((a) => {
+      const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-ghost"; b.textContent = a.label; if (a.title) b.title = a.title;
+      b.onclick = () => a.onClick(b); acts.appendChild(b);
+      // Bouton CONDITIONNEL : enregistré pour être réévalué à chaque `refreshCounts()` (cf. ViewDef.extraActions).
+      if (a.visible) this.conditionalActions.push({ el: b, visible: a.visible });
+    });
     // bouton primaire « + … »
     if (def.onAdd) { const add = document.createElement("button"); add.type = "button"; add.className = "btn btn-primary"; add.textContent = def.addLabel || I18n.t("shell.header.addDefault"); add.onclick = () => def.onAdd!(); acts.appendChild(add); }
     v.header.append(left, acts);
@@ -702,6 +716,13 @@ export class Shell {
       const cls = v.def.countClass ? v.def.countClass() : null;
       el.classList.toggle("warn", cls === "warn");
       el.classList.toggle("err", cls === "err");
+    });
+    // Boutons d'en-tête CONDITIONNELS : même moment d'évaluation que les pastilles (un prédicat qui
+    // jette ne doit pas faire tomber le rafraîchissement → repli « masqué », journalisé).
+    this.conditionalActions.forEach(({ el, visible }) => {
+      let on = false;
+      try { on = !!visible(); } catch (e) { console.error(e); }
+      el.style.display = on ? "" : "none";
     });
   }
 

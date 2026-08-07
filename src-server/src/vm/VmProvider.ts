@@ -58,12 +58,21 @@ export interface VmRecord {
 /** Un NŒUD physique du cluster de virtualisation, avec ses métriques instantanées. Alimente la
     vue « Clusters » (cadrage 2026-07-13) — état OPÉRATIONNEL, JAMAIS persisté dans le document.
     Toute métrique est NULLABLE : le provider peut ne pas la remonter (nœud hors ligne, droits
-    partiels) et on ne DEVINE rien (null = inconnu, à distinguer d'une vraie valeur nulle). */
+    partiels) et on ne DEVINE rien (null = inconnu, à distinguer d'une vraie valeur nulle).
+    ⚠ Chez Proxmox, ce pivot est la FUSION de deux réponses de la MÊME passe (aucun appel de plus) :
+    `/cluster/resources` fournit l'état et les métriques, `/cluster/status` l'adresse — rapprochement
+    PAR NOM dans l'adaptateur. Un champ non couvert par la réponse d'origine reste null. */
 export interface VmClusterNode {
-  /** Nom COURT du nœud (ex. "pve1") — à rapprocher d'un équipement DC Manager comme VmRecord.host_node. */
+  /** Nom COURT du nœud (ex. "pve1") — à rapprocher d'un équipement DC Manager comme VmRecord.host_node.
+      C'est aussi la CLÉ de fusion des deux vues du nœud (cf. en-tête). */
   name: string;
-  /** Nœud actif/joignable dans le cluster (Proxmox : statut "online"). */
+  /** Nœud actif/joignable dans le cluster (Proxmox : statut "online" de /cluster/resources ;
+      pour un nœud connu du SEUL /cluster/status, son drapeau `online`). */
   online: boolean;
+  /** Adresse du nœud sur le lien de cluster — remontée par `/cluster/status` UNIQUEMENT (côté
+      Proxmox), d'où sa nullité fréquente : nœud absent de cette réponse, ou endpoint indisponible
+      (métadonnée TOLÉRÉE). INFORMATIVE : elle n'entre dans aucun rapprochement. */
+  ip: string | null;
   /** Charge CPU INSTANTANÉE en FRACTION 0..1 (et non en pourcentage) — telle que Proxmox l'expose
       (champ `cpu`) ; c'est l'UI qui la formate en %. null = non remontée (typiquement hors ligne). */
   cpu_used: number | null;
@@ -98,6 +107,12 @@ export interface VmClusterInfo {
   /** État de QUORUM du cluster. null = inconnu : nœud isolé (hors cluster, le quorum n'a pas de
       sens) ou /cluster/status indisponible — à DISTINGUER d'un quorum PERDU (false). */
   quorate: boolean | null;
+  /** Nombre de nœuds MEMBRES déclaré par le cluster lui-même (Proxmox : champ `nodes` de l'entrée
+      `type:"cluster"` de /cluster/status) — DÉNOMINATEUR du « x/y nœuds en ligne » affiché à côté du
+      quorum. À distinguer de `nodes.length`, qui ne compte que les nœuds RÉPONDANTS : un membre
+      éteint manque de la liste mais reste attendu, et c'est justement l'écart qui informe.
+      null = inconnu (nœud isolé, /cluster/status indisponible) → l'UI n'affiche alors aucun ratio. */
+  nodes_expected: number | null;
   /** Nœuds du cluster avec leurs métriques (tableau vide si non remontés). */
   nodes: VmClusterNode[];
   /** URL de l'outil de management du CLUSTER, RECOPIÉE par l'adaptateur depuis la config

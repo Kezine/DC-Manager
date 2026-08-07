@@ -27,6 +27,10 @@ import { I18n } from "../i18n/I18n";
 export interface VmClustersHost {
   /** Ouvre la fiche détail d'un équipement (rapprochement nœud→équipement rendu en LIEN). */
   openEquipmentDetail(id: string): void;
+  /** RACCOURCI « Purger… » de la carte provider : ouvre la purge de masse en PRÉ-SÉLECTIONNANT les
+      orphelines de ce provider (cf. `views/forms/VmPurgeForm`). ABSENT (undefined) = aucun bouton —
+      c'est ainsi que le mode VIEWER et le retrait de la feature s'expriment, sans garde ici. */
+  openPurge?(providerId: string): void;
 }
 
 export class VmClustersView {
@@ -76,13 +80,13 @@ export class VmClustersView {
     // Les adresses IP alimentent le NIVEAU 1 du rapprochement v3 (hostnames des IP rattachées, cf. VmClusterFormat).
     const equipments = this.store.all("equipments") as Array<{ id: string; name: string }>;
     const ipAddresses = this.store.all("ipAddresses") as Array<{ equipment_id: string | null; hostname: string }>;
-    const vms = this.store.all("vms") as Array<{ provider_id?: string; host_node?: string }>;
+    const vms = this.store.all("vms") as Array<{ provider_id?: string; host_node?: string; orphan?: boolean }>;
     providers.forEach((p) => this.container.appendChild(this.card(p, equipments, ipAddresses, vms)));
   }
 
   /** Une CARTE de provider : en-tête (identité + pills version/quorum/synchro), état de synchro,
       puis table des nœuds (ou invitation si le cluster n'a jamais été synchronisé). */
-  private card(p: VmProviderStatus, equipments: Array<{ id: string; name: string }>, ipAddresses: Array<{ equipment_id: string | null; hostname: string }>, vms: Array<{ provider_id?: string; host_node?: string }>): HTMLElement {
+  private card(p: VmProviderStatus, equipments: Array<{ id: string; name: string }>, ipAddresses: Array<{ equipment_id: string | null; hostname: string }>, vms: Array<{ provider_id?: string; host_node?: string; orphan?: boolean }>): HTMLElement {
     const cluster = p.cluster;
     const card = document.createElement("div");
     card.style.cssText = "border:1px solid var(--line); background:var(--bg-2); border-radius:6px; padding:16px; margin-top:14px";
@@ -96,6 +100,11 @@ export class VmClustersView {
     const sub = document.createElement("div"); sub.className = "form-hint";
     sub.innerHTML = Html.escape(p.provider_id) + ` <span style="color:var(--fg-dimmer)">· ${Html.escape(p.kind)}</span>`;
     left.append(title, sub);
+    // Actions de la carte (rangée sous l'identité) : « Management ↗ » puis « Purger… ». Rangée créée
+    // dans tous les cas mais ajoutée SEULEMENT si elle porte quelque chose — une carte sans URL de
+    // management ni purge ne doit pas gagner d'espace vide.
+    const cardActions = document.createElement("div");
+    cardActions.style.cssText = "margin-top:8px; display:flex; flex-wrap:wrap; gap:6px";
     // Bouton « Management » du cluster : l'URL de l'outil de management (Proxmox Datacenter Manager)
     // est FOURNIE en config et recopiée dans cluster.management_url. Lien externe (nouvel onglet) —
     // href posé par propriété DOM (aucune injection). Absent → pas de bouton.
@@ -106,9 +115,21 @@ export class VmClustersView {
       mgmt.className = "btn btn-ghost btn-sm";
       mgmt.textContent = I18n.t("vm.clusters.mgmtBtn");
       mgmt.title = I18n.t("vm.clusters.mgmtTitle");
-      mgmt.style.cssText = "margin-top:8px; display:inline-flex; text-decoration:none";
-      left.appendChild(mgmt);
+      mgmt.style.cssText = "display:inline-flex; text-decoration:none";
+      cardActions.appendChild(mgmt);
     }
+    // RACCOURCI de purge de masse : ouvre la modale en pré-sélectionnant les ORPHELINES de CE provider
+    // (jamais un groupe « provider disparu » — celui-ci ne se coche que délibérément). Le bouton n'existe
+    // que si l'hôte fournit le service (non-viewer), et seulement s'il y a matière : au moins une VM
+    // orpheline de ce provider dans le document — sinon la modale s'ouvrirait sur une sélection vide.
+    if (this.host.openPurge && vms.some((v) => v.provider_id === p.provider_id && v.orphan === true)) {
+      const purge = document.createElement("button"); purge.type = "button"; purge.className = "btn btn-ghost btn-sm";
+      purge.textContent = I18n.t("vm.clusters.purgeBtn");
+      purge.title = I18n.t("vm.clusters.purgeTitle");
+      purge.onclick = () => this.host.openPurge!(p.provider_id);
+      cardActions.appendChild(purge);
+    }
+    if (cardActions.children.length) left.appendChild(cardActions);
     const pills = document.createElement("div"); pills.style.cssText = "display:flex; flex-wrap:wrap; gap:6px; align-items:center";
     pills.innerHTML = this.headerPills(p, cluster);
     head.append(left, pills);
@@ -121,11 +142,18 @@ export class VmClustersView {
     const counts = p.counts
       ? I18n.t("vm.clusters.counts", { created: p.counts.created, updated: p.counts.updated, orphaned: p.counts.orphaned, unchanged: p.counts.unchanged })
       : VmClustersView.MUTED;
-    const gridPairs: Array<[string, string]> = [
+    const gridPairs: Array<[string, string]> = [];
+    // IDENTITÉ DE RÉCONCILIATION, en TÊTE de grille : le préfixe des `ext_id` de toutes les VMs de ce
+    // provider, EN CLAIR. C'est la ligne qui rend visible en un coup d'œil un changement d'identité —
+    // la cause des inventaires dédoublés (cf. docs/vm-proxmox.md « Dépannage — VMs en DOUBLE »). Elle
+    // vient du DERNIER état cluster connu : sans état (jamais synchronisé), pas de ligne — inventer un
+    // repli afficherait une identité que la synchro n'utilise pas.
+    if (cluster) gridPairs.push([I18n.t("vm.clusters.gIdentity"), this.identityCell(cluster.name)]);
+    gridPairs.push(
       [I18n.t("vm.clusters.gPeriod"), Html.escape(period)],
       [I18n.t("vm.clusters.gLastAttempt"), Html.escape(Format.dateTime(p.last_attempt || ""))],
       [I18n.t("vm.clusters.gLastSuccess"), Html.escape(Format.dateTime(p.last_success || ""))],
-    ];
+    );
     if (p.ok) gridPairs.push([I18n.t("vm.clusters.gMessage"), Html.escape(p.message)]);
     gridPairs.push([I18n.t("vm.clusters.gCounts"), counts]);
     card.appendChild(this.grid(gridPairs));
@@ -147,6 +175,14 @@ export class VmClustersView {
     return card;
   }
 
+  /** Cellule « Identité » : le PRÉFIXE des ext_id (nom du cluster) suivi de « /… » — la partie
+      variable étant le vmid. Tooltip sur la valeur + hint SOUS la valeur : le danger (un préfixe qui
+      change dédouble tout l'inventaire) doit être LU, pas seulement survolé. */
+  private identityCell(clusterName: string): string {
+    return `<span style="font-family:var(--mono)" title="${Html.escape(I18n.t("vm.clusters.identityTitle"))}">${Html.escape(clusterName)}/…</span>`
+      + `<div class="form-hint">${Html.escape(I18n.t("vm.clusters.identityHint"))}</div>`;
+  }
+
   /** Pills d'en-tête : synchro (ok/err), et — si le cluster est connu — version + gamme + quorum. */
   private headerPills(p: VmProviderStatus, cluster: VmClusterInfo | null): string {
     const out: string[] = [];
@@ -155,15 +191,22 @@ export class VmClustersView {
       out.push(cluster.version ? this.pill(I18n.t("vm.common.pveVersion", { version: cluster.version }), "neutral") : this.pill(I18n.t("vm.common.versionUnknown"), "dim"));
       out.push(this.pill(cluster.supported ? I18n.t("vm.common.rangeSupported") : I18n.t("vm.common.rangeOut"), cluster.supported ? "ok" : "warn"));
       // Quorum : true = OK ; false = PERDU (erreur) ; null = inconnu (nœud isolé sans cluster).
-      out.push(cluster.quorate === true ? this.pill(I18n.t("vm.clusters.quorumOk"), "ok")
-        : cluster.quorate === false ? this.pill(I18n.t("vm.clusters.quorumLost"), "err")
+      // RATIO « x/y nœuds » quand le cluster déclare sa composition (nodes_expected) : x = nœuds
+      // RÉPONDANTS en ligne, y = membres ATTENDUS — l'écart est le symptôme (un membre éteint manque
+      // de la liste). Composition inconnue → libellé historique, sans ratio inventé.
+      const counted = cluster.nodes_expected !== null && Number.isFinite(cluster.nodes_expected);
+      const ratio = { online: (Array.isArray(cluster.nodes) ? cluster.nodes : []).filter((n) => n.online).length, expected: cluster.nodes_expected };
+      out.push(cluster.quorate === true
+          ? this.pill(counted ? I18n.t("vm.clusters.quorumOkCount", ratio) : I18n.t("vm.clusters.quorumOk"), "ok")
+        : cluster.quorate === false
+          ? this.pill(counted ? I18n.t("vm.clusters.quorumLostCount", ratio) : I18n.t("vm.clusters.quorumLost"), "err")
         : this.pill(I18n.t("vm.clusters.quorumUnknown"), "dim"));
     }
     return out.join(" ");
   }
 
-  /** Section + table des nœuds d'un cluster (nom · état · CPU · RAM · uptime · équipement · nb VMs). */
-  private appendNodes(card: HTMLElement, p: VmProviderStatus, cluster: VmClusterInfo, equipments: Array<{ id: string; name: string }>, ipAddresses: Array<{ equipment_id: string | null; hostname: string }>, vms: Array<{ provider_id?: string; host_node?: string }>): void {
+  /** Section + table des nœuds d'un cluster (nom · IP · état · CPU · RAM · uptime · équipement · nb VMs). */
+  private appendNodes(card: HTMLElement, p: VmProviderStatus, cluster: VmClusterInfo, equipments: Array<{ id: string; name: string }>, ipAddresses: Array<{ equipment_id: string | null; hostname: string }>, vms: Array<{ provider_id?: string; host_node?: string; orphan?: boolean }>): void {
     const nodes = Array.isArray(cluster.nodes) ? cluster.nodes : [];
     this.sect(card, I18n.t("vm.clusters.nodesSection", { count: nodes.length }));
     const rows = nodes.map((node: VmClusterNode) => {
@@ -184,8 +227,12 @@ export class VmClustersView {
         : "";
       // Nb de VMs du document hébergées sur ce nœud (même provider) — `host_node` == nom du nœud.
       const vmCount = vms.filter((v) => v.provider_id === p.provider_id && v.host_node === node.name).length;
+      // Adresse du lien de cluster (remontée par /cluster/status seul) : non remontée → tiret muet,
+      // JAMAIS une case vide — l'absence d'IP est une information, pas un trou d'affichage.
+      const ipCell = node.ip ? `<span style="font-family:var(--mono)">${Html.escape(node.ip)}</span>` : VmClustersView.MUTED;
       return [
         `<span style="font-family:var(--mono)">${Html.escape(node.name)}</span>${mgmtLink}`,
+        ipCell,
         statePill,
         Html.escape(VmClusterFormat.cpuText(node.cpu_used, node.cpu_total)),
         Html.escape(VmClusterFormat.memGo(node.mem_used_mb, node.mem_total_mb)),
@@ -194,7 +241,7 @@ export class VmClustersView {
         String(vmCount),
       ];
     });
-    const tw = this.tbl(card, [I18n.t("vm.clusters.colNode"), I18n.t("vm.clusters.colState"), I18n.t("vm.clusters.colCpu"), I18n.t("vm.clusters.colRam"), I18n.t("vm.clusters.colUptime"), I18n.t("vm.clusters.colEquipment"), I18n.t("vm.clusters.colVms")], rows, I18n.t("vm.clusters.nodesEmpty"));
+    const tw = this.tbl(card, [I18n.t("vm.clusters.colNode"), I18n.t("vm.clusters.colIp"), I18n.t("vm.clusters.colState"), I18n.t("vm.clusters.colCpu"), I18n.t("vm.clusters.colRam"), I18n.t("vm.clusters.colUptime"), I18n.t("vm.clusters.colEquipment"), I18n.t("vm.clusters.colVms")], rows, I18n.t("vm.clusters.nodesEmpty"));
     // Liaison des liens ⓘ → fiche équipement (après injection du HTML), pattern DetailForms.
     tw?.querySelectorAll("[data-eq-view]").forEach((el) => {
       (el as HTMLElement).onclick = () => this.host.openEquipmentDetail((el as HTMLElement).dataset.eqView!);

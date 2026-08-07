@@ -9,6 +9,7 @@ export type { FormHost } from "./Forms";
 // Formulaires de la feature VM (AMOVIBLE) — hors chaîne `Forms`, branchés directement (modale de mapping réseaux).
 export { VmForms } from "./forms/VmForms";
 export { VmProvidersForm } from "./forms/VmProvidersForm";
+export { VmPurgeForm } from "./forms/VmPurgeForm";
 export { VmSyncClient } from "./forms/VmSyncClient";
 // Formulaires de la feature CLIENTS WIFI (AMOVIBLE) — hors chaîne `Forms`, branchés directement.
 export { WifiForms } from "./forms/WifiForms";

@@ -217,7 +217,10 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
 - [`vm-proxmox.md`](docs/vm-proxmox.md) — **inventaire VM Proxmox** (module serveur AMOVIBLE `vm/`,
   pivot `VmRecord`, réconciliation source/locaux, providers PAR document dans `vm-providers.db`
   chiffrée (clé `DCMANAGER_SECRETS_KEY` requise), mapping bridge/tag → réseau, script de suppression,
-  procédure d'ajout d'un provider).
+  procédure d'ajout d'un provider ; **purge de masse des orphelines** — 2 groupes (orphelines d'un
+  provider configuré / VMs FIGÉES d'un provider disparu), enrichies exclues par défaut et listées
+  nominativement, comptes tirés du PLAN de cascade, garantie « UNE transaction = UNE révision, UN SSE,
+  UN undo » (`Store.removeMany`), disponible AUSSI en mode fichier).
 - [`wifi-unifi.md`](docs/wifi-unifi.md) — **inventaire des CLIENTS WIFI** (module serveur AMOVIBLE `wifi/`,
   pivot `WifiClientRecord` et contrat d'adaptateur AGNOSTIQUES de la marque — UniFi n'est que la 1re
   implémentation, ajout d'une marque en 4 points ; réconciliation source/locaux, « orphelin » = DÉCONNECTÉ,

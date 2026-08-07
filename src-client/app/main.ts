@@ -9,7 +9,7 @@ import { EntityRegistry } from "../models";
 import { BrowserStorageAdapter, RestAdapter } from "../data";
 import { Store } from "../store";
 import { RuntimeConfigLoader } from "./RuntimeConfig";
-import { GraphView, ListView, ListConfigs, Forms, DatacenterView, VmForms, VmProvidersForm, VmSyncClient, VmClustersView, WifiForms, WifiProvidersForm, WifiSyncClient, NotificationsAdminView, NotifyClient, CertsAdminView, CertsClient, InterventionsAdminView, InterventionsClient, TrackerSyncClient } from "../views";
+import { GraphView, ListView, ListConfigs, Forms, DatacenterView, VmForms, VmProvidersForm, VmPurgeForm, VmSyncClient, VmClustersView, WifiForms, WifiProvidersForm, WifiSyncClient, NotificationsAdminView, NotifyClient, CertsAdminView, CertsClient, InterventionsAdminView, InterventionsClient, TrackerSyncClient } from "../views";
 import type { InterventionTargetSource, InterventionFicheHooks } from "../views";
 import { FormBase } from "../views/forms/FormBase";
 import { GlobalSearchPalette } from "../views/GlobalSearchPalette";   // palette de recherche globale (loupe topbar + Ctrl+K)
@@ -26,6 +26,7 @@ import { CertsFormat } from "../core/CertsFormat";   // libellés/échéances de
 import type { InterventionRecord } from "../views/forms/InterventionsClient";   // cache des enregistrements pour l'ouverture depuis la palette
 import { CertTargetMatch } from "../core/CertTargetMatch";   // moteur PUR du rapprochement certificat ↔ équipement/VM (calculé)
 import { VmLocate } from "../core/VmLocate";   // « Localiser » une VM = localiser son HÔTE (prédicat PUR, feature VM AMOVIBLE)
+import { VmPurge } from "../core/VmPurge";   // « y a-t-il des VMs à purger ? » — prédicat PUR de visibilité du bouton « Purger… »
 import { WifiLocate } from "../core/WifiLocate";   // « Localiser » un client wifi = localiser son AP (prédicat PUR, feature WIFI AMOVIBLE)
 import type { NetworkIdentity } from "../core/CertTargetMatch";
 import type { CertFicheHooks, CertFicheMatch } from "../views/CertFicheHooks";
@@ -323,7 +324,10 @@ async function boot(): Promise<void> {
     host: {
       refreshChrome: () => refreshChrome(),
       refreshActive: () => shell.refreshActive(),
-      documentOpened: () => { shell.hideWelcome(); shell.switchView(viewAfterOpen()); refreshChrome(); shell.refreshActive(); },
+      // `resetVmProvidersProbe` EN PREMIER : la config des providers VM est PAR DOCUMENT, et les
+      // rafraîchissements qui suivent réévaluent la visibilité du bouton « Purger… » — donc re-sondent
+      // avec le document désormais ouvert. (Closure sur une const déclarée plus bas, cf. note ci-dessus.)
+      documentOpened: () => { resetVmProvidersProbe(); shell.hideWelcome(); shell.switchView(viewAfterOpen()); refreshChrome(); shell.refreshActive(); },
       resetUndo: () => undoTimeline.reset(),
       setDisplayName: (name) => { files.name = name; },
       invalidate3D: () => dcView.invalidate3D(),
@@ -501,7 +505,9 @@ async function boot(): Promise<void> {
         SEUL cas d'usage aujourd'hui : une VM n'a aucune existence dans la scène 3D — on localise son
         ÉQUIPEMENT HÔTE (cf. `core/VmLocate`). */
     locateTarget?: (id: string) => string | null;
-    extraActions?: Array<{ label: string; onClick: (btn: HTMLButtonElement) => void; title?: string }>;
+    /** Boutons secondaires d'en-tête — même forme que `ViewDef.extraActions` du Shell, `visible` compris
+        (prédicat de visibilité réévalué à chaque `refreshCounts`, cf. Shell.ts). */
+    extraActions?: Array<{ label: string; onClick: (btn: HTMLButtonElement) => void; title?: string; visible?: () => boolean }>;
   }
   /** Déclare un onglet de LISTE et rend un ACCESSEUR sur sa `ListView` — null tant que l'onglet n'a
       jamais été affiché (la vue est construite au premier `onShow`, à dessein : on ne paie pas le
@@ -595,13 +601,40 @@ async function boot(): Promise<void> {
   // `form`/`addLabel` : AUCUN bouton « + créer » en v1 (liste en lecture seule, cf. ListConfigs.vms `actions: view`) ;
   // les enrichissements locaux (notes + groupes) se font depuis la fiche. Actions d'en-tête (feature amovible) :
   //  - « Réseaux virtuels… » : mapping bridge/tag → réseau logique (méta) — les deux modes, hors viewer ;
+  //  - « Purger… » : purge de MASSE des orphelines / des VMs d'un provider disparu — les deux modes, hors
+  //    viewer, et CONDITIONNEL (masqué s'il n'y a rien à purger, cf. `visible` ci-dessous) ;
   //  - « Synchroniser » : MODE API SEULEMENT (masqué en mode fichier — pas de serveur à interroger). L'ancien
   //    « Statut de synchro… » a migré vers le sous-onglet « Clusters » (état de synchro PAR provider + nœuds).
   // Sous-onglet « Clusters » (feature amovible, MODE API) : instancié plus bas si REST_MODE. Déclaré ICI pour que
   // le « Synchroniser » de la barre d'outils puisse le rafraîchir après une passe réussie (cf. onDone ci-dessous).
   let clustersView: VmClustersView | null = null;
+  // PURGE DE MASSE des VMs — liste des providers CONFIGURÉS, nécessaire au groupe « provider disparu ».
+  // `null` = INCONNUE : mode fichier (aucun serveur à interroger, principe n°15) ou sonde pas encore
+  // aboutie. Le prédicat de visibilité du bouton la lit à chaque `refreshCounts` et déclenche, UNE
+  // seule fois par session, un tirage en tâche de fond (le prédicat doit rester synchrone). Sans liste,
+  // seules les ORPHELINES rendent le bouton visible — jamais de supposition sur une config non lue.
+  let vmConfiguredProviderIds: string[] | null = null;
+  let vmProvidersProbeStarted = false;
+  const probeVmProviders = (): void => {
+    if (vmProvidersProbeStarted || !vmSyncClient) return;
+    vmProvidersProbeStarted = true;
+    vmSyncClient.providers()
+      .then((list) => { vmConfiguredProviderIds = list.map((p) => p.id); shell.refreshCounts(); })   // relit la visibilité avec la config réelle
+      .catch(() => { /* 503 (clé absente) / panne : la liste reste inconnue pour CE document, la modale le dira */ });
+  };
+  /** Ré-arme la sonde : la config des providers est PAR DOCUMENT, et le premier tirage a lieu au
+      `shell.build()` — donc AVANT que le moindre document soit ouvert (l'appel échoue alors sur
+      « aucun document ouvert »). Appelé à chaque ouverture de document en mode API. */
+  const resetVmProvidersProbe = (): void => { vmProvidersProbeStarted = false; vmConfiguredProviderIds = null; };
   const vmExtraActions: NonNullable<TabOpts["extraActions"]> = VIEWER ? [] : [
     { label: I18n.t("app.vm.netMapping"), title: I18n.t("app.vm.netMappingTitle"), onClick: () => VmForms.netMapping(store, formHost) },
+    // « Purger… » : les DEUX modes (fichier et API), hors viewer. Visible seulement s'il y a matière —
+    // au moins une orpheline, ou (config connue) au moins une VM d'un provider disparu.
+    {
+      label: I18n.t("app.vm.purge"), title: I18n.t("app.vm.purgeTitle"),
+      visible: () => { probeVmProviders(); return VmPurge.hasPurgeable(store.all("vms"), vmConfiguredProviderIds); },
+      onClick: () => VmPurgeForm.open(store, formHost, vmSyncClient, { onDone: () => shell.refreshActive() }),
+    },
   ];
   if (REST_MODE && vmSyncClient) {
     const client = vmSyncClient;   // const → non-null capturé dans les closures (garde REST_MODE ci-dessus)
@@ -644,6 +677,11 @@ async function boot(): Promise<void> {
     clustersView = new VmClustersView(store, clustersContainer, client, {
       // Rapprochement nœud→équipement rendu en LIEN : ouvre la fiche équipement (comme GraphView/DatacenterView).
       openEquipmentDetail: (id) => Forms.equipmentDetail(store, formHost, id, () => shell.refreshActive()),
+      // Raccourci « Purger… » de la carte provider (non-viewer seulement : c'est une action destructrice) —
+      // ouvre la MÊME modale que l'en-tête de l'onglet VMs, en pré-sélectionnant les orphelines du provider.
+      openPurge: VIEWER ? undefined : (providerId) => VmPurgeForm.open(store, formHost, client, {
+        providerId, onDone: () => { shell.refreshActive(); void clustersView?.reload(); },
+      }),
     });
   }
   // CLIENTS WIFI : onglet de PREMIER NIVEAU, LECTURE SEULE — alimenté par la synchro d'un contrôleur

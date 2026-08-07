@@ -30,6 +30,7 @@ const DOMAINS = [
   "./test-entity-candidates.js", // source de CANDIDATS d'entités PARTAGÉE (lot 4 recherche) : parité fichier (golden), chemin serveur (fromRecords), orchestration double mode (repli, annulation)
   "./test-legacy-migration.js",  // BASCULE + migration legacy (L4 migration DB) : backup .bak, normalisation, abort nommé, DocumentStore relationnel (better-sqlite3 RÉEL, fichiers temp)
   "./test-relational-evolution.js", // évolution ADDITIVE du schéma (lot A sous-équipements v2) : missingColumns pur + ALTER/backfill défauts à l'ouverture, ordre tables→colonnes→index (better-sqlite3 RÉEL)
+  "./test-vm-purge.js",          // PURGE DE MASSE des VMs (lot A) : règle pure `core/VmPurge` (groupes configuré/disparu/fichier, critère « enrichie » par famille, comptes du plan) + garantie transactionnelle de `Store.removeMany` (60 racines = 1 transaction / 1 undo, puis 1 révision / 1 SSE sur DocumentStore RÉEL)
   "./test-i18n.js",              // localisation : complétude des catalogues fr ⇄ en
   "./test-certs.js",             // certificats : crypto client pure (PkiCrypto/PkiSession)
   "./test-lifecycle-format.js",  // cycle de vie matériel (core/LifecycleFormat) : âge d'achat + état de garantie (now injecté), granularité adaptative, frontière 90 j

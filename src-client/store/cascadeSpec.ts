@@ -3,4 +3,4 @@
    (cf. principe n°3 — réutilisation plutôt que duplication). Ce module ne fait que ré-exporter,
    pour préserver le point d'import des consommateurs du package `store`. */
 export { Cascade } from "../../src-shared/Cascade";
-export type { CascadeDelete, CascadeDetach, CascadePlan } from "../../src-shared/Cascade";
+export type { CascadeDelete, CascadeDetach, CascadePlan, CascadeTarget } from "../../src-shared/Cascade";

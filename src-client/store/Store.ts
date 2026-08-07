@@ -18,7 +18,7 @@ import { I18n } from "../i18n/I18n";
 import { APP_RELEASE, EQUIP_FACE_IMG_FIELD, CABLE_STATUS_DRAFT, PORT_CONNECTOR_MM, PORT_CONNECTOR_DEFAULT, LOCATIONS, RACK_DEPTH_DEFAULT } from "../domain/constants";
 import { Depths } from "../registries/Depths";
 import { DEFAULT_PORT_TYPES, DEFAULT_CABLE_TYPES } from "../registries/defaultCatalogs";
-import { Cascade, CascadeDelete, CascadeDetach } from "./cascadeSpec";
+import { Cascade, CascadeDelete, CascadeDetach, CascadeTarget } from "./cascadeSpec";
 import { DataValidator, PortStrands } from "../../src-shared/DataValidation";
 import type { ValidationError, EntityFetcher, ChildFinder } from "../../src-shared/DataValidation";
 import { PlacementContainers } from "../../src-shared/PlacementContainers";
@@ -493,15 +493,70 @@ export class Store {
     return updates!.length;
   }
   async remove(collection: string, id: string): Promise<void> {
-    // 1. calcule la cascade AVANT toute mutation
-    const { deletes, detaches } = this._cascadePlan(collection, id);
+    await this._removeTargets([{ collection, id }]);
+  }
+
+  /** Suppression EN LOT de plusieurs racines d'une MÊME collection, en UNE SEULE transaction — donc
+      UNE révision, UN événement SSE et UNE entrée d'undo, quel que soit le nombre de racines.
+
+      🚨 NE JAMAIS boucler sur `remove()` pour obtenir ce résultat : N appels = N transactions, donc N
+      révisions consommées, N événements SSE réveillant tous les autres clients, et un undo « en miettes »
+      (l'utilisateur devrait défaire N fois pour revenir en arrière). C'est exactement le cas d'usage qui a
+      motivé ce point d'entrée : purger d'un geste les ~60 VMs orphelines laissées par une bascule d'identité
+      de réconciliation (cf. `core/VmPurge`, docs/vm-proxmox.md « Purge de masse des orphelines »).
+
+      Le plan de cascade est calculé en UNE fois sur TOUTES les racines (`Cascade.planMany`) : c'est une
+      exigence de CORRECTION, pas une optimisation — les garanties du moteur (composition des retraits de
+      liste, garde anti-résurrection) ne valent que dans la portée d'un appel (cf. src-shared/Cascade.ts).
+
+      Les ids INCONNUS (déjà supprimés par un autre client, double-clic) et les DOUBLONS sont écartés en
+      amont : sans ce filtre, la transaction porterait des suppressions sans objet. Renvoie le nombre de
+      racines réellement supprimées (0 = rien à faire, aucune écriture, aucune révision consommée). */
+  async removeMany(collection: string, ids: ReadonlyArray<string>): Promise<number> {
+    const targets = this._existingTargets(collection, ids);
+    if (!targets.length) return 0;   // aucune écriture (ni transaction, ni rev, ni SSE, ni pas d'undo)
+    await this._removeTargets(targets);
+    return targets.length;
+  }
+
+  /** PRÉVISUALISATION de la cascade d'un lot de suppressions — ne mute RIEN, n'écrit RIEN. Sert aux UI qui
+      doivent ANNONCER les effets avant de les déclencher (« Z adresses IP seront détachées ») : le compte
+      vient alors du PLAN RÉEL, jamais d'une estimation refaite à la main qui divergerait de la cascade.
+      Mêmes racines retenues que `removeMany` (ids inconnus et doublons écartés) → l'aperçu décrit
+      EXACTEMENT ce que la purge fera. */
+  cascadePreview(collection: string, ids: ReadonlyArray<string>): { deletes: CascadeDelete[]; detaches: CascadeDetach[] } {
+    const targets = this._existingTargets(collection, ids);
+    if (!targets.length) return { deletes: [], detaches: [] };
+    return this._cascadePlan(targets);
+  }
+
+  /* Racines RÉELLEMENT supprimables d'un lot : ids vides, doublons et entités absentes du cache écartés.
+     Partagé par `removeMany` et `cascadePreview` pour qu'aperçu et exécution portent sur le MÊME ensemble. */
+  private _existingTargets(collection: string, ids: ReadonlyArray<string>): CascadeTarget[] {
+    const targets: CascadeTarget[] = [];
+    const seen = new Set<string>();
+    for (const id of ids || []) {
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      if (!this.get(collection, id)) continue;   // racine absente du cache → rien à supprimer
+      targets.push({ collection, id });
+    }
+    return targets;
+  }
+
+  /* Suppression EFFECTIVE d'un ENSEMBLE de racines : plan de cascade → mutation du cache → UNE transaction.
+     Chemin UNIQUE de `remove` (une racine) et de `removeMany` (un lot) — le corps était identique à la
+     boucle de racines près, et le dupliquer aurait laissé les deux copies diverger (principe n°3). */
+  private async _removeTargets(targets: ReadonlyArray<CascadeTarget>): Promise<void> {
+    // 1. calcule la cascade AVANT toute mutation (UN SEUL plan pour TOUTES les racines)
+    const { deletes, detaches } = this._cascadePlan(targets);
     // 2. applique en mémoire : détachements puis suppressions (index incrémental)
     detaches.forEach((d) => {
       const o = this.get(d.c, d.id);
       if (o) this._withReindex(d.c, o, (x) => { x[d.key] = ("value" in d) ? d.value : null; if (x.touch) x.touch(); });
     });
     const delByColl: Record<string, Set<string>> = {};
-    deletes.concat([{ c: collection, id }]).forEach((d) => { (delByColl[d.c] = delByColl[d.c] || new Set()).add(d.id); });
+    deletes.concat(targets.map((t) => ({ c: t.collection, id: t.id }))).forEach((d) => { (delByColl[d.c] = delByColl[d.c] || new Set()).add(d.id); });
     Object.keys(delByColl).forEach((c) => {
       delByColl[c].forEach((did) => {
         const o = this._idIndex[c].get(did);
@@ -509,24 +564,25 @@ export class Store {
       });
       this.data[c] = this.data[c].filter((o) => !delByColl[c].has(o.id));
     });
-    // 3. UNE transaction : détachements (updates) + suppressions enfants + cible.
+    // 3. UNE transaction : détachements (updates) + suppressions enfants + cibles.
     const tx: Transaction = {
       updates: detaches.map((d) => { const o = this.get(d.c, d.id); return o ? { collection: d.c, id: d.id, record: o.toJSON() } : null; }).filter(Boolean) as Transaction["updates"],
-      deletes: deletes.map((d) => ({ collection: d.c, id: d.id })).concat([{ collection, id }]),
+      deletes: deletes.map((d) => ({ collection: d.c, id: d.id })).concat(targets.map((t) => ({ collection: t.collection, id: t.id }))),
     };
     await this.adapter.transact(tx);
     this._emit();
   }
 
   /* Plan de cascade (intégrité référentielle) : entités à SUPPRIMER + à DÉTACHER. Délègue au calcul
-     PARTAGÉ `Cascade.plan` (même logique côté serveur sur `DELETE`), alimenté par nos capacités
-     injectées : résolutions inverses via les index secondaires (`recordFinder`), lecture via `entityFetcher`.
+     PARTAGÉ `Cascade.planMany` (même logique côté serveur sur `DELETE` et sur `/transact`), alimenté par nos
+     capacités injectées : résolutions inverses via les index secondaires (`recordFinder`), lecture via
+     `entityFetcher`. MULTI-RACINES par construction : une racine seule n'est qu'un lot d'un élément.
      Le plan est RÉCURSIF (chaîne complète, jusqu'au point fixe — cf. docs/placement.md §6.16) : il peut donc
-     être bien plus profond qu'une liste d'enfants directs. `remove` n'a rien à y adapter — les suppressions
+     être bien plus profond qu'une liste d'enfants directs. L'appelant n'a rien à y adapter — les suppressions
      forment un ENSEMBLE (aucun ordre à respecter) et le plan garantit qu'aucun détachement ne vise une entité
      qu'il supprime, donc l'étape 2 ne peut plus « nettoyer » une FK sur un enregistrement qui part juste après. */
-  private _cascadePlan(collection: string, id: string): { deletes: CascadeDelete[]; detaches: CascadeDetach[] } {
-    return Cascade.plan(collection, id, this.recordFinder, this.entityFetcher);
+  private _cascadePlan(targets: ReadonlyArray<CascadeTarget>): { deletes: CascadeDelete[]; detaches: CascadeDetach[] } {
+    return Cascade.planMany(targets, this.recordFinder, this.entityFetcher);
   }
 
   /* ---- CLONAGE ---- */
