@@ -148,5 +148,43 @@ export const vm = {
     colEquipment: "Équipement DC Manager",
     colVms: "VMs",
     nodesEmpty: "Aucun nœud remonté par ce cluster.",
+    purgeBtn: "Purger…",
+    purgeTitle: "Purger en masse les VMs orphelines de ce provider",
+  },
+  /* PURGE DE MASSE des VMs (orphelines + providers disparus) — modale `VmPurgeForm`, règle pure
+     `core/VmPurge`. Le vocabulaire distingue trois états qu'il ne faut JAMAIS confondre : ORPHELINE
+     (disparue de l'inventaire d'un provider toujours configuré), FIGÉE (son provider n'existe plus
+     dans la configuration — aucune passe ne la couvre, elle ne portera donc jamais la pastille), et
+     ENRICHIE (elle porte un travail local que la purge détruirait sans retour). */
+  purge: {
+    title: "Purger des VMs",
+    subtitle: "Orphelines et VMs de providers disparus",
+    loading: "Analyse de l'inventaire…",
+    intro: "Cochez les groupes à purger. La suppression DÉTACHE les adresses IP rattachées (elles ne sont pas supprimées) et se défait d'un seul « Annuler » : tout le lot est écrit en une seule transaction.",
+    introFile: "Mode fichier : la liste des providers configurés est inconnue (aucun serveur). Seules les VMs ORPHELINES sont proposées, groupées par identifiant de provider — impossible de distinguer ici un provider configuré d'un provider disparu.",
+    providersUnavailable: "Liste des providers illisible ({{detail}}) — repli sur les seules VMs orphelines, groupées par identifiant de provider.",
+    nothing: "Aucune VM à purger : ni orpheline, ni VM d'un provider disparu.",
+    groupOrphans: "Provider « {{provider}} » : {{count}} orpheline(s)",
+    groupOrphansUnknown: "Identifiant de provider « {{provider}} » : {{count}} orpheline(s)",
+    groupGone: "Provider disparu « {{provider}} » : {{count}} VM(s) figée(s), plus couvertes par aucune synchro",
+    groupTitle: "{{plain}} VM(s) sans enrichissement local, {{enriched}} enrichie(s)",
+    providerNone: "sans provider",
+    enrichedTitle: "{{count}} enrichie(s) dans ce groupe — EXCLUES par défaut :",
+    familyNotes: "notes",
+    familyDescription: "description",
+    familyGroups: "groupes",
+    familyIps: "adresses IP rattachées",
+    includeEnriched: "Inclure aussi les {{count}} enrichies",
+    includeEnrichedTitle: "Ajouter les VMs porteuses d'un enrichissement local à la sélection",
+    includeEnrichedHint: "Les enrichies portent un travail local (notes, description, groupes, adresses IP rattachées) qui sera perdu : recopiez-le AVANT de les inclure.",
+    recapSection: "Récapitulatif",
+    recap: "{{vms}} VM(s) seront supprimées, dont {{enriched}} enrichie(s) ; {{ips}} adresse(s) IP seront détachées.",
+    recapNone: "Aucune VM sélectionnée.",
+    purge: "Purger {{count}} VMs",
+    purgeIdle: "Purger",
+    confirmTitle: "Purger {{count}} VMs ?",
+    confirmMessage: "{{vms}} VM(s) vont être supprimées du document, dont {{enriched}} porteuse(s) d'un enrichissement local. {{ips}} adresse(s) IP seront détachées (jamais supprimées). Rien n'est touché côté Proxmox. L'opération se défait d'un seul « Annuler ».",
+    confirmLabel: "Purger",
+    done: "{{count}} VM(s) purgée(s)",
   },
 } as const;

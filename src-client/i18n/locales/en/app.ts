@@ -149,6 +149,8 @@ export const app = {
     providersTitle: "Configure the synchronisation providers (node pool, token, interval)",
     refresh: "Refresh",
     refreshTitle: "Reload the clusters status (GET /vm/status)",
+    purge: "Purge…",
+    purgeTitle: "Bulk-purge orphan VMs and those of vanished providers",
   },
   wifi: {
     sync: "Synchronise",

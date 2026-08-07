@@ -144,5 +144,43 @@ export const vm = {
     colEquipment: "DC Manager equipment",
     colVms: "VMs",
     nodesEmpty: "No node reported by this cluster.",
+    purgeBtn: "Purge…",
+    purgeTitle: "Bulk-purge this provider's orphan VMs",
+  },
+  /* BULK PURGE of VMs (orphans + vanished providers) — `VmPurgeForm` modal, pure rule
+     `core/VmPurge`. The wording keeps three states apart: ORPHAN (gone from the inventory of a
+     provider that is still configured), FROZEN (its provider no longer exists in the configuration —
+     no pass covers it, so it will never get the badge), and ENRICHED (it carries local work the
+     purge would destroy for good). */
+  purge: {
+    title: "Purge VMs",
+    subtitle: "Orphans and VMs of vanished providers",
+    loading: "Analysing the inventory…",
+    intro: "Tick the groups to purge. Deletion DETACHES the attached IP addresses (they are not deleted) and is undone by a single “Undo”: the whole batch is written in one transaction.",
+    introFile: "File mode: the list of configured providers is unknown (no server). Only ORPHAN VMs are offered, grouped by provider identifier — a configured provider cannot be told apart from a vanished one here.",
+    providersUnavailable: "Provider list unreadable ({{detail}}) — falling back to orphan VMs only, grouped by provider identifier.",
+    nothing: "No VM to purge: neither orphans nor VMs of a vanished provider.",
+    groupOrphans: "Provider “{{provider}}”: {{count}} orphan(s)",
+    groupOrphansUnknown: "Provider identifier “{{provider}}”: {{count}} orphan(s)",
+    groupGone: "Vanished provider “{{provider}}”: {{count}} frozen VM(s), no longer covered by any sync",
+    groupTitle: "{{plain}} VM(s) without local enrichment, {{enriched}} enriched",
+    providerNone: "no provider",
+    enrichedTitle: "{{count}} enriched in this group — EXCLUDED by default:",
+    familyNotes: "notes",
+    familyDescription: "description",
+    familyGroups: "groups",
+    familyIps: "attached IP addresses",
+    includeEnriched: "Also include the {{count}} enriched ones",
+    includeEnrichedTitle: "Add the VMs carrying local enrichment to the selection",
+    includeEnrichedHint: "Enriched VMs carry local work (notes, description, groups, attached IP addresses) that will be lost: copy it over BEFORE including them.",
+    recapSection: "Summary",
+    recap: "{{vms}} VM(s) will be deleted, including {{enriched}} enriched; {{ips}} IP address(es) will be detached.",
+    recapNone: "No VM selected.",
+    purge: "Purge {{count}} VMs",
+    purgeIdle: "Purge",
+    confirmTitle: "Purge {{count}} VMs?",
+    confirmMessage: "{{vms}} VM(s) are about to be deleted from the document, {{enriched}} of which carry local enrichment. {{ips}} IP address(es) will be detached (never deleted). Nothing is touched on the Proxmox side. The operation is undone by a single “Undo”.",
+    confirmLabel: "Purge",
+    done: "{{count}} VM(s) purged",
   },
 } as const;

@@ -89,8 +89,10 @@ par construction. Un test d'invariant vérifie la liste contre le modèle.
 | `core/VmIpMatch.ts` | Rapprochement IP assisté (PUR) : propose les `ipAddresses` EXISTANTES dont l'adresse correspond à une IP constatée d'une vNIC (normalisation trim/CIDR, correspondance EXACTE, « première vNIC gagne »), avec le CONFLIT d'exclusivité éventuel (`equipment`/`other_vm`). Aucune création, aucun rattachement — la fiche VM propose, l'utilisateur clique. |
 | `views/forms/VmForms.ts` | Modale « Réseaux virtuels », formulaire d'édition (champs LOCAUX uniquement), lancement de synchro + modale de résultat (le statut vit dans le sous-onglet Clusters). |
 | `views/forms/VmProvidersForm.ts` | Modale « Providers… » (en-tête du sous-onglet Clusters, mode API, non-viewer) : liste + formulaire création/édition (éditeur de POOL ordonné url+empreinte, jeton en ÉCRITURE SEULE « inchangé si vide », include_lxc/intervalle/timeout), « Tester la connexion », « Enregistrer », « Supprimer ». Clé absente/config invalide (503) → bandeau au lieu des contrôles ; rafraîchit la vue Clusters après écriture. |
+| `core/VmPurge.ts` | Règle PURE de la **purge de masse** (lecteurs injectés) : construction des GROUPES proposables (orphelines par provider configuré / VMs figées d'un provider disparu / fusion en mode fichier), critère « **enrichie** » par FAMILLE, résolution de la sélection et comptes du récapitulatif dérivés du PLAN de cascade. Voir « Purge de masse des orphelines » plus bas. |
+| `views/forms/VmPurgeForm.ts` | Modale « **Purger des VMs…** » (les DEUX modes, non-viewer) : groupes cochables + compteurs, enrichies listées NOMINATIVEMENT et décochées, case d'inclusion, récapitulatif exact, bouton DANGER + confirmation. N'arbitre rien (règle dans `core/VmPurge`, suppression par `Store.removeMany`). |
 | `views/forms/VmSyncClient.ts` | Accès aux endpoints vm (contexte REST minimal injecté) : synchro/statut + CRUD/test des providers ; DTOs miroirs du serveur (dupliqués, assumés/commentés). Le jeton ne part qu'à l'envoi (écriture seule). |
-| `views/VmClustersView.ts` | Sous-onglet « Clusters » (mode API) : cartes par provider — version/gamme, quorum, état de synchro, table des nœuds (métriques, équipement rapproché, VMs par nœud) ; en-tête : « Providers… » (gestion) + « Actualiser » (l'état cluster est en mémoire serveur, sans push SSE). |
+| `views/VmClustersView.ts` | Sous-onglet « Clusters » (mode API) : cartes par provider — version/gamme, quorum, état de synchro, table des nœuds (métriques, équipement rapproché, VMs par nœud) ; en-tête : « Providers… » (gestion) + « Actualiser » (l'état cluster est en mémoire serveur, sans push SSE). Chaque carte porte aussi le raccourci « **Purger…** » (non-viewer, s'il existe une orpheline de CE provider) qui ouvre la purge de masse pré-sélectionnée. |
 | `core/VmStatus.ts` | **SOURCE UNIQUE** de l'état affiché d'une VM (PUR) : classification fermée du statut source (`running`/`stopped`/`other`/`none`), priorité de l'**orphelinat** sur le statut, couleurs sémantiques, clé de tri et **pastilles HTML échappées**. `ListConfigs.vms`, `DetailForms.vmDetail` et `VmHostTip` la CONSOMMENT, aucun ne la réécrit. Statut affiché TEL QUEL et jamais traduit (tolérance aux releases Proxmox) ; seul le mot « orpheline » est localisé (`lists.ph.orphan`). Le statut est **rogné** avant classification. |
 | `core/VmHostTip.ts` | Bloc « VMs hébergées » de la **bulle de survol d'un équipement** en vue Datacenter (PUR : ni DOM, ni store). Reçoit les VMs de l'hôte, rend des LIGNES HTML **déjà échappées** — tri par nom, bornage `MAX_LISTED` ; la pastille de statut est **déléguée à `VmStatus`**. Cf. « VMs dans la bulle d'un équipement » plus bas. |
 | `core/VmLocate.ts` | « Localiser en 3D » une VM = localiser son **HÔTE** (PUR : store injecté par interface étroite). Rend l'**id de l'équipement à viser**, ou `null` si la localisation ne peut pas aboutir. Cf. « Localiser une VM » plus bas. |
@@ -131,8 +133,9 @@ par construction. Un test d'invariant vérifie la liste contre le modèle.
   document×provider — deux « Synchroniser » quasi simultanés (multi-clients)
   ne déclenchent qu'une passe, la seconde reçoit le dernier statut annoté.
 - Une VM **disparue** de l'inventaire passe `orphan: true` (badge « orpheline »)
-  — jamais supprimée automatiquement : la purge est un geste utilisateur, DEPUIS
-  LA FICHE détail (bouton « Supprimer cette VM orpheline… », `DetailForms.vmDetail`).
+  — jamais supprimée automatiquement : la purge est un geste utilisateur, à l'unité
+  DEPUIS LA FICHE détail (bouton « Supprimer cette VM orpheline… », `DetailForms.vmDetail`)
+  ou **en masse** (section « Purge de masse des orphelines » plus bas).
   Le bouton est **réservé aux orphelines** : supprimer une VM encore présente au
   cluster serait vain (recréée à la synchro suivante) et destructeur (perte des
   enrichissements locaux) — l'UI l'interdit donc. La suppression emprunte le MÊME
@@ -150,6 +153,62 @@ par construction. Un test d'invariant vérifie la liste contre le modèle.
   L'utilisateur clique « Rattacher » ; si l'adresse est déjà prise (équipement ou
   autre VM), un dialogue confirme la **bascule** (l'exclusivité `equipment_id`/`vm_id`
   vide l'affectation précédente). Réservé au mode non-visualiseur.
+
+## Purge de masse des orphelines
+
+Le geste unitaire de la fiche suffit pour un résidu isolé, pas pour un **accident
+d'identité** : une bascule du nom de cluster (cf. « Dépannage — VMs en DOUBLE ») peut
+laisser **des dizaines** d'orphelines d'un coup, et supprimer un provider **FIGE** ses
+VMs — qui ne deviendront jamais orphelines, puisque plus aucune passe ne couvre leur
+`provider_id`. D'où une action de masse.
+
+**Où** : bouton « **Purger…** » dans l'en-tête de l'onglet **VMs** (les DEUX modes,
+hors visualiseur), affiché **seulement s'il y a matière** ; et raccourci « Purger… »
+sur chaque **carte provider** de la vue Clusters, qui pré-sélectionne les orphelines
+de ce provider. La modale (`VmPurgeForm`) ne décide rien : la règle vit dans le module
+PUR `core/VmPurge`, la suppression dans `Store.removeMany`.
+
+**Deux groupes**, cochables séparément, avec compteurs :
+
+| Groupe | Ce qu'il propose | Coché par défaut |
+|---|---|---|
+| **Orphelines** d'un provider **configuré** | les VMs `orphan: true` de ce `provider_id`, **elles seules** — une VM encore inventoriée serait recréée à la passe suivante | non (sauf pré-sélection par le raccourci de la carte provider) |
+| VMs d'un provider **DISPARU** (`provider_id` présent dans le document, absent de la configuration serveur) | **TOUTES** ses VMs, orphelines ou non : c'est le cas « figé sans pastille », introuvable autrement | **jamais** — ce groupe ratisse large, il ne se coche que délibérément |
+
+**Les ENRICHIES sont exclues par défaut.** Une VM porteuse d'un travail LOCAL —
+`notes`, `description`, appartenance à un **groupe** (`group_id`/`group_ids`), ou au
+moins une `ipAddress` **rattachée** — est listée **par son nom** sous son groupe, avec
+la ou les raisons, et **décochée**. Une case « Inclure aussi les N enrichies » les
+ajoute d'un geste explicite. Rien n'est recopié automatiquement : c'est à l'utilisateur
+de reporter ses enrichissements sur le jumeau conservé **avant** de purger.
+
+**Récapitulatif exact** avant confirmation : « X VMs seront supprimées, dont Y
+enrichies ; Z adresses IP seront détachées ». Le compte des IP vient du **plan de
+cascade réel** (`Store.cascadePreview`), jamais d'une estimation — la règle `vms` de
+`src-shared/Cascade` **détache** `ipAddresses.vm_id` (l'adresse survit, « non
+attribuée »), elle ne supprime rien. Bouton **danger** + confirmation finale.
+
+**UNE transaction, UN undo.** `Store.removeMany` calcule **un seul** plan de cascade
+sur toutes les racines (`Cascade.planMany`) et n'émet **qu'une** transaction : une
+révision, un événement SSE, un pas d'undo — un unique « Annuler » restitue les 60 VMs
+*et* réattache leurs adresses IP. Boucler sur `remove()` donnerait N révisions, N
+réveils SSE et un undo en miettes ; c'est interdit, et un test le verrouille (60
+racines ⇒ 1 transaction côté client, 1 révision + 1 SSE sur un `DocumentStore` réel).
+En mode API, le lot part par le chemin d'écriture standard `POST /transact` (verrou
+optimiste `X-Base-Rev` → 409 si un autre client a écrit entre-temps) : **aucun endpoint
+serveur nouveau**, la cascade résiduelle serveur constate simplement qu'il n'y a rien à
+compléter.
+
+**Ce que la purge ne fait pas** : rien côté Proxmox ; aucune VM **vivante** d'un
+provider configuré ; aucune annulation partielle (c'est un lot atomique) ; aucune
+recopie d'enrichissement.
+
+**Mode fichier** : la liste des providers configurés n'existe pas (aucun serveur). Les
+deux groupes **fusionnent** en « orphelines par identifiant de provider » et la modale
+le dit — on ne peut pas distinguer un provider configuré d'un provider disparu sans la
+configuration, et proposer « toutes les VMs d'un provider » sur cette ignorance
+ratisserait un inventaire vivant. Même repli, avec la cause affichée, si
+`GET /vm/providers` échoue en mode API (503 clé absente, panne réseau).
 
 ## VMs dans la bulle d'un équipement (vue Datacenter 2D/3D)
 
@@ -419,8 +478,11 @@ la trace d'un changement d'identité — jamais d'une écriture dupliquée (la t
 | `ext_id` IDENTIQUE, `provider_id` DIFFÉRENT, l'ancien exemplaire **sans** pastille orpheline et `last_sync` FIGÉE | le provider a été **supprimé/recréé sous un autre id** : les VMs de l'ancien id ne sont plus dans AUCUN périmètre — elles ne sont donc jamais marquées orphelines, elles se figent |
 
 ⚠ Conséquence du 3ᵉ cas, à connaître : **supprimer un provider ne rend pas ses VMs
-orphelines** — plus aucune passe ne couvre leur `provider_id`. Elles restent telles
-quelles jusqu'à une suppression manuelle.
+orphelines** — plus aucune passe ne couvre leur `provider_id`. Elles se **figent** dans
+leur dernier état, sans pastille, jusqu'à une suppression explicite. C'est exactement ce
+que le groupe « provider disparu » de la **purge de masse** sait retrouver (il compare
+les `provider_id` du document à la configuration serveur) — voir « Purge de masse des
+orphelines ».
 
 **Garde-fou (identité FAILLIBLE)** : le nom du cluster vient de `/cluster/status`.
 Il est le **socle d'identité** de la passe, pas une métadonnée : s'il n'est pas
@@ -433,14 +495,17 @@ change pas non plus « pour la rendre plus stable » — ce serait dédoubler l'
 une fois de plus.
 
 **Remédier aux doublons existants** : les exemplaires **orphelins** (1ᵉʳ cas) se
-purgent **depuis leur fiche** (bouton « Supprimer cette VM orpheline… »). Vérifier
-AVANT si l'exemplaire supprimé porte des enrichissements locaux (notes, groupes,
-hôte rattaché) : ils ne sont PAS reportés sur son jumeau, ils sont perdus.
-Les exemplaires des 2ᵉ/3ᵉ cas ne portent PAS la pastille orpheline, donc pas ce
-bouton (réservé aux orphelines — supprimer une VM encore inventoriée serait vain) :
+purgent **depuis leur fiche** (bouton « Supprimer cette VM orpheline… ») ou, quand ils
+se comptent par dizaines, d'un seul geste via « **Purger…** » (en-tête de l'onglet VMs
+ou carte provider — cf. « Purge de masse des orphelines »). Vérifier AVANT si
+l'exemplaire supprimé porte des enrichissements locaux (notes, groupes, hôte rattaché) :
+ils ne sont PAS reportés sur son jumeau, ils sont perdus — c'est pourquoi la purge de
+masse **exclut les enrichies par défaut** et les liste par leur nom.
+Les exemplaires des 2ᵉ/3ᵉ cas ne portent PAS la pastille orpheline, donc pas le bouton
+de fiche (réservé aux orphelines — supprimer une VM encore inventoriée serait vain) :
 il faut d'abord **retirer le provider en trop** de la configuration, puis purger ses
-VMs — geste qui n'a pas d'équivalent UI à ce jour (une action de masse « purger les
-VMs d'un provider retiré » reste à cadrer).
+VMs — elles apparaissent alors dans le groupe « **provider disparu** » de la purge de
+masse, qui est précisément là pour ça.
 
 ### Champs d'un provider (validation `ProviderConfigValidate`)
 
@@ -564,7 +629,11 @@ fichiers dédiés ci-dessus).
 
 **Non disponible en mode fichier AUJOURD'HUI — écart assumé et documenté** (principe n°15 de
 `CLAUDE.md`) : l'inventaire est produit par la SYNCHRO côté serveur (jetons chiffrés au repos,
-appels Proxmox). ⚠ **Évolution PRÉVUE** (décision utilisateur 2026-08-02) : un provider
+appels Proxmox). ⚠ Ce qui ne dépend PAS du serveur reste, lui, disponible en local : la
+collection `vms` est une collection du DOCUMENT (lisible, cherchable, enrichissable), et la
+**purge de masse** fonctionne SANS serveur — un document exporté avec ses orphelines se purge
+en local, avec le repli documenté « liste des providers inconnue » (cf. « Purge de masse des
+orphelines »). ⚠ **Évolution PRÉVUE** (décision utilisateur 2026-08-02) : un provider
 **« Manuel »** permettant de créer/éditer une VM à la main — ce chemin-là devra fonctionner
 AUSSI en mode fichier (`vms` est une collection du DOCUMENT ; seule la synchro est serveur).
 Cadrage à venir : `.notes/toDos/vms-provider-manuel-todo-2026-08-02.md`.
