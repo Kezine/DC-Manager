@@ -451,7 +451,12 @@ export class SearchTerms {
     const out: DependentQuery[] = [];
     const seen = new Set<string>();
     const add = (q: DependentQuery): void => {
-      const key = q.collection + " " + q.field + " " + q.value + " " + (q.then ? q.then.collection + "/" + q.then.field : "");
+      // ⚠ Séparateur de clé composite écrit en SÉQUENCE D'ÉCHAPPEMENT (`\u0000`) et JAMAIS en
+      //   caractère brut : un NUL tapé en clair ressort tel quel dans la source et fait passer le
+      //   FICHIER ENTIER pour binaire aux yeux de grep/ripgrep (« Binary file … matches », sans
+      //   plus aucune correspondance affichée) — toute recherche dans ce module central devient
+      //   alors AVEUGLE. Même piège que celui commenté sur `Cascade.KEY_SEP` et dans le module `issues/`.
+      const key = q.collection + "\u0000" + q.field + "\u0000" + q.value + "\u0000" + (q.then ? q.then.collection + "/" + q.then.field : "");
       if (seen.has(key)) return;
       seen.add(key);
       out.push(q);
