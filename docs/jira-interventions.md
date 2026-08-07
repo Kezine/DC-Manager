@@ -22,7 +22,8 @@ Ce que la feature fait :
 - **repousse le contenu** à chaque enregistrement suivant (titre, description, type,
   priorité, échéance, étiquettes des objets liés), **sans jamais bloquer** l'enregistrement
   local si le tracker est indisponible ;
-- **adopte** un ticket EXISTANT (« Lier ») quand la référence a déjà été saisie à la main ;
+- **adopte** un ticket EXISTANT (« Lier ») quand la référence a déjà été saisie à la main —
+  jamais **deux fois le même** ticket (un ticket n'appartient qu'à une intervention) ;
 - **relit** le traitement du ticket (statut, assigné) en **LECTURE SEULE**, et l'affiche sur
   la fiche et dans le listing ;
 - **étiquette** chaque ticket avec les objets liés de l'intervention (`DCM-EQ-SOS13`…), de
@@ -85,8 +86,17 @@ création / PUT d'une intervention répliquée (ou auto_replicate)
   est un état **STABLE**, pas une rafale : il est rejoué à la passe suivante et par l'action
   manuelle, **jamais en boucle immédiate** — un champ refusé en permanence ne doit pas
   marteler le tracker ;
-- l'état étant **persisté**, un **redémarrage du serveur ne perd aucune poussée** : la passe
-  suivante du couple document×provider ramasse tout ce qui n'est pas `synced` ;
+- l'état étant **persisté**, un **redémarrage du serveur ne perd aucune poussée** : le
+  **ramassage au démarrage** (`TrackerSyncService.sweepPushDue`, lancé par
+  `TrackerModule.start()` **sans être attendu**) balaye `listPushDue()` **sans document** —
+  donc **tous** les documents — et rejoue les poussées dues, provider par provider. Sans lui,
+  la persistance ne servirait qu'aux providers **périodiques** : un provider en mode **manuel**
+  (`interval_sec = 0`, le défaut) n'a ni timer ni geste automatique, et une poussée interrompue
+  par un `docker stop` y dormirait jusqu'à la prochaine édition de l'objet. Le balayage ne fait
+  que la moitié **poussée** du pont (le retour d'état ne rattrape rien, il rafraîchit), prend le
+  **même verrou d'anti-chevauchement** que les passes, n'enregistre **aucun statut** de provider
+  (poser un `last_attempt` ferait refuser par l'anti-rafale le premier « Synchroniser » de
+  l'opérateur) et **ne jette jamais** : le serveur démarre normalement **tracker éteint** ;
 - la **relecture au moment de pousser** est délibérée (`TrackerSyncService.pushOnce` relit
   l'intervention, il ne capture rien au moment du hook) : une édition concurrente pendant l'appel
   distant **gagne** (« dernier état gagne »), et l'inverse pousserait une version périmée ;
@@ -104,9 +114,32 @@ création / PUT d'une intervention répliquée (ou auto_replicate)
   (`tracker_provider_id`, `tracker_ext_id`, `jira_ref`, `tracker_url`) **d'abord**, et
   seulement ensuite l'état de poussée et le statut. Si l'écriture locale échoue **après** la
   création distante, le ticket **existe** : la clé survit alors dans le message d'échec
-  persisté, avec la marche à suivre (« reprenez-le par « Répliquer » en mode LIAISON avec la
-  clé … »). **Jamais** de suppression compensatoire chez le tracker — on ne détruit pas dans
-  un système tiers pour rattraper notre propre écriture.
+  persisté, avec la marche à suivre. **Jamais** de suppression compensatoire chez le tracker —
+  on ne détruit pas dans un système tiers pour rattraper notre propre écriture.
+
+> 🚨 **ÉCHEC PARTIEL DE CRÉATION — pourquoi il ne fabrique pas un ticket par passe.** Une
+> création distante **réussie** dont l'écriture locale **échoue** (base verrouillée, disque
+> plein) laisse la ligne en `error` avec un `tracker_ext_id` **vide**. Or c'est exactement sur
+> ce vide que la poussée décide de **créer** : la ligne étant toujours due, chaque passe
+> suivante fabriquerait un ticket **de plus** dans un projet **partagé** — 12 par heure à
+> `interval_sec = 300`, tous irrattrapables (aucune suppression distante). Le pont **mémorise**
+> donc l'identité rendue par le tracker (`TrackerSyncService.createdIdentities`, clé
+> `[docId, interventionId]`), **avant** de tenter l'écriture locale ; toute poussée ultérieure
+> de cette intervention **rejoue l'écriture d'identité**, jamais la création, puis reprend son
+> cours en **mise à jour**. L'entrée disparaît dès que l'identité est en base — par le
+> rattrapage, par la voie nominale, ou par un **autre chemin** (liaison manuelle) — et à la
+> suppression de l'intervention.
+>
+> ⚠ **Limite résiduelle assumée** : cette mémoire est **en mémoire** (comme le statut et les
+> curseurs de roulement). Un **redémarrage** du serveur la perd, et une ligne restée `error`
+> sans identité refait alors **une** création — **une seule**, jamais la boucle sans fin. La
+> persister demanderait une colonne dans `interventions.db`, une base que ce module ne possède
+> pas : un coût sans commune mesure avec la rareté de l'incident.
+> **Exploitation** : surveiller dans le journal serveur la ligne `ÉCHEC PARTIEL — ticket créé,
+> identité non enregistrée` (niveau **erreur**). Elle porte la **clé** du ticket, que le message
+> d'erreur **persisté** sur la fiche répète. Si le serveur a redémarré entre-temps, le ticket
+> laissé derrière est **orphelin** : le **fermer** chez le tracker, ou le reprendre sur une
+> intervention en saisissant sa clé puis « Répliquer » en mode **liaison**.
 
 **Ce qui déclenche une poussée** (`TrackerSyncService.markPushDue`) :
 
@@ -119,10 +152,15 @@ création / PUT d'une intervention répliquée (ou auto_replicate)
 | non répliquée mais **référence déjà saisie** (`jira_ref` non vide) | rien, **journalisé** (`info`) : créer produirait un doublon du ticket visé — c'est l'action « Lier » qui s'applique |
 | **suppression** d'une intervention | rien côté tracker (doctrine « jamais de suppression distante ») ; le ticket sort simplement de l'assiette du retour d'état |
 
-> ⚠ **Reprise.** Une poussée `pending`/`error` est rejouée par la **passe du provider
-> concerné** : automatiquement si son `interval_sec` > 0, sinon par « Synchroniser » ou par
-> l'action de la fiche. Un provider en mode manuel (`interval_sec = 0`) ne rattrape donc
-> **rien tout seul** — c'est le comportement voulu, mais il se règle en posant un intervalle.
+> ⚠ **Reprise — les trois chemins, et le trou qui reste.** Une poussée `pending`/`error` est
+> rejouée : ① au **démarrage du serveur**, par le ramassage global (tous documents, tous
+> providers, `interval_sec` compris **à 0**) ; ② par la **passe périodique** du provider, s'il a
+> un `interval_sec` > 0 ; ③ par un geste — « Synchroniser » de l'en-tête, ou « Mettre à jour le
+> ticket » sur la fiche.
+> ⚠ Il reste donc **un** cas non couvert, et c'est délibéré : un échec survenu **en cours de
+> fonctionnement** chez un provider en mode **manuel** (`interval_sec = 0`) attend un geste — ni
+> le ramassage (déjà passé) ni un timer (inexistant) ne le reprendront avant le prochain
+> redémarrage. C'est le comportement voulu du mode manuel ; il se règle en posant un intervalle.
 
 ## Architecture — qui fait quoi
 
@@ -135,7 +173,7 @@ création / PUT d'une intervention répliquée (ou auto_replicate)
 | `TrackerProviderConfigDb.ts` | Stockage `tracker-providers.db` (SQLite dédiée, **table unique**), jetons **chiffrés** (`SecretBox`), deux surfaces de lecture (synchro / CRUD UI). |
 | `TrackerLabels.ts` | Étiquettes `DCM-*` : familles, normalisation, **DIFF en verbes** qui n'effleure jamais les étiquettes étrangères. Module **PUR**. |
 | `TrackerPassScope.ts` | Périmètre d'**UNE passe** : plafond **ROULANT** à fenêtre circulaire. Module **PUR**, paramétré par **noms de champ** (il borne la poussée comme le retour d'état). |
-| `TrackerSyncService.ts` | Le moteur : hook d'écriture, actions manuelles (répliquer / lier / re-pousser), composition du contenu, poussée, retour d'état, plafonds, timers, anti-rafale, statut mémoire, signalement `notify`, publication live. Porte la **fabrique `adapterFor`** — point d'extension « marque » n°2. |
+| `TrackerSyncService.ts` | Le moteur : hook d'écriture, actions manuelles (répliquer / lier / re-pousser), composition du contenu, poussée (sérialisée par intervention, **mémoire des identités créées**), retour d'état, plafonds, **ramassage au démarrage**, timers, anti-rafale, statut mémoire, signalement `notify`, publication live. Porte la **fabrique `adapterFor`** — point d'extension « marque » n°2. |
 | `TrackerModule.ts` | Façade + routes Express `/documents/:docId/tracker/*`, 503 actionnables, audit d'auteur sur les actions manuelles, réinjection des providers au jeton indéchiffrable dans le statut. |
 | `JiraHttp.ts` | **Jira** : `fetch` **injecté**, auth **Basic**, respect du `Retry-After` (429) borné, plafond de réponse, erreurs traduites — le jeton n'apparaît nulle part. |
 | `JiraParse.ts` | **Jira** : décodage **PUR et TOLÉRANT** (état, alias de champs, catégorie de statut, pagination bi-forme, `browseUrl`, référence saisie), table de **priorités**, `toAdf`, lecture des **refus par champ**. |
@@ -296,6 +334,16 @@ statut de la passe rend les deux jeux de compteurs **séparément** (`push_due`,
 `push_failed`, `push_skipped` · `tracked`, `queried`, `updated`, `missing`, `unchanged`,
 `skipped`) : une poussée en échec et un retour d'état parfait ne doivent pas se compenser
 dans un résumé. `last_success` n'avance **que** sur une passe entièrement réussie.
+
+**Un ticket n'appartient qu'à UNE intervention.** L'assiette du retour d'état est indexée **par
+identité distante** : si deux interventions du même document portaient le même
+`tracker_ext_id` chez le même provider, la seconde écraserait la première dans l'index et
+l'une des deux cesserait **silencieusement** d'être rafraîchie — sans erreur, sans journal,
+sans rien à voir dans l'UI. L'invariant est tenu **à la source**, par la seule voie qui puisse
+le rompre : l'adoption d'un ticket **existant** (`linkExisting`) est **refusée** — `409`, en
+**nommant** l'intervention qui le porte déjà — quand ce ticket est déjà lié. Le contrôle porte
+sur l'identité **interne**, résolue par le tracker : deux références saisies différemment (clé,
+URL collée, clé d'avant un déplacement de projet) désignent le même ticket.
 
 **Idempotence.** Chaque ticket résolu est comparé champ à champ (statut, catégorie, assigné,
 URL, et la **clé** — elle suit le ticket, un déplacement de projet la change). Si rien n'a
@@ -459,7 +507,7 @@ absente ou module en erreur).
 |---|---|---|
 | `POST` | `/documents/:docId/tracker/sync` | passe complète (poussées dues + retour d'état) sur **tous** les providers du document → `{ providers }` ; `500` sur échec interne inattendu |
 | `GET` | `/documents/:docId/tracker/status` | état par provider (mémoire serveur), enrichi des providers au jeton indéchiffrable → `{ providers }` |
-| `POST` | `/documents/:docId/tracker/replicate/:interventionId` | réplication **manuelle**. Corps : `{ provider_id? }` (**requis** si le document a plusieurs providers), `{ link: true }` ⇒ **LIER** le ticket déjà désigné par la référence de l'intervention au lieu d'en créer un. Succès → `{ ok, provider_id, ext_id, key, message }` ; refus → `404` (intervention inconnue), `409` (déjà répliquée), `400` (demande incomplète/incohérente), `422` (le **tracker** a refusé) |
+| `POST` | `/documents/:docId/tracker/replicate/:interventionId` | réplication **manuelle**. Corps : `{ provider_id? }` (**requis** si le document a plusieurs providers), `{ link: true }` ⇒ **LIER** le ticket déjà désigné par la référence de l'intervention au lieu d'en créer un. Succès → `{ ok, provider_id, ext_id, key, message }` ; refus → `404` (intervention inconnue), `409` (déjà répliquée, **ou** ticket déjà lié à une **autre** intervention du document — le message la nomme), `400` (demande incomplète/incohérente), `422` (le **tracker** a refusé) |
 | `POST` | `/documents/:docId/tracker/push/:interventionId` | « Mettre à jour le ticket » — reprise d'un échec de poussée. Mêmes codes que ci-dessus |
 | `GET` | `/documents/:docId/tracker/providers` | liste **sans** jeton (`has_token: true`) |
 | `PUT` | `/documents/:docId/tracker/providers/:id` | créer/mettre à jour → `{ provider }` ; `400` + `issues` si invalide ; `500` sur échec d'écriture. Jeton vide/absent ⇒ **conserver** l'existant |
@@ -508,7 +556,8 @@ du sens :
 ticket visé peut venir d'une **autre source** du projet partagé, et le contenu DC Manager
 **écrasera son résumé et sa description** à la prochaine poussée — la confirmation le **dit**,
 parce qu'une confirmation qui n'énonce pas ce qu'elle fait perdre ne protège personne. Côté
-serveur, la liaison résout la référence (clé **ou** URL collée), enregistre l'identité
+serveur, la liaison résout la référence (clé **ou** URL collée), **refuse** le ticket déjà lié
+à une autre intervention du document (`409`, message nommant celle-ci), enregistre l'identité
 **INTERNE** rendue par le tracker (jamais la référence saisie), puis aligne immédiatement le
 contenu.
 
@@ -749,9 +798,13 @@ puis poser une période réaliste.
 - **plafond ROULANT** (`TrackerPassScope`) : ordre stable, troncature, absence de zone morte ;
 - **le pont de bout en bout** sur `interventions.db` **et** `DocumentStore` **réels** :
   poussée tolérante (tracker éteint ⇒ intervention enregistrée + `error` + reprise), survie au
-  redémarrage, retour d'état **idempotent**, introuvable, auto-réplication et ses refus, et la
+  redémarrage, retour d'état **idempotent**, introuvable, auto-réplication et ses refus, la
   **course** de deux poussées en vol sur la même intervention (création distante **suspendue** :
-  un seul ticket, et la seconde demande rejouée en mise à jour) ;
+  un seul ticket, et la seconde demande rejouée en mise à jour), l'**échec partiel de création**
+  (identité mémorisée ⇒ **zéro** ticket de plus aux passes suivantes, et le **résiduel** de
+  redémarrage mesuré : **une** re-création, pas une boucle), le **refus d'adoption double** d'un
+  ticket, et le **ramassage au démarrage** d'une poussée laissée en plan (sans timer ni geste,
+  tracker éteint compris) ;
 - **invariants** : décodeur ≡ pivot (`TRACKER_TICKET_STATE_FIELDS`), **agnosticisme de
   marque** (aucun « jira » hors des points d'extension), et les trois duplications
   client ⇄ serveur verrouillées (sentinelle « introuvable », catégories, états de poussée).

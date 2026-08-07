@@ -3,7 +3,7 @@ import { Logger } from "../logger.js";
 import { Changeset } from "../../../src-shared/DocumentChangeset.js";   // marqueur de module (pastille d'onglet)
 import {
   OPTION_AUTO_REPLICATE, TRACKER_STATUS_CATEGORY_FALLBACK,
-  type InterventionForPush, type InterventionTrackerSource, type TrackerDegradeSink,
+  type InterventionForPush, type InterventionTrackerSource, type PendingPush, type TrackerDegradeSink,
   type TrackerProviderAdapter, type TrackerProviderConfig, type TrackerProviderConfigSource,
   type TrackerPushContent, type TrackerPushKind, type TrackerStatePatch, type TrackerTicketState,
 } from "./TrackerProvider.js";
@@ -32,11 +32,19 @@ import { TrackerPassScope } from "./TrackerPassScope.js";
    un état `error` STABLE — pas une rafale : il est rejoué à la passe périodique et
    par l'action manuelle, jamais en boucle immédiate (risque n°3 du cadrage).
    `pending`/`error` étant PERSISTÉS, un redémarrage du serveur ne perd aucune
-   poussée : la passe suivante les ramasse.
+   poussée : le RAMASSAGE AU DÉMARRAGE (`sweepPushDue`) les reprend, TOUS DOCUMENTS
+   CONFONDUS. Sans lui, un provider en mode MANUEL (`interval_sec = 0`, le réglage
+   recommandé pendant la validation d'une instance) n'aurait RIEN pour les rattraper :
+   ni timer, ni geste — la poussée dormirait jusqu'à la prochaine édition de l'objet.
    🚨 COROLLAIRE DE L'ASYNCHRONE : les poussées d'une MÊME intervention sont
    SÉRIALISÉES (cf. le champ `pushing`). Sans cela, un second enregistrement — ou
    un « Synchroniser » — arrivant pendant l'appel distant relirait une identité
    distante encore vide et créerait un SECOND ticket, irrattrapable.
+   🚨 SECOND COROLLAIRE, symétrique : une création distante RÉUSSIE dont l'écriture
+   locale ÉCHOUE laisse un ticket chez le tiers SANS identité ici. La ligne reste
+   `error` avec un `tracker_ext_id` vide, donc chaque passe suivante la reprendrait
+   comme une CRÉATION — un ticket de plus, indéfiniment. L'identité créée est donc
+   MÉMORISÉE (cf. `createdIdentities`) et REJOUÉE, jamais re-créée.
 
    ── CE QU'ON NE DÉTRUIT JAMAIS ───────────────────────────────────────────────
    Aucune suppression distante (une intervention supprimée laisse son ticket
@@ -123,8 +131,9 @@ export interface TrackerProviderStatus {
 
 /** NATURE d'un refus d'action manuelle. Existe pour que la ROUTE choisisse son code HTTP sans
     réinterpréter un message : `invalid` = demande incomplète/incohérente (400) · `not_found` =
-    document ou intervention inconnus (404) · `conflict` = déjà répliquée (409) · `tracker` = le
-    tracker a REFUSÉ (422 : la requête est bien formée, c'est la demande qui est inexploitable). */
+    document ou intervention inconnus (404) · `conflict` = déjà répliquée, OU ticket déjà ADOPTÉ par
+    une autre intervention du document (409) · `tracker` = le tracker a REFUSÉ (422 : la requête est
+    bien formée, c'est la demande qui est inexploitable). */
 export type TrackerActionFailure = "invalid" | "not_found" | "conflict" | "tracker";
 
 /** Résultat d'une action manuelle (« Répliquer », « Mettre à jour le ticket »). */
@@ -141,6 +150,20 @@ export interface TrackerActionResult {
   /** Message lisible et ACTIONNABLE — jamais le jeton. Sur un refus du TRACKER, c'est SON message,
       transmis TEL QUEL. */
   message: string;
+}
+
+/** IDENTITÉ d'un ticket CRÉÉ chez le tracker dont l'enregistrement local a ÉCHOUÉ — la matière du
+    rattrapage (cf. `TrackerSyncService.createdIdentities`). Volontairement RÉDUITE à ce qu'il faut
+    pour ré-écrire l'identité : le reste (statut, assigné) revient de lui-même au retour d'état. */
+interface CreatedIdentity {
+  /** Provider chez qui le ticket existe RÉELLEMENT — il PRIME sur celui de la ligne locale, qui a
+      pu changer entre-temps sans que le ticket, lui, ne bouge. */
+  providerId: string;
+  /** Identité INTERNE du ticket (jamais la clé lisible). */
+  extId: string;
+  /** Clé LISIBLE ("" si le tracker n'en rend pas). */
+  key: string;
+  url: string | null;
 }
 
 /** Résultat interne d'une poussée (création ou mise à jour). */
@@ -214,6 +237,26 @@ export class TrackerSyncService {
       rafale : chaque rejeu correspond à une demande réelle, et une poussée qui n'en déclenche
       aucune ne rejoue rien. */
   private readonly pushing = new Map<string, boolean>();
+  /** IDENTITÉS CRÉÉES chez le tracker mais PAS ENCORE ENREGISTRÉES ici : clé `[docId,
+      interventionId]` (même sérialisation JSON que `pushing`) → identité rendue par le tracker.
+      🚨 POURQUOI CETTE MÉMOIRE EXISTE. `createRemote` crée le ticket AVANT de pouvoir l'écrire ici
+      (c'est l'ordre impératif : un ticket qui existe doit toujours être rattrapable). Si l'écriture
+      locale échoue — base verrouillée, disque plein —, la ligne reste `error` avec un
+      `tracker_ext_id` VIDE. Or c'est précisément sur ce vide que `pushOnce` décide de CRÉER : sans
+      mémoire, chaque passe suivante fabriquerait un ticket DE PLUS dans un projet PARTAGÉ (12 par
+      heure à `interval_sec = 300`), tous irrattrapables — la doctrine interdit toute suppression
+      distante. La mémoire fait REJOUER l'écriture d'identité, jamais la création.
+      L'entrée est posée AVANT la tentative d'écriture (l'ordre compte : une entrée posée après
+      coup serait perdue par l'exception même qu'elle doit couvrir), et retirée dès que l'identité
+      est en base — par le rattrapage, par la voie nominale, ou par un AUTRE chemin (liaison
+      manuelle). Elle l'est aussi à la SUPPRESSION de l'intervention : il n'y a plus où écrire.
+      ⚠ LIMITE RÉSIDUELLE ASSUMÉE : cette mémoire est en MÉMOIRE (comme `status` et `cursors`), donc
+      perdue au redémarrage. Une ligne restée `error` sans identité y refera UNE création — une
+      seule, pas une boucle. Le journal (« ÉCHEC PARTIEL ») et le message d'erreur PERSISTÉ portent
+      la clé du ticket orphelin : la liaison manuelle reste possible (cf. docs/jira-interventions.md
+      § « Le cycle de POUSSÉE tolérante »). La persister demanderait une colonne dans une base que
+      ce module ne possède pas — un coût sans commune mesure avec un incident aussi rare. */
+  private readonly createdIdentities = new Map<string, CreatedIdentity>();
   private readonly timers: ReturnType<typeof setInterval>[] = [];
 
   constructor(
@@ -264,7 +307,12 @@ export class TrackerSyncService {
       ticket peut déjà avoir été vu, commenté, assigné ; un ticket en trop se ferme, un ticket
       supprimé ne revient pas. Il sortira simplement de l'assiette du retour d'état. */
   onInterventionWrite(docId: string, interventionId: string, kind: "put" | "delete"): void {
-    if (kind === "delete") return;
+    if (kind === "delete") {
+      // L'objet n'existe plus : une identité créée en attente d'enregistrement n'a plus NULLE PART
+      // où être écrite. La garder ferait vivre une entrée morte jusqu'à l'arrêt du serveur.
+      this.createdIdentities.delete(TrackerSyncService.pairKey(docId, interventionId));
+      return;
+    }
     let due = false;
     try {
       due = this.markPushDue(docId, interventionId);
@@ -335,7 +383,9 @@ export class TrackerSyncService {
       ⚠ ADOPTION EN CONNAISSANCE DE CAUSE (risque n°6 du cadrage) : lier un ticket créé par une AUTRE
       source est parfaitement légitime (« ce ticket, c'est mon intervention »), mais DC Manager fait
       dès lors foi sur le contenu — la première poussée écrasera son titre et sa description. C'est
-      à l'UI de le dire avant de demander cette action ; le serveur, lui, l'exécute. */
+      à l'UI de le dire avant de demander cette action ; le serveur, lui, l'exécute.
+      ⚠ L'adoption DOUBLE, elle, est REFUSÉE (cf. `linkExisting`) : un ticket ne peut appartenir qu'à
+      UNE intervention du document. */
   async replicate(docId: string, interventionId: string, opts: { providerId?: string | null; link?: boolean } = {}): Promise<TrackerActionResult> {
     const refused = (failure: TrackerActionFailure, message: string, providerId: string | null = null): TrackerActionResult =>
       ({ ok: false, failure, provider_id: providerId, ext_id: null, key: null, message });
@@ -375,7 +425,13 @@ export class TrackerSyncService {
   }
 
   /** LIAISON d'un ticket EXISTANT désigné par la référence déjà saisie (clé lisible ou URL collée).
-      Le ticket n'est pas créé : il est ADOPTÉ, puis une poussée aligne son contenu sur DC Manager. */
+      Le ticket n'est pas créé : il est ADOPTÉ, puis une poussée aligne son contenu sur DC Manager.
+      🚨 UN TICKET N'APPARTIENT QU'À UNE INTERVENTION. Adopter un ticket DÉJÀ lié à une autre
+      intervention du document est REFUSÉ (409, en nommant celle qui le porte). Ce n'est pas une
+      pédanterie : le retour d'état indexe l'assiette PAR identité distante (`pullPass`), donc la
+      seconde ligne écraserait la première dans l'index et l'une des deux cesserait SILENCIEUSEMENT
+      d'être rafraîchie — sans erreur, sans journal, sans rien à voir dans l'UI. Le contrôle est
+      porté par le SERVEUR (et pas seulement par l'UI) parce qu'il porte l'invariant. */
   private async linkExisting(docId: string, interventionId: string, item: InterventionForPush, config: TrackerProviderConfig): Promise<TrackerActionResult> {
     const reference = TrackerSyncService.text(item.jira_ref);
     if (reference === "") {
@@ -393,6 +449,18 @@ export class TrackerSyncService {
       return {
         ok: false, failure: "tracker", provider_id: config.id, ext_id: null, key: null,
         message: "ticket « " + reference + " » introuvable ou inaccessible — vérifiez la référence et les droits du compte de service sur son projet",
+      };
+    }
+    // 🚨 ADOPTION DOUBLE — refusée AVANT toute écriture (cf. l'en-tête de la méthode). Le contrôle
+    // vient APRÈS la résolution parce qu'il porte sur l'identité INTERNE : deux références saisies
+    // différemment (clé, URL collée, clé d'avant un déplacement de projet) désignent le même ticket.
+    const holder = this.trackedBy(docId, config.id, state.ext_id, interventionId);
+    if (holder !== null) {
+      const label = state.key !== "" ? state.key : state.ext_id;
+      return {
+        ok: false, failure: "conflict", provider_id: config.id, ext_id: state.ext_id, key: state.key || null,
+        message: "ticket « " + label + " » DÉJÀ lié à l'intervention « " + holder.title + " » (" + holder.id + ") — un ticket n'appartient qu'à UNE intervention,"
+          + " sans quoi le retour d'état n'en rafraîchirait qu'une seule : reprenez cette intervention-là, ou désignez un autre ticket pour celle-ci",
       };
     }
     // 🚨 L'IDENTITÉ D'ABORD (leçon v1) : `ext_id` est l'identifiant INTERNE, jamais la référence
@@ -422,6 +490,23 @@ export class TrackerSyncService {
     };
   }
 
+  /** Une AUTRE intervention du document porte-t-elle DÉJÀ cette identité distante chez ce provider ?
+      Rend l'intervention fautive (id + titre — un message qui dit « déjà lié » sans dire À QUOI
+      n'est pas actionnable), ou `null`. L'assiette est parcourue en mémoire : elle est bornée par
+      construction (les interventions RÉPLIQUÉES d'UN document) et cette vérification n'a lieu qu'à
+      une adoption manuelle, jamais dans une boucle de passe. */
+  private trackedBy(docId: string, providerId: string, extId: string, exceptId: string): { id: string; title: string } | null {
+    for (const row of this.interventions.listTracked(docId)) {
+      if (row.id === exceptId) continue;
+      if (TrackerSyncService.text(row.tracker_provider_id) !== providerId) continue;
+      if (TrackerSyncService.text(row.tracker_ext_id) !== extId) continue;
+      const other = this.interventions.getOne(docId, row.id);
+      const title = other && typeof other.title === "string" ? other.title.trim() : "";
+      return { id: row.id, title: title !== "" ? title : "sans titre" };
+    }
+    return null;
+  }
+
   /** POUSSÉE MANUELLE (« Mettre à jour le ticket ») — la porte de récupération d'un échec (E4). */
   async pushNow(docId: string, interventionId: string): Promise<TrackerActionResult> {
     const item = this.interventions.getOne(docId, interventionId);
@@ -448,7 +533,7 @@ export class TrackerSyncService {
       cours, qui rejoue une fois de plus à la fin avec l'intervention relue.
       NE JETTE JAMAIS de son propre fait — elle rend un `PushOutcome` (cf. `pushOnce`). */
   private async pushIntervention(docId: string, interventionId: string): Promise<PushOutcome> {
-    const inFlightKey = JSON.stringify([docId, interventionId]);
+    const inFlightKey = TrackerSyncService.pairKey(docId, interventionId);
     if (this.pushing.has(inFlightKey)) {
       this.pushing.set(inFlightKey, true);   // REDO : la poussée en vol rejouera avec le DERNIER état
       this.log.info("tracker : poussée déjà EN VOL pour cette intervention — fusionnée avec elle (anti-doublon)", docId, interventionId);
@@ -479,7 +564,13 @@ export class TrackerSyncService {
 
       ⚠ RELECTURE AU MOMENT DE POUSSER (risque n°4 du cadrage) : l'intervention est relue ICI, pas
       capturée au moment du hook. Une édition concurrente pendant l'appel distant gagne donc — c'est
-      le comportement voulu (« dernier état gagne »), et l'inverse pousserait une version périmée. */
+      le comportement voulu (« dernier état gagne »), et l'inverse pousserait une version périmée.
+
+      🚨 « PAS D'IDENTITÉ » NE VEUT PAS DIRE « PAS DE TICKET ». C'est la subtilité de cette méthode :
+      elle choisit de CRÉER sur un `tracker_ext_id` vide, or ce vide peut aussi être la trace d'une
+      création RÉUSSIE dont l'écriture locale a échoué. D'où le rattrapage par
+      `replayCreatedIdentity` AVANT toute décision — et avant même la résolution du provider, parce
+      que l'identité mémorisée dit chez QUI le ticket existe vraiment. */
   private async pushOnce(docId: string, interventionId: string): Promise<PushOutcome> {
     const degraded: string[] = [];
     const degrade: TrackerDegradeSink = (message) => {
@@ -493,9 +584,27 @@ export class TrackerSyncService {
 
     const item = this.interventions.getOne(docId, interventionId);
     // Supprimée entre le marquage et la poussée : ce n'est pas un échec, il n'y a plus rien à faire.
-    if (!item) return { ok: true, message: "intervention disparue avant la poussée — rien à pousser", extId: null, key: null, degraded };
+    if (!item) {
+      this.createdIdentities.delete(TrackerSyncService.pairKey(docId, interventionId));   // plus nulle part où l'écrire
+      return { ok: true, message: "intervention disparue avant la poussée — rien à pousser", extId: null, key: null, degraded };
+    }
 
-    const providerId = TrackerSyncService.text(item.tracker_provider_id);
+    let extId = TrackerSyncService.text(item.tracker_ext_id);
+    let providerId = TrackerSyncService.text(item.tracker_provider_id);
+    if (extId === "") {
+      // RATTRAPAGE d'un échec partiel de création : ré-écrire l'identité, JAMAIS re-créer.
+      const replay = this.replayCreatedIdentity(docId, interventionId);
+      if (replay !== null) {
+        if (!replay.ok) return failed(replay.message, replay.key, replay.extId);
+        extId = replay.extId;
+        providerId = replay.providerId;
+      }
+    } else {
+      // L'identité est arrivée par un AUTRE chemin (liaison manuelle, poussée réussie entre-temps) :
+      // la mémoire de rattrapage n'a plus d'objet et ne doit pas survivre à sa raison d'être.
+      this.createdIdentities.delete(TrackerSyncService.pairKey(docId, interventionId));
+    }
+
     if (providerId === "") return failed("aucun provider de réplication désigné pour cette intervention");
     const config = this.providers.providersFor(docId).find((candidate) => candidate.id === providerId) || null;
     if (!config) {
@@ -507,7 +616,6 @@ export class TrackerSyncService {
     try { adapter = this.makeAdapter(config); }
     catch (e) { return failed(e instanceof Error ? e.message : String(e)); }
 
-    const extId = TrackerSyncService.text(item.tracker_ext_id);
     try {
       return extId === ""
         ? await this.createRemote(docId, interventionId, config, adapter, content, degraded, degrade)
@@ -526,8 +634,10 @@ export class TrackerSyncService {
       🚨 L'ORDRE EST IMPÉRATIF, et l'IDENTITÉ EST ÉCRITE AVANT TOUT LE RESTE. Un ticket créé chez un
       tiers doit toujours être rattrapable : si l'écriture locale échoue APRÈS la création, le ticket
       EXISTE — la clé doit alors survivre quelque part, et à défaut de la colonne d'identité, au
-      moins dans le message d'erreur persisté. Jamais de suppression compensatoire côté tracker : on
-      ne détruit pas dans un système tiers pour rattraper NOTRE propre écriture. */
+      moins dans le message d'erreur persisté ET dans la mémoire de rattrapage (`createdIdentities`),
+      qui est ce qui empêche la passe suivante de CRÉER UN TICKET DE PLUS. Jamais de suppression
+      compensatoire côté tracker : on ne détruit pas dans un système tiers pour rattraper NOTRE
+      propre écriture. */
   private async createRemote(
     docId: string, interventionId: string, config: TrackerProviderConfig,
     adapter: TrackerProviderAdapter, content: TrackerPushContent,
@@ -535,6 +645,11 @@ export class TrackerSyncService {
   ): Promise<PushOutcome> {
     const state = await adapter.createIssue(content, degrade);
     const key = state.key.trim();
+    const memoryKey = TrackerSyncService.pairKey(docId, interventionId);
+
+    // 🚨 MÉMORISER AVANT D'ÉCRIRE — l'ordre n'est pas cosmétique : une entrée posée APRÈS coup
+    // serait perdue par l'exception même qu'elle doit couvrir.
+    this.createdIdentities.set(memoryKey, { providerId: config.id, extId: state.ext_id, key, url: state.url });
 
     try {
       this.interventions.applyTrackerState(docId, interventionId, {
@@ -548,11 +663,13 @@ export class TrackerSyncService {
     } catch (e) {
       const detail = e instanceof Error ? e.message : String(e);
       const message = "ticket " + (key ? "« " + key + " » " : "") + "CRÉÉ chez le tracker, mais son identité n'a PAS pu être enregistrée ici (" + detail + ")"
-        + (key ? " — reprenez-le par « Répliquer » en mode LIAISON avec la clé « " + key + " »" : "");
+        + " — elle est MÉMORISÉE et sera réenregistrée à la prochaine poussée, sans qu'aucun nouveau ticket ne soit créé"
+        + (key ? " ; si le serveur redémarre d'ici là, reprenez-le par « Répliquer » en mode LIAISON avec la clé « " + key + " »" : "");
       this.log.error("tracker : ÉCHEC PARTIEL — ticket créé, identité non enregistrée", docId, interventionId, key, detail);
       this.failPush(docId, interventionId, message);
       return { ok: false, message, extId: state.ext_id, key: key || null, degraded };
     }
+    this.createdIdentities.delete(memoryKey);   // identité EN BASE : plus rien à rattraper
 
     this.safeApply(docId, interventionId, {
       tracker_push_state: "synced",
@@ -564,6 +681,39 @@ export class TrackerSyncService {
     });
     this.log.info("tracker : intervention RÉPLIQUÉE", docId, interventionId, config.id, key + " (ext_id " + state.ext_id + ")");
     return { ok: true, message: "ticket « " + (key || state.ext_id) + " » créé", extId: state.ext_id, key: key || null, degraded };
+  }
+
+  /** RATTRAPAGE d'un ÉCHEC PARTIEL de création : rejoue l'écriture de l'IDENTITÉ mémorisée
+      (cf. `createdIdentities`), et JAMAIS la création distante.
+      Rend `null` quand il n'y a rien à rattraper — le cas nominal, donc le chemin qui doit rester
+      gratuit. Sinon le résultat de la tentative : succès ⇒ l'appelant reprend son flux en MISE À
+      JOUR (le ticket existait déjà) ; échec ⇒ l'appelant pose l'état `error` et la mémoire est
+      CONSERVÉE pour la passe d'après. */
+  private replayCreatedIdentity(docId: string, interventionId: string): { ok: boolean; message: string; extId: string; key: string | null; providerId: string } | null {
+    const memoryKey = TrackerSyncService.pairKey(docId, interventionId);
+    const identity = this.createdIdentities.get(memoryKey);
+    if (!identity) return null;
+    const label = identity.key !== "" ? identity.key : identity.extId;
+    try {
+      this.interventions.applyTrackerState(docId, interventionId, {
+        tracker_provider_id: identity.providerId,
+        tracker_ext_id: identity.extId,
+        jira_ref: identity.key !== "" ? identity.key : null,
+        tracker_url: identity.url,
+      });
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      this.log.error("tracker : ÉCHEC PARTIEL — identité toujours pas enregistrable, aucune création tentée", docId, interventionId, label, detail);
+      return {
+        ok: false, extId: identity.extId, key: identity.key || null, providerId: identity.providerId,
+        message: "ticket « " + label + " » CRÉÉ chez le tracker, mais son identité n'a TOUJOURS pas pu être enregistrée ici (" + detail + ")"
+          + " — aucun nouveau ticket n'a été créé ; la tentative sera rejouée à la prochaine poussée",
+      };
+    }
+    this.createdIdentities.delete(memoryKey);
+    this.log.info("tracker : identité d'un ticket CRÉÉ enfin enregistrée — la poussée reprend en MISE À JOUR (aucune création de plus)",
+      docId, interventionId, identity.providerId, label + " (ext_id " + identity.extId + ")");
+    return { ok: true, message: "", extId: identity.extId, key: identity.key || null, providerId: identity.providerId };
   }
 
   /** MISE À JOUR du contenu d'un ticket déjà répliqué.
@@ -723,10 +873,7 @@ export class TrackerSyncService {
     if (!this.docs.get(docId)) return this.record(docId, config, { ok: false, message: "document inconnu", attemptIso });
 
     this.log.info("tracker : passe démarrée", docId, config.id, "kind " + config.kind + ", timeout " + config.timeout_sec + "s");
-    const counts: TrackerSyncCounts = {
-      push_due: 0, pushed: 0, push_failed: 0, push_skipped: 0,
-      tracked: 0, queried: 0, updated: 0, missing: 0, unchanged: 0, skipped: 0,
-    };
+    const counts = TrackerSyncService.emptyCounts();
     const notes: string[] = [];
 
     // ① POUSSÉES DUES (créations et mises à jour). Un échec de poussée n'interrompt pas la passe :
@@ -816,6 +963,10 @@ export class TrackerSyncService {
       return message;
     }
 
+    // INDEX PAR IDENTITÉ DISTANTE. ⚠ Il suppose qu'un ticket n'appartient qu'à UNE intervention du
+    // couple document×provider — sinon la dernière ligne écraserait la précédente et celle-ci
+    // cesserait silencieusement d'être rafraîchie. L'invariant est tenu à la SOURCE : la seule voie
+    // d'adoption d'un ticket déjà connu (`linkExisting`) refuse la liaison double.
     const byExtId = new Map(tracked.map((row) => [TrackerSyncService.text(row.tracker_ext_id), row]));
     const nowIso = new Date().toISOString();
 
@@ -852,6 +1003,82 @@ export class TrackerSyncService {
       counts.updated++;
     }
     return null;
+  }
+
+  /* --------------------------------------------------------------------------
+     RAMASSAGE AU DÉMARRAGE
+     -------------------------------------------------------------------------- */
+
+  /** RAMASSAGE AU DÉMARRAGE — la reprise des poussées qu'un arrêt du serveur a laissées en plan.
+      C'est la contrepartie de la PERSISTANCE de `tracker_push_state` : sans lui, cette persistance
+      ne servirait qu'aux documents dont un provider a une période (`interval_sec > 0`). Un provider
+      en mode MANUEL — le défaut, et le réglage que la doc recommande le temps de valider une
+      instance — n'a ni timer ni geste automatique : une poussée `pending` interrompue par un
+      `docker stop` y dormirait jusqu'à la prochaine édition de l'objet, c'est-à-dire peut-être
+      jamais.
+      Le balayage part de `listPushDue()` SANS document — c'est le seul chemin qui voie l'ensemble,
+      la mémoire du processus précédent étant perdue par définition.
+      ⚠ Il ne fait QUE la moitié POUSSÉE du pont : le retour d'état n'a rien d'urgent au démarrage
+      (il ne rattrape rien, il rafraîchit) et interroger le tracker sur toute l'assiette de tous les
+      documents au boot coûterait cher pour rien.
+      Il n'ENREGISTRE PAS de statut de provider (`this.status`) : ce n'est pas une passe, et poser un
+      `last_attempt` ferait refuser par l'anti-rafale le premier « Synchroniser » de l'opérateur.
+      NE JETTE JAMAIS : tout est avalé et journalisé — le serveur doit démarrer normalement tracker
+      ÉTEINT. À lancer SANS l'attendre (cf. `TrackerModule.start`). */
+  async sweepPushDue(): Promise<void> {
+    let due: PendingPush[];
+    try {
+      due = this.interventions.listPushDue();   // SANS docId = TOUS les documents
+    } catch (e) {
+      this.log.error("tracker : ramassage au démarrage — lecture des poussées dues en échec", e instanceof Error ? e.message : String(e));
+      return;
+    }
+    const docIds: string[] = [];
+    for (const row of due) {
+      const docId = TrackerSyncService.text(row.doc_id);
+      if (docId !== "" && !docIds.includes(docId)) docIds.push(docId);
+    }
+    if (docIds.length === 0) return;   // rien de dû ⇒ aucun tiers réveillé
+    this.log.info("tracker : ramassage au démarrage", due.length + " poussée(s) due(s) sur " + docIds.length + " document(s)");
+    for (const docId of docIds) {
+      let configs: TrackerProviderConfig[];
+      try { configs = this.providers.providersFor(docId); }
+      catch (e) {
+        // Providers illisibles (jeton indéchiffrable, base en erreur) : les AUTRES documents doivent
+        // quand même être ramassés.
+        this.log.error("tracker : ramassage au démarrage — providers illisibles", docId, e instanceof Error ? e.message : String(e));
+        continue;
+      }
+      for (const config of configs) await this.sweepProvider(docId, config);
+    }
+  }
+
+  /** Ramassage des poussées dues d'UN couple document×provider. Prend le MÊME verrou
+      d'anti-chevauchement que `syncProvider` : rien n'interdit qu'un timer ou un « Synchroniser »
+      arrive pendant le balayage, et deux passes simultanées sur le même couple re-résoudraient la
+      même assiette. La sérialisation par intervention (`pushing`) joue en plus, à l'étage du dessous. */
+  private async sweepProvider(docId: string, config: TrackerProviderConfig): Promise<void> {
+    const key = JSON.stringify([docId, config.id]);
+    if (this.running.has(key)) return;   // une passe tient déjà ce couple : elle ramassera la même chose
+    this.running.add(key);
+    try {
+      const counts = TrackerSyncService.emptyCounts();
+      const notes: string[] = [];
+      await this.pushPass(docId, config, counts, notes);
+      if (counts.push_due === 0) return;
+      this.log.info("tracker : ramassage au démarrage terminé", docId, config.id,
+        counts.pushed + " OK, " + counts.push_failed + " en échec sur " + counts.push_due + " due(s)"
+        + (notes.length ? " · " + notes.join(" · ") : ""));
+      // Les autres clients rafraîchissent leurs pastilles : ce qui vient d'être poussé l'a été par le
+      // SERVEUR, aucun client n'en a l'initiative.
+      if (counts.pushed > 0) this.publishInterventions(docId, "Ramassage · " + config.id);
+    } catch (e) {
+      // `pushPass` ne jette pas de son propre fait (chaque poussée rend un résultat) : ceinture pour
+      // une lecture de base en panne, qui ne doit pas priver les couples suivants du ramassage.
+      this.log.error("tracker : ramassage au démarrage — échec inattendu", docId, config.id, e instanceof Error ? e.message : String(e));
+    } finally {
+      this.running.delete(key);
+    }
   }
 
   /* --------------------------------------------------------------------------
@@ -938,6 +1165,23 @@ export class TrackerSyncService {
   /* --------------------------------------------------------------------------
      Helpers privés / purs
      -------------------------------------------------------------------------- */
+
+  /** Clé des mémoires PAR INTERVENTION (`pushing`, `createdIdentities`) : un JSON `[docId, id]`, et
+      jamais une concaténation — aucun des deux identifiants n'a de jeu de caractères garanti, et
+      `"a" + "bc"` collisionnerait avec `"ab" + "c"`. Les deux cartes DOIVENT partager cette clé :
+      elles décrivent le même objet, et deux conventions divergeraient au premier renommage. */
+  private static pairKey(docId: string, interventionId: string): string {
+    return JSON.stringify([docId, interventionId]);
+  }
+
+  /** Compteurs d'une passe à ZÉRO. Fabrique UNIQUE pour ses deux appelants (la passe complète et le
+      ramassage au démarrage) : un compteur ajouté au type ne doit pas pouvoir être oublié d'un côté. */
+  private static emptyCounts(): TrackerSyncCounts {
+    return {
+      push_due: 0, pushed: 0, push_failed: 0, push_skipped: 0,
+      tracked: 0, queried: 0, updated: 0, missing: 0, unchanged: 0, skipped: 0,
+    };
+  }
 
   /** Chaîne rognée d'une valeur potentiellement nulle — "" quand il n'y a rien d'exploitable. */
   private static text(value: unknown): string {

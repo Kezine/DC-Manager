@@ -146,8 +146,15 @@ export class TrackerModule {
     return new TrackerModule(opts.docs, null, null, null, true, log);
   }
 
-  /** Démarre les passes périodiques (no-op si config en erreur/absente). */
+  /** Démarre le pont (no-op si config en erreur/absente) : ① le RAMASSAGE des poussées qu'un arrêt
+      du serveur a laissées en plan, ② les passes périodiques des providers à `interval_sec > 0`.
+      ⚠ Le ramassage n'est PAS attendu — il parle à un tiers, et le serveur doit démarrer
+      normalement tracker ÉTEINT (il est appelé APRÈS `listen()`, comme les autres modules). Il ne
+      jette jamais de son propre fait ; le `catch` est une ceinture contre un bug interne, qui ne
+      doit pas devenir un rejet de promesse non capturé. */
   start(): void {
+    void this.service?.sweepPushDue().catch((e) =>
+      this.log.error("tracker : ramassage au démarrage — échec inattendu", e instanceof Error ? e.message : String(e)));
     this.service?.startTimers();
   }
 

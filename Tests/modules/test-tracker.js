@@ -36,7 +36,10 @@
   13. le PONT DE BOUT EN BOUT sur bases RÉELLES (`interventions.db` + `DocumentStore`) : poussée
       TOLÉRANTE (adaptateur qui jette ⇒ l'intervention est enregistrée, `push_state: error`, reprise
       à la passe suivante), persistance de l'état de poussée à travers un REDÉMARRAGE simulé,
-      création (clé écrite AVANT tout le reste, échec d'écriture locale qui ne perd pas la clé),
+      création (clé écrite AVANT tout le reste ; échec d'écriture locale qui ne perd pas la clé ET
+      ne fabrique AUCUN ticket de plus aux passes suivantes, redémarrage compris — le résiduel
+      assumé est mesuré, pas supposé), REFUS de l'adoption DOUBLE d'un ticket, RAMASSAGE AU
+      DÉMARRAGE d'une poussée laissée en plan (sans timer ni geste, tracker éteint compris),
       retour d'état IDEMPOTENT, `missing` ⇒ « introuvable » SANS suppression, `updated_by`/
       `updated_date` JAMAIS touchés, réplication automatique (un provider ⇒ oui, plusieurs ⇒ non
       + journal) ;
@@ -1487,8 +1490,14 @@ module.exports = async () => {
       ck.eq(idb.getOne(doc.id, "i2").tracker_push_state, "synced", "redémarrage : la poussée aboutit après reprise");
 
       /* ================================================================================
-         4) ÉCHEC D'ÉCRITURE LOCALE **APRÈS** CRÉATION DISTANTE — la clé n'est JAMAIS perdue
-         ================================================================================ */
+         4) ÉCHEC D'ÉCRITURE LOCALE **APRÈS** CRÉATION DISTANTE — la clé n'est JAMAIS perdue,
+            et la passe suivante ne crée SURTOUT PAS un ticket de plus
+         ================================================================================
+         C'est le seul instant où un ticket existe chez un tiers sans être connu ici : la ligne
+         reste `error` avec un `tracker_ext_id` VIDE — or c'est précisément sur ce vide que la
+         poussée décide de CRÉER. Sans mémoire de l'identité créée, chaque passe fabriquerait un
+         ticket DE PLUS dans un projet PARTAGÉ (12 par heure à `interval_sec = 300`), tous
+         irrattrapables : la doctrine interdit toute suppression distante. */
       declare("i3", { title: "Bascule onduleur" });
       let breakIdentity = true;
       const brittle = {
@@ -1502,19 +1511,61 @@ module.exports = async () => {
       };
       const brittleLog = mkLog();
       const brittleService = mkService({ source: brittle, providers: mkProviders([cfg()]), log: brittleLog, makeAdapter: tracker.adapter });
+      const createdBeforePartial = tracker.created.length;
       const partial = await brittleService.replicate(doc.id, "i3", {});
       ck.eq(partial.ok, false, "échec partiel : l'action manuelle rend un ÉCHEC (l'utilisateur doit savoir)");
       ck.eq(partial.key, "INFRA-3", "échec partiel : 🚨 la réponse PORTE la clé du ticket réellement créé — sans elle, la situation serait irrattrapable");
+      ck.eq(tracker.created.length, createdBeforePartial + 1, "échec partiel : UN ticket a bel et bien été créé chez le tracker (c'est ce qui rend la situation délicate)");
       const orphanKey = idb.getOne(doc.id, "i3");
       ck.eq(orphanKey.tracker_push_state, "error", "échec partiel : l'état error est posé…");
       ck(/INFRA-3/.test(orphanKey.tracker_push_error), "échec partiel : … et le message PERSISTÉ porte la clé (au minimum, elle survit là)");
       ck(/LIAISON/.test(orphanKey.tracker_push_error), "échec partiel : … avec la marche à suivre (LIER le ticket existant, jamais de suppression compensatoire chez le tracker)");
       ck(brittleLog.lines.some((l) => l.startsWith("E") && /ÉCHEC PARTIEL/.test(l)), "échec partiel : journalisé en ERREUR (c'est un écart durable, pas un incident passager)");
-      // ⚠ On RETIRE i3 de l'assiette pour la suite du scénario : restée en `error` SANS identité, elle
-      //   serait re-tentée à chaque passe et créerait un ticket de plus à chaque fois (conséquence
-      //   assumée de la reprise — c'est justement pourquoi la clé doit survivre dans le message).
-      //   Le ticket « INFRA-3 » qu'elle a laissé chez le tracker sert plus bas au test de LIAISON.
-      idb.remove(doc.id, "i3");
+
+      /* -- LA PASSE SUIVANTE REJOUE L'IDENTITÉ, PAS LA CRÉATION. C'est le cœur du correctif : la
+            ligne est toujours `error` et toujours sans identité, donc TOUJOURS ramassée par
+            `listPushDue` — mais l'identité mémorisée court-circuite la décision « ext_id vide ⇒
+            créer ». -- */
+      const afterPartial = await brittleService.syncDocument(doc.id);
+      ck.eq(tracker.created.length, createdBeforePartial + 1,
+        "échec partiel : 🚨 la passe suivante ne crée AUCUN ticket de plus (l'identité est REJOUÉE, la création ne l'est pas)");
+      const rescued = idb.getOne(doc.id, "i3");
+      ck.eq(rescued.tracker_ext_id, "10003", "échec partiel : … l'identité mémorisée est ENFIN écrite (identifiant INTERNE)");
+      ck.eq(rescued.jira_ref, "INFRA-3", "échec partiel : … avec la clé, là où l'utilisateur la cherche");
+      ck.eq(rescued.tracker_push_state, "synced", "échec partiel : … et la poussée enchaîne en MISE À JOUR jusqu'à `synced`");
+      ck.eq(rescued.tracker_push_error, null, "échec partiel : … le message d'échec ne survit pas au rattrapage");
+      ck(afterPartial[0].counts.pushed >= 1, "échec partiel : la passe COMPTE la poussée rattrapée");
+
+      /* -- RÉSIDUEL ASSUMÉ ET DOCUMENTÉ : cette mémoire est EN MÉMOIRE. Un REDÉMARRAGE la perd, et
+            une ligne restée `error` sans identité refait alors UNE création — une seule, jamais la
+            boucle infinie. Le ticket abandonné reste rattrapable À LA MAIN par sa clé (message
+            persisté + journal) : c'est exactement ce que rejoue le scénario de LIAISON plus bas. -- */
+      declare("i11", { title: "Échec partiel juste avant l'arrêt" });
+      let breakAgain = true;
+      const brittleTwice = {
+        listTracked: source.listTracked, listPushDue: source.listPushDue, getOne: source.getOne,
+        applyTrackerState: (d, id, patch) => {
+          if (breakAgain && patch.tracker_ext_id) { breakAgain = false; throw new Error("SQLITE_BUSY: database is locked"); }
+          return source.applyTrackerState(d, id, patch);
+        },
+      };
+      const abandoned = await mkService({ source: brittleTwice, providers: mkProviders([cfg()]), log: mkLog(), makeAdapter: tracker.adapter })
+        .replicate(doc.id, "i11", {});
+      ck.eq(abandoned.ok, false, "résiduel : l'échec partiel est reproduit (ticket créé, identité non écrite)…");
+      const abandonedKey = abandoned.key, abandonedExtId = abandoned.ext_id;
+
+      // REDÉMARRAGE : service TOUT NEUF sur la MÊME base — la mémoire des identités créées est vide.
+      const afterReboot = mkService({ providers: mkProviders([cfg()]), log: mkLog(), makeAdapter: tracker.adapter });
+      const createdBeforeReboot = tracker.created.length;
+      await afterReboot.syncDocument(doc.id);
+      ck.eq(tracker.created.length, createdBeforeReboot + 1,
+        "résiduel : … après un redémarrage, la ligne sans identité refait UNE création (limite ASSUMÉE, cf. docs/jira-interventions.md)");
+      ck.eq(idb.getOne(doc.id, "i11").tracker_push_state, "synced", "résiduel : … qui aboutit, elle");
+      await afterReboot.syncDocument(doc.id);
+      ck.eq(tracker.created.length, createdBeforeReboot + 1,
+        "résiduel : … et UNE SEULE — c'est la boucle sans fin qui est interdite, pas la re-création ponctuelle");
+      ck(tracker.tickets.has(abandonedExtId),
+        "résiduel : le ticket abandonné vit sa vie chez le tracker (aucune suppression distante) — il reste rattrapable par sa clé");
 
       /* ================================================================================
          5) MISE À JOUR — diff des étiquettes EN VERBES, labels étrangers INTOUCHÉS
@@ -1642,9 +1693,10 @@ module.exports = async () => {
       ck.eq(idb.getOne(doc.id, "i6").tracker_push_state, null, "auto_replicate désactivé : aucune poussée marquée due");
 
       // RÉFÉRENCE DÉJÀ SAISIE : on ne crée PAS de doublon automatiquement — c'est le rôle de « Lier ».
-      // Cas RÉEL de rattrapage : le ticket « INFRA-3 » existe chez le tracker sans être connu ici
-      // (échec partiel plus haut). L'utilisateur saisit sa clé, puis demande la LIAISON.
-      declare("i7", { title: "Reprise du ticket orphelin", jira_ref: "INFRA-3" });
+      // Cas RÉEL de rattrapage : le ticket ABANDONNÉ plus haut (échec partiel + redémarrage) existe
+      // chez le tracker sans appartenir à personne. L'utilisateur saisit sa clé, puis demande la
+      // LIAISON — c'est la voie de sortie que le message d'erreur persisté lui a indiquée.
+      declare("i7", { title: "Reprise du ticket orphelin", jira_ref: abandonedKey });
       const linkLog = mkLog();
       const linkService = mkService({ providers: mkProviders([cfg()]), log: linkLog, makeAdapter: tracker.adapter });
       linkService.onInterventionWrite(doc.id, "i7", "put");
@@ -1655,8 +1707,21 @@ module.exports = async () => {
       // … et l'action manuelle de LIAISON l'adopte, en connaissance de cause.
       const linked = await linkService.replicate(doc.id, "i7", { link: true });
       ck.eq(linked.ok, true, "liaison : le ticket EXISTANT est adopté");
-      ck.eq(idb.getOne(doc.id, "i7").tracker_ext_id, "10003", "liaison : 🚨 c'est l'identifiant INTERNE qui est persisté, jamais la référence saisie");
+      ck.eq(idb.getOne(doc.id, "i7").tracker_ext_id, abandonedExtId, "liaison : 🚨 c'est l'identifiant INTERNE qui est persisté, jamais la référence saisie");
       ck.eq(idb.getOne(doc.id, "i7").tracker_push_state, "synced", "liaison : le contenu DC Manager est aligné dans la foulée (il fait foi — risque n°6 assumé)");
+
+      // 🚨 ADOPTION DOUBLE — REFUSÉE. Deux interventions sur le MÊME ticket, c'est une assiette de
+      // retour d'état indexée PAR identité distante où la seconde ligne écrase la première : l'une
+      // des deux cesse d'être rafraîchie SANS erreur, SANS journal, SANS rien à voir dans l'UI.
+      // Le contrôle appartient au SERVEUR, qui porte l'invariant — pas à la confirmation de l'UI.
+      declare("i12", { title: "Le même ticket, une seconde fois", jira_ref: abandonedKey });
+      const doubleLink = await linkService.replicate(doc.id, "i12", { link: true });
+      ck.eq(doubleLink.ok, false, "adoption double : la seconde liaison est REFUSÉE");
+      ck.eq(doubleLink.failure, "conflict", "adoption double : … en `conflict` (409 côté route — ni 400, ni 422 : la demande est bien formée, c'est l'état qui s'y oppose)");
+      ck(/i7/.test(doubleLink.message) && /Reprise du ticket orphelin/.test(doubleLink.message),
+        "adoption double : … et le message NOMME l'intervention qui porte déjà le ticket (id + titre) — un « déjà lié » qui ne dit pas À QUOI n'est pas actionnable");
+      ck.eq(idb.getOne(doc.id, "i12").tracker_ext_id, null, "adoption double : 🚨 RIEN n'est écrit — le refus précède toute écriture");
+      ck.eq(idb.getOne(doc.id, "i7").tracker_ext_id, abandonedExtId, "adoption double : … et l'intervention légitime garde son ticket");
 
       /* ================================================================================
          9) ACTIONS MANUELLES — refus TYPÉS (le code HTTP se dérive de la nature, pas du message)
@@ -1759,6 +1824,45 @@ module.exports = async () => {
       ck.eq(slow.updates[0].content.summary, "Coquille corrigée",
         "course : … avec l'intervention RELUE (« dernier état gagne » : c'est la DERNIÈRE version qui atterrit chez le tracker)");
       ck.eq(idb.getOne(doc.id, "i10").tracker_push_state, "synced", "course : l'intervention finit RÉPLIQUÉE et à jour");
+
+      /* ================================================================================
+         15) RAMASSAGE AU DÉMARRAGE — ce qu'un arrêt du serveur a laissé en plan repart SEUL
+         ================================================================================
+         `pending`/`error` sont PERSISTÉS, mais la persistance ne sert à rien si personne ne relit :
+         un provider en mode MANUEL (`interval_sec = 0` — le défaut, et le réglage que la doc
+         recommande le temps de valider une instance) n'arme AUCUN timer, et personne ne cliquera
+         « Synchroniser » à 4 h du matin. Sans ramassage, la poussée dort jusqu'à la prochaine
+         édition de l'objet, c'est-à-dire peut-être jamais. */
+      declare("i13", { title: "Laissée en plan par un arrêt du serveur" });
+      // Exactement l'état qu'un `docker stop` entre le marquage et l'appel distant laisse derrière lui.
+      idb.applyTrackerState(doc.id, "i13", { tracker_provider_id: "tr-1", tracker_push_state: "pending" });
+      ck.eq(idb.listPushDue().length, 1,
+        "ramassage : le balayage GLOBAL (`listPushDue()` SANS document) est le seul chemin qui voie cette poussée — la mémoire du processus précédent est perdue par définition");
+      const sweepLog = mkLog();
+      const sweeper = mkService({ providers: mkProviders([cfg({ interval_sec: 0 })]), log: sweepLog, makeAdapter: tracker.adapter });
+      const createdBeforeSweep = tracker.created.length;
+      await sweeper.sweepPushDue();   // ce que `TrackerModule.start()` lance SANS l'attendre
+      ck.eq(idb.getOne(doc.id, "i13").tracker_push_state, "synced",
+        "ramassage : 🚨 la poussée part au démarrage — aucun timer, aucun clic, aucune ré-édition de l'objet");
+      ck.eq(tracker.created.length, createdBeforeSweep + 1, "ramassage : … et le ticket manquant est bien créé");
+      ck(sweepLog.lines.some((l) => /ramassage au démarrage/.test(l)),
+        "ramassage : … et l'opération est JOURNALISÉE (une reprise silencieuse est indistinguable d'une panne)");
+
+      // Rien de dû ⇒ AUCUN tiers réveillé : un démarrage ne doit pas coûter une requête par document.
+      const idleCreated = tracker.created.length, idleUpdates = tracker.updates.length;
+      await sweeper.sweepPushDue();
+      ck(tracker.created.length === idleCreated && tracker.updates.length === idleUpdates, "ramassage : rien de dû ⇒ rien de tenté");
+
+      // TRACKER ÉTEINT : le balayage rend la main SANS jeter — le serveur doit démarrer quand même.
+      declare("i14", { title: "Ramassée tracker éteint" });
+      idb.applyTrackerState(doc.id, "i14", { tracker_provider_id: "tr-1", tracker_push_state: "pending" });
+      tracker.failCreate = new Error("Tracker : connexion refusée par l'hôte");
+      let sweptOffline = "jeté";
+      try { await sweeper.sweepPushDue(); sweptOffline = "rendu"; } catch (_) { sweptOffline = "jeté"; }
+      tracker.failCreate = null;
+      ck.eq(sweptOffline, "rendu", "ramassage : tracker ÉTEINT, le balayage rend la main SANS jeter (un démarrage ne dépend pas d'un tiers)");
+      ck.eq(idb.getOne(doc.id, "i14").tracker_push_state, "error",
+        "ramassage : … en laissant l'état `error` STABLE, repris à la passe suivante comme n'importe quel échec");
     } finally {
       try { if (idb) idb.close(); } catch (_) { /* déjà fermé */ }
       try { if (docs) docs.closeAll(); } catch (_) { /* déjà fermé */ }

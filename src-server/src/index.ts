@@ -103,7 +103,7 @@ wifi.start();   // synchros périodiques des clients wifi — même raison que v
 notify.start();   // timer de rappels (tick 60 s, unref) — après l'écoute, comme vm
 certs.start();    // suivi d'échéances (passe immédiate + tick horaire, unref)
 interventions.start();   // veilleur de rappels (passe immédiate + tick 5 min, unref)
-trackerModule.start();   // passes périodiques de réplication/retour d'état (interval_sec > 0, unref)
+trackerModule.start();   // ramassage des poussées laissées en plan (non bloquant) + passes périodiques (interval_sec > 0, unref)
 
 // ARRÊT PROPRE (SIGINT = Ctrl-C · SIGTERM = docker stop / systemd) : ferme les dépôts SQLite et le registre
 // (optimize + checkpoint des -wal — cf. DocumentStore.closeAll) avant de quitter. Sans ça, l'OS ferme les fd
@@ -111,7 +111,8 @@ trackerModule.start();   // passes périodiques de réplication/retour d'état (
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.on(sig, () => {
     log.info("signal reçu, arrêt propre", sig);
-    // Modules optionnels d'abord (timers + bases dédiées vm-providers.db / wifi-providers.db / notify.db), cœur ensuite.
+    // Modules optionnels d'abord (timers + bases dédiées vm-providers.db / wifi-providers.db / notify.db /
+    // certs.db / interventions.db / tracker-providers.db), cœur ensuite.
     try { vm.stop(); } catch (e) { log.warn("vm.stop a échoué", (e as any) && (e as any).message); }
     try { wifi.stop(); } catch (e) { log.warn("wifi.stop a échoué", (e as any) && (e as any).message); }
     try { notify.stop(); } catch (e) { log.warn("notify.stop a échoué", (e as any) && (e as any).message); }

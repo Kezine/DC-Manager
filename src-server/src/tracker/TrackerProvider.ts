@@ -319,7 +319,8 @@ export interface TrackedIntervention {
 }
 
 /** Ligne d'une poussée DUE (`tracker_push_state` ∈ pending | error). Porte son `doc_id` : le
-    ramassage au démarrage balaye TOUS les documents (une poussée due survit à un redémarrage). */
+    ramassage au démarrage (`TrackerSyncService.sweepPushDue`) balaye TOUS les documents — une
+    poussée due survit à un redémarrage, et c'est lui qui la reprend. */
 export interface PendingPush {
   doc_id: string;
   id: string;
@@ -372,7 +373,9 @@ export interface TrackerStatePatch {
 export interface InterventionTrackerSource {
   /** L'ASSIETTE : interventions RÉPLIQUÉES d'un document (`tracker_ext_id` non nul). */
   listTracked(docId: string): TrackedIntervention[];
-  /** Les poussées DUES. `docId` absent = TOUS les documents (ramassage au démarrage). */
+  /** Les poussées DUES. `docId` absent = TOUS les documents — la forme qu'emploie le RAMASSAGE AU
+      DÉMARRAGE (`TrackerSyncService.sweepPushDue`), seul chemin qui rattrape une poussée laissée en
+      plan chez un provider SANS période de synchro. */
   listPushDue(docId?: string): PendingPush[];
   /** Une intervention précise (réplication manuelle, poussée) — null si inconnue/supprimée. */
   getOne(docId: string, id: string): InterventionForPush | null;

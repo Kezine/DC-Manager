@@ -447,8 +447,9 @@ export class InterventionsDb {
   }
 
   /** Les poussées DUES : `tracker_push_state` ∈ { pending, error }. `docId` OMIS = tous les
-      documents — c'est ce qui permet de rattraper, après un redémarrage, une poussée qu'un serveur
-      arrêté n'avait pas eu le temps de faire (l'état est PERSISTÉ, pas gardé en mémoire).
+      documents — c'est la forme que consomme le ramassage au démarrage du pont, et c'est ce qui
+      permet de rattraper, après un redémarrage, une poussée qu'un serveur arrêté n'avait pas eu le
+      temps de faire (l'état est PERSISTÉ, pas gardé en mémoire).
       Ordre STABLE (document puis id) ; la priorité de traitement appartient au pont. */
   listPushDue(docId?: string): PendingPushRow[] {
     const columns = "doc_id, id, tracker_provider_id, tracker_ext_id, tracker_push_state";
