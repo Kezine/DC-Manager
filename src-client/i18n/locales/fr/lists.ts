@@ -197,6 +197,11 @@ export const lists = {
     // un client wifi qui part est ordinaire, pas un incident (cf. core/WifiStatus, décision D2).
     // ⚠ VERROUILLÉ par test contre le catalogue partagé `SEARCH_CATALOGS.wifiDisconnected`.
     disconnected: "déconnecté",
+    // Pendant TICKET de « orpheline »/« déconnecté » : MÊME mécanique (non résolu à la dernière
+    // passe), TROISIÈME sens — un ticket qu'on ne retrouve plus signale une suppression, un projet
+    // archivé ou une permission perdue. AFFICHÉ par le bloc « Ticket » d'une intervention répliquée,
+    // à la place de la sentinelle brute écrite par le pont (cf. core/TrackerStatus).
+    notFound: "introuvable",
     wifiClient: "(client wifi)",
     floorLabel: "Étage {{n}}",
     addrCount: "{{count}} adr.",

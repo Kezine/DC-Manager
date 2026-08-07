@@ -10,6 +10,7 @@ import { PveHttpPool } from "./PveHttpPool.js";
 
    Séquence de inventory() :
      1. /cluster/status        → nom du cluster (préfixe de l'ext_id) + quorate ;
+                                 nom NON RÉSOLU → passe AVORTÉE (cf. requireClusterName) ;
      2. /cluster/resources     → squelettes VmRecord ET nœuds du cluster (1 appel
                                  cluster-wide, SANS filtre : une seule réponse porte les deux) ;
      3. /version               → version + gamme supportée (informatif, TOLÉRANT) ;
@@ -19,9 +20,11 @@ import { PveHttpPool } from "./PveHttpPool.js";
    TOLÉRANCE (exigence de cadrage « résilience aux releases ») : un échec sur la
    config d'UNE VM (supprimée/migrée entre les appels 2 et 4) conserve son
    squelette au lieu de faire échouer tout l'inventaire ; l'agent est toujours
-   optionnel ; les métadonnées cluster secondaires (quorum, version) sont AU MIEUX
-   (indisponibles → null). SEUL l'échec de l'inventaire de masse (appel 2) rejette —
-   le moteur de synchro journalise alors et conserve l'état précédent (contrat).
+   optionnel ; les métadonnées cluster SECONDAIRES (quorum, version) sont AU MIEUX
+   (indisponibles → null). DEUX échecs seulement rejettent — le moteur de synchro
+   journalise alors et conserve l'état précédent (contrat) : l'inventaire de masse
+   (appel 2), et le NOM DU CLUSTER (appel 1) qui n'est pas une métadonnée mais le
+   SOCLE D'IDENTITÉ de la réconciliation (cf. requireClusterName).
    Le client HTTP est INJECTÉ (interface minimale ci-dessous) : les tests
    orchestrent l'adaptateur avec un stub route → fixture, sans réseau.
    ============================================================================= */
@@ -93,10 +96,11 @@ export class ProxmoxAdapter implements VmProviderAdapter {
     // (dispose) MÊME quand l'inventaire échoue (rejet de /cluster/resources) — sans quoi elles
     // traîneraient jusqu'au timeout système à chaque passe. No-op pour un client sans dispose (stub).
     try {
-      // 1) Identité + quorum du cluster (1 appel). Nom résolu ici (repli sur l'id d'instance : le
-      //    parser pur ignore l'instance) pour préfixer les ext_id ET nommer le cluster de la vue.
+      // 1) Identité + quorum du cluster (1 appel). Le NOM est le SOCLE D'IDENTITÉ de toute la passe :
+      //    il préfixe CHAQUE ext_id (clé de réconciliation). Non résolu → la passe AVORTE ici, avant
+      //    tout autre appel et surtout avant toute écriture (cf. requireClusterName).
       const status = await this.clusterStatus();
-      const clusterName = status.name ?? this.config.id;
+      const clusterName = ProxmoxAdapter.requireClusterName(status);
 
       // 2) Ressources cluster-wide SANS le filtre `?type=vm` : la MÊME réponse porte les VMs
       //    (fromClusterResources ignore les items sans vmid) ET les nœuds — zéro appel de plus.
@@ -162,18 +166,44 @@ export class ProxmoxAdapter implements VmProviderAdapter {
 
   /** Identité + quorum du cluster depuis /cluster/status (1 appel). Le décodage JSON (nom +
       quorate, y compris le repli « nœud unique ») vit dans ProxmoxParse.clusterStatusInfo — ici
-      ne restent que le repli dépendant de l'INSTANCE (nom absent → id du provider, décidé en
-      amont) et la TOLÉRANCE à l'indisponibilité de l'endpoint (droits restreints → tout inconnu).
+      ne reste que la CAPTURE de l'échec d'appel (`failure`), que requireClusterName transforme en
+      message actionnable. Le quorum, lui, reste TOLÉRANT (inconnu → null) : il n'entre dans aucune
+      identité, seulement dans l'affichage de la vue Clusters.
       ⚠ Si un nœud isolé rejoint plus tard un cluster, le préfixe d'ext_id change et la synchro
-      recrée les VMs (les anciennes passent orphelines) — assumé : événement d'infra rare, purge
-      manuelle des orphelines. */
-  private async clusterStatus(): Promise<{ name: string | null; quorate: boolean | null }> {
+      recrée les VMs (les anciennes passent orphelines) — assumé : événement d'infra rare et
+      DÉLIBÉRÉ, purge manuelle des orphelines. Ce qui n'est PAS assumé, et que requireClusterName
+      empêche, c'est le même effet provoqué par un simple ALÉA (un appel en échec une passe sur mille). */
+  private async clusterStatus(): Promise<{ name: string | null; quorate: boolean | null; failure: string | null }> {
     try {
-      return ProxmoxParse.clusterStatusInfo(await this.http.getJson("/api2/json/cluster/status"));
-    } catch {
-      // /cluster/status indisponible (droits restreints ?) → nom/quorate inconnus (repli en amont).
-      return { name: null, quorate: null };
+      return { ...ProxmoxParse.clusterStatusInfo(await this.http.getJson("/api2/json/cluster/status")), failure: null };
+    } catch (e) {
+      // /cluster/status indisponible (droits restreints, nœud injoignable, 5xx…) : la CAUSE est
+      // conservée pour le message d'avortement (les messages PveHttp ne portent jamais le jeton).
+      return { name: null, quorate: null, failure: e instanceof Error ? e.message : String(e) };
     }
+  }
+
+  /** SOCLE D'IDENTITÉ de la passe : le nom du cluster, préfixe de TOUS les `ext_id`. Résolu → rendu ;
+      NON résolu → on JETTE, ce qui avorte l'inventaire (le moteur de synchro journalise, passe le
+      provider « en erreur » et n'écrit RIEN — le document garde son état précédent).
+
+      POURQUOI avorter plutôt que se replier sur une autre valeur (l'id du provider, comportement
+      antérieur) : `ext_id` est la CLÉ DE RÉCONCILIATION. Un préfixe différent le temps d'une passe
+      ne « dégrade » pas l'inventaire, il le RÉ-IDENTIFIE ENTIÈREMENT : chaque VM du cluster est vue
+      comme inconnue (créée EN DOUBLE) pendant que son exemplaire d'origine, absent de l'inventaire,
+      passe `orphan: true` — et la passe suivante, si le nom redevient résoluble, refait le chemin
+      inverse (battement). Un socle d'identité ne peut donc pas dépendre d'un appel FAILLIBLE : soit
+      il est résolu, soit il n'y a pas de passe. Changer la COMPOSITION de l'ext_id pour l'immuniser
+      (vmid seul, uuid…) serait pire ici : cela dédoublerait, une fois de plus, tout l'existant. */
+  private static requireClusterName(status: { name: string | null; failure: string | null }): string {
+    if (status.name !== null) return status.name;
+    const cause = status.failure !== null
+      ? "appel en échec — " + status.failure
+      : "réponse sans entrée cluster nommée, et sans nœud unique dont le nom servirait d'identité";
+    throw new Error(
+      "Proxmox : nom du cluster NON RÉSOLU (/api2/json/cluster/status) — synchronisation AVORTÉE, aucune écriture. "
+      + "Ce nom préfixe l'identité (ext_id) de toutes les VMs : synchroniser sans lui les recréerait TOUTES en double. "
+      + "Vérifiez la joignabilité de l'API et les droits du jeton sur /cluster/status. Cause : " + cause);
   }
 
   /** Version + appartenance à la gamme pour la MÉTADONNÉE cluster. TOLÉRANT (informatif) : un

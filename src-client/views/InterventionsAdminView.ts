@@ -20,6 +20,12 @@ import { InterventionsError } from "./forms/InterventionsClient";
 import type {
   InterventionsClient, InterventionRecord, InterventionInput, InterventionLink, InterventionsListParams,
 } from "./forms/InterventionsClient";
+import { TrackerStatus } from "../core/TrackerStatus";
+import { TrackerReplication } from "../core/TrackerReplication";
+import { TrackerProvidersForm } from "./forms/TrackerProvidersForm";
+import { TrackerTicketBlock } from "./forms/TrackerTicketBlock";
+import { TrackerSyncError } from "./forms/TrackerSyncClient";
+import type { TrackerSyncClient, TrackerProviderSummary } from "./forms/TrackerSyncClient";
 
 /* =============================================================================
    InterventionsAdminView — page « Interventions » (ONGLET PRINCIPAL, décision de
@@ -50,6 +56,14 @@ import type {
    par la REQUÊTE (jamais de slice client) ; l'UI reprend la barre de contrôles unifiée des listings (recherche
    en tête + filtres en CHIPS via `ui/FilterBar`, classes `.list-chrome`/`.pagination`/`.sortable`).
    L'état de listing vit en MÉMOIRE d'instance (rechargé après chaque écriture).
+
+   PONT « TRACKER » (feature AMOVIBLE dans l'amovible) : quand `tracker` est injecté, les incidents et
+   interventions peuvent être RÉPLIQUÉS dans un tracker distant, dont le TRAITEMENT (statut, assigné)
+   est relu en lecture seule. La vue n'en porte que des BRANCHEMENTS FINS (principe n°2) — deux actions
+   d'en-tête, une pastille au listing, un conteneur dans la fiche : la logique PURE vit dans
+   `core/TrackerStatus` (état du ticket) et `core/TrackerReplication` (état de réplication), l'UI du
+   bloc dans `forms/TrackerTicketBlock`, le transport dans `forms/TrackerSyncClient`. `tracker` null
+   (mode fichier/viewer, ou pont non câblé) ⇒ tout cela disparaît sans une condition de plus ailleurs.
    ============================================================================= */
 
 /** Source des cibles liables (équipements/VMs/spares) — interface hôte INJECTÉE (la vue ne connaît pas le
@@ -116,6 +130,11 @@ export class InterventionsAdminView {
   /** Barre de filtres unifiée (chips + « + Filtre » + Réinitialiser) — bâtie au rendu complet, PRÉSERVÉE sur
       refreshBody (un changement de filtre ne repeint que ses chips + le corps). */
   private filterBar: FilterBar | null = null;
+  /** Providers de réplication configurés — chargés UNE fois (comme `jiraBase`) et seulement pour savoir
+      s'il faut DEMANDER lequel viser (≥ 2). Un échec est avalé : liste vide = « on ne sait pas », et le
+      serveur tranchera (il refuse avec un message qui nomme les providers en cas d'ambiguïté). */
+  private trackerProviders: TrackerProviderSummary[] = [];
+  private trackerProvidersLoaded = false;
 
   constructor(
     private readonly container: HTMLElement,
@@ -125,6 +144,9 @@ export class InterventionsAdminView {
     private readonly host: FormHost,
     /** Source des cibles liables (Store injecté par main.ts — la vue ne touche jamais le Store). */
     private readonly targets: InterventionTargetSource,
+    /** Client du PONT de réplication — null = pont non branché (mode fichier/viewer) : aucune action
+        d'en-tête, aucun bloc « Ticket », aucune pastille. La feature est amovible SANS toucher la vue. */
+    private readonly tracker: TrackerSyncClient | null = null,
   ) {}
 
   /** Activation de l'onglet (onShow) : messages d'indisponibilité, sinon (re)charge la page courante. */
@@ -152,6 +174,17 @@ export class InterventionsAdminView {
     if (this.metaLoaded) return;
     try { this.jiraBase = (await this.client!.meta()).jira_base_url; } catch (_) { this.jiraBase = null; }
     this.metaLoaded = true;
+    await this.ensureTrackerProviders();
+  }
+
+  /** Charge la liste des providers de réplication UNE seule fois, en même temps que les métadonnées.
+      TOUTE erreur est avalée — y compris le 503 « pont désactivé » : le pont est un SUPPLÉMENT, son
+      indisponibilité ne doit ni casser le listing ni masquer les interventions. La conséquence d'une
+      liste vide est bénigne (aucun sélecteur de provider proposé, le serveur tranche). */
+  private async ensureTrackerProviders(): Promise<void> {
+    if (!this.tracker || this.trackerProvidersLoaded) return;
+    this.trackerProvidersLoaded = true;
+    try { this.trackerProviders = await this.tracker.providers(); } catch (_) { this.trackerProviders = []; }
   }
 
   /** Charge la PAGE COURANTE depuis le serveur. La page effective est relue de la réponse (le serveur
@@ -265,6 +298,16 @@ export class InterventionsAdminView {
       this.actionButton(I18n.t("interventions.action.addIntervention"), "", () => this.interventionModal(null, "intervention"), "btn-primary"),
       this.actionButton(I18n.t("interventions.action.refresh"), "", () => void this.reload()),
     );
+    // Actions du PONT (mode API + non-viewer, garanti par la NULLITÉ de `tracker` — le client n'est
+    // construit qu'en mode API, lui-même exclu du viewer) : configuration des trackers de destination
+    // et passe de synchro manuelle. Absentes sinon, sans condition supplémentaire à écrire ici.
+    if (this.tracker) {
+      right.append(
+        this.actionButton(I18n.t("tracker.action.providers"), I18n.t("tracker.action.providersTitle"),
+          () => TrackerProvidersForm.open(this.host, this.tracker!, () => { this.trackerProvidersLoaded = false; void this.ensureTrackerProviders(); })),
+        this.actionButton(I18n.t("tracker.action.sync"), I18n.t("tracker.action.syncTitle"), () => void this.trackerSync()),
+      );
+    }
     right.appendChild(this.filterBar.resetElement);
     bar.appendChild(right);
     bar.appendChild(this.filterBar.chipsElement);   // rangée des chips (dimensions ET cible), À LA LIGNE
@@ -402,24 +445,51 @@ export class InterventionsAdminView {
     return td;
   }
 
-  /** Cellule « Jira » : réutilise le contenu inline (lien/texte/« — ») dans un `<td>`. */
+  /** Cellule « Jira » du listing : la référence (lien/texte/« — ») ENRICHIE de l'état de réplication
+      quand le pont a fait son œuvre — pastille de catégorie du ticket, et un indicateur DISCRET si la
+      dernière poussée a échoué (le détail actionnable vit sur la fiche ; ici, une infobulle suffit).
+      Une intervention non répliquée garde EXACTEMENT le rendu d'avant le pont : la colonne ne devient
+      pas plus bavarde pour ceux qui n'utilisent pas la réplication. */
   private jiraCell(item: InterventionRecord): HTMLElement {
-    const td = document.createElement("td"); td.appendChild(this.jiraInline(item)); return td;
+    const td = document.createElement("td");
+    const wrap = document.createElement("span");
+    wrap.style.cssText = "display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap";
+    wrap.appendChild(this.jiraInline(item));
+
+    if (TrackerReplication.isReplicated(item)) {
+      const pill = document.createElement("span");
+      // Pas d'infobulle sur la pastille : colonne étroite, pastille répétée à chaque ligne.
+      pill.innerHTML = TrackerStatus.statusPill({ status: item.tracker_status, status_category: item.tracker_status_category });
+      wrap.appendChild(pill);
+    }
+    if (TrackerReplication.hasPushError(item)) {
+      const flag = document.createElement("span");
+      flag.className = "gi"; flag.style.color = "var(--err)"; flag.innerHTML = Icons.WARNING;
+      flag.title = I18n.t("tracker.list.pushErrorTitle", { detail: TrackerReplication.pushError(item) });
+      // Repère visuel ET lisible : l'infobulle porte le message du tracker, mais un lecteur d'écran
+      // ne lit pas un `title` d'élément décoratif — d'où le rôle explicite.
+      flag.setAttribute("role", "img");
+      flag.setAttribute("aria-label", flag.title);
+      wrap.appendChild(flag);
+    }
+    td.appendChild(wrap);
+    return td;
   }
 
   /** Contenu Jira RÉUTILISABLE (listing + modale de détail) : lien cliquable si une URL est fabricable
-      (base + clé, ou clé déjà URL) ; sinon texte brut mono (base non configurée) ; « — » si aucune référence. */
+      (lien PERSISTÉ par le pont, sinon base + clé, ou clé déjà URL) ; sinon texte brut mono (base non
+      configurée) ; « — » si aucune référence.
+      ⚠ Le lien passe par `Html.externalLink` (liste blanche de schémas + rel=noopener) : depuis le pont,
+      l'URL peut venir d'un TIERS — c'est le tracker qui l'a composée, pas nous. */
   private jiraInline(item: InterventionRecord): HTMLElement {
     const ref = item.jira_ref;
-    if (!ref) { const s = document.createElement("span"); s.innerHTML = InterventionsAdminView.MUTED; return s; }
-    const url = InterventionsFormat.jiraUrl(this.jiraBase, ref);
-    if (url) {
-      const a = document.createElement("a");
-      a.href = url; a.target = "_blank"; a.rel = "noopener noreferrer"; a.textContent = ref;
-      a.style.cssText = "font-family:var(--mono);font-size:12px";
-      return a;
-    }
-    const span = document.createElement("span"); span.style.cssText = "font-family:var(--mono);font-size:12px"; span.textContent = ref;
+    const url = TrackerReplication.ticketUrl(item.tracker_url, InterventionsFormat.jiraUrl(this.jiraBase, ref));
+    // Libellé : la référence lisible ; à défaut (répliquée mais clé pas encore relue), l'id distant.
+    const label = (ref || "").trim() || (TrackerReplication.isReplicated(item) ? String(item.tracker_ext_id) : "");
+    const span = document.createElement("span");
+    if (!label) { span.innerHTML = InterventionsAdminView.MUTED; return span; }
+    span.style.cssText = "font-family:var(--mono);font-size:12px";
+    span.innerHTML = url ? Html.externalLink(url, label) : Html.escape(label);
     return span;
   }
 
@@ -459,6 +529,28 @@ export class InterventionsAdminView {
       Notify.toast(I18n.t(newStatus === "in_progress" ? "interventions.toast.started" : "interventions.toast.closed"), "ok");
       await this.afterWrite();
     } catch (e) { this.actionError(e); }
+  }
+
+  /** Passe de synchro MANUELLE du pont : envoie les mises à jour dues puis relit l'état des tickets.
+      Elle peut écrire des colonnes `tracker_*` sur n'importe quelle intervention du document → on
+      recharge la page courante à l'arrivée (pastilles et indicateurs d'échec suivent). Le compteur
+      d'ouvertes, lui, ne bouge pas (le statut DC Manager n'est jamais touché) : pas d'`afterWrite`.
+      Un provider en échec ne fait pas échouer l'appel — le serveur rend un STATUT par provider, dont
+      on remonte le premier message d'erreur : c'est lui qui dit quoi corriger. */
+  private async trackerSync(): Promise<void> {
+    if (!this.tracker) return;
+    Notify.toast(I18n.t("tracker.action.syncing"), "info");
+    try {
+      const providers = await this.tracker.sync();
+      const failed = providers.filter((p) => !p.ok);
+      if (failed.length) Notify.toast(I18n.t("tracker.action.syncFailed", { detail: failed[0].message || failed[0].provider_id }), "err");
+      else Notify.toast(I18n.t("tracker.action.syncDone"), "ok");
+      await this.refreshBody();
+    } catch (e) {
+      // 503 (pont désactivé côté serveur) inclus : un toast, jamais le bandeau — les interventions,
+      // elles, restent parfaitement utilisables sans pont.
+      Notify.toast(I18n.t("tracker.action.syncFailed", { detail: TrackerSyncError.text(e) }), "err");
+    }
   }
 
   private async remove(item: InterventionRecord): Promise<void> {
@@ -719,13 +811,26 @@ export class InterventionsAdminView {
   }
 
   /** Corps de la fiche de détail — PARTAGÉ par les deux ouvertures (`detailModal` depuis le listing,
-      `detailModalById` depuis une fiche) : badges (nature/priorité/statut), fenêtre planifiée, référence
-      Jira, description rendue en MARKDOWN, audit, la liste des objets liés (icône de famille + libellé +
-      badge ; orphelin « introuvable » grisé, NON cliquable — un CLIC sur un objet lié existant EMPILE sa
-      fiche par-dessus). Le bouton « Modifier » ne fait PLUS partie de ce corps défilant : il vit dans le PIED
-      FIXE de la modale (footerActions, cf. `editFooterActions`). Reconstruit à neuf à chaque (ré)ouverture —
-      jamais muté. */
+      `detailModalById` depuis une fiche). CONTENEUR STABLE dont le contenu se REPEINT en place quand une
+      action du bloc « Ticket » a changé l'intervention côté serveur : c'est le corps ENTIER qui est
+      refait, et pas seulement le bloc, parce qu'une réplication écrit AUSSI la référence du ticket —
+      rafraîchir le bloc seul laisserait la rangée « Jira » juste au-dessus afficher « — » alors que la
+      clé vient d'être créée. On ne rappelle JAMAIS `openModal` pour autant : sa dédup par `stackKey`
+      jetterait les niveaux empilés entre-temps (piège documenté sur `detailModalById`). */
   private detailBody(item: InterventionRecord): HTMLElement {
+    const shell = document.createElement("div");
+    const repaint = (rec: InterventionRecord): void => { shell.replaceChildren(this.detailContent(rec, repaint)); };
+    repaint(item);
+    return shell;
+  }
+
+  /** Contenu de la fiche de détail : badges (nature/priorité/statut), fenêtre planifiée, référence Jira,
+      bloc « Ticket » du pont, description rendue en MARKDOWN, la liste des objets liés (icône de famille +
+      libellé + badge ; orphelin « introuvable » grisé, NON cliquable — un CLIC sur un objet lié existant
+      EMPILE sa fiche par-dessus) et l'audit. Le bouton « Modifier » ne fait PLUS partie de ce corps
+      défilant : il vit dans le PIED FIXE de la modale (footerActions, cf. `editFooterActions`).
+      Reconstruit à neuf à chaque (ré)ouverture ET à chaque repeint — jamais muté. */
+  private detailContent(item: InterventionRecord, repaint: (rec: InterventionRecord) => void): HTMLElement {
     const root = document.createElement("div");
 
     const badges = document.createElement("div"); badges.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px";
@@ -737,6 +842,7 @@ export class InterventionsAdminView {
     const win = InterventionsFormat.formatWindow(item.planned_start, item.planned_end);
     root.appendChild(this.detailField(I18n.t("interventions.col.window"), this.textValue(win || "—", !win)));
     root.appendChild(this.detailField(I18n.t("interventions.col.jira"), this.jiraInline(item)));
+    this.attachTrackerBlock(root, item, repaint);   // bloc « Ticket » (pont AMOVIBLE) — rien si le pont est absent
 
     // Description : MARKDOWN (micromark, défauts sûrs → sortie injectable en innerHTML — cf. core/Markdown).
     const desc = document.createElement("div");
@@ -761,6 +867,36 @@ export class InterventionsAdminView {
     }
 
     return root;
+  }
+
+  /** BRANCHEMENT du bloc « Ticket » dans la fiche de détail (principe n°2 : la vue ne fait que poser le
+      bloc, lui projeter l'intervention et lui dire comment demander un rafraîchissement — tout le reste
+      vit dans `TrackerTicketBlock`). No-op si le pont n'est pas branché : la fiche est alors STRICTEMENT
+      celle d'avant le chantier.
+      La PROJECTION est ce qui garde le bloc agnostique de marque : c'est ICI, et nulle part chez lui,
+      qu'on lit le champ HÉRITÉ de référence et qu'on arbitre l'URL à ouvrir. */
+  private attachTrackerBlock(root: HTMLElement, item: InterventionRecord, repaint: (rec: InterventionRecord) => void): void {
+    if (!this.tracker) return;
+    TrackerTicketBlock.attach(root, {
+      client: this.tracker,
+      providers: this.trackerProviders,
+      onChanged: () => void this.refreshTicket(item.id, repaint),
+    }, {
+      id: item.id,
+      reference: (item.jira_ref || "").trim(),
+      url: TrackerReplication.ticketUrl(item.tracker_url, InterventionsFormat.jiraUrl(this.jiraBase, item.jira_ref)),
+      state: item,
+    });
+  }
+
+  /** Relit une intervention par son id et repeint le corps de la fiche avec la vérité serveur, puis
+      rafraîchit le listing s'il est à l'écran (pastille, indicateur d'échec) — la fiche peut avoir été
+      ouverte depuis un objet, la vue n'étant alors même pas affichée. Une erreur de relecture est avalée :
+      la fiche garde son contenu (périmé mais lisible) plutôt que de se vider — l'action, elle, a déjà été
+      confirmée par son propre message. */
+  private async refreshTicket(id: string, repaint: (rec: InterventionRecord) => void): Promise<void> {
+    try { repaint(await this.client!.getOne(id)); } catch (_) { /* la fiche reste telle quelle */ }
+    if (this.bodyEl) await this.refreshBody();
   }
 
   /** Bouton « Modifier » du PIED de la fiche (footerActions) — hors du corps DÉFILANT `detailBody`, donc

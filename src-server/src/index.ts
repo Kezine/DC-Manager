@@ -14,6 +14,7 @@ import { WifiModule } from "./wifi/WifiModule.js";   // module OPTIONNEL (featur
 import { NotifyModule } from "./notify/NotifyModule.js";   // module OPTIONNEL (feature amovible) — seul câblage hors de notify/
 import { CertsModule } from "./certs/CertsModule.js";   // module OPTIONNEL (feature amovible) — seul câblage hors de certs/
 import { InterventionsModule } from "./interventions/InterventionsModule.js";   // module OPTIONNEL (feature amovible) — seul câblage hors de interventions/
+import { TrackerModule } from "./tracker/TrackerModule.js";   // module OPTIONNEL (feature amovible) — PONT interventions ⇄ tracker distant
 
 /* Bootstrap : lit l'environnement, ouvre le registre multi-documents (driver better-sqlite3) et démarre le serveur. */
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -77,14 +78,32 @@ const certs = CertsModule.create({ docs, live, dataDir: DOCS_DIR, sqlite: Databa
 // base interventions.db dédiée, cf. InterventionsModule). PONT vers notify (typage structurel, comme
 // vm/certs) : le veilleur de rappels signale intervention-reminder (paliers 24 h/1 h/heure H) et clôt
 // dès qu'un objet démarre/se clôt/s'annule ou est supprimé.
+// ⚠ Les modules `interventions/` et `tracker/` se POINTENT L'UN L'AUTRE — chacun par une INTERFACE
+// déclarée CHEZ LUI, jamais par un import : interventions ANNONCE ses écritures (`onWrite`), tracker
+// LIT et ÉCRIT l'état de réplication (`listTracked`/`listPushDue`/`getOne`/`applyTrackerState`, que
+// la façade InterventionsModule satisfait structurellement). Chacun reste donc supprimable seul.
+// La boucle de construction se dénoue par une FERMETURE : le rappel lit la variable AU MOMENT de
+// l'appel — donc après l'affectation trois lignes plus bas. Pont absent ⇒ `null` ⇒ rappel inerte.
+let tracker: TrackerModule | null = null;
 const interventions = InterventionsModule.create({ docs, live, dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, log: log.child("interventions"),
+  problems: { raise: (k, e) => notify.raise(k, e), resolve: (k) => notify.resolve(k) },
+  onWrite: (docId, interventionId, kind) => tracker?.onInterventionWrite(docId, interventionId, kind) });
+// Réplication des interventions/incidents dans un tracker distant (Atlassian Jira Cloud en 1re
+// implémentation — la marque n'est qu'un adaptateur derrière `kind`). Providers PAR DOCUMENT dans
+// DOCS_DIR/tracker-providers.db. Prérequis IDENTIQUE à vm//wifi//notify/ : DCMANAGER_SECRETS_KEY
+// (SecretBox PARTAGÉ) ; absente → module inactif, routes en 503 actionnable et hook inerte — les
+// interventions, elles, restent PLEINEMENT fonctionnelles. PONT vers notify (typage structurel) :
+// chaque passe en échec est signalée, chaque retour à la normale la clôt.
+const trackerModule = TrackerModule.create({ docs, interventions, live, dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, log: log.child("tracker"),
   problems: { raise: (k, e) => notify.raise(k, e), resolve: (k) => notify.resolve(k) } });
-new Server({ docs, auth, live, resolver: userResolver, clientDir: CLIENT_DIR, apiBase: API_BASE, loginUrl: SSO_LOGIN_URL, log, extensions: [vm.extension(), wifi.extension(), notify.extension(), certs.extension(), interventions.extension()] }).listen(PORT);
+tracker = trackerModule;
+new Server({ docs, auth, live, resolver: userResolver, clientDir: CLIENT_DIR, apiBase: API_BASE, loginUrl: SSO_LOGIN_URL, log, extensions: [vm.extension(), wifi.extension(), notify.extension(), certs.extension(), interventions.extension(), trackerModule.extension()] }).listen(PORT);
 vm.start();   // synchros périodiques (interval_sec > 0) — après l'écoute : le serveur répond pendant une 1re synchro lente
 wifi.start();   // synchros périodiques des clients wifi — même raison que vm.start()
 notify.start();   // timer de rappels (tick 60 s, unref) — après l'écoute, comme vm
 certs.start();    // suivi d'échéances (passe immédiate + tick horaire, unref)
 interventions.start();   // veilleur de rappels (passe immédiate + tick 5 min, unref)
+trackerModule.start();   // ramassage des poussées laissées en plan (non bloquant) + passes périodiques (interval_sec > 0, unref)
 
 // ARRÊT PROPRE (SIGINT = Ctrl-C · SIGTERM = docker stop / systemd) : ferme les dépôts SQLite et le registre
 // (optimize + checkpoint des -wal — cf. DocumentStore.closeAll) avant de quitter. Sans ça, l'OS ferme les fd
@@ -92,12 +111,14 @@ interventions.start();   // veilleur de rappels (passe immédiate + tick 5 min, 
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.on(sig, () => {
     log.info("signal reçu, arrêt propre", sig);
-    // Modules optionnels d'abord (timers + bases dédiées vm-providers.db / wifi-providers.db / notify.db), cœur ensuite.
+    // Modules optionnels d'abord (timers + bases dédiées vm-providers.db / wifi-providers.db / notify.db /
+    // certs.db / interventions.db / tracker-providers.db), cœur ensuite.
     try { vm.stop(); } catch (e) { log.warn("vm.stop a échoué", (e as any) && (e as any).message); }
     try { wifi.stop(); } catch (e) { log.warn("wifi.stop a échoué", (e as any) && (e as any).message); }
     try { notify.stop(); } catch (e) { log.warn("notify.stop a échoué", (e as any) && (e as any).message); }
     try { certs.stop(); } catch (e) { log.warn("certs.stop a échoué", (e as any) && (e as any).message); }
     try { interventions.stop(); } catch (e) { log.warn("interventions.stop a échoué", (e as any) && (e as any).message); }
+    try { trackerModule.stop(); } catch (e) { log.warn("tracker.stop a échoué", (e as any) && (e as any).message); }
     try { usersDb?.close(); } catch (e) { log.warn("usersDb.close a échoué", (e as any) && (e as any).message); }
     try { docs.closeAll(); } catch (e) { log.warn("closeAll a échoué", (e as any) && (e as any).message); }
     process.exit(0);

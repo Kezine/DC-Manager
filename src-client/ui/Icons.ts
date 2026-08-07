@@ -281,6 +281,14 @@ export class Icons {
   /** Interventions / maintenance : clé à molette. */
   static readonly INTERVENTION = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.66 5.66l-6.7 6.7a1.5 1.5 0 0 0 2.12 2.12l6.7-6.7a4 4 0 0 0 5.66-5.66l-2.83 2.83-2.12-.71-.71-2.12z"/></svg>';
 
+  /** TICKET d'un tracker distant : coupon perforé. Intention DISTINCTE de `INTERVENTION` (la clé à
+      molette = un travail qu'on planifie et qu'on exécute NOUS) : ici l'objet est un ticket qui vit
+      CHEZ UN TIERS. Distincte aussi des `ISSUE_*` de la PKI, où « issue » veut dire « émettre » (un
+      certificat) et non « incident ».
+      Consommée par le bloc « Ticket » des fiches d'intervention (pont de réplication), qui porte
+      exactement cette intention : l'objet désigné vit chez le tracker, pas chez nous. */
+  static readonly TICKET = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16v4a2 2 0 0 0 0 4v4H4v-4a2 2 0 0 0 0-4z"/><path d="M9.5 6v12" stroke-dasharray="2 2.5"/></svg>';
+
   /** Notifications : cloche. */
   static readonly NOTIFICATION = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>';
 

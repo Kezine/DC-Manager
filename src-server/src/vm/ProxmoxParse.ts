@@ -176,12 +176,14 @@ export class ProxmoxParse {
      -------------------------------------------------------------------------- */
 
   /** Décode `/cluster/status` : NOM du cluster + état de QUORUM. PUR et tolérant — le décodage
-      JSON vit ici (testable par fixtures), l'adaptateur ne garde que le repli dépendant de
-      l'instance (nom absent → id du provider). Choix de cadrage : l'extraction du nom vivait
-      dans l'adaptateur ; on la SORT ici pour la mutualiser avec l'extraction du quorate (même
-      réponse, même logique tolérante) — l'adaptateur ne conserve que ce qu'il est SEUL à savoir.
+      JSON vit ici (testable par fixtures), l'adaptateur ne garde que la CONDUITE À TENIR quand le
+      nom manque (avorter la passe : ce nom est le socle d'identité des ext_id). Choix de cadrage :
+      l'extraction du nom vivait dans l'adaptateur ; on la SORT ici pour la mutualiser avec
+      l'extraction du quorate (même réponse, même logique tolérante) — l'adaptateur ne conserve que
+      ce qu'il est SEUL à savoir.
       - name : entrée `type:"cluster"` nommée ; sinon nœud UNIQUE (installation isolée : son nom
-        est une identité stable) ; sinon null (repli DÉCIDÉ par l'appelant, seul à connaître l'instance) ;
+        est une identité stable) ; sinon null — « pas d'identité », JAMAIS remplacé par une valeur
+        de secours (cf. ProxmoxAdapter.requireClusterName : la passe avorte) ;
       - quorate : champ `quorate` (0/1) de l'entrée cluster → booléen ; PAS d'entrée cluster
         (nœud isolé) → null (le quorum n'a pas de sens hors cluster : inconnu, pas « faux »). */
   static clusterStatusInfo(json: any): { name: string | null; quorate: boolean | null } {

@@ -87,7 +87,7 @@ export const wifi = {
     savedUpdated: "Provider mis à jour",
     savedCreated: "Provider créé",
     deleteTitle: "Supprimer ce provider ?",
-    deleteMessage: "Supprimer le provider « {{id}} » ? Les clients déjà synchronisés restent dans le document (ils apparaîtront déconnectés).",
+    deleteMessage: "Supprimer le provider « {{id}} » ? Les clients déjà synchronisés restent dans le document, figés dans leur dernier état : plus aucune synchro ne les couvre (un client affiché connecté le restera).",
     deleted: "Provider supprimé",
     disabledTitle: "Gestion des providers indisponible",
     disabledDetail: "La gestion des providers par l'UI est désactivée côté serveur. Définissez la clé de chiffrement des secrets (DCMANAGER_SECRETS_KEY) dans l'environnement du serveur pour l'activer.",

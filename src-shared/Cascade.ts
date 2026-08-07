@@ -32,13 +32,14 @@
    Capacités INJECTÉES (mêmes que la validation V5b/V6) :
      - `find(collection, field, value)` → enregistrements dont `field` vaut `value` (index/where) ;
      - `fetch(collection, id)` → un enregistrement (pour lire un champ, ex. le nom).
-   Ce fichier n'importe rien (aucune dépendance) — l'auto-suffisance de `src-shared/` n'est plus
-   une contrainte de build (cf. CLAUDE.md « Code partagé »), c'est ici un simple constat.
+   Ce fichier n'importe rien (aucune dépendance) — un import ENTRE fichiers de `src-shared/` serait
+   AUTORISÉ, à condition IMPÉRATIVE d'écrire le spécificateur avec l'extension `.js` (cf. CLAUDE.md
+   « Code partagé ») : c'est ici un simple CONSTAT, pas une contrainte.
 
    AJOUTER UNE RELATION = AJOUTER UNE ENTRÉE dans `SPEC` (déclaratif), ou un `custom` pour les
    cas non réductibles à une FK simple (multi-réseaux, câbles branchés par DEUX champs, routes de
-   waypoints). ⚠ Un `custom` ne doit PLUS servir à rattraper la transitivité d'une règle voisine :
-   c'est le travail du moteur.
+   waypoints). ⚠ Un `custom` ne doit PLUS servir à rattraper la
+   transitivité d'une règle voisine : c'est le travail du moteur.
    ============================================================================ */
 
 /** Capacité de recherche par champ (= `RecordFinder` de la validation). */

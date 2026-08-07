@@ -84,6 +84,16 @@ export const domain = {
     transceiver: "Transceiver",
     other: "Autre",
   },
+  // CATÉGORIE d'état d'un ticket répliqué — énumération FERMÉE (`TRACKER_STATUS_CATEGORIES`), la SEULE
+  // partie traduisible de l'état. ⚠ Le libellé `status` du tracker, lui, s'affiche TEL QUEL et n'est
+  // JAMAIS traduit (décision D3 : les workflows sont configurables par projet). Résolu au point de
+  // rendu par `core/TrackerStatus.categoryLabel`.
+  trackerStatusCategory: {
+    todo: "Ouvert",
+    in_progress: "En cours",
+    done: "Clos",
+    unknown: "Inconnu",
+  },
   spareStatus: {
     available: "Disponible",
     assigned: "Attribué",

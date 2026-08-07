@@ -102,7 +102,7 @@ export const vm = {
     savedUpdated: "Provider updated",
     savedCreated: "Provider created",
     deleteTitle: "Delete this provider?",
-    deleteMessage: "Delete provider “{{id}}”? Already synchronised VMs remain in the document (they will become orphans).",
+    deleteMessage: "Delete provider “{{id}}”? Already synchronised VMs remain in the document, FROZEN in their last state: no sync covers them any more — they will NOT be flagged as orphans.",
     deleted: "Provider deleted",
     testConnOk: "Connection OK",
     testConnFail: "Connection failed",

@@ -80,6 +80,16 @@ export const domain = {
     transceiver: "Transceiver",
     other: "Other",
   },
+  // Replicated issue state CATEGORY — CLOSED enumeration (`TRACKER_STATUS_CATEGORIES`), the ONLY
+  // translatable part of the state. ⚠ The tracker's own `status` label is displayed AS IS and NEVER
+  // translated (D3: workflows are configurable per project). Resolved at render time by
+  // `core/TrackerStatus.categoryLabel`.
+  trackerStatusCategory: {
+    todo: "Open",
+    in_progress: "In progress",
+    done: "Closed",
+    unknown: "Unknown",
+  },
   spareStatus: {
     available: "Available",
     assigned: "Assigned",

@@ -301,13 +301,24 @@ export class SearchTerms {
       0 = colonne `search` « pauvre » (valeurs propres seules, pré-enrichissement) ; 1 = search-v1
       (dérivés par lien/enfants + catalogues fr/en) ; 2 = search-v2 (COMPOSITIONS tapables : « U12 »,
       « ét. N »/« fl. N », « 42 U », « 12 brins », « marque modèle », capacités/rpm des spares) ;
-      3 = search-v3 (collection `wifiClients` : AP résolu par lien + catalogue « déconnecté » fr/en).
+      3 = search-v3 (collection `wifiClients` : AP résolu par lien + catalogue « déconnecté » fr/en) ;
+      4 = search-v4 (RETRAIT de la collection `issues` de la spec — cf. ci-dessous).
       À INCRÉMENTER à chaque évolution de la spec (cf. en-tête) — le backfill à l'ouverture met les
       documents existants à niveau tout seul. ⚠ Un ajout de collection COMPTE comme une évolution de
       spec : sans bump, les documents déjà ouverts garderaient une colonne `search` calculée sans elle
-      (ici l'effet serait mince — la collection est neuve donc vide — mais la doctrine ne se négocie pas
-      au cas par cas, sinon on ne sait plus ce que vaut le marqueur). */
-  static readonly SEARCH_VERSION = 3;
+      (l'effet serait mince — la collection est neuve donc vide — mais la doctrine ne se négocie pas
+      au cas par cas, sinon on ne sait plus ce que vaut le marqueur).
+
+      🚨 CE MARQUEUR NE REDESCEND JAMAIS. La v4 a d'abord porté l'AJOUT d'une collection `issues`
+      (chantier « remote issue tracker »), abandonnée au pivot du 2026-08-07 ; la spec `issues` a donc
+      été retirée SANS re-bumper. C'est délibéré et c'est la seule conduite sûre : des bases locales
+      ont pu passer en v4 pendant le chantier, et repasser le marqueur à 3 leur ferait croire à un
+      RETARD de spec — elles se re-backfilleraient jusqu'à la prochaine évolution, sans fin. Le
+      marqueur est MONOTONE ; ce qu'il désigne, c'est « l'état de spec n°4 », pas « la 4ᵉ collection ».
+      Les documents restés en v3 se backfillent vers la spec ACTUELLE (sans `issues`), et ceux déjà en
+      v4 portent une colonne `search` qui ne contient au pire que des termes d'une collection
+      disparue — donc invisibles, puisque plus aucun enregistrement ne les porte. */
+  static readonly SEARCH_VERSION = 4;
 
   /** Collections dont l'écriture exige de connaître l'enregistrement PRÉCÉDENT pour invalider
       (dérivations par ENFANTS : un sous-équipement DÉPLACÉ d'un maître à l'autre doit rafraîchir
@@ -410,7 +421,12 @@ export class SearchTerms {
     const out: DependentQuery[] = [];
     const seen = new Set<string>();
     const add = (q: DependentQuery): void => {
-      const key = q.collection + " " + q.field + " " + q.value + " " + (q.then ? q.then.collection + "/" + q.then.field : "");
+      // ⚠ Séparateur de clé composite écrit en SÉQUENCE D'ÉCHAPPEMENT (`\u0000`) et JAMAIS en
+      //   caractère brut : un NUL tapé en clair ressort tel quel dans la source et fait passer le
+      //   FICHIER ENTIER pour binaire aux yeux de grep/ripgrep (« Binary file … matches », sans
+      //   plus aucune correspondance affichée) — toute recherche dans ce module central devient
+      //   alors AVEUGLE. Même piège que celui commenté sur `Cascade.KEY_SEP` et dans le module `issues/`.
+      const key = q.collection + "\u0000" + q.field + "\u0000" + q.value + "\u0000" + (q.then ? q.then.collection + "/" + q.then.field : "");
       if (seen.has(key)) return;
       seen.add(key);
       out.push(q);

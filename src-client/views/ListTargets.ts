@@ -34,8 +34,11 @@ export interface ListTargetFilter extends ListTargetResolver {
   placeholder: string;
   /** Candidats d'une saisie — familles CONFONDUES, déjà triés par pertinence et bornés. ASYNCHRONE
       (norme n°15) : en mode API, ils viennent du SERVEUR (recherche transverse, au-delà du corpus
-      chargé) ; en mode fichier, du cache LOCAL (promesse résolue). Cf. `core/EntityCandidateSource`. */
-  search(query: string): Promise<TargetSearchItem[]>;
+      chargé) ; en mode fichier, du cache LOCAL (promesse résolue). Cf. `core/EntityCandidateSource`.
+      `excluded` (clés « famille:id » à écarter) est FACULTATIF et sans emploi pour une dimension de
+      FILTRE, qui est mono-valeur : il sert à un ÉDITEUR de liens MULTI-valeurs qui consommerait le
+      MÊME descripteur et devrait en déduire les cibles déjà liées. */
+  search(query: string, excluded?: ReadonlySet<string>): Promise<TargetSearchItem[]>;
   /** Libellé d'AFFICHAGE d'une cible choisie (chip) — null si elle a disparu du document. */
   labelOf(kind: string, id: string): string | null;
   /** Badge de FAMILLE d'un résultat (`tag` du SearchPop) — "" pour n'en afficher aucun. */

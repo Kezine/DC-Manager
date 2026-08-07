@@ -306,6 +306,16 @@ est ordinaire). Tout le reste (nom, MAC, IP, SSID, type, nom d'AP brut) est une 
 couverte par `ownText` — d'où l'absence de `own` pour cette collection. Côté palette, elle a sa propre
 **portée « wifi: »** : un client wifi n'est ni un sous-réseau ni une adresse, c'est un objet de présence.
 
+### Interventions et tickets répliqués
+
+Les **interventions** ne sont **pas** une collection du document : elles vivent dans une base SERVEUR
+séparée (`interventions.db`), avec leur propre colonne `search` et leur propre listing paginé
+(cf. `docs/interventions.md`). Elles sont donc **hors** de la spec partagée `SearchTerms`, et **hors**
+de la palette Ctrl+K. L'état de leur **réplication** vers un tracker distant
+(cf. `docs/jira-interventions.md`) suit la même règle : les colonnes `tracker_*` ne sont ni dans le
+corpus de la palette, ni dans le texte cherché du listing — seule la **référence** du ticket (`jira_ref`)
+entre dans la colonne `search` de `interventions.db`.
+
 ## Invariants testés
 
 - **corpus ≡ fiches ouvrables** (`GlobalSearchSources.families()` ⇄ `DetailForms.DETAIL_COLLECTIONS`,

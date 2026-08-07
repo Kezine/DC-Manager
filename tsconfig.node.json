@@ -66,6 +66,43 @@
     // Express : testé avec DocumentStore réel + stub d'inventaire. Les routes (WifiModule.ts,
     // Express) restent HORS test, comme api.ts et VmModule.
     "src-server/src/wifi/WifiSyncService.ts",
+    // Module `tracker/` AMOVIBLE — PONT « interventions ⇄ tracker distant » (Atlassian Jira Cloud en
+    // 1re implémentation, la marque n'étant qu'un adaptateur derrière `kind`). DC Manager fait foi
+    // sur le CONTENU poussé, le tracker sur le TRAITEMENT relu.
+    // Contrats purs (pivot d'état, adaptateur, config, surface attendue du module interventions) :
+    // aucun runtime hors la liste canonique des champs du pivot, sonde de complétude comprise.
+    "src-server/src/tracker/TrackerProvider.ts",
+    // Validation PAR PROVIDER (classe PURE) : champs COMMUNS + branche d'options par `kind` — c'est
+    // le point d'extension « nouvelle marque » côté validation, donc testé pour lui-même.
+    "src-server/src/tracker/TrackerProviderConfigValidate.ts",
+    // Stockage DB des providers (tracker-providers.db, jetons chiffrés via SecretBox, table UNIQUE et
+    // SANS matériel TLS — un tracker SaaS a un certificat public) : CRUD + lecture pour la synchro ;
+    // testé avec better-sqlite3 RÉEL (driver injecté).
+    "src-server/src/tracker/TrackerProviderConfigDb.ts",
+    // Décodage Jira PUR (fixtures JSON → TrackerTicketState, alias de champs, catégorie d'état, lien
+    // d'INTERFACE composé — jamais `self`, ADF, table de priorités, lecture des refus PAR CHAMP) +
+    // pagination pure TOLÉRANTE aux DEUX formes d'API (jeton `nextPageToken` / décalage `startAt`) :
+    // testés en isolation, sans réseau.
+    "src-server/src/tracker/JiraParse.ts",
+    // Client HTTP Jira : `fetch` INJECTÉ (patron notify/WebhookNotifier, PAS le node:https de
+    // vm//wifi/ — cf. l'écart documenté dans le fichier), donc TOUT y est testable sans réseau,
+    // parties pures comprises (en-tête Basic, `Retry-After`, extraction du message d'erreur Jira).
+    "src-server/src/tracker/JiraHttp.ts",
+    // Adaptateur Jira — l'ORCHESTRATION (résolution PAR LOTS, pagination, création/mise à jour avec
+    // labels EN VERBES et repli « priorité refusée », test de connexion) est testée avec un client
+    // HTTP stub (`JiraJsonClient` injecté).
+    "src-server/src/tracker/JiraAdapter.ts",
+    // Étiquettes `DCM-*` des objets liés (module PUR) : normalisation, composition et DIFF EN VERBES
+    // — c'est ici que se neutralise le risque n°1 (ne jamais toucher aux labels des autres sources).
+    "src-server/src/tracker/TrackerLabels.ts",
+    // Plafond ROULANT d'une passe (module PUR, sans dépendance) : la leçon « un simple tri laisse une
+    // ZONE MORTE quand la synchro est idempotente » ne dépend pas de ce qu'on synchronise — le pont
+    // le réutilise sur les colonnes `tracker_*`. Testé pour lui seul.
+    "src-server/src/tracker/TrackerPassScope.ts",
+    // Moteur du PONT (poussée tolérante + retour d'état idempotent) — sans Express : testé avec
+    // interventions.db + DocumentStore RÉELS et un adaptateur stub. Les routes (TrackerModule.ts,
+    // Express) restent HORS test, comme api.ts/VmModule/WifiModule.
+    "src-server/src/tracker/TrackerSyncService.ts",
     // Coffre à secrets serveur PARTAGÉ (AES-256-GCM, node:crypto) des secrets stockés en DB
     // (jetons providers VM, jetons webhooks notify) — testé en isolation (aller-retour, clé
     // différente, altération, format inconnu, repli d'environnement legacy).
