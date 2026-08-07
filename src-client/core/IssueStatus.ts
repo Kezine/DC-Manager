@@ -44,12 +44,34 @@
    (aucune donnée du tracker n'entre jamais dans un attribut `style`) et le libellé
    BRUT du statut, lui, passe systématiquement par `Html.escape`.
 
-   FEATURE TICKETS AMOVIBLE : supprimer l'inventaire des tickets = supprimer ce
-   fichier avec le modèle `Issue` et les blocs `issues` des vues.
+   ── ⚠ SANS CONSOMMATEUR POUR L'INSTANT, ET C'EST VOULU (pivot du 2026-08-07) ──
+   Le miroir de tickets qui lisait ce module (collection `issues`, onglet dédié) a
+   été DÉMOLI : le chantier réplique désormais les interventions DC Manager DANS
+   Jira, dans l'autre sens. La classification et les pastilles, elles, restent
+   EXACTEMENT ce qu'il faut pour afficher le statut Jira d'une intervention
+   répliquée — d'où leur conservation en l'état plutôt qu'une suppression suivie
+   d'une réécriture à l'identique. Cf. `.notes/toDos/jira-replication-interventions-cadrage-2026-08-07.md`.
    ============================================================================= */
 import { Html } from "./Html";
 import { I18n } from "../i18n/I18n";
-import { ISSUE_STATUS_CATEGORIES } from "../../src-shared/IssueSync";
+
+/** CATÉGORIES d'état d'un ticket — énumération FERMÉE, commune à tous les trackers. C'est
+    l'adaptateur serveur qui produit la valeur : Jira l'expose nativement (`statusCategory`), une
+    marque qui n'en aurait pas la déduit chez elle (GitHub : `closed` → `done`). `unknown` n'est pas
+    un bouche-trou honteux mais la valeur qui rend la TOLÉRANCE possible : un état que l'adaptateur
+    ne sait pas classer est ACCEPTÉ et rangé ici, plutôt que de faire échouer la passe entière.
+
+    ⚠ DÉCLARÉE ICI depuis le pivot du 2026-08-07. Elle vivait dans la frontière de synchro partagée
+    `src-shared/IssueSync.ts`, supprimée avec la collection `issues` : plus aucune COLLECTION du
+    document ne porte cette énumération, donc plus rien à partager front ⇄ back par ce canal. Le pont
+    `tracker/` (lot P2) persistera la catégorie dans `interventions.db`, base SERVEUR hors du schéma
+    partagé — c'est à ce moment-là, et seulement s'il apparaît un second lecteur, qu'il faudra
+    décider où la faire remonter. Dupliquer une liste de 4 littéraux « au cas où » serait la faute
+    inverse (principe n°3). */
+export const ISSUE_STATUS_CATEGORIES = ["todo", "in_progress", "done", "unknown"] as const;
+
+/** Catégorie d'état (type littéral dérivé de la liste fermée). */
+export type IssueStatusCategory = (typeof ISSUE_STATUS_CATEGORIES)[number];
 
 /** Vue MINIMALE d'un ticket — le module ne dépend NI du modèle `Issue`, NI du store.
     Forme TOLÉRANTE (champs optionnels) : les enregistrements arrivent d'une synchro tierce. */
@@ -69,7 +91,7 @@ export class IssueStatus {
 
   /** Ordre SÉMANTIQUE des catégories, et donc l'ordre de tri des listings : ce qui reste à faire
       d'abord, ce qui est terminé ensuite, l'inclassable en dernier. Repris tel quel de la liste
-      partagée — l'ordre de déclaration EST l'ordre de traitement, il n'y a pas de seconde table. */
+      ci-dessus — l'ordre de déclaration EST l'ordre de traitement, il n'y a pas de seconde table. */
   static readonly CATEGORIES: readonly string[] = ISSUE_STATUS_CATEGORIES;
 
   /** Couleur d'un ticket INTROUVABLE : AVERTISSEMENT et non ERREUR. Un ticket qu'on ne résout plus
@@ -100,8 +122,8 @@ export class IssueStatus {
 
   /** Catégorie NORMALISÉE (toujours l'une des 4 valeurs fermées). Une valeur absente ou inconnue
       devient `unknown` : le module ne fait jamais confiance à ce qui vient d'un tiers, même si la
-      normalisation partagée (`IssueSync.normalizeCategory`) a déjà clampé ce que la synchro écrit —
-      la fiche peut aussi lire un enregistrement importé, écrit par une autre porte. */
+      synchro serveur clampe déjà ce qu'elle écrit — l'affichage peut aussi lire une valeur arrivée
+      par une autre porte (import, écriture directe). */
   static categoryOf(issue: IssueStatusIssue | null | undefined): string {
     const category = issue && typeof issue.status_category === "string" ? issue.status_category.trim() : "";
     return IssueStatus.CATEGORIES.includes(category) ? category : IssueStatus.UNKNOWN;

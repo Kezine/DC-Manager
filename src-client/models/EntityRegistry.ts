@@ -22,7 +22,6 @@ import { Site } from "./Site";
 import { Vm } from "./Vm";
 import { WifiClient } from "./WifiClient";
 import { Contact } from "./Contact";
-import { Issue } from "./Issue";
 
 type EntityCtor = new (p?: Props) => Entity;
 
@@ -57,10 +56,6 @@ const CLASSES_TYPED = {
   // insertion doit se faire AU MÊME ENDROIT des deux côtés (ici, après `vms`).
   wifiClients: WifiClient,
   contacts: Contact,
-  // TICKETS d'un tracker distant (chantier remote issue tracker) : ajoutés EN FIN de table, donc
-  // APRÈS `contacts` — même position que dans `Schema.COLLECTIONS` (l'invariant testé compare les
-  // deux listes, ORDRE compris).
-  issues: Issue,
 };
 const CLASSES: Record<string, EntityCtor> = CLASSES_TYPED;   // vue « indexable par chaîne » (entrées non fiables)
 

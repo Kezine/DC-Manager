@@ -351,9 +351,11 @@ export class JiraParse {
     return JiraParse.firstString(value, PERSON_ALIASES);
   }
 
-  /** Étiquettes : uniquement les CHAÎNES non vides, rognées. Ni tri ni déduplication ici — c'est la
-      frontière PARTAGÉE (`IssueSync.normalizeLabels`) qui canonise, et le faire deux fois de deux
-      façons est précisément ce qui produit un faux delta à chaque passe. */
+  /** Étiquettes : uniquement les CHAÎNES non vides, rognées. Ni tri ni déduplication ici — le
+      décodeur rend ce qu'il a LU, la canonisation (tri + dédup) appartient à la frontière de
+      persistance, et la faire deux fois de deux façons est précisément ce qui produit un faux delta
+      à chaque passe. ⚠ Cette frontière a disparu avec la collection `issues` au pivot du 2026-08-07 :
+      le lot P2 devra la reposer côté pont (les labels `DCM-*` s'y comparent par ENSEMBLE). */
   private static labels(value: any): string[] {
     if (!Array.isArray(value)) return [];
     const out: string[] = [];

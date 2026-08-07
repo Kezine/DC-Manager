@@ -96,24 +96,6 @@ export const SEARCH_CATALOGS = {
       un incident mais une DÉCONNEXION ordinaire (décision D2 du cadrage). Duplication des libellés client
       ASSUMÉE et VERROUILLÉE par test, comme tous les catalogues ci-dessus. */
   wifiDisconnected: ["déconnecté", "disconnected"] as readonly string[],
-  /** lists.ph.notFound (fr+en) — versé par la spec `issues` quand le ticket est « orphelin ».
-      TROISIÈME libellé pour la MÊME mécanique (`orphan`), et c'est voulu : une VM disparue est
-      « orpheline », un client wifi parti est « déconnecté », un ticket non résolu est
-      « INTROUVABLE » — suppression, projet archivé ou permission perdue (cadrage §3). Chercher
-      « introuvable » doit donc ramener des tickets, pas des VMs. Duplication des libellés client
-      ASSUMÉE et VERROUILLÉE par test, comme tous les catalogues ci-dessus. */
-  issueNotFound: ["introuvable", "not found"] as readonly string[],
-  /** domain.issueStatusCategory (fr+en) — CATÉGORIE normalisée de l'état d'un ticket (décision D3).
-      ⚠ Ne PAS confondre avec le champ `status` : celui-là porte le libellé BRUT du tracker, il est
-      affiché tel quel, JAMAIS traduit, et il est déjà cherchable comme colonne plate (`ownText`).
-      Seule la catégorie FERMÉE est traduisible, donc catalogable — taper « clos » doit ramener les
-      tickets terminés quel que soit le vocabulaire du workflow (« Done », « Terminé », « Livré »…).
-      `unknown` n'a VOLONTAIREMENT pas d'entrée : c'est la valeur par DÉFAUT de la spec, donc portée
-      par tout ticket mal classé — lui donner des termes ferait ressortir la moitié du corpus sur une
-      recherche « inconnu ». Une catégorie sans entrée ne produit simplement aucun terme. */
-  issueStatusCategory: {
-    todo: ["Ouvert", "Open"], in_progress: ["En cours", "In progress"], done: ["Clos", "Closed"],
-  } as Readonly<Record<string, readonly string[]>>,
 };
 
 /* ---- formes de la spec déclarative ---- */
@@ -300,28 +282,6 @@ const SEARCH_SPECS: Readonly<Record<string, CollectionSearchSpec>> = {
     // GroupTypes.label cherché par ListConfigs.groups.searchFields (+ sub de la palette).
     catalogs: [{ field: "type", terms: SEARCH_CATALOGS.groupType }],
   },
-  issues: {
-    // « introuvable »/« not found » : MÊME mécanique que l'orphelinat des VMs et la déconnexion wifi,
-    // TROISIÈME libellé (cf. le catalogue) — un ticket non résolu signale une anomalie, pas une
-    // absence ordinaire. Et la CATÉGORIE d'état, seule partie traduisible du statut (décision D3).
-    catalogs: [
-      { field: "orphan", terms: { "true": SEARCH_CATALOGS.issueNotFound } },
-      { field: "status_category", terms: SEARCH_CATALOGS.issueStatusCategory },
-    ],
-    // AUCUN `links`, et c'est une LIMITE MESURÉE, pas un oubli. La matière plate demandée (clé,
-    // titre, statut brut, assigné, étiquettes) est déjà couverte par `ownText` — ce sont des colonnes
-    // du record, tableau `labels` compris (joint par espace). Restaient les LIBELLÉS DES CIBLES
-    // LIÉES, qui seraient un vrai dérivé : ils ne sont PAS réductibles au mécanisme déclaratif
-    // existant, pour deux raisons qui tiennent toutes les deux à la clé COMPOSÉE « famille:id » —
-    //   (1) `TermLink` suit un champ dont la valeur EST un id, vers UNE collection `target` fixe ;
-    //       `targets` est POLYMORPHE (4 collections) et sa valeur n'est pas un id nu ;
-    //   (2) `dependentQueries` DÉRIVE l'invalidation de ces mêmes liens : elle produirait
-    //       « les issues dont targets = <id de l'équipement> », requête qui ne matcherait JAMAIS la
-    //       clé composée — renommer un équipement laisserait donc les colonnes `search` périmées.
-    // Forcer le mécanisme donnerait un dérivé qui ne s'invalide pas : pire qu'une absence. Le dérivé
-    // par cible reste ouvert (il demanderait une forme de lien à clé composée, avec sa requête
-    // inverse) — à cadrer si le besoin se confirme, pas à improviser ici.
-  },
 };
 
 /** Requête « qui dépend de cet enregistrement ? » : les records de `collection` dont `field` vaut
@@ -342,12 +302,22 @@ export class SearchTerms {
       (dérivés par lien/enfants + catalogues fr/en) ; 2 = search-v2 (COMPOSITIONS tapables : « U12 »,
       « ét. N »/« fl. N », « 42 U », « 12 brins », « marque modèle », capacités/rpm des spares) ;
       3 = search-v3 (collection `wifiClients` : AP résolu par lien + catalogue « déconnecté » fr/en) ;
-      4 = search-v4 (collection `issues` : catalogues « introuvable » et CATÉGORIE d'état fr/en).
+      4 = search-v4 (RETRAIT de la collection `issues` de la spec — cf. ci-dessous).
       À INCRÉMENTER à chaque évolution de la spec (cf. en-tête) — le backfill à l'ouverture met les
       documents existants à niveau tout seul. ⚠ Un ajout de collection COMPTE comme une évolution de
       spec : sans bump, les documents déjà ouverts garderaient une colonne `search` calculée sans elle
-      (ici l'effet serait mince — la collection est neuve donc vide — mais la doctrine ne se négocie pas
-      au cas par cas, sinon on ne sait plus ce que vaut le marqueur). */
+      (l'effet serait mince — la collection est neuve donc vide — mais la doctrine ne se négocie pas
+      au cas par cas, sinon on ne sait plus ce que vaut le marqueur).
+
+      🚨 CE MARQUEUR NE REDESCEND JAMAIS. La v4 a d'abord porté l'AJOUT d'une collection `issues`
+      (chantier « remote issue tracker »), abandonnée au pivot du 2026-08-07 ; la spec `issues` a donc
+      été retirée SANS re-bumper. C'est délibéré et c'est la seule conduite sûre : des bases locales
+      ont pu passer en v4 pendant le chantier, et repasser le marqueur à 3 leur ferait croire à un
+      RETARD de spec — elles se re-backfilleraient jusqu'à la prochaine évolution, sans fin. Le
+      marqueur est MONOTONE ; ce qu'il désigne, c'est « l'état de spec n°4 », pas « la 4ᵉ collection ».
+      Les documents restés en v3 se backfillent vers la spec ACTUELLE (sans `issues`), et ceux déjà en
+      v4 portent une colonne `search` qui ne contient au pire que des termes d'une collection
+      disparue — donc invisibles, puisque plus aucun enregistrement ne les porte. */
   static readonly SEARCH_VERSION = 4;
 
   /** Collections dont l'écriture exige de connaître l'enregistrement PRÉCÉDENT pour invalider

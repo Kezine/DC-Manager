@@ -66,13 +66,13 @@
     // Express : testé avec DocumentStore réel + stub d'inventaire. Les routes (WifiModule.ts,
     // Express) restent HORS test, comme api.ts et VmModule.
     "src-server/src/wifi/WifiSyncService.ts",
-    // Module `issues/` AMOVIBLE (« remote issue tracker » : miroir des tickets SUIVIS d'un tracker
-    // distant — Atlassian Jira Cloud en 1re implémentation, la marque n'étant qu'un adaptateur
-    // derrière `kind`). ⚠ Assiette INVERSÉE par rapport à vm/ et wifi/ : c'est le DOCUMENT qui
-    // énumère, et l'adaptateur RÉSOUT (`resolve(extIds)`), d'où un pivot testé pour son ÉGALITÉ avec
-    // la frontière partagée src-shared/IssueSync.
+    // Module `issues/` AMOVIBLE — COUCHE TRACKER (Atlassian Jira Cloud en 1re implémentation, la
+    // marque n'étant qu'un adaptateur derrière `kind`). ⚠ Le miroir de tickets qui la portait a été
+    // DÉMOLI au pivot du 2026-08-07 (cf. `.notes/toDos/jira-replication-interventions-cadrage-…`) :
+    // ne restent que l'accès au tracker, la configuration chiffrée des providers et le plafond de
+    // passe, que le PONT interventions ⇄ Jira consommera.
     // Contrats purs (pivot + adaptateur + config) : aucun runtime hors la liste canonique des champs
-    // du pivot, qui est justement ce que le test d'invariant compare au partagé.
+    // du pivot, sonde de complétude comprise.
     "src-server/src/issues/IssueProvider.ts",
     // Validation PAR PROVIDER (classe PURE) : champs COMMUNS + branche d'options par `kind` — c'est
     // le point d'extension « nouvelle marque » côté validation, donc testé pour lui-même.
@@ -92,18 +92,10 @@
     // Adaptateur Jira — l'ORCHESTRATION (résolution PAR LOTS, pagination, création + ADF, test de
     // connexion) est testée avec un client HTTP stub (`JiraJsonClient` injecté).
     "src-server/src/issues/JiraAdapter.ts",
-    // Moteur de réconciliation PUR — ⚠ variante INVERSÉE : (résolution du tracker, tickets SUIVIS du
-    // document) → ops {update/introuvable} et JAMAIS de création ; dépendances injectées (horloge).
-    // La frontière source/locaux vient de src-shared/IssueSync. C'est LE fichier où le chantier se
-    // joue, donc celui qu'on teste le plus finement (invariant « aucun creates », orphelinat
-    // ALLER-RETOUR, patchs minimaux, idempotence).
-    "src-server/src/issues/IssueReconcile.ts",
-    // Moteur de SYNCHRO (assiette du document → résolution par lots → réconciliation → écriture
-    // transactionnelle + SSE) et les DEUX portes d'entrée de l'assiette — « Suivre un ticket » et
-    // « Ouvrir un ticket » (création chez le tracker PUIS écriture locale, avec son échec PARTIEL) —
-    // sans Express : testé avec DocumentStore réel + adaptateur stub. Les routes (IssueModule.ts,
-    // Express) restent HORS test, comme api.ts, VmModule et WifiModule.
-    "src-server/src/issues/IssueSyncService.ts",
+    // Plafond ROULANT d'une passe de synchro (module PUR, sans dépendance) — extrait du service de
+    // synchro démoli pour survivre au pivot : la leçon « un simple tri laisse une ZONE MORTE quand la
+    // synchro est idempotente » ne dépend pas de ce qu'on synchronise. Testé pour lui seul.
+    "src-server/src/issues/TrackerPassScope.ts",
     // Coffre à secrets serveur PARTAGÉ (AES-256-GCM, node:crypto) des secrets stockés en DB
     // (jetons providers VM, jetons webhooks notify) — testé en isolation (aller-retour, clé
     // différente, altération, format inconnu, repli d'environnement legacy).

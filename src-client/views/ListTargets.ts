@@ -23,7 +23,6 @@ import type { Store } from "../store";
 import { type TargetSearchItem } from "../core/TargetSearch";
 import type { ListTargetResolver } from "../core/StoreListRowSource";
 import { EntityCandidates, EntityCandidateSource, type EntityCandidateFamily, type EntitySearchReader } from "../core/EntityCandidates";
-import { IssueTargets } from "../../src-shared/IssueTargets";   // clés composées « famille:id » des tickets (feature AMOVIBLE)
 import { I18n } from "../i18n/I18n";
 
 /** Descripteur COMPLET d'une dimension CIBLE : l'habillage (libellés, badge, recherche) + le contrat
@@ -37,8 +36,8 @@ export interface ListTargetFilter extends ListTargetResolver {
       (norme n°15) : en mode API, ils viennent du SERVEUR (recherche transverse, au-delà du corpus
       chargé) ; en mode fichier, du cache LOCAL (promesse résolue). Cf. `core/EntityCandidateSource`.
       `excluded` (clés « famille:id » à écarter) est FACULTATIF et sans emploi pour une dimension de
-      FILTRE, qui est mono-valeur : il sert à l'ÉDITEUR de liens des tickets, qui consomme le MÊME
-      descripteur (cf. `views/IssueTargetSource`) et doit y déduire les cibles déjà liées. */
+      FILTRE, qui est mono-valeur : il sert à un ÉDITEUR de liens MULTI-valeurs qui consommerait le
+      MÊME descripteur et devrait en déduire les cibles déjà liées. */
   search(query: string, excluded?: ReadonlySet<string>): Promise<TargetSearchItem[]>;
   /** Libellé d'AFFICHAGE d'une cible choisie (chip) — null si elle a disparu du document. */
   labelOf(kind: string, id: string): string | null;
@@ -54,11 +53,6 @@ interface TargetFamily {
   fallbackKey: string;
   /** Clé i18n du badge de famille (`tag` du SearchPop). */
   tagKey: string;
-  /** Règle de nommage PROPRE à la famille, quand `record.name` ne suffit pas. Facultative : la
-      plupart des collections portent un `name`. Un SPARE, lui, n'en a pas toujours — son identité
-      lisible est CALCULÉE (`displayName`, puis le numéro de série en dernier recours), exactement
-      comme dans l'éditeur de liens d'intervention. Rendre "" laisse jouer le repli localisé. */
-  name?: (record: any) => string;
 }
 
 export class ListTargets {
@@ -69,11 +63,6 @@ export class ListTargets {
 
   private static readonly EQUIPMENT: TargetFamily = { kind: "equipment", collection: "equipments", fallbackKey: "lists.ph.equipment", tagKey: "lists.filter.targetEquipment" };
   private static readonly VM: TargetFamily = { kind: "vm", collection: "vms", fallbackKey: "lists.ph.vm", tagKey: "lists.filter.targetVm" };
-  private static readonly SPARE: TargetFamily = {
-    kind: "spare", collection: "spares", fallbackKey: "lists.ph.spare", tagKey: "lists.filter.targetSpare",
-    name: (record: any) => (record.displayName ? record.displayName() : record.name) || record.serial || "",
-  };
-  private static readonly SUB_EQUIPMENT: TargetFamily = { kind: "sub_equipment", collection: "subEquipments", fallbackKey: "subEquipment.fallback", tagKey: "lists.filter.targetSubEquipment" };
 
   /** PORTEUR d'une adresse IP : équipement OU VM. Le lien est une simple colonne (`equipment_id` /
       `vm_id`) → le filtre part au SERVEUR en `where` ; le mode fichier applique le même test en mémoire.
@@ -148,39 +137,6 @@ export class ListTargets {
     };
   }
 
-  /** CIBLE d'un TICKET (feature `issues` AMOVIBLE) : le rattachement est MANUEL et POLYMORPHE — un
-      ticket vise des équipements, des VMs, des spares et des sous-équipements, en clés COMPOSÉES
-      « famille:id » stockées dans le tableau `targets` (cf. `src-shared/IssueTargets`).
-      Le `where` SERVEUR marche sans code neuf parce que `targets` ∈ `Schema.ARRAY_FIELDS` : le dépôt
-      relationnel y teste l'APPARTENANCE (`json_each`), exactement comme pour `tags_src`. C'est le
-      3ᵉ cas de figure du filtre CIBLE, après l'égalité de colonne (`ipCarrier`) et les 2 sauts non
-      mappables (`cableEquipment`) — et le seul dont la valeur cherchée est une clé composée.
-      ⚠ Les 4 familles ci-dessous doivent rester en phase avec `ISSUE_TARGET_KINDS` (partagé), qui
-      gouverne la validation de forme et les `custom` de cascade : un test le vérifie.
-      Ce MÊME descripteur alimente l'ÉDITEUR de liens de la fiche (cf. `views/IssueTargetSource`) —
-      d'où le `excluded` transmis à la source de candidats. */
-  static issueTarget(store: Store, reader: EntitySearchReader | null = null): ListTargetFilter {
-    const families = [ListTargets.EQUIPMENT, ListTargets.VM, ListTargets.SPARE, ListTargets.SUB_EQUIPMENT];
-    const source = new EntityCandidateSource(store, ListTargets.candidateFamilies(families), reader, ListTargets.SEARCH_LIMIT);
-    return {
-      label: I18n.t("lists.filter.issueTarget"),
-      placeholder: I18n.t("lists.filter.issueTargetPlaceholder"),
-      search: (query, excluded) => source.fetch(query, excluded),
-      labelOf: (kind, id) => ListTargets.labelOf(store, families, kind, id),
-      tagOf: (kind) => ListTargets.tagOf(families, kind),
-      // La clé est RECOMPOSÉE par le module PARTAGÉ, jamais concaténée à la main ici : c'est la même
-      // composition que la validation, la cascade et l'éditeur — une seule règle, un seul encodage.
-      where: (kind, id) => (IssueTargets.isKind(kind) ? { targets: IssueTargets.key(kind, id) } : null),
-      restrict: (rows, kind, id) => {
-        // Famille inconnue → AUCUNE ligne (jamais « toutes ») : un slug non prévu ne doit pas se lire
-        // comme « pas de filtre » — l'utilisateur verrait un filtre posé sans effet.
-        if (!IssueTargets.isKind(kind)) return [];
-        const key = IssueTargets.key(kind, id);
-        return rows.filter((row) => row && Array.isArray(row.targets) && row.targets.indexOf(key) >= 0);
-      },
-    };
-  }
-
   /* ---- helpers communs ---- */
 
   /** Adapte les familles locales (`TargetFamily`) en familles de la source PARTAGÉE (`EntityCandidateFamily`) :
@@ -205,6 +161,6 @@ export class ListTargets {
   }
 
   private static nameOf(record: any, family: TargetFamily): string {
-    return (family.name ? family.name(record) : record.name) || I18n.t(family.fallbackKey);
+    return record.name || I18n.t(family.fallbackKey);
   }
 }

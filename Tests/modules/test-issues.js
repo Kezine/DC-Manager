@@ -1,397 +1,64 @@
-/* Tests modules — FEATURE « REMOTE ISSUE TRACKER » (collection partagée `issues`, lot L1).
+/* Tests modules — COUCHE TRACKER (module serveur AMOVIBLE `issues/`) + affichage d'état.
    ----------------------------------------------------------------------------
-   Le lot L1 est le SOCLE DE DONNÉES : zéro réseau, zéro module serveur, zéro UI. Ce fichier
-   couvre donc, du plus pur au plus intégré :
-   1. la FRONTIÈRE source/locaux partagée (`src-shared/IssueSync`) et sa DÉLÉGATION par le
-      modèle client — c'est LE verrou anti-faux-delta : deux normalisations divergentes feraient
-      trouver un écart à CHAQUE passe et réécrire le document en boucle ;
-   2. les CLÉS DE CIBLE composées (`src-shared/IssueTargets`) et leur convergence de vocabulaire
-      avec `core/TargetSearch` / les interventions — vérifiée par test, JAMAIS par un import
-      (décision D10 : les deux modules restent amovibles indépendamment) ;
-   3. la SPEC de la collection (enum FERMÉE `status_category`, forme des `targets`) et la
-      collection dans les mécaniques transverses (ordre des collections, RenderImpact) ;
-   4. la CASCADE des `targets` — dont le cas qui a déjà mordu ailleurs : un LOT (ou une RÉCURSION)
-      qui supprime DEUX cibles du MÊME ticket ;
-   5. la RECHERCHE : catalogues « introuvable » et CATÉGORIE d'état, fr+en, verrouillés sur les
-      locales client, et la limite ASSUMÉE (aucun dérivé par cible) ;
-   6. `core/IssueStatus` : catégories, priorité de l'introuvable, clé de tri, libellés.
+   ⚠ CE FICHIER A MAIGRI AU PIVOT DU 2026-08-07. Il couvrait la feature « remote issue
+   tracker » — un MIROIR des tickets d'un tracker distant DANS DC Manager (collection
+   partagée `issues`, onglet dédié, suivi de tickets étrangers). Le besoin réel était le flux
+   INVERSE : répliquer les incidents/interventions DC Manager DANS un projet Jira partagé
+   (cf. `.notes/toDos/jira-replication-interventions-cadrage-2026-08-07.md`). La collection,
+   son UI et sa synchro ont donc été DÉMOLIES ; ce qui les servait — l'accès au tracker et la
+   configuration chiffrée des providers — SURVIT tel quel et reste testé ici, parce que le pont
+   `interventions ⇄ Jira` (lot P2) le consommera sans y toucher.
+   Ce qui a disparu avec la feature, et pourquoi c'est SANS PERTE : la frontière source/locaux
+   partagée, les clés de cible composées, la spec de collection, la cascade des `targets`, les
+   catalogues de recherche, la réconciliation à assiette inversée, la synchro de bout en bout et
+   les deux portes d'entrée de l'assiette (« Suivre » / « Ouvrir un ticket ») ne testaient QUE du
+   code supprimé — les garder aurait testé du vide.
 
-   Le lot L2 ajoute le module serveur AMOVIBLE `issues/` — contrats, adaptateur Jira Cloud et
-   configuration chiffrée. Toujours du plus pur au plus intégré :
-   7. `JiraParse.toAdf` — le format de description de l'API v3 (piège n°1 de la création) ;
-   8. le DÉCODAGE Jira PUR : formes pleines/creuses/inattendues, alias, catégorie d'état, et les
-      DEUX pièges du cadrage — `ext_id` = l'id INTERNE (jamais la clé, qui bouge) et `url` COMPOSÉE
-      vers l'interface (jamais le champ `self`, qui pointe l'API) ;
-   9. la PAGINATION pure (chaque garde-fou séparément, DEUX formes d'API) + JQL + références saisies ;
-  10. l'ORCHESTRATION de l'adaptateur sur stub HTTP STRUCTUREL : `resolve` par LOTS et le partage
+   Ce qui reste, du plus pur au plus intégré :
+   1. `core/IssueStatus` — classification d'un état de ticket (catégorie FERMÉE, priorité de
+      l'introuvable, clé de tri, libellés) et ses PASTILLES avec leur échappement. SANS
+      consommateur pour l'instant, et c'est assumé : le lot P3 affichera le statut Jira d'une
+      intervention répliquée avec exactement ces règles-là ;
+   2. `Html.externalLink` — un lien sortant ne peut pas être un vecteur XSS (primitive GÉNÉRIQUE,
+      utile à toute donnée d'origine tierce affichée en lien) ;
+   3. le miroir `KIND_FIELDS` (formulaire providers) ⇄ `KIND_OPTION_SPECS` (serveur) — un miroir
+      que personne ne vérifie finit par diverger ;
+   4. `JiraParse.toAdf` — le format de description de l'API v3 (piège n°1 de la création) ;
+   5. le DÉCODAGE Jira PUR : formes pleines/creuses/inattendues, alias, catégorie d'état, et les
+      DEUX pièges du chantier — `ext_id` = l'id INTERNE (jamais la clé, qui bouge au déplacement
+      de projet) et `url` COMPOSÉE vers l'interface (jamais le champ `self`, qui pointe l'API) ;
+   6. la PAGINATION pure (chaque garde-fou séparément, DEUX formes d'API) + JQL + références saisies ;
+   7. l'ORCHESTRATION de l'adaptateur sur stub HTTP STRUCTUREL : `resolve` par LOTS et le partage
       found/missing, `lookup`, `createIssue` (dont l'échec Jira au message INTACT), `test` ;
-  11. le CLIENT HTTP : parties pures (Basic, `Retry-After`, extraction du message d'erreur) et flux
+   8. le CLIENT HTTP : parties pures (Basic, `Retry-After`, extraction du message d'erreur) et flux
       réel sur `fetch` INJECTÉ — 429 avec backoff borné, cap de réponse, erreurs traduites ;
-  12. la VALIDATION d'un provider — champs communs + branche d'options PAR MARQUE ;
-  13. le STOCKAGE chiffré (better-sqlite3 RÉEL) : CRUD sans fuite de jeton, compte RELU, sentinelle ;
-  14. les INVARIANTS : pivot serveur ≡ `ISSUE_SOURCE_FIELDS`, et AGNOSTICISME de marque (aucun
-      littéral « jira » hors des points d'extension) — l'exigence n°1 du chantier, donc TESTÉE.
-
-   Le lot L3 ajoute la RÉCONCILIATION, le SERVICE et les ROUTES. C'est là que l'écart structurant du
-   chantier devient exécutable, d'où l'insistance des tests dessus :
-  15. `IssueReconcile` — 🚨 la variante INVERSÉE : AUCUN `creates`, JAMAIS (y compris quand la source
-      rend un ticket que le document ne suit pas) · orphelinat ALLER **ET RETOUR** · patchs MINIMAUX ·
-      IDEMPOTENCE (une passe sans changement ne produit aucune opération) · `last_sync` hors diff ;
-  16. `IssueSyncService.passScope` — le PLAFOND de passe et son ROULEMENT (aucune zone morte) ;
-  17. `IssueSyncService` de bout en bout sur `DocumentStore` RÉEL : « Suivre un ticket » (dont le
-      piège n°1 — un ticket DÉPLACÉ de projet garde son identité), triptyque révision+SSE, absence
-      totale d'écriture quand rien ne change, introuvable aller-retour, anti-chevauchement,
-      anti-rafale, statut, `ProblemReporter`, plafond ET sa journalisation, multi-providers.
-   ⚠ Les routes Express (`IssueModule.ts`) restent HORS test, comme `api.ts`/`VmModule`/`WifiModule` :
-   c'est la convention du dépôt. La logique qu'elles exposent vit, elle, dans le service — testée.
-   Harnais et assertions : harness.js. Cadrage : .notes/toDos/remote-issue-tracker-jira-cadrage-2026-08-06.md. */
+   9. la VALIDATION d'un provider — champs communs + branche d'options PAR MARQUE ;
+  10. le STOCKAGE chiffré (better-sqlite3 RÉEL) : CRUD sans fuite de jeton, compte RELU, sentinelle ;
+  11. `TrackerPassScope` — le PLAFOND de passe et son ROULEMENT. Extrait du service démoli parce que
+      la leçon ne dépend pas de ce qu'on synchronise : la synchro étant IDEMPOTENTE, un simple tri
+      laisserait une ZONE MORTE permanente en queue d'assiette, que rien ne signalerait ;
+  12. les INVARIANTS : décodeur ≡ pivot (`ISSUE_RECORD_FIELDS`, plus sa sonde de compilation) et
+      AGNOSTICISME de marque — aucun littéral « jira » hors des points d'extension, sur les sources
+      SURVIVANTES, avec des exemptions par DÉCLARATION dont chacune est prouvée load-bearing.
+   ⚠ Les routes Express restent HORS test, comme `api.ts`/`VmModule`/`WifiModule` : c'est la
+   convention du dépôt (et le module de routes `IssueModule.ts` a été supprimé au pivot).
+   Harnais et assertions : harness.js. */
 "use strict";
 const { ck, section, path, D, SHARED, SERVER, Validation, Cascade, SharedSchema, EntityRegistry, COLLECTION_THREE_IMPACT, makeStore } = require("./harness.js");
 
 module.exports = async () => {
-  const { IssueSync, ISSUE_SOURCE_FIELDS, ISSUE_STATUS_CATEGORIES } = SHARED("src-shared/IssueSync.js");
-  const { IssueTargets, ISSUE_TARGET_KINDS } = SHARED("src-shared/IssueTargets.js");
-  const { SearchTerms, SEARCH_CATALOGS } = SHARED("src-shared/SearchTerms.js");
-  const { Issue } = D("models/Issue.js");
-  const { IssueStatus } = D("core/IssueStatus.js");
-
-  /* ============ PARTAGÉ : frontière SOURCE / LOCAUX ============ */
-
-  await section("shared : IssueSync — frontière source/locaux (défauts, catégorie clampée, étiquettes déterministes, délégation du modèle)", async () => {
-  {
-    // -- DÉFAUTS : ce sont EXACTEMENT ceux de la spec `issues` (un écart ferait diverger le
-    //    document et le diff de synchro). Non-nullables → "", nullables → null, jamais l'inverse. --
-    const empty = IssueSync.normalizeSource({});
-    ck.eq(ISSUE_SOURCE_FIELDS.length, 17, "ISSUE_SOURCE_FIELDS : 17 champs source déclarés");
-    ck(ISSUE_SOURCE_FIELDS.every((f) => f in empty), "normalizeSource : produit TOUS les champs de la liste canonique");
-    ck(["ext_id", "provider_id", "key", "summary", "status", "issue_type", "last_sync"].every((f) => empty[f] === ""),
-      "normalizeSource : champs texte non nullables absents → \"\" (aucun null silencieux)");
-    ck(["priority", "assignee", "reporter", "resolution", "created_src", "updated_src", "url"].every((f) => empty[f] === null),
-      "normalizeSource : champs NULLABLES absents → null (« non renseigné » ≠ « renseigné à vide »)");
-    ck.eq(JSON.stringify(empty.labels), "[]", "normalizeSource : labels absents → []");
-    ck.eq(empty.orphan, false, "normalizeSource : orphan absent → false");
-    ck.eq(empty.status_category, "unknown", "normalizeSource : catégorie absente → « unknown » (membre à part entière de l'ensemble fermé)");
-    ck.eq(IssueSync.normalizeSource({ priority: "" }).priority, null, "normalizeSource : nullable vidé côté source → null, jamais \"\"");
-    ck.eq(IssueSync.normalizeSource({ orphan: "oui" }).orphan, false, "normalizeSource : orphan non booléen → false");
-    ck.eq(IssueSync.normalizeSource({ orphan: "true" }).orphan, true, "normalizeSource : orphan « true » (round-trip JSON/formulaire) → true, comme la spec");
-
-    // -- CATÉGORIE : ensemble FERMÉ, tout le reste CLAMPÉ. C'est ce clamp qui garantit que la synchro
-    //    ne peut PAS produire une valeur que l'`enum` de la spec refuserait — sans quoi un seul
-    //    ticket mal classé ferait rejeter la passe entière (validation en bloc). --
-    ck.eq(ISSUE_STATUS_CATEGORIES.join(","), "todo,in_progress,done,unknown", "ISSUE_STATUS_CATEGORIES : l'ensemble FERMÉ, dans l'ordre sémantique");
-    ck(ISSUE_STATUS_CATEGORIES.every((c) => IssueSync.normalizeCategory(c) === c), "normalizeCategory : chaque valeur de l'ensemble est conservée");
-    ck.eq(IssueSync.normalizeCategory("En recette"), "unknown", "normalizeCategory : valeur hors ensemble → unknown (tolérance : la passe n'échoue pas)");
-    ck.eq(IssueSync.normalizeCategory(null), "unknown", "normalizeCategory : absente → unknown");
-
-    // -- ÉTIQUETTES : normalisation DÉTERMINISTE (rognées, vides écartées, dédupliquées, TRIÉES).
-    //    Sans le tri, un simple réordonnancement côté tracker produirait un faux delta à chaque passe. --
-    ck.eq(JSON.stringify(IssueSync.normalizeLabels(["reseau", "  urgent ", "reseau", "", "  ", 42, null])), JSON.stringify(["reseau", "urgent"]),
-      "normalizeLabels : rognées, vides et non-chaînes écartées, dédupliquées");
-    ck.eq(JSON.stringify(IssueSync.normalizeLabels(["b", "a", "c"])), JSON.stringify(IssueSync.normalizeLabels(["c", "b", "a"])),
-      "normalizeLabels : DÉTERMINISTE — deux ordres d'entrée donnent la MÊME liste (pas de faux delta au réordonnancement)");
-    ck.eq(JSON.stringify(IssueSync.normalizeLabels("pas un tableau")), "[]", "normalizeLabels : forme inattendue → [] (aucune exception)");
-
-    // -- sourceEquals : compare des états NORMALISÉS champ à champ. --
-    const a = IssueSync.normalizeSource({ ext_id: "10042", key: "INFRA-123", status: "En recette", labels: ["a", "b"] });
-    const b = IssueSync.normalizeSource({ ext_id: "10042", key: "INFRA-123", status: "En recette", labels: ["b", "a"], notes: "local", targets: ["equipment:E1"] });
-    ck(ISSUE_SOURCE_FIELDS.every((f) => IssueSync.sourceEquals(a, b, f)),
-      "sourceEquals : étiquettes réordonnées + champs LOCAUX en plus → AUCUN écart de source");
-    ck(!IssueSync.sourceEquals(a, IssueSync.normalizeSource({ ...a, key: "OPS-45" }), "key"), "sourceEquals : un champ source modifié est détecté");
-    ck(!IssueSync.sourceEquals(a, IssueSync.normalizeSource({ ...a, labels: ["a"] }), "labels"), "sourceEquals : une étiquette RETIRÉE est détectée");
-
-    // -- INVARIANT DE DÉLÉGATION : le modèle client doit produire les MÊMES valeurs source que la
-    //    normalisation partagée. C'est LE verrou anti-faux-delta (le modèle réécrivant sa propre
-    //    normalisation, la synchro trouverait un écart à chaque passe et réécrirait le document). --
-    const raw = {
-      ext_id: "10042", key: "INFRA-123", summary: "Panne cœur", status: "En recette", status_category: "vocabulaire-maison",
-      issue_type: "Bug", priority: "", assignee: "A. Dupont", labels: ["reseau", "urgent", "reseau"], url: "https://jira.example/browse/INFRA-123",
-      orphan: 1, notes: "note locale", targets: ["equipment:E1"],
-    };
-    const model = new Issue(raw);
-    const shared = IssueSync.normalizeSource(raw);
-    ck(ISSUE_SOURCE_FIELDS.every((f) => JSON.stringify(model[f]) === JSON.stringify(shared[f])),
-      "modèle Issue : CHAQUE champ source ≡ IssueSync.normalizeSource (aucun faux delta possible)");
-    ck.eq(model.status_category, "unknown", "modèle : catégorie inconnue clampée par la frontière partagée");
-    ck.eq(model.notes, "note locale", "modèle : champ LOCAL `notes` conservé");
-    ck.eq(JSON.stringify(model.targets), JSON.stringify(["equipment:E1"]), "modèle : champ LOCAL `targets` conservé");
-    ck.eq(JSON.stringify(new Issue({ targets: ["equipment:E1", 42, null] }).targets), JSON.stringify(["equipment:E1"]),
-      "modèle : `targets` filtré aux CHAÎNES (même règle que la normalisation de spec)");
-
-    // -- PARTITION de la spec : tout champ déclaré est SOURCE ou l'un des 3 LOCAUX, jamais entre les
-    //    deux. C'est ce qui empêche qu'un champ ajouté plus tard à la spec soit oublié de la
-    //    frontière (il deviendrait silencieusement « local », donc jamais rafraîchi). --
-    const LOCAL_FIELDS = ["notes", "description", "targets"];
-    const specFields = Object.keys(Validation.COLLECTION_SPECS.issues.fields).sort();
-    ck.eq(JSON.stringify(specFields), JSON.stringify([...ISSUE_SOURCE_FIELDS, ...LOCAL_FIELDS].sort()),
-      "partition : champs de la spec ≡ champs SOURCE ∪ { notes, description, targets } (ni manque, ni fantôme)");
-    ck(LOCAL_FIELDS.every((f) => !ISSUE_SOURCE_FIELDS.includes(f)), "partition : aucun champ LOCAL dans la liste des champs source (la synchro ne les écrase jamais)");
-
-    // -- ACCORD avec la normalisation de SPEC : un aller-retour d'écriture ne doit rien déplacer.
-    //    (La catégorie est la SEULE divergence, ASSUMÉE et documentée : la frontière CLAMPE, la spec
-    //    REFUSE — la porte d'écriture directe reste stricte, la synchro reste tolérante.) --
-    for (const sample of [{}, { priority: "Haute", url: "https://x/1" }, { summary: "t", labels: ["a"] }, { orphan: true, last_sync: "2026-08-06T10:00:00.000Z" }]) {
-      const bySpec = Validation.DataValidator.normalizeRecord("issues", sample);
-      const byFrontier = IssueSync.normalizeSource(sample);
-      const drifted = ISSUE_SOURCE_FIELDS.filter((f) => f !== "status_category" && JSON.stringify(bySpec[f]) !== JSON.stringify(byFrontier[f]));
-      ck.eq(drifted.join(","), "", "accord spec ⇄ frontière sur " + JSON.stringify(sample) + " (champs divergents : [" + drifted.join(", ") + "])");
-    }
-  }
-  });
-
-  /* ============ PARTAGÉ : clés de cible composées ============ */
-
-  await section("shared : IssueTargets — clés « famille:id » (composition, décodage, forme, vocabulaire commun)", async () => {
-  {
-    ck.eq(ISSUE_TARGET_KINDS.join(","), "equipment,vm,spare,sub_equipment", "ISSUE_TARGET_KINDS : les 4 familles liables");
-    ck.eq(IssueTargets.key("equipment", "E1"), "equipment:E1", "key : composition « famille:id »");
-    ck.eq(JSON.stringify(IssueTargets.parse("vm:V1")), JSON.stringify({ kind: "vm", id: "V1" }), "parse : décodage exact");
-    // Le séparateur est le PREMIER « : » — un id qui en contient reste INTACT (inverse exact de key).
-    ck.eq(IssueTargets.parse("equipment:a:b").id, "a:b", "parse : séparateur = le PREMIER « : », un id à deux-points reste intact");
-    ck.eq(IssueTargets.parse("equipment:a:b").kind, "equipment", "parse : … et la famille reste correctement isolée");
-    for (const junk of ["", "sansSeparateur", ":E1", "equipment:", null, undefined, 42]) {
-      ck.eq(IssueTargets.parse(junk), null, "parse : forme invalide " + JSON.stringify(junk) + " → null, aucune exception");
-    }
-
-    // isValidKey = famille CONNUE + id non vide. On juge la FORME, jamais l'EXISTENCE de la cible.
-    ck(IssueTargets.KINDS.every((k) => IssueTargets.isValidKey(k + ":X")), "isValidKey : les 4 familles connues sont acceptées");
-    ck(!IssueTargets.isValidKey("gizmo:X"), "isValidKey : famille INCONNUE refusée (aucune règle de cascade ne saurait la détacher)");
-    ck(!IssueTargets.isValidKey("equipment:"), "isValidKey : id vide refusé");
-    ck(!IssueTargets.isValidKey(42), "isValidKey : non-chaîne refusée");
-    ck(IssueTargets.isValidKey("equipment:id-qui-n-existe-pas"), "isValidKey : cible INEXISTANTE acceptée (on valide la forme, pas l'existence — l'objet peut être créé après le lien)");
-
-    // COLLECTION_BY_KIND : chaque famille pointe une collection RÉELLE du modèle.
-    ck(IssueTargets.KINDS.every((k) => SharedSchema.COLLECTIONS.includes(IssueTargets.COLLECTION_BY_KIND[k])),
-      "COLLECTION_BY_KIND : chaque famille désigne une collection réelle de Schema.COLLECTIONS");
-
-    // -- CONVERGENCE DE VOCABULAIRE, vérifiée par TEST et non par un import (décision D10 : les
-    //    modules `issues` et `interventions` doivent rester amovibles l'un sans l'autre). Un
-    //    utilisateur qui lie « equipment:E1 » sur une intervention et sur un ticket écrit la MÊME
-    //    chose, et l'éditeur de liens (SearchPop alimenté par TargetSearch) sert les deux. --
-    const { TargetSearch } = D("core/TargetSearch.js");
-    ck(IssueTargets.KINDS.every((k) => IssueTargets.key(k, "X") === TargetSearch.key(k, "X")),
-      "vocabulaire : IssueTargets.key ≡ TargetSearch.key (la clé produite par le picker est lisible telle quelle)");
-    ck.eq(JSON.stringify(IssueTargets.parse("equipment:a:b")), JSON.stringify(TargetSearch.parse("equipment:a:b")),
-      "vocabulaire : IssueTargets.parse ≡ TargetSearch.parse (même règle de séparateur)");
-    const { InterventionsFormat } = D("core/InterventionsFormat.js");
-    ck.eq(IssueTargets.KINDS.join(","), InterventionsFormat.TARGET_KIND_SLUGS.join(","),
-      "vocabulaire : mêmes familles que les interventions (miroir de INTERVENTION_TARGET_KINDS) — convergence, PAS dépendance");
-  }
-  });
-
-  /* ============ PARTAGÉ : la collection dans les mécaniques transverses ============ */
-
-  await section("shared : collection issues — spec (enum fermée, forme des targets), ordre COLLECTIONS, RenderImpact", async () => {
-  {
-    // -- ORDRE : Schema.COLLECTIONS ⇄ EntityRegistry.CLASSES (l'invariant global compare les deux
-    //    listes ; ici on ASSERTE la POSITION voulue, pour que le jour où l'un des deux bouge on sache où). --
-    ck.eq(SharedSchema.COLLECTIONS[SharedSchema.COLLECTIONS.length - 1], "issues", "COLLECTIONS : issues ajoutée EN FIN de liste");
-    ck.eq(EntityRegistry.COLLECTIONS[EntityRegistry.COLLECTIONS.length - 1], "issues", "EntityRegistry : même position (les deux tables sont comparées par un test d'invariant)");
-    ck.eq(EntityRegistry.classOf("issues"), Issue, "EntityRegistry : la collection hydrate bien la classe Issue");
-
-    // -- ARRAY_FIELDS : `labels` et `targets` filtrables par APPARTENANCE (patron `tags_src`) —
-    //    c'est ce qui fait marcher le filtre « Cible » unifié des listings sans code neuf. --
-    ck(SharedSchema.isArrayField("labels") && SharedSchema.isArrayField("targets"),
-      "ARRAY_FIELDS : labels + targets (le `where` y teste l'appartenance, pas l'égalité)");
-
-    // -- SPEC : défauts, enum FERMÉE, absence VOULUE de `ref` sur targets. --
-    const fields = Validation.COLLECTION_SPECS.issues.fields;
-    const textFields = ["ext_id", "provider_id", "key", "summary", "status", "issue_type", "last_sync", "notes", "description"];
-    ck(textFields.every((f) => fields[f] && fields[f].type === "string" && fields[f].default === ""),
-      "spec : champs texte non nullables à default \"\" (aucun null silencieux en colonnes strictes)");
-    ck(["priority", "assignee", "reporter", "resolution", "created_src", "updated_src", "url"].every((f) => fields[f].nullable === true && fields[f].default === null),
-      "spec : champs nullables → default null");
-    ck(fields.orphan.type === "boolean" && fields.orphan.default === false, "spec : orphan booléen, défaut false");
-    ck.eq(JSON.stringify(fields.status_category.enum), JSON.stringify(ISSUE_STATUS_CATEGORIES), "spec : status_category porte l'enum FERMÉE partagée (une seule liste)");
-    ck.eq(fields.status_category.default, "unknown", "spec : status_category défaut « unknown »");
-    ck(!fields.status.enum, "spec : `status` SANS enum — libellé brut du workflow, affiché tel quel et jamais traduit (D3)");
-    ck(fields.labels.type === "string[]" && fields.targets.type === "string[]", "spec : labels + targets sont des string[]");
-    ck(!fields.targets.ref, "spec : targets SANS `ref` — une clé POLYMORPHE ne désigne pas UNE collection (V2 ne sait pas la contrôler)");
-
-    // Un enregistrement MINIMAL doit être normalisable ET valide (aucune sur-contrainte introduite).
-    const V = Validation.DataValidator;
-    ck.eq(V.normalizeAndValidate("issues", {}).errors.length, 0, "spec : enregistrement minimal (aucun champ) → 0 erreur (aucun champ n'est `required`)");
-
-    // -- ENUM FERMÉE : la porte d'écriture DIRECTE (API/import) refuse une catégorie inventée, alors
-    //    que la synchro, elle, ne peut pas en produire (clamp de la frontière). Les deux se complètent. --
-    const badCategory = V.normalizeAndValidate("issues", { status_category: "En recette" }).errors;
-    ck(badCategory.some((e) => e.path === "status_category" && e.code === "enum"), "spec : catégorie hors ensemble → erreur `enum` (écriture directe refusée)");
-    ck.eq(V.normalizeAndValidate("issues", { status_category: "done" }).errors.length, 0, "spec : catégorie de l'ensemble → acceptée");
-
-    // -- FORME des targets (invariant V3) : famille connue + id non vide. --
-    const targetErrors = (targets) => V.normalizeAndValidate("issues", { targets }).errors.filter((e) => e.path === "targets");
-    ck.eq(targetErrors(["equipment:E1", "vm:V1", "spare:S1", "sub_equipment:SE1"]).length, 0, "targets : les 4 familles → valides");
-    ck.eq(targetErrors(["equipment:a:b"]).length, 0, "targets : un id contenant « : » reste valide (le séparateur est le premier)");
-    ck(targetErrors(["gizmo:X"]).some((e) => e.code === "invariant"), "targets : famille INCONNUE → invariant violé");
-    ck(targetErrors(["equipment:"]).some((e) => e.code === "invariant"), "targets : id vide → invariant violé");
-    ck(targetErrors(["E1"]).some((e) => e.code === "invariant"), "targets : clé SANS famille → invariant violé");
-    ck(targetErrors(["equipment:E1", "gizmo:X"]).some((e) => e.code === "invariant"), "targets : UNE clé fautive parmi des bonnes suffit à violer l'invariant");
-    ck(targetErrors(["equipment:absent-du-document"]).length === 0, "targets : cible INEXISTANTE tolérée (la forme est jugée, pas l'existence)");
-    // Le message NOMME les familles acceptées — sinon l'utilisateur devine.
-    ck(IssueTargets.KINDS.every((k) => targetErrors(["gizmo:X"])[0].message.includes(k)), "targets : le message d'erreur ÉNUMÈRE les familles acceptées");
-
-    // -- CARTE D'IMPACT 3D : `none` (l'invariant global vérifie que toute collection est mappée). --
-    ck.eq(COLLECTION_THREE_IMPACT.issues, "none", "RenderImpact : issues → none (ni placement, ni dimension, ni port : aucun mesh n'en dépend)");
-  }
-  });
-
-  /* ============ PARTAGÉ : cascade des cibles ============ */
-
-  await section("shared : Cascade — détachement des `targets` (4 familles, récursion, LOT multi-suppressions du MÊME ticket)", async () => {
-  {
-    // Corpus : un ticket I1 lié aux QUATRE familles, un ticket I2 lié à un équipement différent.
-    const mkDb = () => ({
-      equipments: [{ id: "E1", name: "sw-coeur" }, { id: "E9", name: "sw-annexe" }],
-      subEquipments: [{ id: "SE1", name: "drive-1", equipment_id: "E1" }],
-      vms: [{ id: "V1", name: "web-1" }],
-      spares: [{ id: "S1" }],
-      issues: [
-        { id: "I1", key: "INFRA-1", targets: ["equipment:E1", "vm:V1", "spare:S1", "sub_equipment:SE1"] },
-        { id: "I2", key: "INFRA-2", targets: ["equipment:E9"] },
-      ],
-      ports: [], cables: [], cableBundles: [], ipAddresses: [], dhcpRanges: [], ipNetworks: [], aggregates: [], wifiClients: [], rackItems: [], waypoints: [],
-    });
-    const finders = (db) => [
-      (c, f, v) => (db[c] || []).filter((r) => (Array.isArray(r[f]) ? r[f].includes(v) : r[f] === v)),
-      (c, id) => (db[c] || []).find((r) => r.id === id) || null,
-    ];
-    /** Valeur FINALE de `targets` planifiée pour un ticket (null si aucun détachement le concerne). */
-    const finalTargets = (plan, issueId) => {
-      const d = plan.detaches.filter((x) => x.c === "issues" && x.id === issueId && x.key === "targets").pop();
-      return d ? d.value : null;
-    };
-
-    // 1) UNE famille à la fois : chaque suppression retire SA clé, et elle seule.
-    for (const [collection, id, key] of [["vms", "V1", "vm:V1"], ["spares", "S1", "spare:S1"], ["subEquipments", "SE1", "sub_equipment:SE1"]]) {
-      const db = mkDb(); const [find, fetch] = finders(db);
-      const plan = Cascade.plan(collection, id, find, fetch);
-      const targets = finalTargets(plan, "I1");
-      ck(targets !== null && !targets.includes(key) && targets.length === 3,
-        "cascade " + collection + " : la clé « " + key + " » est retirée des targets (les 3 autres restent)");
-      ck(!plan.deletes.some((d) => d.c === "issues"), "cascade " + collection + " : AUCUN ticket supprimé (il porte notes et liens — le lien coupé est une information)");
-      ck(!plan.detaches.some((d) => d.c === "issues" && d.id === "I2"), "cascade " + collection + " : le ticket qui ne cible pas cet objet n'est pas touché");
-    }
-
-    // 2) 🚨 LE PIÈGE : un LOT qui supprime DEUX cibles du MÊME ticket. `planMany` développe les deux
-    //    dans le MÊME plan ; sans composition sur le déjà planifié (`pendingValue`), la seconde
-    //    valeur — calculée sur les targets d'ORIGINE — ÉCRASERAIT la première et l'une des deux clés
-    //    survivrait, pointant un objet supprimé. Perte SILENCIEUSE : d'où ce test.
-    {
-      const db = mkDb(); const [find, fetch] = finders(db);
-      const plan = Cascade.planMany([{ collection: "vms", id: "V1" }, { collection: "spares", id: "S1" }], find, fetch);
-      const targets = finalTargets(plan, "I1");
-      ck.eq(JSON.stringify(targets), JSON.stringify(["equipment:E1", "sub_equipment:SE1"]),
-        "cascade LOT : DEUX cibles du même ticket supprimées ensemble → les DEUX clés retirées (composition sur le déjà planifié)");
-      const issueDetaches = plan.detaches.filter((d) => d.c === "issues" && d.id === "I1" && d.key === "targets");
-      ck.eq(issueDetaches.length, 1, "cascade LOT : un SEUL détachement conservé par (collection, id, clé) — le plan reste proportionné");
-    }
-
-    // 3) MÊME piège par RÉCURSION, sans lot : supprimer l'équipement supprime AUSSI son sous-équipement
-    //    (règle `equipments.delete`), donc DEUX clés du même ticket tombent dans le même plan.
-    {
-      const db = mkDb(); const [find, fetch] = finders(db);
-      const plan = Cascade.plan("equipments", "E1", find, fetch);
-      const targets = finalTargets(plan, "I1");
-      ck.eq(JSON.stringify(targets), JSON.stringify(["vm:V1", "spare:S1"]),
-        "cascade RÉCURSION : supprimer l'équipement retire SA clé ET celle de son sous-équipement (emporté par la cascade)");
-      ck(plan.deletes.some((d) => d.c === "subEquipments" && d.id === "SE1"), "cascade RÉCURSION : … le sous-équipement est bien supprimé par la même passe (anti-vacuité)");
-      // L'autre ticket, lui, perd sa propre clé seulement si l'équipement supprimé est le sien.
-      ck.eq(finalTargets(plan, "I2"), null, "cascade RÉCURSION : le ticket lié à un AUTRE équipement n'est pas touché");
-    }
-
-    // 4) LES QUATRE familles d'un coup : rien ne doit rester.
-    {
-      const db = mkDb(); const [find, fetch] = finders(db);
-      const plan = Cascade.planMany([{ collection: "equipments", id: "E1" }, { collection: "vms", id: "V1" }, { collection: "spares", id: "S1" }], find, fetch);
-      ck.eq(JSON.stringify(finalTargets(plan, "I1")), "[]", "cascade : les 4 familles retirées (le sous-équipement suivant l'équipement) → targets vide");
-    }
-
-    // 5) Supprimer un TICKET n'entraîne RIEN (règle déclarée vide, à dessein : rien du document ne
-    //    pointe vers un ticket — le lien va dans l'AUTRE sens).
-    {
-      const db = mkDb(); const [find, fetch] = finders(db);
-      const plan = Cascade.plan("issues", "I1", find, fetch);
-      ck(plan.deletes.length === 0 && plan.detaches.length === 0, "cascade issues : aucun effet (rien ne pointe vers un ticket)");
-    }
-
-    // 6) ANTI-VACUITÉ du détecteur : un ticket SANS `targets` (legacy / jamais lié) ne produit aucun
-    //    détachement, et surtout ne fait pas planter la règle sur un champ absent.
-    {
-      const db = mkDb();
-      db.issues.push({ id: "I3", key: "INFRA-3" });   // pas de champ targets du tout
-      const [find, fetch] = finders(db);
-      const plan = Cascade.plan("vms", "V1", find, fetch);
-      ck(!plan.detaches.some((d) => d.c === "issues" && d.id === "I3"), "cascade : un ticket sans `targets` n'est pas touché (aucune exception sur champ absent)");
-    }
-  }
-  });
-
-  /* ============ PARTAGÉ : recherche ============ */
-
-  await section("shared : SearchTerms — catalogues « introuvable » + CATÉGORIE (fr/en verrouillés sur les locales), colonnes plates, bump de version", async () => {
-  {
-    const noFetch = () => null, noFind = () => [];
-    const terms = (record) => SearchTerms.termsOf("issues", record, noFetch, noFind);
-
-    // -- « introuvable » : MÊME mécanique que l'orphelinat VM et la déconnexion wifi, TROISIÈME libellé. --
-    const lost = terms({ id: "I1", orphan: true, status_category: "unknown" });
-    ck(lost.includes("introuvable") && lost.includes("not found"), "recherche : catalogue « introuvable » fr+en (le serveur ignore la langue de l'utilisateur)");
-    ck(!terms({ id: "I2", orphan: false, status_category: "unknown" }).includes("introuvable"), "recherche : ticket résolu → AUCUN terme « introuvable » (false ≠ clé de catalogue)");
-
-    // -- CATÉGORIE : seule partie TRADUISIBLE de l'état — taper « clos » doit ramener les tickets
-    //    terminés quel que soit le vocabulaire du workflow (« Done », « Terminé », « Livré »…). --
-    const done = terms({ id: "I3", status_category: "done", status: "Livré au client" });
-    ck(done.includes("Clos") && done.includes("Closed"), "recherche : catégorie `done` → « Clos » + « Closed »");
-    ck(terms({ id: "I4", status_category: "in_progress" }).includes("En cours"), "recherche : catégorie `in_progress` → « En cours »");
-    ck(terms({ id: "I5", status_category: "todo" }).includes("Ouvert"), "recherche : catégorie `todo` → « Ouvert »");
-    ck.eq(terms({ id: "I6", status_category: "unknown" }).length, 0,
-      "recherche : catégorie `unknown` → AUCUN terme (c'est le DÉFAUT de la spec : la cataloguer ferait ressortir la moitié du corpus)");
-
-    // -- COLONNES PLATES : clé, titre, statut BRUT, assigné et étiquettes sont couverts par `ownText`
-    //    (aucun `own` n'est nécessaire — rien n'est enfoui dans une structure ni composé par l'habillage). --
-    const record = { id: "I7", key: "INFRA-123", summary: "Panne cœur", status: "En recette", assignee: "A. Dupont", labels: ["reseau", "urgent"], status_category: "todo" };
-    const text = SearchTerms.searchText("issues", record, noFetch, noFind);
-    for (const needle of ["infra-123", "panne", "en recette", "dupont", "reseau", "urgent"]) {
-      ck(text.includes(needle), "recherche : « " + needle + " » présent dans la colonne (matière plate via ownText)");
-    }
-    ck(text.includes(SharedSchema.normSearch("Ouvert")), "recherche : … et le terme de CATÉGORIE s'y ajoute (colonne enrichie)");
-
-    // -- LIMITE ASSUMÉE : aucun dérivé par CIBLE. Les clés « famille:id » ne sont pas réductibles au
-    //    mécanisme déclaratif (`TermLink` suit un champ dont la valeur EST un id, vers UNE collection),
-    //    et `dependentQueries` en dériverait une invalidation qui ne matcherait jamais la clé composée
-    //    → le dérivé serait présent mais JAMAIS rafraîchi. On ne force donc pas.
-    ck.eq(SearchTerms.dependentQueries("equipments", "E1", null, null).filter((q) => q.collection === "issues").length, 0,
-      "recherche : AUCUNE dépendance inverse depuis `issues` (limite assumée — pas de dérivé par cible en v1)");
-
-    // -- VERROUS sur les locales : la duplication assumée catalogue ⇄ i18n ne peut pas dériver en silence. --
-    const norm = SharedSchema.normSearch;
-    const frLists = D("i18n/locales/fr/lists.js").lists, enLists = D("i18n/locales/en/lists.js").lists;
-    const notFound = SEARCH_CATALOGS.issueNotFound.map(norm);
-    ck(notFound.includes(norm(frLists.ph.notFound)) && notFound.includes(norm(enLists.ph.notFound)),
-      "catalogue issueNotFound : couvre lists.ph.notFound des DEUX locales (verrou anti-dérive)");
-    // … et ce libellé est bien DISTINCT de ceux des VMs et du wifi : trois sens, trois mots.
-    ck(norm(frLists.ph.notFound) !== norm(frLists.ph.orphan) && norm(frLists.ph.notFound) !== norm(frLists.ph.disconnected),
-      "libellés : « introuvable » ≠ « orpheline » ≠ « déconnecté » (même mécanique `orphan`, trois SENS distincts)");
-    const frDomain = D("i18n/locales/fr/domain.js").domain, enDomain = D("i18n/locales/en/domain.js").domain;
-    for (const category of ["todo", "in_progress", "done"]) {
-      const catalog = (SEARCH_CATALOGS.issueStatusCategory[category] || []).map(norm);
-      ck(catalog.includes(norm(frDomain.issueStatusCategory[category])) && catalog.includes(norm(enDomain.issueStatusCategory[category])),
-        "catalogue issueStatusCategory." + category + " : couvre domain.issueStatusCategory des DEUX locales");
-    }
-    ck(!("unknown" in SEARCH_CATALOGS.issueStatusCategory) && !!enDomain.issueStatusCategory.unknown,
-      "catalogue : `unknown` AFFICHABLE (locales) mais volontairement PAS cherchable (c'est le défaut de la spec)");
-
-    // -- VERSIONNAGE : ajouter une collection à la spec EST une évolution → bump (doctrine du fichier). --
-    ck.eq(SearchTerms.SEARCH_VERSION, 4, "SEARCH_VERSION = 4 (l'ajout de `issues` à la spec a bumpé le marqueur de backfill)");
-  }
-  });
-
-  /* ============ CLIENT : IssueStatus ============ */
+  const { IssueStatus, ISSUE_STATUS_CATEGORIES } = D("core/IssueStatus.js");
 
   await section("client : IssueStatus — catégories, PRIORITÉ de l'introuvable, clé de tri, libellés", async () => {
   {
     // -- CATÉGORIE : ensemble FERMÉ, repli `unknown` sur tout ce qui n'en est pas (le module ne fait
-    //    jamais confiance à ce qui vient d'un tiers, même si la frontière de synchro clampe déjà). --
-    ck.eq(IssueStatus.CATEGORIES.join(","), ISSUE_STATUS_CATEGORIES.join(","), "CATEGORIES : reprise TELLE QUELLE de la liste partagée (pas de seconde table)");
+    //    jamais confiance à ce qui vient d'un tiers, même si la synchro serveur clampe déjà). --
+    // ⚠ Attente EXPLICITE (jamais dérivée du module) : la liste est l'ABSTRACTION multi-marques
+    //    elle-même — c'est elle qui rend un GitHub ou un Redmine affichable sans toucher une vue.
+    //    L'ORDRE compte autant que le contenu : il EST l'ordre de tri sémantique des listings.
+    ck.eq(ISSUE_STATUS_CATEGORIES.join(","), "todo,in_progress,done,unknown",
+      "ISSUE_STATUS_CATEGORIES : les 4 valeurs fermées, dans l'ordre SÉMANTIQUE (à faire → terminé → inclassable)");
+    ck.eq(IssueStatus.CATEGORIES.join(","), ISSUE_STATUS_CATEGORIES.join(","), "CATEGORIES : reprise TELLE QUELLE de la liste (pas de seconde table)");
     ck.eq(IssueStatus.categoryOf({ status_category: "in_progress" }), "in_progress", "categoryOf : catégorie connue conservée");
     ck.eq(IssueStatus.categoryOf({ status_category: "  done  " }), "done", "categoryOf : catégorie rognée");
     ck.eq(IssueStatus.categoryOf({ status_category: "En recette" }), "unknown", "categoryOf : valeur hors ensemble → unknown");
@@ -432,13 +99,6 @@ module.exports = async () => {
     ck.eq(IssueStatus.categoryLabel("En recette"), frDomain.issueStatusCategory.unknown,
       "categoryLabel : valeur non normalisée ramenée à `unknown` — la clé i18n demandée existe TOUJOURS");
     ck.eq(IssueStatus.categoryLabel(null), frDomain.issueStatusCategory.unknown, "categoryLabel : null toléré");
-
-    // -- displayName du modèle : la CLÉ prime (c'est elle qu'on prononce et qu'on recopie). --
-    ck.eq(Issue.displayName({ key: "INFRA-123", summary: "Panne" }), "INFRA-123", "displayName : la clé lisible prime");
-    ck.eq(Issue.displayName({ key: "   ", summary: "Panne cœur" }), "Panne cœur", "displayName : clé blanche → repli sur le titre");
-    ck.eq(Issue.displayName({ ext_id: "10042" }), "10042", "displayName : ni clé ni titre → repli sur l'identité côté tracker");
-    ck.eq(Issue.displayName({}), "", "displayName : rien d'affichable → \"\" (l'appelant décide de son repli)");
-    ck.eq(Issue.displayName(null), "", "displayName : null toléré");
   }
   });
 
@@ -528,61 +188,6 @@ module.exports = async () => {
   }
   });
 
-  await section("client L4 : dimension CIBLE des tickets — familles, `where` d'appartenance et restriction locale", async () => {
-  {
-    const { ListTargets } = D("views/ListTargets.js");
-    const { I18n } = D("i18n/I18n.js");
-    const store = await makeStore();
-    const filter = ListTargets.issueTarget(store, null);   // reader null = mode FICHIER (aucun réseau)
-
-    // -- 🚨 L'INVARIANT du lot : les familles proposées par l'UI sont EXACTEMENT celles que le
-    //    partagé déclare. Une famille en trop serait liable sans cascade de détachement (référence
-    //    pendante) ; une famille en moins serait détachable mais jamais liable. --
-    const uiKinds = ISSUE_TARGET_KINDS.filter((kind) => filter.tagOf(kind) !== "");
-    ck.eq(uiKinds.join(","), ISSUE_TARGET_KINDS.join(","),
-      "familles : les 4 familles de `ISSUE_TARGET_KINDS` ont toutes un badge dans la dimension CIBLE");
-    ck.eq(filter.tagOf("famille-inconnue"), "", "familles : un slug inconnu n'a pas de badge (jamais de libellé inventé)");
-
-    // -- `where` SERVEUR : une APPARTENANCE au tableau `targets` (∈ Schema.ARRAY_FIELDS), et la clé
-    //    est RECOMPOSÉE par le module partagé — jamais concaténée à la main. --
-    ck.eq(JSON.stringify(filter.where("equipment", "E1")), JSON.stringify({ targets: "equipment:E1" }),
-      "where : appartenance au tableau `targets`, clé composée par IssueTargets");
-    ck.eq(filter.where("famille-inconnue", "X"), null, "where : famille inconnue → aucun critère serveur (la restriction cliente tranchera)");
-
-    // -- RESTRICTION CLIENTE (seul chemin du mode fichier, et repli des cibles non mappables). --
-    const rows = [
-      { id: "i1", targets: ["equipment:E1", "vm:V9"] },
-      { id: "i2", targets: ["vm:V9"] },
-      { id: "i3", targets: [] },
-      { id: "i4" },                                   // champ absent (record partiel)
-      { id: "i5", targets: ["equipment:E10"] },       // 🚨 préfixe commun avec E1 : ne doit PAS matcher
-    ];
-    ck.eq(filter.restrict(rows, "equipment", "E1").map((r) => r.id).join(","), "i1",
-      "restrict : seuls les tickets portant la clé EXACTE sont gardés (« E10 » n'est pas « E1 »)");
-    ck.eq(filter.restrict(rows, "vm", "V9").map((r) => r.id).join(","), "i1,i2", "restrict : une même cible peut être portée par plusieurs tickets");
-    ck.eq(filter.restrict(rows, "equipment", "INEXISTANT").length, 0, "restrict : cible sans ticket → aucune ligne");
-    ck.eq(filter.restrict(rows, "famille-inconnue", "X").length, 0,
-      "restrict : famille inconnue → AUCUNE ligne (jamais « toutes » : un filtre posé sans effet serait pire)");
-
-    // -- Le descripteur sert AUSSI d'ÉDITEUR de liens (cf. views/IssueTargetSource) : il doit donc
-    //    savoir NOMMER une cible et EXCLURE les cibles déjà liées de sa recherche. --
-    const eq = await store.create("equipments", { name: "SW-Coeur", type: "switch" });
-    ck.eq(filter.labelOf("equipment", eq.id), "SW-Coeur", "labelOf : la cible existante est nommée");
-    ck.eq(filter.labelOf("equipment", "inexistant"), null, "labelOf : cible disparue → null (l'UI grise, elle ne plante pas)");
-    ck.eq(filter.labelOf("famille-inconnue", eq.id), null, "labelOf : famille inconnue → null");
-    ck.eq((await filter.search("SW-Coeur")).length, 1, "search : la cible remonte dans les candidats (mode fichier, cache local)");
-    ck.eq((await filter.search("SW-Coeur", new Set(["equipment:" + eq.id]))).length, 0,
-      "search : une cible DÉJÀ liée est écartée des candidats (dédup de l'éditeur)");
-
-    // -- Le NOMMAGE d'un spare passe par sa règle propre (`displayName`), pas par `name` : sans
-    //    cela, un spare sans nom s'afficherait « (spare) » dans l'éditeur alors qu'il a une identité. --
-    const spare = await store.create("spares", { type: "hdd", brand: "Seagate", model_pn: "ST-4000", serial: "SN-42" });
-    ck.eq(filter.labelOf("spare", spare.id), spare.displayName(),
-      "labelOf : un spare sans `name` est nommé par sa règle CALCULÉE (displayName) — le repli « (spare) » n'a pas à jouer");
-    ck(filter.labelOf("spare", spare.id) !== I18n.t("lists.ph.spare"), "labelOf : … et surtout pas par le repli localisé, qui ne distinguerait plus deux spares");
-  }
-  });
-
   await section("client L4 : KIND_FIELDS (formulaire providers) ⇄ KIND_OPTION_SPECS (serveur) — le miroir est VÉRIFIÉ", async () => {
   {
     // Un miroir que personne ne contrôle DIVERGE : un champ affiché mais non déclaré côté serveur
@@ -614,71 +219,6 @@ module.exports = async () => {
         if (field.placeholderKey) ck(I18n.t(field.placeholderKey) !== field.placeholderKey, "i18n : placeholder présent pour « " + kind + "." + spec.name + " »");
       }
     }
-  }
-  });
-
-  await section("client L5 : IssueTargetSummary — sélection PURE des tickets d'une cible (ouverts, tri, bornage, préfixe)", async () => {
-  {
-    // La rangée « Tickets » des fiches lit cette logique SYNCHRONEMENT dans le Store — c'est tout
-    // l'écart avec la rangée « Interventions », qui interroge le serveur. Elle est donc PURE, donc
-    // testable seule, et c'est précisément pour ça qu'elle n'est pas enfouie dans le helper DOM.
-    const { IssueTargetSummary } = D("core/IssueTargetSummary.js");
-    const mk = (over) => Object.assign({
-      id: "", key: "", summary: "", status: "", status_category: "todo", orphan: false,
-      updated_src: null, updated_date: "2026-01-01T00:00:00.000Z", targets: [],
-    }, over);
-    const issues = [
-      mk({ id: "a", key: "INFRA-1", status_category: "todo", updated_src: "2026-08-01T10:00:00.000Z", targets: ["equipment:E1"] }),
-      mk({ id: "b", key: "INFRA-2", status_category: "done", updated_src: "2026-08-05T10:00:00.000Z", targets: ["equipment:E1", "vm:V9"] }),
-      mk({ id: "c", key: "INFRA-3", status_category: "in_progress", updated_src: "2026-08-03T10:00:00.000Z", targets: ["equipment:E1"] }),
-      mk({ id: "d", key: "INFRA-4", status_category: "unknown", updated_src: "2026-08-04T10:00:00.000Z", targets: ["equipment:E10"] }),
-      // Ticket JAMAIS daté par le tracker : la récence retombe sur l'horodatage LOCAL.
-      mk({ id: "e", key: "INFRA-5", status_category: "todo", updated_src: null, updated_date: "2026-07-01T00:00:00.000Z", targets: ["equipment:E1"] }),
-    ];
-    const order = issues.map((i) => i.id).join(",");
-
-    // -- 1) SÉLECTION : la clé est composée par le module PARTAGÉ, et comparée par ÉGALITÉ. --
-    const forE1 = IssueTargetSummary.of(issues, "equipment", "E1");
-    ck.eq(forE1.map((i) => i.id).sort().join(","), "a,b,c,e", "sélection : les tickets qui portent « equipment:E1 » dans leurs cibles");
-    ck(!forE1.some((i) => i.id === "d"), "🚨 « equipment:E10 » n'est PAS « equipment:E1 » — l'appartenance est une ÉGALITÉ, jamais un préfixe (le piège classique des clés composées)");
-    ck.eq(IssueTargetSummary.of(issues, "vm", "V9").map((i) => i.id).join(","), "b", "sélection : un même ticket peut viser plusieurs familles à la fois");
-    ck.eq(IssueTargetSummary.of(issues, "equipment", "ABSENT").length, 0, "cible sans aucun ticket → aucune ligne (et surtout pas toutes)");
-    ck.eq(IssueTargetSummary.of(issues, "famille-inconnue", "E1").length, 0, "famille INCONNUE → aucune ligne : un slug non prévu ne doit pas se lire comme « pas de filtre »");
-    ck.eq(IssueTargetSummary.of(issues, "equipment", "").length, 0, "id vide → aucune ligne (une clé « equipment: » n'est pas une cible)");
-    ck.eq(IssueTargetSummary.of(null, "equipment", "E1").length, 0, "entrée absente tolérée (aucun ticket chargé) — la rangée d'une fiche ne doit jamais jeter");
-    ck.eq(IssueTargetSummary.of([{ id: "x" }, { id: "y", targets: "pas-un-tableau" }], "equipment", "E1").length, 0, "enregistrement sans `targets` exploitable → ignoré, jamais d'exception");
-
-    // -- 2) OUVERTS : la règle vit dans `IssueStatus.isOpen` (source unique de l'état). --
-    ck.eq(IssueStatus.isOpen({ status_category: "todo" }), true, "« todo » est OUVERT");
-    ck.eq(IssueStatus.isOpen({ status_category: "in_progress" }), true, "« in_progress » est OUVERT");
-    ck.eq(IssueStatus.isOpen({ status_category: "done" }), false, "« done » est le SEUL état clos");
-    ck.eq(IssueStatus.isOpen({ status_category: "categorie-maison" }), true,
-      "🚨 une catégorie inconnue est comptée OUVERTE : elle retombe sur `unknown`, et un ticket qu'on n'a pas su classer doit être VU, pas escamoté");
-    ck.eq(IssueStatus.isOpen({ status_category: "in_progress", orphan: true }), true,
-      "l'orphelinat n'entre PAS dans la décision : un ticket devenu introuvable garde l'état de sa dernière résolution");
-    ck.eq(IssueTargetSummary.openCount(forE1), 3, "comptage : 3 ouverts sur 4 (le ticket « done » est exclu)");
-    ck.eq(IssueTargetSummary.openCount([]), 0, "comptage : aucun ticket → 0");
-
-    // -- 3) TRI et BORNAGE : récence CÔTÉ TRACKER, repli sur l'horodatage local. --
-    ck.eq(IssueTargetSummary.latest(forE1, 3).map((i) => i.id).join(","), "b,c,a",
-      "tri : du plus récemment modifié CHEZ LE TRACKER au plus ancien — tous états confondus (un ticket clos hier fait partie de l'histoire de l'objet)");
-    ck.eq(IssueTargetSummary.latest(forE1, 4).map((i) => i.id).join(","), "b,c,a,e",
-      "récence : sans `updated_src`, on retombe sur l'horodatage LOCAL (ici plus ancien → en queue)");
-    ck.eq(IssueTargetSummary.latest(forE1, 2).length, 2, "bornage : jamais plus que demandé");
-    ck.eq(IssueTargetSummary.latest(forE1, 0).length, 0, "bornage : une limite nulle rend une liste vide (et non « tout »)");
-    ck.eq(issues.map((i) => i.id).join(","), order, "le tableau d'entrée n'est PAS muté (il vient du Store — un tri en place réordonnerait la collection)");
-    // Ordre TOTAL et STABLE : deux tickets de même récence sont départagés par la clé, jamais laissés
-    // à l'ordre d'itération (qui ferait sautiller la rangée d'un rendu à l'autre).
-    const tied = [mk({ id: "z", key: "B-2", updated_src: "2026-08-09T00:00:00.000Z", targets: ["vm:V1"] }), mk({ id: "y", key: "A-1", updated_src: "2026-08-09T00:00:00.000Z", targets: ["vm:V1"] })];
-    ck.eq(IssueTargetSummary.latest(tied, 2).map((i) => i.key).join(","), "A-1,B-2", "égalité de récence → départage par la CLÉ (ordre stable d'un rendu à l'autre)");
-
-    // -- 4) DIGEST : ce que la rangée consomme, en un appel. --
-    const digest = IssueTargetSummary.digest(issues, "equipment", "E1", 3);
-    ck.eq(digest.openCount, 3, "digest : compte d'OUVERTS (le badge)");
-    ck.eq(digest.total, 4, "digest : TOTAL tous états — c'est lui qui décide du « Afficher plus » (une cible dont tout est clos a quand même une histoire)");
-    ck.eq(digest.latest.map((i) => i.id).join(","), "b,c,a", "digest : les N derniers, déjà triés et bornés");
-    const empty = IssueTargetSummary.digest(issues, "spare", "S-404", 3);
-    ck(empty.openCount === 0 && empty.total === 0 && empty.latest.length === 0, "digest d'une cible sans ticket : tout à zéro (la rangée n'affiche alors rien de plus qu'un bouton de création)");
   }
   });
 
@@ -857,12 +397,12 @@ module.exports = async () => {
     ck.eq(JiraParse.issueRecord(fixtureIssue("9", "K-9", { assignee: { emailAddress: "x@y.z" } }), BASE).assignee, "x@y.z",
       "personne : l'adresse e-mail sert de DERNIER repli (displayName souvent masqué par la confidentialité Atlassian)");
 
-    // -- ÉTIQUETTES : nettoyées, mais NI triées NI dédupliquées ici (c'est la frontière PARTAGÉE qui
-    //    canonise — le faire deux fois de deux façons est ce qui produit un faux delta à chaque passe). --
+    // -- ÉTIQUETTES : nettoyées, mais NI triées NI dédupliquées ici — le décodeur rend ce qu'il a LU,
+    //    la canonisation appartient à la frontière de PERSISTANCE (le faire deux fois de deux façons
+    //    est ce qui produit un faux delta à chaque passe). --
     const labels = JiraParse.issueRecord(fixtureIssue("9", "K-9", { labels: ["b", "  a  ", "", 42, null, "b"] }), BASE).labels;
     ck.eq(JSON.stringify(labels), JSON.stringify(["b", "a", "b"]),
-      "labels : rognées, vides et non-chaînes écartées — ordre CONSERVÉ et doublon GARDÉ (la canonisation appartient à IssueSync)");
-    ck.eq(JSON.stringify(IssueSync.normalizeLabels(labels)), JSON.stringify(["a", "b"]), "labels : … et la frontière partagée les canonise bien ensuite (tri + dédup)");
+      "labels : rognées, vides et non-chaînes écartées — ordre CONSERVÉ et doublon GARDÉ (la canonisation n'est PAS le travail du décodeur)");
 
     // -- LISTE : inexploitables écartés, DOUBLONS d'ext_id écartés (le premier gagne). --
     const list = JiraParse.issueRecords([fixtureIssue("1", "A-1"), null, fixtureIssue("1", "A-1-bis"), fixtureIssue("2", "A-2"), { key: "sans-id" }], BASE);
@@ -1393,669 +933,88 @@ module.exports = async () => {
     }
   });
 
-  /* ============ SERVEUR : réconciliation PURE — la variante INVERSÉE ============ */
+  /* ============ SERVEUR : plafond ROULANT d'une passe de synchro (module PUR) ============ */
 
-  await section("Serveur : IssueReconcile — AUCUN creates, orphelinat ALLER-RETOUR, patch minimal, idempotence", async () => {
+  await section("Serveur : TrackerPassScope — plafond de passe, ordre stable et ROULEMENT (aucune zone morte)", async () => {
   {
-    const { IssueReconcile } = SERVER("issues/IssueReconcile.js");
-    const NOW = "2026-08-07T12:00:00.000Z";
-    const OLD = "2026-08-01T08:00:00.000Z";
-
-    /** Pivot d'adaptateur (les 17 champs source), surchargeable champ par champ. */
-    const pivot = (over) => ({
-      ext_id: "10042", provider_id: "p1", key: "INFRA-123", summary: "Panne de la baie B12",
-      status: "En cours", status_category: "in_progress", issue_type: "Bug", priority: "Haute",
-      assignee: "Alice", reporter: "Bob", labels: ["reseau", "urgent"], resolution: null,
-      created_src: "2026-08-01T10:00:00.000Z", updated_src: "2026-08-02T10:00:00.000Z",
-      url: "https://exemple.atlassian.net/browse/INFRA-123", orphan: false, last_sync: "", ...over,
-    });
-    /** Enregistrement du DOCUMENT : champs source NORMALISÉS (mêmes valeurs que produirait la
-        synchro — c'est tout l'objet de la frontière partagée) + champs LOCAUX renseignés. */
-    const stored = (over, lastSync) => ({
-      id: "issue-1", created_date: OLD, updated_date: OLD,
-      ...IssueReconcile.sourceOf(pivot(), lastSync === undefined ? OLD : lastSync),
-      notes: "ma note", description: "ma description", targets: ["equipment:eq-1"], ...over,
-    });
-    const plan = (found, missing, existing) => IssueReconcile.plan({
-      providerId: "p1", resolution: { found, missing }, existingIssues: existing, nowIso: NOW,
-    });
-    const base = stored();
-
-    // -- 1) 🚨 L'INVARIANT DU CHANTIER : la synchro ne PEUPLE JAMAIS le document (assiette inversée).
-    const unfollowed = plan([pivot()], [], []);
-    ck(!("creates" in unfollowed), "plan : le résultat ne porte MÊME PAS de champ `creates` — l'assiette vient du DOCUMENT, jamais de la source (§3 du cadrage)");
-    ck.eq(unfollowed.updates.length + unfollowed.orphans.length, 0, "ticket rendu par la SOURCE sans être suivi → AUCUNE opération");
-    ck.eq(unfollowed.untracked, 1, "… il est COMPTÉ (observable dans les journaux : un adaptateur qui répond à côté est une anomalie), jamais matérialisé");
-
-    // -- 2) IDEMPOTENCE : re-planifier sur l'état écrit ne produit AUCUNE opération. --
-    const idem = plan([pivot()], [], [base]);
-    ck(idem.updates.length === 0 && idem.orphans.length === 0, "idempotence : état inchangé → AUCUNE opération (donc ni révision, ni SSE, ni bruit d'undo)");
-    ck.eq(idem.unchanged, 1, "idempotence : compté « inchangé »");
-    ck.eq(plan([pivot()], [], [stored({}, "")]).updates.length, 0,
-      "`last_sync` HORS diff : un ticket jamais estampillé (last_sync \"\") ne devient pas une écriture à lui seul — c'est LA condition de l'idempotence");
-
-    // -- 3) PATCH MINIMAL : seuls les champs modifiés (+ last_sync) ; les LOCAUX jamais touchés. --
-    const closed = plan([pivot({ status: "Terminé", status_category: "done", resolution: "Corrigé" })], [], [base]).updates;
-    ck.eq(closed.length, 1, "patch : 1 mise à jour");
-    ck.eq(Object.keys(closed[0].patch).sort().join(","), "last_sync,resolution,status,status_category",
-      "patch MINIMAL : les 3 champs modifiés + last_sync, rien d'autre");
-    ck.eq(closed[0].patch.last_sync, NOW, "`last_sync` est POSÉ dès qu'il y a une écriture réelle (et seulement là)");
-    ck(!("notes" in closed[0].patch) && !("description" in closed[0].patch) && !("targets" in closed[0].patch),
-      "patch : les champs LOCAUX (notes, description, targets) ne sont JAMAIS dans un patch de synchro");
-
-    // -- 4) ORPHELINAT — ALLER. Dérivé des `missing`, jamais d'une suppression. --
-    const gone = plan([], ["10042"], [base]);
-    ck.eq(gone.orphans.length, 1, "identifiant rendu MANQUANT → 1 « introuvable »");
-    ck(gone.orphans[0].id === "issue-1" && gone.orphans[0].patch.orphan === true && gone.orphans[0].patch.last_sync === NOW,
-      "introuvable : patch { orphan, last_sync } — l'enregistrement SURVIT (il porte des notes et des liens que le tracker ignore)");
-    const already = plan([], ["10042"], [stored({ orphan: true })]);
-    ck.eq(already.orphans.length, 0, "introuvable DÉJÀ marqué → aucune op (idempotence)");
-    ck.eq(already.unchanged, 1, "… et compté « inchangé »");
-
-    // -- 5) ORPHELINAT — RETOUR. LE cas qu'on oublie : le drapeau doit retomber tout seul. --
-    const back = plan([pivot()], [], [stored({ orphan: true })]).updates;
-    ck.eq(back.length, 1, "RETOUR d'orphelinat : 1 mise à jour");
-    ck.eq(back[0].patch.orphan, false, "🚨 RETOUR : orphan true → false dès que le ticket est de nouveau résolu");
-    ck.eq(Object.keys(back[0].patch).sort().join(","), "last_sync,orphan", "RETOUR : patch minimal — seuls le drapeau et l'horodatage bougent");
-
-    // -- 6) NON DEMANDÉ ≠ INTROUVABLE. Le service PLAFONNE l'assiette : un ticket suivi qui n'a pas
-    //       été interrogé doit rester INTACT. C'est pourquoi les orphelins viennent des `missing` et
-    //       surtout PAS d'une différence d'ensembles « suivi mais pas revenu ». --
-    const untouched = plan([], [], [base]);
-    ck(untouched.updates.length === 0 && untouched.orphans.length === 0 && untouched.unchanged === 0,
-      "ticket suivi mais NON interrogé à cette passe (plafond) → INTACT, jamais marqué introuvable");
-
-    // -- 7) PÉRIMÈTRE : un autre provider n'est pas touché. --
-    const other = { ...stored(), id: "issue-2", provider_id: "p2", ext_id: "99" };
-    const scoped = plan([], ["10042", "99"], [base, other]);
-    ck.eq(scoped.orphans.length, 1, "périmètre : seuls les tickets de CE provider peuvent devenir introuvables");
-    ck.eq(scoped.orphans[0].id, "issue-1", "périmètre : … et c'est bien celui du provider réconcilié");
-    ck.eq(plan([pivot({ provider_id: "p2" })], [], [base]).updates.length, 0, "périmètre : record estampillé d'un AUTRE provider → écarté (garde-fou d'appelant)");
-
-    // -- 8) TOLÉRANCE : record inexploitable, doublons, `missing` exotiques. --
-    ck.eq(plan([pivot({ ext_id: "" })], [], [base]).untracked, 0, "record sans ext_id → écarté (inréconciliable), pas même compté comme « non suivi »");
-    const dup = plan([pivot({ summary: "premier" }), pivot({ summary: "second" })], [], [base]).updates;
-    ck.eq(dup.length, 1, "doublon d'ext_id dans la résolution → une seule opération");
-    ck.eq(dup[0].patch.summary, "premier", "doublon : le PREMIER gagne");
-    ck.eq(plan([], ["", "   ", "inconnu"], [base]).orphans.length, 0, "`missing` vide/blanc/non suivi → ignoré, aucune exception");
-
-    // -- 9) NORMALISATION PARTAGÉE : jamais réécrite sur place (verrou posé au lot L1). --
-    ck.eq(JSON.stringify(IssueReconcile.sourceOf(pivot(), NOW)),
-      JSON.stringify(IssueSync.normalizeSource({ ...pivot(), orphan: false, last_sync: NOW })),
-      "sourceOf DÉLÈGUE à `IssueSync.normalizeSource` — aucune normalisation réécrite ici (deux normalisations divergentes = faux delta à CHAQUE passe)");
-    ck.eq(plan([pivot({ labels: ["urgent", "reseau", "reseau"] })], [], [base]).updates.length, 0,
-      "étiquettes réordonnées/dupliquées côté tracker → AUCUN delta (normalisation déterministe du partagé)");
-    ck.eq(plan([pivot({ status_category: "en-recette-maison" })], [], [base]).updates[0].patch.status_category, "unknown",
-      "catégorie inconnue → CLAMPÉE sur `unknown` par la frontière partagée (une passe entière ne tombe pas pour un ticket mal classé)");
-    ck.eq(IssueReconcile.sourceOf(pivot({ orphan: true, last_sync: "vieux" }), NOW).orphan, false,
-      "sourceOf : un ticket RÉSOLU est orphan:false quoi qu'en dise l'adaptateur — le drapeau appartient au SERVICE");
-    ck.eq(IssueReconcile.sourceOf(pivot({ last_sync: "vieux" }), NOW).last_sync, NOW,
-      "sourceOf : c'est la PASSE qui date (l'adaptateur ne voit qu'un lot, il ne peut pas dater une passe)");
-  }
-  });
-
-  /* ============ SERVEUR : périmètre d'une passe (plafond + roulement) ============ */
-
-  await section("Serveur : IssueSyncService.passScope — plafond de passe, ordre stable et ROULEMENT (aucune zone morte)", async () => {
-  {
-    const { IssueSyncService } = SERVER("issues/IssueSyncService.js");
+    const { TrackerPassScope } = SERVER("issues/TrackerPassScope.js");
     const t = (extId, lastSync) => ({ id: "x-" + extId, ext_id: extId, last_sync: lastSync });
     const assiette = [t("a", "2026-08-05"), t("b", ""), t("c", "2026-08-01")];
 
     // -- Ordre STABLE : jamais synchronisés d'abord — la priorité SENSÉE du premier tour. --
-    const full = IssueSyncService.passScope(assiette, 10);
+    const full = TrackerPassScope.compute(assiette, 10);
     ck.eq(full.batch.join(","), "b,c,a", "ordre : `last_sync` CROISSANT — les jamais synchronisés (\"\") passent en tête");
     ck.eq(full.skipped, 0, "sous le plafond → rien de reporté");
     ck.eq(full.nextStart, 0, "sous le plafond → aucun roulement à mémoriser");
 
     // -- PLAFOND + ROULEMENT : l'assiette entière défile en ⌈N/plafond⌉ passes, MÊME si rien ne
     //    change (l'idempotence n'avance pas `last_sync`, donc un simple tri ne suffirait PAS). --
-    const p1 = IssueSyncService.passScope(assiette, 2, 0);
+    const p1 = TrackerPassScope.compute(assiette, 2, 0);
     ck.eq(p1.batch.join(","), "b,c", "plafond : seuls N identifiants sont interrogés");
     ck.eq(p1.skipped, 1, "plafond : le reliquat est COMPTÉ (il sera journalisé et remonté au statut)");
-    const p2 = IssueSyncService.passScope(assiette, 2, p1.nextStart);
+    const p2 = TrackerPassScope.compute(assiette, 2, p1.nextStart);
     ck.eq(p2.batch.join(","), "a,b", "ROULEMENT : la passe suivante reprend où la précédente s'est arrêtée (fenêtre circulaire)");
-    ck(p2.batch.includes("a"), "ROULEMENT : … donc le ticket reporté EST interrogé — aucune zone morte, quoi qu'il arrive aux données");
-    const p3 = IssueSyncService.passScope(assiette, 2, p2.nextStart);
+    ck(p2.batch.includes("a"), "ROULEMENT : … donc l'objet reporté EST interrogé — aucune zone morte, quoi qu'il arrive aux données");
+    const p3 = TrackerPassScope.compute(assiette, 2, p2.nextStart);
     ck.eq(p3.batch.join(","), "c,a", "ROULEMENT : le tour se poursuit indéfiniment");
 
     // -- Robustesse : curseur périmé, doublons, identités vides, plafond absurde. --
-    ck.eq(IssueSyncService.passScope(assiette, 2, 999).batch.length, 2, "curseur hors bornes (tickets retirés depuis) → ramené dans les bornes, jamais d'exception");
-    ck.eq(IssueSyncService.passScope(assiette, 2, -5).batch.length, 2, "curseur négatif → idem (modulo positif)");
-    ck.eq(IssueSyncService.passScope([t("a", ""), t("a", ""), t("", "")], 10).batch.join(","), "a", "assiette : doublon d'ext_id dédupliqué, ext_id vide écarté");
-    ck.eq(IssueSyncService.passScope([t("a", "")], 0).batch.length, 1, "plafond absurde (0) → AUCUN plafond, plutôt qu'une passe morte");
-    ck.eq(IssueSyncService.passScope([], 10).batch.length, 0, "assiette vide → rien à demander");
+    ck.eq(TrackerPassScope.compute(assiette, 2, 999).batch.length, 2, "curseur hors bornes (objets retirés depuis) → ramené dans les bornes, jamais d'exception");
+    ck.eq(TrackerPassScope.compute(assiette, 2, -5).batch.length, 2, "curseur négatif → idem (modulo positif)");
+    ck.eq(TrackerPassScope.compute([t("a", ""), t("a", ""), t("", "")], 10).batch.join(","), "a", "assiette : doublon d'ext_id dédupliqué, ext_id vide écarté");
+    ck.eq(TrackerPassScope.compute([t("a", "")], 0).batch.length, 1, "plafond absurde (0) → AUCUN plafond, plutôt qu'une passe morte");
+    ck.eq(TrackerPassScope.compute([], 10).batch.length, 0, "assiette vide → rien à demander");
+
+    // -- NOMS DE CHAMP PARAMÉTRÉS : ce que l'extraction hors du service de synchro a ajouté. Le
+    //    module ne présume plus rien de la collection qu'il borne — le PONT vers Jira (lot P2)
+    //    bornera des interventions à colonnes `tracker_*`, pas des tickets à colonnes `ext_id`. --
+    const tracked = [
+      { tracker_ext_id: "j-2", tracker_last_sync: "2026-08-05" },
+      { tracker_ext_id: "j-1", tracker_last_sync: "" },
+    ];
+    ck.eq(TrackerPassScope.compute(tracked, 10, 0, "tracker_ext_id", "tracker_last_sync").batch.join(","), "j-1,j-2",
+      "champs paramétrés : la même règle s'applique à d'AUTRES colonnes (ordre par le champ de sync fourni)");
+    ck.eq(TrackerPassScope.compute(tracked, 10).batch.length, 0,
+      "champs paramétrés : … et les DÉFAUTS (`ext_id`/`last_sync`) ne matchent alors rien — aucune identité devinée");
   }
   });
 
-  /* ============ SERVEUR : synchro + suivi de bout en bout (DocumentStore RÉEL) ============ */
+  /* ============ SERVEUR : invariants de contrat et d'agnosticisme ============ */
 
-  await section("Serveur : IssueSyncService — bout en bout (suivi, triptyque, idempotence, introuvable, plafond, anti-rafale)", async () => {
-    let Sqlite = null;
-    try {
-      const Candidate = require(path.join(__dirname, "..", "..", "src-server", "node_modules", "better-sqlite3"));
-      const probe = new Candidate(":memory:"); probe.close();
-      Sqlite = Candidate;
-    } catch (_) { /* module/binaire absent → section sautée */ }
-    if (!Sqlite) { ck(true, "better-sqlite3 indisponible → section IssueSyncService sautée"); return; }
-
-    const fs = require("fs"), os = require("os");
-    const { DocumentStore } = SERVER("documents.js");
-    const { IssueSyncService } = SERVER("issues/IssueSyncService.js");
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dcm-issuesync-"));
-    try {
-      const docs = new DocumentStore(dir, Sqlite);
-      const doc = docs.create("infra-test");
-      const repo = docs.repo(doc.id);
-
-      const cfg = (id) => ({ id, kind: "jira", url: "https://exemple.atlassian.net", token: "K", account: "svc@exemple.be", interval_sec: 0, timeout_sec: 20, options: {} });
-      let configured = [cfg("tracker-1")];
-      const providers = {
-        configuredDocIds: () => [doc.id],
-        providersFor: (d) => (d === doc.id ? configured : []),
-        summariesFor: (d) => providers.providersFor(d).map((c) => ({ id: c.id, kind: c.kind, interval_sec: c.interval_sec })),
-      };
-
-      // Tickets CONNUS du tracker, par instance de provider. Le stub ESTAMPILLE `provider_id` au
-      // retour, exactement comme le fait tout adaptateur réel (le décodeur pur, lui, l'ignore).
-      const remote = new Map([["tracker-1", new Map()], ["tracker-2", new Map()]]);
-      const MOVED = { key: "OPS-45", url: "https://exemple.atlassian.net/browse/OPS-45" };
-      const ticket = (over) => ({
-        ext_id: "10042", provider_id: "", key: "INFRA-123", summary: "Panne de la baie B12",
-        status: "En cours", status_category: "in_progress", issue_type: "Bug", priority: "Haute",
-        assignee: "Alice", reporter: "Bob", labels: ["reseau"], resolution: null,
-        created_src: "2026-08-01T10:00:00.000Z", updated_src: "2026-08-02T10:00:00.000Z",
-        url: "https://exemple.atlassian.net/browse/INFRA-123", orphan: false, last_sync: "", ...over,
-      });
-      remote.get("tracker-1").set("10042", ticket());
-
-      const calls = { resolve: [], lookup: [] };
-      let failResolve = false, failLookup = false, gate = null;
-      const makeAdapter = (config) => ({
-        kind: config.kind, config,
-        test: async () => ({ ok: true, kind: config.kind, version: null, supported: true, message: "" }),
-        resolve: async (extIds) => {
-          calls.resolve.push({ provider: config.id, ids: extIds.slice() });
-          if (gate) await gate;
-          if (failResolve) throw new Error("Tracker : délai dépassé (20000 ms)");
-          const known = remote.get(config.id) || new Map();
-          const found = [], missing = [];
-          for (const id of extIds) {
-            const r = known.get(id);
-            if (r) found.push({ ...r, provider_id: config.id }); else missing.push(id);
-          }
-          return { found, missing };
-        },
-        lookup: async (reference) => {
-          calls.lookup.push({ provider: config.id, reference });
-          if (failLookup) throw new Error("Tracker : 401 — jeton refusé");
-          for (const r of (remote.get(config.id) || new Map()).values()) {
-            if (r.key === reference || r.ext_id === reference || r.url === reference) return { ...r, provider_id: config.id };
-          }
-          return null;
-        },
-        createIssue: async () => { throw new Error("hors périmètre du lot L3"); },
-      });
-
-      const live = { events: [], publish(docId, data) { this.events.push({ docId, data }); } };
-      const logged = [];
-      const log = { info: (...a) => logged.push("info " + a.join(" ")), warn: (...a) => logged.push("warn " + a.join(" ")), error: (...a) => logged.push("error " + a.join(" ")) };
-      // minIntervalSec 0 : anti-rafale neutralisé pour dérouler le scénario (testé à part plus bas).
-      const service = new IssueSyncService(docs, live, providers, log, makeAdapter, 0);
-
-      // -- 1) ASSIETTE VIDE : un provider fraîchement configuré n'est PAS en erreur, et surtout on
-      //       n'appelle même pas le tracker (contraste net avec vm//wifi/, qui inventorient toujours).
-      const rev0 = docs.getRev(doc.id);
-      const r0 = await service.syncDocument(doc.id);
-      ck(r0.length === 1 && r0[0].ok === true, "assiette VIDE : la passe RÉUSSIT (rien à rafraîchir n'est pas une erreur)");
-      ck(/aucun ticket suivi/.test(r0[0].message), "… et le statut renvoie vers « Suivre un ticket »");
-      ck.eq(calls.resolve.length, 0, "assiette vide → le tracker n'est même PAS appelé (l'assiette vient du DOCUMENT)");
-      ck.eq(docs.getRev(doc.id), rev0, "assiette vide → aucune révision consommée");
-
-      // -- 2) « SUIVRE UN TICKET » : la porte d'entrée n°1 (décision D4). --
-      const f1 = await service.followReference(doc.id, "INFRA-123");
-      ck(f1.ok === true && f1.already === false, "suivi : référence reconnue → enregistrement CRÉÉ");
-      ck.eq(f1.provider_id, "tracker-1", "suivi : le provider qui a RECONNU la référence est rendu");
-      ck.eq(f1.issue.ext_id, "10042", "🚨 suivi : c'est l'identifiant INTERNE qui est persisté, jamais la clé saisie (risque n°1 du chantier)");
-      ck.eq(f1.issue.key, "INFRA-123", "suivi : la clé lisible est conservée comme champ d'AFFICHAGE");
-      ck(f1.issue.notes === "" && f1.issue.description === "" && JSON.stringify(f1.issue.targets) === "[]", "suivi : champs LOCAUX à leur défaut (l'utilisateur les enrichit ensuite)");
-      ck(f1.issue.last_sync !== "" && f1.issue.orphan === false, "suivi : l'enregistrement est estampillé par la passe, et résolu");
-      ck(docs.getRev(doc.id) > rev0, "suivi : révision consommée — le triptyque COMPLET, comme toute écriture");
-      ck.eq(live.events.length, 1, "suivi : 1 événement SSE publié");
-      ck(live.events[0].data.changeset.collections.join(",") === "issues" && live.events[0].data.origin === "issue-sync",
-        "suivi : changeset ciblé sur `issues` (les autres clients rechargent en granulaire)");
-
-      // -- 3) IDEMPOTENCE de la porte d'entrée : re-suivre ne crée pas de doublon. --
-      const revAfterFollow = docs.getRev(doc.id);
-      const sseAfterFollow = live.events.length;
-      const f2 = await service.followReference(doc.id, "INFRA-123");
-      ck(f2.ok === true && f2.already === true, "re-suivi : signalé « déjà suivi » (l'UI ne doit pas annoncer une création fantôme)");
-      ck.eq(repo.findBy("issues", "provider_id", "tracker-1").length, 1, "re-suivi : AUCUN doublon créé");
-      ck.eq(docs.getRev(doc.id), revAfterFollow, "re-suivi sans changement : aucune révision consommée");
-      ck.eq(live.events.length, sseAfterFollow, "re-suivi sans changement : aucun SSE");
-
-      // -- 4) 🚨 DÉPLACEMENT DE PROJET : la clé change, l'identité NON (risque n°1 du cadrage). --
-      remote.get("tracker-1").set("10042", ticket(MOVED));
-      const f3 = await service.followReference(doc.id, "OPS-45");
-      ck(f3.ok === true && f3.already === true, "déplacement de projet : la NOUVELLE clé désigne le MÊME ticket (identité = ext_id) → « déjà suivi »");
-      ck.eq(repo.findBy("issues", "provider_id", "tracker-1").length, 1, "déplacement : toujours UN seul enregistrement — ni doublon, ni orphelin (le défaut qui serait resté silencieux)");
-      ck.eq(f3.issue.key, "OPS-45", "déplacement : la clé, simple champ d'affichage, est rafraîchie au passage");
-
-      // -- 5) SUIVI PAR URL (ce que l'utilisateur a réellement sous la main). --
-      ck.eq((await service.followReference(doc.id, MOVED.url)).already, true, "suivi par URL collée : même ticket reconnu (la référence peut être une clé OU une URL)");
-
-      // -- 6) RÉFÉRENCE INCONNUE : refus ACTIONNABLE et surtout AUCUN enregistrement fantôme. --
-      const revBeforeBad = docs.getRev(doc.id);
-      const lookupsBefore = calls.lookup.length;
-      const bad = await service.followReference(doc.id, "NEXISTE-PAS-1");
-      ck.eq(bad.ok, false, "référence inconnue → REFUS");
-      ck.eq(bad.issue, null, "référence inconnue : rien n'est rendu…");
-      ck.eq(repo.findBy("issues", "provider_id", "tracker-1").length, 1, "… et surtout RIEN n'est créé (on ne persiste pas un ticket fantôme)");
-      ck(/introuvable ou inaccessible/.test(bad.message) && /droits/.test(bad.message), "référence inconnue : message ACTIONNABLE (vérifier la clé/URL ET les droits du compte de service)");
-      ck.eq(docs.getRev(doc.id), revBeforeBad, "référence inconnue : aucune révision consommée");
-      const blank = await service.followReference(doc.id, "   ");
-      ck(blank.ok === false && /INFRA-123/.test(blank.message), "référence VIDE : refus qui montre la forme attendue");
-      ck.eq(calls.lookup.length, lookupsBefore + 1, "référence vide : le tracker n'est même pas interrogé");
-
-      // -- 7) PROVIDER EN PANNE ≠ TICKET INTROUVABLE : le message doit envoyer au bon endroit. --
-      failLookup = true;
-      const down = await service.followReference(doc.id, "INFRA-999");
-      ck(down.ok === false && /jeton refusé/.test(down.message), "provider en PANNE : le message porte l'échec du provider, pas un « introuvable » qui ferait corriger la saisie");
-      failLookup = false;
-
-      // -- 8) SYNCHRO IDEMPOTENTE de bout en bout : ni révision, ni SSE. --
-      const revBeforeSync = docs.getRev(doc.id);
-      const sseBeforeSync = live.events.length;
-      const s1 = await service.syncDocument(doc.id);
-      ck(s1[0].ok === true && s1[0].counts.unchanged === 1, "synchro : le ticket suivi est déjà à jour");
-      ck.eq(s1[0].counts.tracked, 1, "compteurs : l'assiette SUIVIE est remontée (elle est pilotée par l'utilisateur, donc à surveiller)");
-      ck.eq(docs.getRev(doc.id), revBeforeSync, "IDEMPOTENCE : rien de changé → AUCUNE révision");
-      ck.eq(live.events.length, sseBeforeSync, "IDEMPOTENCE : … et AUCUN événement SSE");
-      ck.eq(calls.resolve[calls.resolve.length - 1].ids.join(","), "10042", "résolution : les identifiants INTERNES du document partent EN UN LOT (jamais un appel par ticket)");
-
-      // -- 9) Champs SOURCE écrasés, champs LOCAUX (dont le rattachement manuel) préservés. --
-      const one = repo.findBy("issues", "provider_id", "tracker-1")[0];
-      repo.transact({ updates: [{ collection: "issues", record: { ...one, notes: "à traiter lundi", targets: ["equipment:eq-x"] } }] }, docs.markChanged(doc.id));
-      remote.get("tracker-1").set("10042", ticket({ ...MOVED, status: "Terminé", status_category: "done", resolution: "Corrigé", assignee: null }));
-      const s2 = await service.syncDocument(doc.id);
-      ck.eq(s2[0].counts.updated, 1, "synchro : 1 ticket mis à jour");
-      const after = repo.getOne("issues", one.id);
-      ck(after.status === "Terminé" && after.status_category === "done" && after.resolution === "Corrigé" && after.assignee === null,
-        "champs SOURCE écrasés par la passe (y compris un retour à null)");
-      ck(after.notes === "à traiter lundi" && JSON.stringify(after.targets) === '["equipment:eq-x"]',
-        "champs LOCAUX préservés : notes ET rattachement MANUEL `targets` (la relecture au moment d'écrire les protège d'une édition concurrente)");
-
-      // -- 10) 🚨 INVARIANT DE BOUT EN BOUT : un ticket que le tracker connaît mais que le document
-      //        ne SUIT PAS n'entre jamais par la synchro. --
-      remote.get("tracker-1").set("777", ticket({ ext_id: "777", key: "INFRA-777", url: "https://exemple.atlassian.net/browse/INFRA-777" }));
-      const revBeforeExtra = docs.getRev(doc.id);
-      await service.syncDocument(doc.id);
-      ck.eq(repo.findBy("issues", "provider_id", "tracker-1").length, 1, "🚨 ticket connu du tracker mais NON suivi → il n'entre JAMAIS par une passe de synchro");
-      ck.eq(calls.resolve[calls.resolve.length - 1].ids.join(","), "10042", "… il n'est d'ailleurs même pas demandé : la synchro interroge l'assiette du DOCUMENT");
-      ck.eq(docs.getRev(doc.id), revBeforeExtra, "… et la passe ne consomme aucune révision");
-
-      // -- 11) INTROUVABLE (aller) : drapeau posé, enregistrement CONSERVÉ. --
-      remote.get("tracker-1").delete("10042");
-      const s4 = await service.syncDocument(doc.id);
-      ck.eq(s4[0].counts.missing, 1, "ticket disparu du tracker → 1 « introuvable »");
-      const lost = repo.getOne("issues", one.id);
-      ck(lost.orphan === true && lost.notes === "à traiter lundi", "introuvable : drapeau posé, enregistrement CONSERVÉ avec ses enrichissements (JAMAIS de delete)");
-      ck(/introuvable/.test(s4[0].message), "le résumé parle d'« introuvable(s) » — un ticket suivi qui disparaît est un incident, pas une déconnexion banale");
-      ck.eq((await service.syncDocument(doc.id))[0].counts.missing, 0, "introuvable DÉJÀ marqué → aucune nouvelle opération (idempotence)");
-
-      // -- 12) INTROUVABLE (retour) : le drapeau retombe tout seul. --
-      remote.get("tracker-1").set("10042", ticket({ ...MOVED, status: "Terminé", status_category: "done", resolution: "Corrigé", assignee: null }));
-      const s6 = await service.syncDocument(doc.id);
-      ck.eq(s6[0].counts.updated, 1, "retour : le ticket redevenu résolu est mis à jour");
-      ck.eq(repo.getOne("issues", one.id).orphan, false, "🚨 RETOUR D'ORPHELINAT de bout en bout : le drapeau retombe sans cas particulier");
-
-      // -- 13) CATÉGORIE inconnue : la passe ABOUTIT (le clamp partagé la rend valide par construction). --
-      remote.get("tracker-1").set("10042", ticket({ ...MOVED, status_category: "en-recette-maison" }));
-      const s7 = await service.syncDocument(doc.id);
-      ck(s7[0].ok === true, "catégorie d'état inconnue : la passe ABOUTIT (autorité serveur satisfaite PAR CONSTRUCTION)");
-      ck.eq(repo.getOne("issues", one.id).status_category, "unknown", "… et la valeur est rangée sur `unknown` plutôt que de faire refuser le lot entier");
-
-      // -- 14) RÉSOLUTION EN ÉCHEC : statut en erreur, document INTACT, last_success conservé. --
-      failResolve = true;
-      const revBeforeFail = docs.getRev(doc.id);
-      const s8 = await service.syncDocument(doc.id);
-      ck(s8[0].ok === false && /délai dépassé/.test(s8[0].message), "échec de résolution → statut en erreur (message du tracker)");
-      ck(s8[0].last_success !== null, "last_success CONSERVÉ malgré l'échec (« en erreur depuis…, dernière réussite à… »)");
-      ck.eq(docs.getRev(doc.id), revBeforeFail, "document INTACT après échec (aucune écriture partielle)");
-      failResolve = false;
-
-      // -- 15) STATUT : fusion config × runtime, purge des fantômes, document non configuré. --
-      const st = service.statusFor(doc.id);
-      ck(st.length === 1 && st[0].provider_id === "tracker-1", "statusFor : fusion config déclarée × état runtime");
-      ck.eq(service.statusFor("doc-inexistant").length, 0, "document non configuré → aucun provider (feature dormante)");
-      configured = [];
-      ck.eq(service.statusFor(doc.id).length, 0, "provider RETIRÉ de la config → statut purgé (aucun fantôme en mémoire)");
-      configured = [cfg("tracker-1")];
-
-      // -- 16) PLAFOND DE PASSE : borné, JOURNALISÉ, remonté au statut, et à ROULEMENT. --
-      await service.followReference(doc.id, "INFRA-777");   // second ticket dans l'assiette
-      ck.eq(repo.findBy("issues", "provider_id", "tracker-1").length, 2, "assiette : 2 tickets suivis (entrés par la SEULE porte qui existe)");
-      const capLog = [];
-      const capLogger = { info: () => {}, warn: (...a) => capLog.push(a.join(" ")), error: () => {} };
-      const capped = new IssueSyncService(docs, live, providers, capLogger, makeAdapter, 0, undefined, 1);
-      const c1 = await capped.syncDocument(doc.id);
-      ck.eq(c1[0].counts.queried, 1, "PLAFOND : une seule demande par passe");
-      ck.eq(c1[0].counts.skipped, 1, "PLAFOND : le reliquat est COMPTÉ");
-      ck(/PLAFOND DE PASSE ATTEINT/.test(c1[0].message), "PLAFOND : le statut le DIT — un cap silencieux se lirait « tout est à jour » alors que la moitié n'a pas été regardée");
-      ck(capLog.some((l) => /PLAFOND/.test(l)), "PLAFOND : … et il est JOURNALISÉ côté serveur");
-      const asked1 = calls.resolve[calls.resolve.length - 1].ids.join(",");
-      await capped.syncDocument(doc.id);
-      const asked2 = calls.resolve[calls.resolve.length - 1].ids.join(",");
-      ck(asked1 !== asked2, "PLAFOND : la passe suivante interroge l'AUTRE ticket (roulement — aucune zone morte, même si rien ne change)");
-
-      // -- 16 bis) PURGE DU CURSEUR DE ROULEMENT au retrait du provider. Le statut fantôme est déjà
-      //       purgé (cas 15) ; le CURSEUR de plafond est indexé par le MÊME couple document×provider
-      //       et doit vieillir selon la MÊME règle — sinon il survit indéfiniment à un
-      //       `DELETE /providers/:id`. La fuite est bornée et sans effet fonctionnel (une entrée
-      //       orpheline n'est plus jamais relue), mais purger un état runtime et pas l'autre est un
-      //       piège de relecture.
-      //       OBSERVABLE : après purge, une passe plafonnée REPART DU DÉBUT de l'assiette au lieu de
-      //       poursuivre le roulement. Il faut donc TROIS tickets pour distinguer les deux — avec
-      //       deux, le roulement revient au premier tout seul et le test serait vacuous.
-      remote.get("tracker-1").set("888", ticket({ ext_id: "888", key: "INFRA-888", url: "https://exemple.atlassian.net/browse/INFRA-888" }));
-      await service.followReference(doc.id, "INFRA-888");
-      ck.eq(repo.findBy("issues", "provider_id", "tracker-1").length, 3, "assiette : 3 tickets suivis (le minimum pour distinguer « roulement » de « remise à zéro »)");
-      const rolling = new IssueSyncService(docs, live, providers, capLogger, makeAdapter, 0, undefined, 1);
-      const askedRoll = [];
-      for (let pass = 0; pass < 2; pass++) { await rolling.syncDocument(doc.id); askedRoll.push(calls.resolve[calls.resolve.length - 1].ids.join(",")); }
-      ck(askedRoll[0] !== askedRoll[1], "roulement : deux passes plafonnées consécutives n'interrogent pas le même ticket");
-      configured = [];
-      rolling.statusFor(doc.id);   // point de passage de la purge — il connaît la config DÉCLARÉE
-      configured = [cfg("tracker-1")];
-      await rolling.syncDocument(doc.id);
-      ck.eq(calls.resolve[calls.resolve.length - 1].ids.join(","), askedRoll[0],
-        "🚨 curseur PURGÉ avec le statut au retrait du provider : la passe suivante REPART DU DÉBUT de l'assiette (sans purge, elle poursuivrait le roulement sur le 3ᵉ ticket)");
-
-      // -- 17) ANTI-CHEVAUCHEMENT : timer + clic manuel ne doublent pas la passe. --
-      let release = null;
-      gate = new Promise((r) => { release = r; });
-      const overlapping = new IssueSyncService(docs, live, providers, log, makeAdapter, 0);
-      const inflight = overlapping.syncDocument(doc.id);
-      const concurrent = await overlapping.syncDocument(doc.id);
-      ck(/déjà en cours/.test(concurrent[0].message), "anti-chevauchement : la seconde passe n'en lance PAS une nouvelle");
-      ck.eq(concurrent[0].last_attempt, null, "… et son statut synthétique n'est PAS stocké (il masquerait le résultat réel de la passe en cours)");
-      release();
-      gate = null;
-      await inflight;
-
-      // -- 18) ANTI-RAFALE : deux clics quasi simultanés = UNE seule résolution. --
-      const before = calls.resolve.length;
-      const throttled = new IssueSyncService(docs, live, providers, log, makeAdapter, 3600);
-      const t1 = await throttled.syncDocument(doc.id);
-      const t2 = await throttled.syncDocument(doc.id);
-      ck.eq(calls.resolve.length, before + 1, "relance sous le délai minimal → UNE seule résolution");
-      ck(/relance ignorée/.test(t2[0].message), "… la seconde reçoit le dernier statut, annoté « relance ignorée »");
-      ck.eq(t1[0].last_attempt, t2[0].last_attempt, "… même horodatage de tentative (aucune nouvelle passe)");
-      ck(!/relance ignorée/.test(throttled.statusFor(doc.id)[0].message), "… l'annotation n'est PAS stockée dans le statut persistant");
-
-      // -- 19) PRODUCTEUR de problèmes (pont vers notify) : raise en échec, resolve au retour. --
-      const problems = { raised: [], resolved: [], raise(k, e) { this.raised.push({ k, e }); }, resolve(k) { this.resolved.push(k); } };
-      const reported = new IssueSyncService(docs, live, providers, log, makeAdapter, 0, problems);
-      failResolve = true;
-      await reported.syncDocument(doc.id);
-      ck.eq(problems.raised.length, 1, "échec → 1 signalement levé");
-      ck.eq(problems.raised[0].k, "issue-sync:" + doc.id + ":tracker-1", "clé STABLE par couple document×provider (le moteur notify déduplique dessus)");
-      ck.eq(problems.raised[0].e.event_type, "issue-sync-failure", "type d'événement dédié à la feature");
-      failResolve = false;
-      await reported.syncDocument(doc.id);
-      ck.eq(problems.resolved.length, 1, "retour à la normale → clôture (resolve)");
-
-      // -- 20) MULTI-PROVIDERS : la référence est résolue par celui qui la RECONNAÎT. --
-      remote.get("tracker-2").set("55", ticket({ ext_id: "55", key: "SUP-9", url: "https://autre.atlassian.net/browse/SUP-9" }));
-      configured = [cfg("tracker-1"), cfg("tracker-2")];
-      const f4 = await service.followReference(doc.id, "SUP-9");
-      ck(f4.ok === true && f4.provider_id === "tracker-2", "multi-providers : c'est le provider qui RECONNAÎT la référence qui l'emporte (premier reconnaissant, ordre de configuration)");
-      ck.eq(repo.findBy("issues", "provider_id", "tracker-2").length, 1, "multi-providers : l'enregistrement est estampillé du BON provider (c'est lui qui délimitera son périmètre de synchro)");
-      const multi = await service.syncDocument(doc.id);
-      ck.eq(multi.length, 2, "multi-providers : chaque instance fait sa propre passe");
-      ck(multi.every((s) => s.ok), "multi-providers : … et chacune ne voit QUE ses tickets (périmètre par provider_id)");
-      configured = [cfg("tracker-1")];
-    } finally {
-      try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* dossier temp (handles longs sous Windows) */ }
-    }
-  });
-
-  await section("Serveur L5 : IssueSyncService.openIssue — ordre tracker→local, ÉCHEC PARTIEL, message du tracker INTACT, provider", async () => {
-    let Sqlite = null;
-    try {
-      const Candidate = require(path.join(__dirname, "..", "..", "src-server", "node_modules", "better-sqlite3"));
-      const probe = new Candidate(":memory:"); probe.close();
-      Sqlite = Candidate;
-    } catch (_) { /* module/binaire absent → section sautée */ }
-    if (!Sqlite) { ck(true, "better-sqlite3 indisponible → section openIssue sautée"); return; }
-
-    const fs = require("fs"), os = require("os");
-    const { DocumentStore } = SERVER("documents.js");
-    const { IssueSyncService } = SERVER("issues/IssueSyncService.js");
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dcm-issueopen-"));
-    try {
-      const docs = new DocumentStore(dir, Sqlite);
-      const doc = docs.create("infra-open");
-      const repo = docs.repo(doc.id);
-
-      const cfg = (id, options) => ({ id, kind: "jira", url: "https://exemple.atlassian.net", token: "K", account: "svc@exemple.be", interval_sec: 0, timeout_sec: 20, options: options || { project_key: "INFRA", issue_type: "Tâche" } });
-      let configured = [cfg("tracker-1")];
-      const providers = {
-        configuredDocIds: () => [doc.id],
-        providersFor: (d) => (d === doc.id ? configured : []),
-        summariesFor: (d) => providers.providersFor(d).map((c) => ({ id: c.id, kind: c.kind, interval_sec: c.interval_sec })),
-      };
-
-      // ADAPTATEUR STUB qui JOURNALISE TOUT ce qu'on lui demande — c'est ce journal qui permet de
-      // prouver l'ORDRE des étapes et, surtout, l'ABSENCE de suppression compensatoire. Le contrat
-      // n'a d'ailleurs AUCUNE méthode de suppression : `deleteIssue` n'existe ici que pour que le
-      // test puisse affirmer qu'on n'a jamais essayé d'en appeler une (une assertion sur une méthode
-      // absente ne prouverait rien).
-      const calls = [];
-      let refusal = null;
-      let nextCreated = null;
-      const makeAdapter = (config) => ({
-        kind: config.kind, config,
-        test: async () => ({ ok: true, kind: config.kind, version: null, supported: true, message: "" }),
-        resolve: async (ids) => { calls.push({ m: "resolve", provider: config.id, ids: ids.slice() }); return { found: [], missing: ids.slice() }; },
-        lookup: async () => { calls.push({ m: "lookup", provider: config.id }); return null; },
-        createIssue: async (input) => {
-          calls.push({ m: "createIssue", provider: config.id, input: { ...input } });
-          if (refusal) throw new Error(refusal);
-          return Object.assign({
-            ext_id: "10500", provider_id: config.id, key: "INFRA-500", summary: input.summary,
-            status: "À faire", status_category: "todo", issue_type: "Tâche", priority: null,
-            assignee: null, reporter: "svc", labels: [], resolution: null,
-            created_src: "2026-08-07T09:00:00.000Z", updated_src: "2026-08-07T09:00:00.000Z",
-            url: "https://exemple.atlassian.net/browse/INFRA-500", orphan: false, last_sync: "",
-          }, nextCreated || {});
-        },
-        deleteIssue: async () => { calls.push({ m: "deleteIssue", provider: config.id }); },
-      });
-
-      const live = { events: [], publish(docId, data) { this.events.push({ docId, data }); } };
-      const logged = [];
-      const log = { info: (...a) => logged.push("info " + a.join(" ")), warn: (...a) => logged.push("warn " + a.join(" ")), error: (...a) => logged.push("error " + a.join(" ")) };
-      const service = new IssueSyncService(docs, live, providers, log, makeAdapter, 0);
-
-      // -- 1) SUCCÈS : création distante PUIS écriture locale, avec les cibles fournies. --
-      const rev0 = docs.getRev(doc.id);
-      const ok = await service.openIssue(doc.id, { summary: "  Panne de la baie B12  ", description: "détail\nsur deux lignes", targets: ["equipment:eq-1", "vm:vm-9"] });
-      ck.eq(ok.ok, true, "ouverture : la création aboutit");
-      ck.eq(calls.filter((c) => c.m === "createIssue").length, 1, "ouverture : UN seul appel de création chez le tracker");
-      ck.eq(calls[0].input.summary, "Panne de la baie B12", "ouverture : le titre est ROGNÉ avant d'être envoyé");
-      ck(!("project" in calls[0].input) && !("issue_type" in calls[0].input),
-        "🚨 ouverture : ni PROJET ni TYPE ne transitent par l'appelant — ce sont des OPTIONS du provider (l'utilisateur n'a pas à connaître la config du tracker, et un client ne doit pas pouvoir viser un autre projet)");
-      ck.eq(ok.issue.ext_id, "10500", "ouverture : l'enregistrement local porte l'identifiant INTERNE du ticket créé");
-      ck.eq(ok.issue.key, "INFRA-500", "ouverture : … et sa clé lisible");
-      ck.eq(ok.issue.provider_id, "tracker-1", "ouverture : estampillé du provider (c'est lui qui délimitera son périmètre de synchro)");
-      ck.eq(JSON.stringify(ok.issue.targets), '["equipment:eq-1","vm:vm-9"]', "ouverture : les CIBLES fournies sont liées D'EMBLÉE (un ticket ouvert depuis une fiche naît rattaché à l'objet)");
-      ck.eq(ok.issue.description, "détail\nsur deux lignes", "ouverture : la description SAISIE ICI est conservée en champ LOCAL (elle n'est pas rapatriée du tracker — la v1 ne la lit pas)");
-      ck.eq(ok.created_key, null, "ouverture réussie : aucune clé d'échec partiel à rattraper");
-      ck(docs.getRev(doc.id) > rev0, "ouverture : révision consommée — le triptyque COMPLET, comme toute écriture");
-      ck.eq(live.events.length, 1, "ouverture : 1 événement SSE publié");
-      ck.eq(live.events[0].data.changeset.collections.join(","), "issues", "ouverture : changeset ciblé sur `issues` (rechargement granulaire des autres clients)");
-      ck.eq(repo.findBy("issues", "ext_id", "10500").length, 1, "ouverture : l'enregistrement est bien DANS le document");
-
-      // -- 2) 🚨 ORDRE : la création DISTANTE précède l'écriture LOCALE. On le prouve par le seul
-      //       moyen honnête : un dépôt qui JETTE à l'écriture. Si l'ordre était inversé, le tracker
-      //       ne serait jamais appelé. --
-      const realRepo = docs.repo(doc.id);
-      const brokenRepo = {
-        findBy: (c, f, v) => realRepo.findBy(c, f, v),
-        getOne: (c, i) => realRepo.getOne(c, i),
-        transact: () => { throw new Error("disque plein"); },
-      };
-      const brokenDocs = { get: (id) => docs.get(id), repo: () => brokenRepo, markChanged: (id) => docs.markChanged(id) };
-      const brokenService = new IssueSyncService(brokenDocs, live, providers, log, makeAdapter, 0);
-      const before = calls.length;
-      const partial = await brokenService.openIssue(doc.id, { summary: "Second ticket", description: "", targets: [] });
-      ck.eq(partial.ok, false, "ÉCHEC PARTIEL : l'opération est un échec…");
-      ck.eq(partial.failure, "partial", "… d'une nature PROPRE (ni « demande invalide », ni « refus du tracker ») — c'est elle qui décide du code HTTP");
-      ck.eq(calls.filter((c) => c.m === "createIssue").length, 2, "🚨 ORDRE PROUVÉ : le tracker A ÉTÉ appelé alors que l'écriture locale échoue (l'inverse laisserait une ligne mensongère dans le document)");
-      ck.eq(partial.created_key, "INFRA-500", "🚨 ÉCHEC PARTIEL : la réponse PORTE LA CLÉ créée — sans elle, un ticket existerait chez le tracker sans que personne ne sache lequel");
-      ck(/créé chez le tracker/.test(partial.message) && /Suivre un ticket/.test(partial.message) && /INFRA-500/.test(partial.message),
-        "ÉCHEC PARTIEL : le message DIT ce qui s'est passé et la suite à donner (« Suivre un ticket » avec cette clé)");
-      ck.eq(calls.slice(before).filter((c) => c.m === "deleteIssue").length, 0,
-        "🚨 ÉCHEC PARTIEL : AUCUNE suppression compensatoire chez le tracker — on ne détruit pas dans un système tiers pour rattraper NOTRE écriture (elle pourrait échouer, et le ticket a pu être vu/assigné)");
-      ck.eq(repo.findBy("issues", "key", "INFRA-500").length, 1, "ÉCHEC PARTIEL : aucun enregistrement local n'a été créé (seul celui du cas 1 subsiste)");
-      ck(logged.some((l) => /^error .*ÉCHEC PARTIEL/.test(l)), "ÉCHEC PARTIEL : journalisé en ERREUR côté serveur — c'est un écart durable tracker ⇄ document, pas un incident passager");
-
-      // -- 2 bis) 🚨 LA GARANTIE EST STRUCTURELLE, pas limitée au `transact`. Un `transact` qui
-      //       échoue (cas 2) n'est qu'UN des chemins d'après-création : la validation partagée, les
-      //       LECTEURS de dépôt qu'elle reçoit et la relecture de l'enregistrement écrit en sont
-      //       d'autres. Tout ce qui suit une création distante RÉUSSIE doit rendre la CLÉ — sinon
-      //       l'exception remonte au `.catch` de la route, qui répond « ouverture du ticket en
-      //       échec » SANS la clé : le ticket existe chez le tracker et personne ne sait lequel.
-      //       ⚠ Ici c'est un LECTEUR qui jette (`getOne`), pas l'écriture : `transact` réussit (à
-      //       vide, pour isoler l'échec de lecture) et c'est la RELECTURE qui casse. Le même
-      //       `getOne` est aussi le lecteur passé à la validation partagée — il ne sert pas
-      //       aujourd'hui (la spec `issues` n'a ni `ref` ni invariant lisant le dépôt), et c'est
-      //       précisément pour ça que la protection ne doit pas dépendre de cet état de la spec.
-      const readerRepo = {
-        findBy: (c, f, v) => realRepo.findBy(c, f, v),
-        getOne: () => { throw new Error("dépôt : lecture impossible (fichier verrouillé)"); },
-        transact: () => { /* écriture « réussie » à vide : on isole l'échec du LECTEUR */ },
-      };
-      const readerDocs = { get: (id) => docs.get(id), repo: () => readerRepo, markChanged: (id) => docs.markChanged(id) };
-      const readerService = new IssueSyncService(readerDocs, live, providers, log, makeAdapter, 0);
-      const createsBeforeReader = calls.filter((c) => c.m === "createIssue").length;
-      const readerPartial = await readerService.openIssue(doc.id, { summary: "Ticket au lecteur cassé", description: "", targets: [] });
-      ck.eq(readerPartial.ok, false, "lecteur qui JETTE après création distante : l'opération est un échec…");
-      ck.eq(readerPartial.failure, "partial", "… de nature « partial » — donc un 500 PORTEUR de la clé, et non le 500 muet du `.catch` de la route");
-      ck.eq(readerPartial.created_key, "INFRA-500",
-        "🚨 … et la CLÉ créée est rendue MALGRÉ L'EXCEPTION : la garantie ne dépend pas de l'inventaire des chemins d'erreur connus");
-      ck(/créé chez le tracker/.test(readerPartial.message) && /Suivre un ticket/.test(readerPartial.message) && /INFRA-500/.test(readerPartial.message),
-        "… avec EXACTEMENT la même marche à suivre que l'échec partiel « propre » (un seul texte, cf. `partialMessage`)");
-      ck.eq(calls.filter((c) => c.m === "createIssue").length, createsBeforeReader + 1, "… le ticket a bien été créé chez le tracker (c'est tout le problème)");
-      ck.eq(calls.filter((c) => c.m === "deleteIssue").length, 0, "… et toujours AUCUNE suppression compensatoire");
-
-      // -- 3) 🚨 REFUS DU TRACKER : son message traverse le service MOT POUR MOT. --
-      refusal = "Tracker : HTTP 400 sur /rest/api/3/issue — customfield_10010 : Le champ « Équipe » est requis";
-      const revBefore = docs.getRev(doc.id);
-      const refused = await service.openIssue(doc.id, { summary: "Titre", description: "", targets: [] });
-      ck.eq(refused.ok, false, "refus du tracker → échec");
-      ck.eq(refused.failure, "tracker", "refus du tracker : nature « tracker » (→ 422 côté route : la requête est bien formée)");
-      ck.eq(refused.message, refusal,
-        "🚨 le message du tracker remonte INTACT jusqu'à la sortie du service — l'envelopper dans un « échec de création » générique détruirait la seule information exploitable (« le champ X est requis »)");
-      ck.eq(refused.created_key, null, "refus du tracker : rien n'a été créé, donc aucune clé à rattraper");
-      ck.eq(docs.getRev(doc.id), revBefore, "refus du tracker : document INTACT, aucune révision consommée");
-      refusal = null;
-
-      // -- 4) `project_key` ABSENT : la CHAÎNE complète est éprouvée (service → VRAI JiraAdapter →
-      //       garde d'entrée), avec un client HTTP qui compte les appels. Le partage des rôles voulu
-      //       par L2 (le champ n'est pas requis à la SAISIE, le manque se signale à la CRÉATION) ne
-      //       tient que si le message est actionnable ET qu'aucun appel ne part. --
-      const httpProbe = mkJiraStub({});
-      const realAdapterService = new IssueSyncService(docs, live, providers, log, (config) => new JiraAdapter(config, httpProbe), 0);
-      configured = [cfg("tracker-1", { issue_type: "Task" })];   // provider SANS projet de création
-      const noProject = await realAdapterService.openIssue(doc.id, { summary: "Titre", description: "", targets: [] });
-      ck.eq(noProject.ok, false, "provider sans projet de création → refus");
-      ck(/project_key/.test(noProject.message), "… message ACTIONNABLE qui NOMME l'option à remplir (et non un « échec » opaque)");
-      ck.eq(httpProbe.calls.length, 0, "… et AUCUN appel réseau n'a été tenté (la garde est à l'entrée de l'adaptateur)");
-      configured = [cfg("tracker-1")];
-
-      // -- 5) RÉSOLUTION DU PROVIDER : implicite à un, REQUIS au-delà, refusé si inconnu. --
-      const createsBefore = calls.filter((c) => c.m === "createIssue").length;
-      const implicit = await service.openIssue(doc.id, { summary: "Sans provider", description: "", targets: [] });
-      ck(implicit.ok === true && implicit.provider_id === "tracker-1", "un SEUL provider → il est IMPLICITE (rien à choisir n'est pas un choix)");
-
-      configured = [cfg("tracker-1"), cfg("tracker-2")];
-      const ambiguous = await service.openIssue(doc.id, { summary: "Ambigu", description: "", targets: [] });
-      ck.eq(ambiguous.ok, false, "PLUSIEURS providers sans choix → refus");
-      ck.eq(ambiguous.failure, "invalid", "… nature « demande invalide » (→ 400 : c'est corrigeable dans le formulaire)");
-      ck(/tracker-1/.test(ambiguous.message) && /tracker-2/.test(ambiguous.message), "… et le message ÉNUMÈRE les providers configurés (sinon l'utilisateur ne sait pas quoi répondre)");
-      ck.eq(calls.filter((c) => c.m === "createIssue").length, createsBefore + 1,
-        "🚨 ambiguïté → AUCUNE création : créer chez un tiers est IRRÉVERSIBLE, on ne devine pas le destinataire (contrairement à « Suivre », où le provider qui RECONNAÎT la référence tranche tout seul)");
-      const chosen = await service.openIssue(doc.id, { provider_id: "tracker-2", summary: "Chez le second", description: "", targets: [] });
-      ck(chosen.ok === true && chosen.provider_id === "tracker-2", "provider nommé explicitement → c'est chez LUI que le ticket est créé");
-      const unknown = await service.openIssue(doc.id, { provider_id: "tracker-42", summary: "x", description: "", targets: [] });
-      ck(unknown.ok === false && /tracker-42/.test(unknown.message) && unknown.failure === "invalid", "provider INCONNU → refus nommant la valeur reçue");
-      configured = [cfg("tracker-1")];
-
-      // -- 6) CIBLES mal formées : refusées AVANT l'appel distant. Une faute de saisie ne doit pas
-      //       devenir un ÉCHEC PARTIEL — c'est le seul refus de validation prévisible sur ce chemin. --
-      const beforeBadTarget = calls.filter((c) => c.m === "createIssue").length;
-      const badTarget = await service.openIssue(doc.id, { summary: "Titre", description: "", targets: ["equipment:eq-1", "pasunecle"] });
-      ck.eq(badTarget.ok, false, "cible mal formée → refus");
-      ck.eq(badTarget.failure, "invalid", "… nature « demande invalide »");
-      ck(/pasunecle/.test(badTarget.message), "… message citant la clé fautive");
-      ck.eq(calls.filter((c) => c.m === "createIssue").length, beforeBadTarget,
-        "🚨 … et AUCUN appel distant : laisser filer transformerait une faute de saisie en ÉCHEC PARTIEL (ticket créé, enregistrement refusé)");
-
-      // -- 7) GARDES d'entrée : titre vide, document inconnu, aucun provider. --
-      const noTitle = await service.openIssue(doc.id, { summary: "   ", description: "", targets: [] });
-      ck(noTitle.ok === false && noTitle.failure === "invalid" && /titre/i.test(noTitle.message), "titre vide → refus explicite, sans appel distant");
-      const noDoc = await service.openIssue("doc-inexistant", { summary: "x" });
-      ck(noDoc.ok === false && /document inconnu/.test(noDoc.message), "document inconnu → refus");
-      configured = [];
-      const noProvider = await service.openIssue(doc.id, { summary: "x" });
-      ck(noProvider.ok === false && /aucun provider/.test(noProvider.message), "aucun provider configuré → refus qui dit quoi faire (en configurer un)");
-      configured = [cfg("tracker-1")];
-
-      // -- 8) Le ticket créé entre bien dans l'ASSIETTE : la passe suivante le RÉSOUT. --
-      const resolveBefore = calls.filter((c) => c.m === "resolve").length;
-      await service.syncDocument(doc.id);
-      const asked = calls.filter((c) => c.m === "resolve").slice(resolveBefore)[0];
-      ck(!!asked && asked.ids.includes("10500"),
-        "le ticket OUVERT depuis DC Manager est désormais SUIVI : la passe de synchro le demande au tracker (2e porte d'entrée de l'assiette, décision D7)");
-    } finally {
-      try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* dossier temp (handles longs sous Windows) */ }
-    }
-  });
-
-  /* ============ INVARIANTS : pivot ⇄ frontière partagée, et AGNOSTICISME de marque ============ */
-
-  await section("Serveur : invariants — pivot ≡ ISSUE_SOURCE_FIELDS, agnosticisme de marque (aucun « jira » hors des points d'extension)", async () => {
+  await section("Serveur : invariants — décodeur ≡ pivot, agnosticisme de marque (aucun « jira » hors des points d'extension)", async () => {
   {
     const { ISSUE_RECORD_FIELDS, ISSUE_RECORD_FIELDS_ARE_EXHAUSTIVE } = SERVER("issues/IssueProvider.js");
     const { KIND_OPTION_SPECS, SUPPORTED_KINDS } = SERVER("issues/IssueProviderConfigValidate.js");
 
-    // -- 1) PIVOT ⇄ FRONTIÈRE PARTAGÉE. Une dérive entre les deux ne se verrait qu'EN PRODUCTION
-    //       (un champ jamais rafraîchi, ou un champ local écrasé par une passe). --
-    ck.eq(ISSUE_RECORD_FIELDS.join(","), ISSUE_SOURCE_FIELDS.join(","),
-      "pivot serveur ≡ ISSUE_SOURCE_FIELDS : mêmes champs, MÊME ORDRE (égalité stricte, pas un jeu d'ensembles)");
+    // -- 1) DÉCODEUR ⇄ PIVOT. ⚠ Cet invariant confrontait aussi le pivot à la FRONTIÈRE PARTAGÉE
+    //       (`src-shared/IssueSync.ISSUE_SOURCE_FIELDS`), supprimée avec la collection `issues` au
+    //       pivot du 2026-08-07 : le pivot n'a plus de pendant PERSISTÉ tant que le pont du lot P2
+    //       n'aura pas posé les colonnes `tracker_*` d'`interventions.db`. Ce qui RESTE vérifiable
+    //       aujourd'hui — et qui reste ce qui casserait silencieusement — c'est la boucle interne :
+    //       la liste couvre l'interface, et le décodeur produit EXACTEMENT cette liste. --
     ck.eq(ISSUE_RECORD_FIELDS_ARE_EXHAUSTIVE, true,
       "sonde de complétude : la liste couvre TOUS les champs de l'interface `IssueRecord` (vérifié à la COMPILATION — `tsc` échoue avant ce test si un champ manque)");
-    // … et le décodeur produit EXACTEMENT ces champs-là, ni plus ni moins : c'est ce qui ferme la
-    // boucle (une liste juste mais un décodeur incomplet laisserait un champ `undefined` filer).
     const decoded = JiraParse.issueRecord(fixtureIssue("1", "K-1"), BASE);
-    ck.eq(Object.keys(decoded).sort().join(","), [...ISSUE_SOURCE_FIELDS].sort().join(","),
-      "décodeur : un record produit porte EXACTEMENT les champs source (ni manque, ni champ fantôme)");
-    ck(ISSUE_SOURCE_FIELDS.every((f) => decoded[f] !== undefined), "décodeur : aucun champ laissé `undefined` (les défauts sont explicites)");
+    ck.eq(Object.keys(decoded).sort().join(","), [...ISSUE_RECORD_FIELDS].sort().join(","),
+      "décodeur : un record produit porte EXACTEMENT les champs du pivot (ni manque, ni champ fantôme)");
+    ck(ISSUE_RECORD_FIELDS.every((f) => decoded[f] !== undefined), "décodeur : aucun champ laissé `undefined` (les défauts sont explicites)");
 
     // -- 2) AGNOSTICISME DE MARQUE — l'exigence n°1 du chantier, donc TESTÉE et pas seulement
     //       affirmée. On relit les SOURCES (c'est le code ÉCRIT qu'on contrôle) de TOUT ce que la
-    //       doc déclare agnostique : le SERVEUR (pivot, réconciliation, stockage, routes, service),
-    //       le PARTAGÉ (frontière source/locaux, clés de cible) et le CLIENT (modèle, règles pures,
-    //       vues, formulaires, catalogues i18n). Les COMMENTAIRES sont libres de citer la première
-    //       implémentation — ils l'expliquent, et le détecteur ne les voit pas.
+    //       doc déclare agnostique. ⚠ La liste a MAIGRI au pivot du 2026-08-07 : elle balayait 19
+    //       fichiers, dont la plupart ont été supprimés avec le miroir de tickets. Ne restent que
+    //       les SURVIVANTS — la couche tracker serveur (pivot, config, stockage, plafond de passe),
+    //       la classification d'état cliente, le client REST, le formulaire de providers et ses
+    //       catalogues i18n. Les COMMENTAIRES sont libres de citer la première implémentation — ils
+    //       l'expliquent, et le détecteur ne les voit pas.
     //
     //       ⚠ Les exemptions sont NOMMÉES et CIBLÉES — une DÉCLARATION, jamais un fichier entier.
-    //       Exempter un fichier entier (ce que faisait la version précédente pour `IssueSyncService`)
-    //       laisse une marque fuir n'importe où dedans, c'est-à-dire précisément ce qu'on veut
-    //       interdire. Il n'y a que les QUATRE points d'extension du chantier, plus un placeholder
-    //       i18n d'exemple.
+    //       Exempter un fichier entier laisse une marque fuir n'importe où dedans, c'est-à-dire
+    //       précisément ce qu'on veut interdire.
+    //       ⚠ La FABRIQUE `adapterFor` (point d'extension n°2) n'est plus balayée : elle vivait dans
+    //       le service de synchro, démoli. Le lot P2 la reposera dans le pont — il devra la
+    //       RÉINSCRIRE ici, avec son exemption `*imports*`, sinon plus rien ne dira qu'une marque a
+    //       filé hors de son point d'extension.
     const fs = require("fs");
     const ts = require("typescript");
     /** Littéraux (chaîne ET morceaux de gabarit) et identifiants nommant une marque dans un extrait,
@@ -2091,28 +1050,16 @@ module.exports = async () => {
     // Ce que la doc déclare agnostique, avec les exemptions de chacun. Les QUATRE points d'extension
     // du chantier sont exactement les quatre exemptions non vides ci-dessous.
     const AGNOSTIC_SOURCES = [
-      // — SERVEUR. `IssueSyncService` porte la FABRIQUE `adapterFor` (point d'extension n°2) : elle
-      //   seule (et l'import de l'adaptateur qu'elle instancie) a le droit de nommer une marque.
+      // — SERVEUR : contrats du pivot, stockage de config, plafond de passe. Aucune marque.
       ["src-server/src/issues/IssueProvider.ts", []],
       ["src-server/src/issues/IssueProviderConfigDb.ts", []],
-      ["src-server/src/issues/IssueReconcile.ts", []],
-      ["src-server/src/issues/IssueModule.ts", []],
-      ["src-server/src/issues/IssueSyncService.ts", ["adapterFor", "*imports*"]],
+      ["src-server/src/issues/TrackerPassScope.ts", []],
       ["src-server/src/issues/IssueProviderConfigValidate.ts", ["KIND_OPTION_SPECS"]],   // point d'extension n°3
-      // — PARTAGÉ : la frontière source/locaux et les clés de cible ne connaissent aucune marque.
-      ["src-shared/IssueSync.ts", []],
-      ["src-shared/IssueTargets.ts", []],
-      // — CLIENT : modèle, règles pures, contrats d'intégration, formulaires, fiche de rangée. Seul
-      //   le formulaire de PROVIDERS nomme les marques, dans les DEUX tables du point d'extension
-      //   n°4 (`KINDS` = option du <select>, `KIND_FIELDS` = miroir des options de la marque).
-      ["src-client/models/Issue.ts", []],
+      // — CLIENT : classification d'état, client REST, formulaire de providers. Seul ce dernier
+      //   nomme les marques, dans les DEUX tables du point d'extension n°4 (`KINDS` = option du
+      //   <select>, `KIND_FIELDS` = miroir des options de la marque).
       ["src-client/core/IssueStatus.ts", []],
-      ["src-client/core/IssueTargetSummary.ts", []],
-      ["src-client/views/IssueTargetSource.ts", []],
-      ["src-client/views/IssueFicheHooks.ts", []],
-      ["src-client/views/forms/IssueForms.ts", []],
       ["src-client/views/forms/IssueSyncClient.ts", []],
-      ["src-client/views/forms/IssueFicheRow.ts", []],
       ["src-client/views/forms/IssueProvidersForm.ts", ["KINDS", "KIND_FIELDS"]],
       // — CATALOGUES i18n : AUCUN libellé traduit ne nomme un tracker (le libellé « Jira » du
       //   <select> est un nom propre et vit dans le code du formulaire, non traduit). Seule
@@ -2144,24 +1091,14 @@ module.exports = async () => {
       ck(brandOffenders(relPath, []).length > 0,
         "discrimination : l'exemption de « " + relPath + " » (" + exempt.join(", ") + ") n'est pas décorative — sans elle, une marque y est bien détectée");
     }
-    ck(brandOffenders("src-server/src/issues/IssueSyncService.ts", ["*imports*"]).length > 0,
-      "discrimination : … et dans le service, l'exemption `adapterFor` compte À ELLE SEULE (la fabrique nomme bien la marque, imports mis à part)");
     ck(brandOffenders("src-server/src/issues/JiraParse.ts", []).length > 0,
       "discrimination : le détecteur repère bien la marque dans le module qui la porte (sinon les tests ci-dessus seraient vacuous)");
 
-    // -- 3) COHÉRENCE marque ⇄ table d'options ⇄ FABRIQUE. Les DEUX sens comptent : un `kind`
-    //       validable SANS adaptateur donnerait un provider enregistrable mais MORT, et un
-    //       adaptateur sans branche d'options serait inaccessible depuis l'UI. --
-    const { IssueSyncService } = SERVER("issues/IssueSyncService.js");
+    // -- 3) COHÉRENCE marque ⇄ table d'options. ⚠ Le SENS INVERSE (« tout kind validable a bien un
+    //       adaptateur dans la FABRIQUE ») a disparu avec `adapterFor`, démolie au pivot : un `kind`
+    //       validable sans adaptateur donnerait un provider enregistrable mais MORT, et c'est
+    //       exactement ce que le lot P2 devra RE-verrouiller en reposant la fabrique dans le pont. --
     ck(SUPPORTED_KINDS.includes(new JiraAdapter(CFG, mkJiraStub({})).kind), "cohérence : le `kind` déclaré par l'adaptateur a bien une branche d'options");
-    for (const kind of SUPPORTED_KINDS) {
-      let built = null;
-      try { built = IssueSyncService.adapterFor({ ...CFG, kind }); } catch (_) { built = null; }
-      ck(!!built && built.kind === kind, "cohérence : le kind « " + kind + " » (table d'options) a bien un adaptateur dans la FABRIQUE");
-    }
-    let threw = false;
-    try { IssueSyncService.adapterFor({ ...CFG, kind: "marque-inconnue" }); } catch (e) { threw = /inconnu/.test(e.message); }
-    ck(threw, "cohérence : un kind SANS entrée d'options est REFUSÉ par la fabrique, avec un message actionnable");
     ck.eq(Object.keys(KIND_OPTION_SPECS).length, 1, "v1 : une seule marque implémentée — le mécanisme, lui, en accepte N");
   }
   });

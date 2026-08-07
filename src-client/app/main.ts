@@ -9,11 +9,8 @@ import { EntityRegistry } from "../models";
 import { BrowserStorageAdapter, RestAdapter } from "../data";
 import { Store } from "../store";
 import { RuntimeConfigLoader } from "./RuntimeConfig";
-import { GraphView, ListView, ListConfigs, Forms, DatacenterView, VmForms, VmProvidersForm, VmSyncClient, VmClustersView, WifiForms, WifiProvidersForm, WifiSyncClient, IssueForms, IssueProvidersForm, IssueSyncClient, NotificationsAdminView, NotifyClient, CertsAdminView, CertsClient, InterventionsAdminView, InterventionsClient } from "../views";
-import type { InterventionTargetSource, InterventionFicheHooks, IssueFicheHooks } from "../views";
-import { ListTargets } from "../views/ListTargets";   // descripteur de la dimension CIBLE — partagé listing ⇄ éditeur de liens des tickets
-import { IssueTargetSummary } from "../core/IssueTargetSummary";   // sélection PURE des tickets d'une cible (rangée « Tickets » des fiches)
-import { IssueTargets } from "../../src-shared/IssueTargets";   // composition PARTAGÉE des clés « famille:id » (cible pré-liée à la création)
+import { GraphView, ListView, ListConfigs, Forms, DatacenterView, VmForms, VmProvidersForm, VmSyncClient, VmClustersView, WifiForms, WifiProvidersForm, WifiSyncClient, NotificationsAdminView, NotifyClient, CertsAdminView, CertsClient, InterventionsAdminView, InterventionsClient } from "../views";
+import type { InterventionTargetSource, InterventionFicheHooks } from "../views";
 import { FormBase } from "../views/forms/FormBase";
 import { GlobalSearchPalette } from "../views/GlobalSearchPalette";   // palette de recherche globale (loupe topbar + Ctrl+K)
 import { GlobalSearchSources } from "../views/GlobalSearchSources";   // familles à fiche = périmètre envoyé à la recherche transverse serveur (mode API)
@@ -100,12 +97,6 @@ const vmSyncClient = REST_MODE ? new VmSyncClient(adapter as RestAdapter) : null
 // Client de synchro des CLIENTS WIFI (feature AMOVIBLE) — mode API SEULEMENT, même montage que le client VM
 // (le RestAdapter satisfait `WifiRestContext` ; routes SCOPÉES PAR DOCUMENT, `<dataBase>/wifi`).
 const wifiSyncClient = REST_MODE ? new WifiSyncClient(adapter as RestAdapter) : null;
-// Client du module TICKETS (feature AMOVIBLE) — mode API SEULEMENT, même montage que les clients VM
-// et wifi (le RestAdapter satisfait `IssueRestContext` ; routes SCOPÉES PAR DOCUMENT, `<dataBase>/issues`).
-// ⚠ null en mode fichier ⇒ « Synchroniser », « Suivre un ticket » et « Providers… » sont ABSENTS —
-// mais la collection reste lisible, filtrable, cherchable, et ses champs LOCAUX + `targets` restent
-// éditables : ce sont des données du DOCUMENT, pas du tracker (décision D9 du cadrage).
-const issueSyncClient = REST_MODE ? new IssueSyncClient(adapter as RestAdapter) : null;
 // Client du service de notifications (feature notify/ AMOVIBLE) — mode API SEULEMENT (null en mode fichier/viewer :
 // la page admin affiche alors un message d'indisponibilité). Le RestAdapter satisfait `NotifyRestContext` (apiRoot/
 // docId/headers/clientId publics) ; les routes notify sont GLOBALES (`<apiRoot>/notify`, non scopées par document).
@@ -175,14 +166,6 @@ async function boot(): Promise<void> {
   // `markDirty` : garde « modifications non enregistrées » du NIVEAU de modale, pour les éditeurs SANS
   // champ de saisie (la chaîne de route) que l'instantané de `Modal` ne peut pas voir bouger.
   const formHost: FormHost = { openModal: (o) => modal.open(o), closeModal: () => modal.close(), refreshModal: () => modal.refresh(), markDirty: () => modal.markDirty(), setDirty: () => { refreshChrome(); }, autocompleteLimit: () => prefs.autocompleteMaxResults, userDirectory };   // mutation modèle déjà suivie par la révision (store.onChange) ; userDirectory : résout les auteurs d'audit (mode API)
-  // CIBLES liables d'un TICKET (feature `issues` AMOVIBLE) : le MÊME DESCRIPTEUR que la dimension
-  // « Cible » du listing (familles, règle de nommage, source de candidats double mode) sert d'ÉDITEUR
-  // de liens à la fiche — deux surfaces, une seule table de familles à tenir à jour. Injecté dans les
-  // DEUX modes de données : `targets` appartient au document, pas au tracker (décision D9).
-  // ⚠ C'est bien une SECONDE instance (le listing construit la sienne) et c'est VOULU : chaque point
-  // de recherche porte son propre AbortController, comme la palette globale. Une instance partagée
-  // ferait annuler la requête de l'éditeur par une frappe dans le filtre du listing, et inversement.
-  formHost.issueTargets = ListTargets.issueTarget(store, entitySearchReader);
   // RECHERCHE GLOBALE (modale dédiée) — UNE instance, UNE implémentation pour les DEUX chemins
   // (déclencheur topbar + Ctrl+K). Garde d'overlay = le pattern des raccourcis undo/redo (sélecteurs
   // DOM) : la palette est un geste de NAVIGATION GLOBALE, pas un niveau de la pile de modales — son
@@ -517,8 +500,8 @@ async function boot(): Promise<void> {
   /** Déclare un onglet de LISTE et rend un ACCESSEUR sur sa `ListView` — null tant que l'onglet n'a
       jamais été affiché (la vue est construite au premier `onShow`, à dessein : on ne paie pas le
       coût d'un listing qu'on n'ouvre pas). Utile aux navigations qui doivent AGIR sur le listing
-      d'arrivée — « Afficher plus » de la rangée « Tickets » d'une fiche, qui bascule d'onglet puis y
-      pose le filtre de cible. Tous les autres appelants ignorent simplement ce retour. */
+      d'arrivée — un « Afficher plus » de fiche qui bascule d'onglet puis y pose un filtre de cible
+      (cf. `ListView.focusTarget`). Tous les appelants actuels ignorent simplement ce retour. */
   const addListTab = (name: string, label: string, configFn: (s: typeof store) => ListOptions, opts: TabOpts = {}): (() => ListView | null) => {
     const cfg = configFn(store);
     const formFn = opts.form;
@@ -679,40 +662,6 @@ async function boot(): Promise<void> {
     title: I18n.t("tabs.wifi.title"), subtitle: I18n.t("tabs.wifi.subtitle"),
     extraActions: wifiExtraActions.length ? wifiExtraActions : undefined,
     locate: "equipment", locateTarget: (id) => WifiLocate.apEquipmentId(store.get("wifiClients", id), store),
-  });
-  // TICKETS : onglet de PREMIER NIVEAU — collection MIROIR d'un tracker distant (Jira en 1re
-  // implémentation ; la marque n'est qu'un adaptateur serveur). Pas de `form` : les champs SOURCE ne
-  // s'éditent pas ici (la synchro les écraserait), et les enrichissements locaux + les CIBLES se font
-  // depuis la fiche. Les tickets n'entrent au document que par DEUX ACTES, jamais par une passe :
-  //  - « Suivre un ticket » (action secondaire) : un ticket qui EXISTE déjà chez le tracker ;
-  //  - « + Ouvrir un ticket » (bouton PRIMAIRE — le texte est réservé aux primaires, principe n°14) :
-  //    DC Manager le CRÉE chez le tracker puis l'enregistre (décision D7).
-  // Toutes ces actions, plus « Synchroniser » et « Providers… », exigent le MODE API ET le non-viewer :
-  // elles écrivent, et aucune n'a de sens sans serveur à interroger.
-  // Pas de `locate` : un ticket n'existe pas dans la scène 3D, et il peut cibler PLUSIEURS objets —
-  // rien ne permettrait de choisir lequel cadrer à la place de l'utilisateur.
-  const issueExtraActions: NonNullable<TabOpts["extraActions"]> = [];
-  let openIssueCreate: ((prefill?: { summary?: string; targets?: string[]; context?: string }, onCreated?: (id: string) => void) => void) | null = null;
-  if (REST_MODE && issueSyncClient && !VIEWER) {
-    const client = issueSyncClient;   // const → non-null capturé dans les closures (garde ci-dessus)
-    issueExtraActions.push(
-      { label: I18n.t("app.issues.sync"), title: I18n.t("app.issues.syncTitle"), onClick: (btn) => { void IssueForms.sync(client, btn); } },
-      { label: I18n.t("app.issues.follow"), title: I18n.t("app.issues.followTitle"), onClick: () => IssueForms.follow(formHost, client, () => shell.refreshActive()) },
-      { label: I18n.t("app.issues.providers"), title: I18n.t("app.issues.providersTitle"), onClick: () => IssueProvidersForm.open(formHost, client, () => shell.refreshActive()) },
-    );
-    // Ouverture MUTUALISÉE de la modale de création : un seul montage pour les DEUX points d'entrée
-    // (bouton primaire de l'onglet, et « Ouvrir un ticket » de la rangée « Tickets » des fiches).
-    openIssueCreate = (prefill, onCreated) => IssueForms.create(formHost, client, prefill, (id) => { shell.refreshActive(); onCreated?.(id); });
-  }
-  const ticketsListView = addListTab("tickets", I18n.t("tabs.issues.label"), (s) => ListConfigs.issues(s, entitySearchReader), {
-    icon: Icons.TICKET,
-    title: I18n.t("tabs.issues.title"), subtitle: I18n.t("tabs.issues.subtitle"),
-    extraActions: issueExtraActions.length ? issueExtraActions : undefined,
-    // Bouton PRIMAIRE de l'en-tête. `addListTab` le supprime déjà en viewer ; ici il n'existe même
-    // pas hors mode API (`openIssueCreate` null) — un bouton grisé laisserait croire à un droit
-    // manquant alors que c'est la feature entière qui n'a pas de serveur à qui parler.
-    addLabel: openIssueCreate ? I18n.t("app.issues.create") : undefined,
-    onAdd: openIssueCreate ? () => openIssueCreate!() : undefined,
   });
   addListTab("racks", I18n.t("tabs.racks.label"), ListConfigs.racks, {
     icon: Icons.RACK_CONTENT,
@@ -1066,49 +1015,6 @@ async function boot(): Promise<void> {
     openListFor: (kind, id) => { shell.switchView("interventions"); interventionsView.openListFor(kind, id); },
   } : null;
   formHost.interventionHooks = interventionHooks;
-
-  // ---- INTÉGRATION « FICHES » de la feature TICKETS (AMOVIBLE) : rangée « Tickets » des fiches ----
-  // 🚨 ÉCART ESSENTIEL avec les hooks d'interventions juste au-dessus, et c'est un GAIN de
-  // l'architecture retenue (arbitrage A1 du cadrage) : les interventions vivent dans une base
-  // SERVEUR séparée, d'où leurs `countOpen`/`latestFor` ASYNCHRONES et l'absence de rangée en mode
-  // fichier. Les tickets, eux, sont une COLLECTION DU DOCUMENT — le comptage et les « 3 derniers »
-  // sont un simple filtre EN MÉMOIRE (`core/IssueTargetSummary`, pur et testé). Donc : aucune route
-  // de comptage à écrire, aucun chargement async, aucun état d'échec réseau, et la rangée MARCHE EN
-  // MODE FICHIER. Ces hooks sont par conséquent injectés dans les DEUX modes, comme `issueTargets`.
-  // Seule `createFor` est conditionnée au mode API : elle seule parle au tracker.
-  const issueFicheHooks: IssueFicheHooks = {
-    digestFor: (kind, id, latest) => {
-      const digest = IssueTargetSummary.digest(store.all("issues"), kind, id, latest);
-      // Projection sur le type LOCAL du contrat : on ne fait pas fuiter le modèle `Issue` dans les
-      // fiches (même discipline que `InterventionFicheItem`).
-      return {
-        openCount: digest.openCount, total: digest.total,
-        latest: digest.latest.map((issue: any) => ({
-          id: String(issue.id || ""), key: issue.key || "", summary: issue.summary || "",
-          status: issue.status || "", status_category: issue.status_category || "", orphan: !!issue.orphan,
-        })),
-      };
-    },
-    // Clic sur une LIGNE du mini-listing : la fiche du ticket s'EMPILE par-dessus la fiche courante
-    // (pile de modales) — on ne quitte ni la vue ni la fiche, ← Retour ramène à l'objet.
-    openDetail: (issueId) => { Forms.detail(store, formHost, "issues", issueId, () => shell.refreshActive()); },
-    // « Afficher plus » : CHANGEMENT DE VUE (la fiche a été fermée par la rangée) puis pose du filtre
-    // de cible sur le listing d'arrivée. `switchView` déclenche `onShow` SYNCHRONEMENT, donc la vue
-    // existe quand on l'appelle — même au tout premier affichage de l'onglet.
-    openListFor: (kind, id) => { shell.switchView("tickets"); ticketsListView()?.focusTarget(kind, id); },
-    // « Ouvrir un ticket » depuis une fiche : titre suggéré = le NOM de l'objet (pas un gabarit à
-    // trous — un titre laissé tel quel doit rester un titre valide) et cible DÉJÀ liée, en clé
-    // composée par le module PARTAGÉ. La modale s'EMPILE : on revient à la fiche en validant comme
-    // en annulant. ⚠ Après création, la collection `issues` arrive par le rechargement GRANULAIRE
-    // déclenché par l'événement SSE du serveur, qui peut atterrir juste APRÈS la réponse HTTP : on
-    // redemande donc le rendu de la fiche, sans garantie qu'elle voie déjà le nouveau ticket — il y
-    // apparaîtra au plus tard à sa réouverture. Aucun contournement ici : la fraîcheur du document
-    // est le travail du canal SSE, pas celui d'une fiche.
-    createFor: openIssueCreate
-      ? (kind, id, label) => openIssueCreate!({ summary: label, targets: [IssueTargets.key(kind, id)], context: label }, () => formHost.refreshModal?.())
-      : undefined,
-  };
-  formHost.issueHooks = issueFicheHooks;
 
   // ---- RAPPROCHEMENT CERTIFICAT ↔ équipement/VM (feature AMOVIBLE, mode API) : lien CALCULÉ, jamais persisté ----
   // Identité réseau d'une cible : hostnames rapprochables (`name` + hostnames des IP rattachées) + IP (IPAM = fait

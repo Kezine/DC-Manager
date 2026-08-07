@@ -5,9 +5,6 @@ import { Ip } from "../core/Ip";
 import { VmStatus } from "../core/VmStatus";
 import { WifiStatus } from "../core/WifiStatus";   // présence + type d'un client wifi (feature AMOVIBLE)
 import { WifiClient } from "../models/WifiClient";   // libellé « nom sinon MAC » — règle unique partagée fiche/palette
-import { IssueStatus } from "../core/IssueStatus";   // état d'un ticket : pastilles + catégorie + tri (feature AMOVIBLE)
-import { Issue } from "../models/Issue";   // libellé « clé sinon titre sinon identité source » — règle unique
-import { IssueTargets } from "../../src-shared/IssueTargets";   // clés composées « famille:id » des cibles d'un ticket
 import { Format } from "../core/Format";
 import { LifecycleFormat } from "../core/LifecycleFormat";   // âge d'achat + état de garantie (colonne combinée)
 import { I18n } from "../i18n/I18n";
@@ -666,108 +663,6 @@ export class ListConfigs {
         // Connecté depuis : horodatage ISO trié LEXICOGRAPHIQUEMENT (= chronologiquement, contrat
         // existant des colonnes de date du dépôt) et rendu localisé.
         { head: I18n.t("lists.col.connectedSince"), cls: "cell-num", sortKey: "since", sort: (c) => c.connected_since || "", render: (c) => (c.connected_since ? Html.escape(Format.dateTime(c.connected_since)) : dim("—")) },
-      ],
-    };
-  }
-
-  /** TICKETS d'un tracker distant — collection ALIMENTÉE PAR LA SYNCHRO d'un provider (Atlassian
-      Jira en 1re implémentation ; la marque n'est qu'un adaptateur serveur). Liste en LECTURE
-      (`actions: { view: true }` + aucun `form` sur l'onglet) : un ticket n'entre au document que par
-      un ACTE (« Suivre un ticket »), jamais par une passe de synchro — l'assiette est INVERSÉE par
-      rapport aux VMs et au wifi (cadrage §3). Les champs LOCAUX (description, notes) et les CIBLES
-      s'éditent depuis la fiche.
-      ⚠ Le champ `orphan` s'AFFICHE « introuvable » et non « orphelin » : un ticket qu'on ne résout
-      plus signale une suppression, un projet archivé ou une permission perdue. La règle d'état vit
-      dans `core/IssueStatus`, partagée avec la fiche et la palette : on ne la réécrit pas ici.
-      `entitySearch` (mode API) alimente la recherche de CANDIDATS de la dimension CIBLE ; null en
-      mode fichier, où la dimension reste servie par le cache local (principe n°15). */
-  static issues(store: Store, entitySearch: EntitySearchReader | null = null): ListOptions {
-    // Dimension CIBLE du listing (« les tickets qui visent CET objet »). Le MÊME descripteur résout
-    // aussi les libellés de la colonne « Cibles » ci-dessous : filtre et colonne ne peuvent donc pas
-    // nommer une cible différemment, et il n'y a qu'une table de familles à tenir à jour.
-    const targetFilter = ListTargets.issueTarget(store, entitySearch);
-    // Une CIBLE liée, en texte : « famille · libellé ». Une clé qui ne se résout pas (document
-    // importé — la cascade empêche le cas nominal) reste VISIBLE sous sa forme brute plutôt que de
-    // disparaître : l'utilisateur doit voir ce que porte son ticket.
-    const targetText = (key: string): string => {
-      const ref = IssueTargets.parse(key);
-      if (!ref) return key;
-      const label = targetFilter.labelOf(ref.kind, ref.id);
-      const family = targetFilter.tagOf(ref.kind);
-      return (family ? family + " · " : "") + (label !== null ? label : key);
-    };
-    // Options de FILTRE calculées à la volée sur les tickets DU DOCUMENT (dynamiques : elles suivent
-    // la synchro — le mécanisme de filtres réévalue `options()` à chaque re-rendu). Même patron que
-    // les filtres du listing VMs/wifi : la correspondance porte sur la MÊME valeur que l'affichage.
-    const distinct = (valueOf: (i: any) => string) => (): { id: string; label: string }[] => {
-      const s = new Set<string>();
-      store.all("issues").forEach((i: any) => { const v = valueOf(i); if (v) s.add(v); });
-      return [...s].sort().map((v) => ({ id: v, label: v }));
-    };
-    return {
-      collection: "issues",
-      // Tri par défaut sur la dernière MODIFICATION CÔTÉ TRACKER, décroissante : sur un suivi de
-      // tickets, « ce qui a bougé » est la première question — pas l'ordre alphabétique des clés.
-      defaultSort: { key: "updated", dir: "desc" },
-      actions: { view: true },   // lecture seule : ni « + créer » (c'est « Suivre un ticket »), ni édition de masse
-      emptyText: I18n.t("lists.empty.issues"),
-      targetFilter,
-      columns: [
-        // CLÉ : le repère qu'on prononce et qu'on recopie, donc la colonne de tête. CLIQUABLE →
-        // ouvre le ticket chez le tracker. 🚨 `url` est une donnée d'ORIGINE DISTANTE (et un document
-        // importé peut porter n'importe quoi) : le lien passe par `Html.externalLink`, qui n'accepte
-        // que http/https et pose `rel="noopener noreferrer"`. Une URL absente ou non conforme
-        // retombe sur du TEXTE, jamais sur un href douteux.
-        {
-          head: I18n.t("lists.col.key"), essential: true, cls: "cell-name", sortKey: "key",
-          sort: (i) => i.key || "",
-          render: (i) => { const label = Issue.displayName(i); return label ? Html.externalLink(i.url, label) : dim("—"); },
-        },
-        { head: I18n.t("lists.col.summary"), essential: true, sortKey: "summary", sort: (i) => i.summary || "", render: (i) => (i.summary ? Html.escape(i.summary) : dim("—")) },
-        // ÉTAT : pastille « introuvable » (dominante) + statut BRUT du tracker, coloré par sa
-        // CATÉGORIE. Le FILTRE porte, lui, sur la catégorie NORMALISÉE — c'est la seule dimension
-        // qui ait un sens commun à tous les providers (un workflow maison n'est pas filtrable).
-        // Le listing ne pose PAS de `title` sur la pastille « introuvable » : colonne étroite et
-        // pastille répétée à chaque ligne (la fiche, elle, l'explicite).
-        {
-          head: I18n.t("lists.col.status"), essential: true, sortKey: "status",
-          sort: (i) => IssueStatus.sortKey(i), render: (i) => IssueStatus.pills(i),
-          filter: {
-            label: I18n.t("lists.filter.issueCategory"),
-            options: () => IssueStatus.CATEGORIES.map((c) => ({ id: c, label: IssueStatus.categoryLabel(c) })),
-            valueOf: (i) => IssueStatus.categoryOf(i),
-          },
-        },
-        {
-          head: I18n.t("lists.col.type"), essential: true, sortKey: "issueType", sort: (i) => i.issue_type || "",
-          render: (i) => (i.issue_type ? `<span class="pill">${Html.escape(i.issue_type)}</span>` : dim("—")),
-          filter: { label: I18n.t("lists.col.type"), options: distinct((i) => i.issue_type || ""), valueOf: (i) => i.issue_type || "" },
-        },
-        { head: I18n.t("lists.col.priority"), sortKey: "priority", sort: (i) => i.priority || "", render: (i) => (i.priority ? `<span class="pill">${Html.escape(i.priority)}</span>` : dim("—")) },
-        { head: I18n.t("lists.col.assignee"), essential: true, sortKey: "assignee", sort: (i) => i.assignee || "", render: (i) => (i.assignee ? Html.escape(i.assignee) : dim("—")) },
-        // CIBLES : le NOMBRE en colonne (étroite, tabulaire) et le DÉTAIL au survol — patron de la
-        // colonne « Liens » des interventions. Énumérer les libellés dans la cellule ferait exploser
-        // la largeur pour une information qu'on ne lit qu'en cas de doute.
-        {
-          head: I18n.t("lists.col.targets"), cls: "cell-num",
-          sort: (i) => (Array.isArray(i.targets) ? i.targets.length : 0),
-          render: (i) => {
-            const keys: string[] = Array.isArray(i.targets) ? i.targets : [];
-            if (!keys.length) return dim("—");
-            return `<span title="${Html.escape(keys.map(targetText).join("\n"))}">${keys.length}</span>`;
-          },
-        },
-        // PROVIDER : colonne non essentielle (masquée en mode compact), présente d'abord pour PORTER
-        // son filtre — un document multi-trackers doit pouvoir isoler une instance, et le mécanisme
-        // de filtres de `ListView` s'accroche à une colonne.
-        {
-          head: I18n.t("lists.col.provider"), sortKey: "provider", sort: (i) => i.provider_id || "",
-          render: (i) => (i.provider_id ? `<span style="font-family:var(--mono);color:var(--fg-dim)">${Html.escape(i.provider_id)}</span>` : dim("—")),
-          filter: { label: I18n.t("lists.col.provider"), options: distinct((i) => i.provider_id || ""), valueOf: (i) => i.provider_id || "" },
-        },
-        // Mis à jour CÔTÉ TRACKER : horodatage ISO trié LEXICOGRAPHIQUEMENT (= chronologiquement,
-        // contrat existant des colonnes de date du dépôt) et rendu localisé.
-        { head: I18n.t("lists.col.updatedSrc"), cls: "cell-num", sortKey: "updated", sort: (i) => i.updated_src || "", render: (i) => (i.updated_src ? Html.escape(Format.dateTime(i.updated_src)) : dim("—")) },
       ],
     };
   }

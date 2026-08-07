@@ -1,5 +1,13 @@
 # TICKETS d'un tracker distant — collection miroir à assiette PILOTÉE PAR L'UTILISATEUR
 
+> ⚠ **EN COURS DE REFONTE (pivot du 2026-08-07) — CE DOCUMENT NE DÉCRIT PLUS LE CODE.** Le flux
+> a été INVERSÉ : DC Manager ne miroite plus des tickets étrangers, il RÉPLIQUE ses incidents et
+> interventions DANS un projet Jira partagé. La collection `issues`, son onglet et sa synchro ont
+> été démolis ; seules la couche Jira (`Jira*`), la configuration chiffrée des providers et le
+> plafond de passe (`TrackerPassScope`) survivent, en attente du pont `interventions ⇄ Jira`.
+> Réécriture complète prévue au lot P4 — cadrage :
+> `.notes/toDos/jira-replication-interventions-cadrage-2026-08-07.md`.
+
 > Module serveur **AMOVIBLE** `src-server/src/issues/`, collection partagée `issues`,
 > onglet client « Tickets ». Première implémentation : **Atlassian Jira Cloud** — mais
 > **la marque n'est qu'un adaptateur** : le pivot, la réconciliation, le service, la base

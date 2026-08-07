@@ -49,8 +49,6 @@ import { VmLocate } from "../core/VmLocate";
 import { WifiStatus } from "../core/WifiStatus";   // présence/type d'un client wifi (feature AMOVIBLE)
 import { WifiLocate } from "../core/WifiLocate";   // « Localiser » un client wifi = localiser son AP
 import { WifiClient } from "../models/WifiClient";   // libellé « nom sinon MAC » — règle unique
-import { IssueStatus } from "../core/IssueStatus";   // état d'un ticket (feature AMOVIBLE) — règle unique
-import { Issue } from "../models/Issue";   // libellé « clé sinon titre sinon identité source » — règle unique
 import { RackScene } from "../geometry/RackScene";
 import { I18n } from "../i18n/I18n";
 import type { GlobalSearchItem } from "../core/GlobalSearch";
@@ -97,11 +95,6 @@ export class GlobalSearchSources {
     // sous-réseau ni une adresse — c'est un objet de PRÉSENCE (qui est connecté, où, depuis quand),
     // et le préfixe « wifi: » est ce qu'un exploitant tape spontanément.
     { id: "wifi", icon: Icons.WIFI, prefix: "wifi:", kinds: ["wifiClients"] },
-    // Portée DÉDIÉE : un ticket n'est ni un objet d'inventaire ni un équipement — c'est une
-    // référence de SUIVI, qu'on cherche par sa clé (« INFRA-123 ») ou par son titre. Le préfixe est
-    // « ticket: » et non « issue: » : c'est le mot que l'exploitant prononce, et « issue » est déjà
-    // pris par un autre sens dans l'app (les icônes `ISSUE_*` de la PKI = ÉMETTRE un certificat).
-    { id: "issues", icon: Icons.TICKET, prefix: "ticket:", kinds: ["issues"] },
     { id: "inventory", icon: Icons.SPARE, prefix: "inv:", kinds: ["spares", "groups", "contacts", "cableTypes", "portTypes"] },
   ];
 
@@ -236,27 +229,6 @@ export class GlobalSearchSources {
         : (WifiStatus.rawType(c) ? { text: WifiStatus.rawType(c), tone: "" } : null)),
       // « Localiser » un client wifi = son POINT D'ACCÈS (même règle que le listing : WifiLocate).
       locate: (c, store) => { const ap = WifiLocate.apEquipmentId(c, store); return ap ? { kind: "equipment", id: ap } : null; },
-    },
-    // TICKET (feature amovible) : le libellé est la CLÉ lisible — c'est elle qu'on tape (« INFRA-123 »)
-    // et elle est courte ; le TITRE part en sous-ligne, et le CHEMIN porte le type et l'assigné, qui
-    // sont les deux axes de tri mentaux d'un suivi (« un bug », « chez untel »). Règle de libellé
-    // UNIQUE (`Issue.displayName`), partagée avec le listing et la fiche.
-    // ⚠ AUCUN `locate` : un ticket n'a pas d'existence dans la scène 3D. Contrairement aux VMs et aux
-    // clients wifi, on ne peut pas non plus viser un porteur — un ticket peut cibler PLUSIEURS objets
-    // (ou aucun), et rien ne permet de choisir lequel cadrer à la place de l'utilisateur.
-    issues: {
-      label: (i) => Issue.displayName(i) || "?",
-      sub: (i) => i.summary || "",
-      path: (i) => [i.issue_type, i.assignee].filter(Boolean).join(" · "),
-      // Pastille d'ÉTAT : « introuvable » en AVERTISSEMENT (l'enregistrement local est intact et
-      // reviendra si l'accès est rétabli) ; sinon le statut BRUT du tracker, en vert quand la
-      // catégorie normalisée est « clos ». Source unique `core/IssueStatus` — jamais réécrite ici.
-      pill: (i) => {
-        if (IssueStatus.isNotFound(i)) return { text: IssueStatus.notFoundLabel(), tone: "warn" };
-        const category = IssueStatus.categoryOf(i);
-        const text = IssueStatus.raw(i) || IssueStatus.categoryLabel(category);
-        return text ? { text, tone: category === "done" ? "ok" : "" } : null;
-      },
     },
     spares: {
       label: (s) => (s.displayName ? s.displayName() : s.name) || s.serial || "?",

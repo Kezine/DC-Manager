@@ -33,10 +33,14 @@
    ============================================================================= */
 
 /** Inventaire NORMALISÉ d'UN ticket — le contrat pivot, AGNOSTIQUE du tracker.
-    Ses champs sont EXACTEMENT les champs SOURCE de l'entité `issues` du document, déclarés une
-    seule fois en partagé (`src-shared/IssueSync.ts`, `ISSUE_SOURCE_FIELDS`) : un test d'invariant
-    compare les deux listes, parce qu'une dérive entre le pivot serveur et la frontière partagée
-    ne se verrait qu'EN PRODUCTION (champ jamais rafraîchi, ou champ écrasé par erreur).
+    ⚠ Ses champs miroitaient EXACTEMENT ceux de l'entité `issues` du document, déclarés une seule
+    fois en partagé (`src-shared/IssueSync.ts`) — collection et frontière SUPPRIMÉES au pivot du
+    2026-08-07 (le chantier réplique désormais les interventions DANS Jira, cf.
+    `.notes/toDos/jira-replication-interventions-cadrage-2026-08-07.md`). Le pivot est donc
+    provisoirement SANS pendant persisté : il sera remodelé par le lot P2 sur les colonnes
+    `tracker_*` d'`interventions.db`, et c'est là que le verrou d'égalité renaîtra. Il reste
+    entre-temps le contrat que produit l'adaptateur et que consomme le décodeur — testé pour son
+    EXHAUSTIVITÉ (`ISSUE_RECORD_FIELDS_ARE_EXHAUSTIVE`, sonde de compilation ci-dessous).
 
     ⚠ AUTORITÉ des champs : l'adaptateur RENSEIGNE tout ce qu'il OBSERVE, mais deux champs
     appartiennent au SERVICE et sont ré-estampillés par lui à l'écriture —
@@ -66,8 +70,9 @@ export interface IssueRecord {
   /** Libellé BRUT du statut, affiché tel quel et JAMAIS traduit (les workflows sont configurables
       par projet : « En recette », « Attente client »…). */
   status: string;
-  /** Classification FERMÉE du statut (`ISSUE_STATUS_CATEGORIES` du partagé) — la seule base des
-      couleurs, tris et filtres sémantiques, donc la seule chose qui rend l'abstraction possible.
+  /** Classification FERMÉE du statut (`todo` / `in_progress` / `done` / `unknown`, cf.
+      `ISSUE_STATUS_CATEGORIES` côté client) — la seule base des couleurs, tris et filtres
+      sémantiques, donc la seule chose qui rend l'abstraction multi-marques possible.
       C'est l'ADAPTATEUR qui la produit : une marque qui ne l'expose pas la déduit chez elle. */
   status_category: string;
   /** Type de ticket (Bug / Tâche / …) — libellé brut, tolérant. */
@@ -99,9 +104,8 @@ export interface IssueRecord {
 }
 
 /** Liste CANONIQUE des champs du pivot, sous forme EXPLOITABLE À L'EXÉCUTION (une `interface` TS
-    est effacée à la compilation : sans cette liste, aucun test ne pourrait comparer le pivot à la
-    frontière partagée `ISSUE_SOURCE_FIELDS`). Ordre identique à celui du partagé, pour que la
-    comparaison de test soit une égalité STRICTE et non un jeu d'ensembles. */
+    est effacée à la compilation : sans cette liste, aucun test ne pourrait vérifier qu'un décodeur
+    produit EXACTEMENT les champs du contrat, ni la comparer à un jour à la forme persistée). */
 export const ISSUE_RECORD_FIELDS = [
   "ext_id", "provider_id", "key", "summary", "status", "status_category", "issue_type",
   "priority", "assignee", "reporter", "labels", "resolution", "created_src", "updated_src",

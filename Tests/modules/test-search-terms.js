@@ -198,8 +198,11 @@ module.exports = async () => {
     // ⚠ Attente EXPLICITE (jamais dérivée du module) : le marqueur de version est le déclencheur du
     // backfill, une valeur figée par erreur laisserait les documents existants sur une spec périmée.
     // v3 = ajout de la collection `wifiClients` à la spec (chantier provider wifi, 2026-08-03).
-    // v4 = ajout de la collection `issues` à la spec (chantier remote issue tracker, 2026-08-06).
-    ck.eq(SearchTerms.SEARCH_VERSION, 4, "SEARCH_VERSION = 4 (compositions v2 + wifiClients v3 + issues v4 — toute évolution de spec bumpe, le backfill fait le reste)");
+    // v4 = la collection `issues` a été AJOUTÉE puis RETIRÉE de la spec (chantier « remote issue
+    // tracker », abandonné au pivot du 2026-08-07). 🚨 Le marqueur NE REDESCEND PAS à 3 : il est
+    // MONOTONE, et des bases locales ont pu passer en v4 pendant le chantier — les faire croire à un
+    // retard de spec les re-backfillerait sans fin. Cf. le commentaire de `SEARCH_VERSION`.
+    ck.eq(SearchTerms.SEARCH_VERSION, 4, "SEARCH_VERSION = 4 (compositions v2 + wifiClients v3 + retrait d'issues v4 — le marqueur est MONOTONE, jamais décrémenté)");
 
     // équipement posé en baie : « U12 » (conditions du path client : placement rack/side/wall + rack_id + rack_u).
     ck(termsOf("equipments", rec("equipments", "eq-rack")).includes("U12"), "equipment racké (rack_u 12) : « U12 » est un terme — la position se tape telle quelle");

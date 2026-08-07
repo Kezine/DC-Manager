@@ -25,19 +25,11 @@ export class Schema {
     "equipments", "ports", "aggregates", "subEquipments", "cables", "networks", "groups", "racks",
     "rackItems", "portTypes", "cableTypes", "cableBundles", "datacenters",
     "waypoints", "floors", "ipNetworks", "ipAddresses", "dhcpRanges", "spares", "sites", "vms", "wifiClients", "contacts",
-    // TICKETS d'un tracker distant (chantier remote issue tracker, Jira Cloud en 1re implémentation —
-    // la marque n'est QU'un adaptateur). Collection AMOVIBLE, ajoutée EN FIN de liste : l'ordre est
-    // COMPARÉ à `EntityRegistry.CLASSES` par un test d'invariant, toute insertion doit donc se faire
-    // au MÊME endroit des deux côtés.
-    "issues",
   ];
 
   /** Champs de type TABLEAU (un filtre `where` y teste l'APPARTENANCE, pas l'égalité). `tags_src` = étiquettes
-      Proxmox d'une VM (scalaires filtrables) ; `nics` (tableau d'OBJETS) n'y a PAS sa place (mécanisme scalaire).
-      `labels` = étiquettes d'un ticket (même nature que `tags_src`) ; `targets` = cibles liées d'un ticket, clés
-      COMPOSÉES « famille:id » (cf. `IssueTargets`) — c'est leur appartenance qui fait marcher le filtre « Cible »
-      unifié des listings SANS code neuf (cf. docs/recherche.md § filtre CIBLE). */
-  static readonly ARRAY_FIELDS: ReadonlySet<string> = new Set(["network_ids", "waypoint_ids", "group_ids", "dns_servers", "tags_src", "labels", "targets"]);
+      Proxmox d'une VM (scalaires filtrables) ; `nics` (tableau d'OBJETS) n'y a PAS sa place (mécanisme scalaire). */
+  static readonly ARRAY_FIELDS: ReadonlySet<string> = new Set(["network_ids", "waypoint_ids", "group_ids", "dns_servers", "tags_src"]);
 
   /** Champs d'ÉQUIPEMENT référençant une image de façade (bibliothèque HORS modèle). Source UNIQUE front ⇄ back :
       le serveur s'en sert pour la PURGE des images orphelines (maintenance) ; le front garde sa carte face → champ

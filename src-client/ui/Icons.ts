@@ -281,10 +281,12 @@ export class Icons {
   /** Interventions / maintenance : clé à molette. */
   static readonly INTERVENTION = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.66 5.66l-6.7 6.7a1.5 1.5 0 0 0 2.12 2.12l6.7-6.7a4 4 0 0 0 5.66-5.66l-2.83 2.83-2.12-.71-.71-2.12z"/></svg>';
 
-  /** TICKET d'un tracker distant (collection `issues`) : coupon perforé. Intention DISTINCTE de
-      `INTERVENTION` (la clé à molette = un travail qu'on planifie et qu'on exécute NOUS) : ici l'objet
-      est un ticket qui vit CHEZ UN TIERS et dont nous ne sommes que le miroir. Distincte aussi des
-      `ISSUE_*` de la PKI, où « issue » veut dire « émettre » (un certificat) et non « incident ». */
+  /** TICKET d'un tracker distant : coupon perforé. Intention DISTINCTE de `INTERVENTION` (la clé à
+      molette = un travail qu'on planifie et qu'on exécute NOUS) : ici l'objet est un ticket qui vit
+      CHEZ UN TIERS. Distincte aussi des `ISSUE_*` de la PKI, où « issue » veut dire « émettre » (un
+      certificat) et non « incident ».
+      ⚠ Sans consommateur depuis le pivot du 2026-08-07 (l'onglet « Tickets » a été démoli) — conservée
+      pour le bloc « Ticket Jira » des fiches d'intervention, qui portera exactement la même intention. */
   static readonly TICKET = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16v4a2 2 0 0 0 0 4v4H4v-4a2 2 0 0 0 0-4z"/><path d="M9.5 6v12" stroke-dasharray="2 2.5"/></svg>';
 
   /** Notifications : cloche. */

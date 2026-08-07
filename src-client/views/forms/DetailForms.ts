@@ -29,12 +29,7 @@ import { WifiStatus } from "../../core/WifiStatus";   // présence/type d'un cli
 import { WifiLocate } from "../../core/WifiLocate";   // « Localiser » un client wifi = localiser son POINT D'ACCÈS
 import { WifiClient } from "../../models/WifiClient";   // libellé « nom sinon MAC » — règle unique
 import { WifiForms } from "./WifiForms";   // édition des champs LOCAUX (feature wifi AMOVIBLE)
-import { IssueStatus } from "../../core/IssueStatus";   // état d'un ticket — règle unique partagée avec le listing et la palette
-import { Issue } from "../../models/Issue";   // libellé « clé sinon titre sinon identité source » — règle unique
-import { IssueForms } from "./IssueForms";   // édition des champs LOCAUX + des CIBLES (feature tickets AMOVIBLE)
-import { IssueTargets } from "../../../src-shared/IssueTargets";   // clés composées « famille:id » des cibles d'un ticket
 import { InterventionFicheRow } from "./InterventionFicheRow";   // intégration « fiches » de la feature interventions (AMOVIBLE)
-import { IssueFicheRow } from "./IssueFicheRow";   // intégration « fiches » de la feature tickets (AMOVIBLE)
 import { CertFicheRow } from "./CertFicheRow";   // intégration « fiches » du rapprochement certificat ↔ cible (AMOVIBLE)
 import { SubEquipmentForms } from "./SubEquipmentForms";   // fiche + formulaire des sous-équipements (hors chaîne d'héritage, cf. son en-tête)
 import { AuditLine } from "./AuditLine";   // ligne « Créé/Modifié par {auteur} le {date} » (résolue via l'annuaire, mode API)
@@ -106,7 +101,6 @@ export class DetailForms extends IpamForms {
     contacts: (s, h, i, c) => DetailForms.contactDetail(s, h, i, c),
     vms: (s, h, i, c) => DetailForms.vmDetail(s, h, i, c),
     wifiClients: (s, h, i, c) => DetailForms.wifiClientDetail(s, h, i, c),
-    issues: (s, h, i, c) => DetailForms.issueDetail(s, h, i, c),
     cableTypes: (s, h, i) => DetailForms.cableTypeDetail(s, h, i),
     portTypes: (s, h, i) => DetailForms.portTypeDetail(s, h, i),
   };
@@ -540,9 +534,6 @@ export class DetailForms extends IpamForms {
     ]));
     // Intégration « fiches » : badge d'interventions ouvertes + « Déclarer une intervention » (no-op hors mode API).
     InterventionFicheRow.attach(root, host.interventionHooks, { kind: "spare", id, label: (sp.displayName ? sp.displayName() : (sp.name || "")) }, () => host.closeModal?.());
-    // Intégration « fiches » : tickets du tracker visant ce spare. ⚠ SYNCHRONE et disponible EN MODE
-    // FICHIER (les tickets sont une collection du document) — cf. IssueFicheRow.
-    IssueFicheRow.attach(root, host.issueHooks, { kind: "spare", id, label: (sp.displayName ? sp.displayName() : (sp.name || "")) }, () => host.closeModal?.());
     AuditLine.attach(root, sp, host.userDirectory);   // « Créé/Modifié par » (mode API)
     const footerActions = this.footer(() => this.spare(store, host, id, onChanged));
     host.openModal({ title: I18n.t("detail.spare.title"), subtitle: Html.escape(sp.displayName ? sp.displayName() : (sp.name || "")), body: root, footerActions, stackKey: "detail:spares/" + id, onResume: () => this.spareDetail(store, host, id, onChanged), hideFooter: true, wide: true });
@@ -610,9 +601,6 @@ export class DetailForms extends IpamForms {
     //    les réseaux ; « non raccordé » si aucun mapping. IPs constatées = donnée source informative (décision IPAM). --
     // Intégration « fiches » : badge d'interventions ouvertes + « Déclarer une intervention » (no-op hors mode API).
     InterventionFicheRow.attach(root, host.interventionHooks, { kind: "vm", id, label: vm.name || "" }, () => host.closeModal?.());
-    // Intégration « fiches » : tickets du tracker visant cette VM. ⚠ SYNCHRONE et disponible EN MODE
-    // FICHIER (les tickets sont une collection du document) — cf. IssueFicheRow.
-    IssueFicheRow.attach(root, host.issueHooks, { kind: "vm", id, label: vm.name || "" }, () => host.closeModal?.());
     // Intégration « fiches » : certificats TLS rapprochés (calculé, no-op hors mode API).
     CertFicheRow.attach(root, host.certHooks, { kind: "vm", id }, () => host.closeModal?.());
 
@@ -873,142 +861,6 @@ export class DetailForms extends IpamForms {
     host.openModal({
       title: I18n.t("detail.wifi.title"), subtitle: Html.escape(label), body: root, footerActions,
       stackKey: "detail:wifiClients/" + id, onResume: () => this.wifiClientDetail(store, host, id, onChanged),
-      hideFooter: true, wide: true,
-    });
-  }
-
-  /* ---- TICKET d'un tracker distant (feature amovible) ---- */
-  /** Fiche détail d'un ticket. MÊME patron que les VMs et les clients wifi : l'IDENTITÉ SOURCE
-      (alimentée par la synchro, lecture seule) est séparée des ENRICHISSEMENTS LOCAUX (édités via
-      `IssueForms.edit`, jamais écrasés par la synchro — cf. src-shared/IssueSync). Deux
-      particularités, toutes deux voulues :
-      - le LIEN vers le ticket est une ligne à part entière : c'est l'action la plus fréquente depuis
-        cette fiche, et le lien est PERSISTÉ au pivot (décision D6), donc cliquable même en mode
-        fichier, après export, sans serveur ni variable d'environnement ;
-      - les CIBLES (rattachement MANUEL aux objets du modèle) sont RÉSOLUES en fiches ouvrables :
-        c'est le chemin « ce ticket parle de QUOI ? », pendant exact du filtre « Cible » du listing. */
-  static issueDetail(store: Store, host: FormHost, id: string, onChanged?: () => void): void {
-    const issue: any = store.get("issues", id);
-    if (!issue) { Notify.toast(I18n.t("detail.nf.issue"), "err"); return; }
-    const root = document.createElement("div");
-    const label = Issue.displayName(issue) || I18n.t("lists.ph.issue");
-
-    // -- IDENTITÉ SOURCE (lecture seule). La fiche a la place d'EXPLIQUER l'introuvable → elle passe
-    //    l'infobulle que le listing omet (colonne étroite, pastille répétée à chaque ligne). --
-    const mono = (value: string) => `<span style="font-family:var(--mono)">${Html.escape(value)}</span>`;
-    const labelsHtml = (Array.isArray(issue.labels) && issue.labels.length)
-      ? (issue.labels as string[]).map((l) => `<span class="pill">${Html.escape(l)}</span>`).join(" ")
-      : this.MUTED;
-    root.appendChild(this.grid([
-      [I18n.t("lists.col.key"), issue.key ? mono(issue.key) : this.MUTED],
-      [I18n.t("lists.col.summary"), issue.summary ? Html.escape(issue.summary) : this.MUTED],
-      [I18n.t("lists.col.status"), IssueStatus.pills(issue, I18n.t("detail.issue.notFoundTitle"))],
-      [I18n.t("lists.col.type"), issue.issue_type ? `<span class="pill">${Html.escape(issue.issue_type)}</span>` : this.MUTED],
-      [I18n.t("lists.col.priority"), issue.priority ? `<span class="pill">${Html.escape(issue.priority)}</span>` : this.MUTED],
-      [I18n.t("lists.col.assignee"), issue.assignee ? Html.escape(issue.assignee) : this.MUTED],
-      [I18n.t("detail.issue.reporter"), issue.reporter ? Html.escape(issue.reporter) : this.MUTED],
-      [I18n.t("detail.issue.labels"), labelsHtml],
-      [I18n.t("detail.issue.resolution"), issue.resolution ? `<span class="pill">${Html.escape(issue.resolution)}</span>` : this.MUTED],
-      // 🚨 `url` vient d'un TIERS (ou d'un document importé) : `Html.externalLink` n'accepte que
-      // http/https et pose `rel="noopener noreferrer"`. Une valeur non conforme s'affiche en TEXTE.
-      [I18n.t("detail.issue.link"), issue.url ? Html.externalLink(issue.url, issue.url) : this.MUTED],
-      [I18n.t("detail.issue.createdSrc"), issue.created_src ? Html.escape(Format.dateTime(issue.created_src)) : this.MUTED],
-      [I18n.t("detail.issue.updatedSrc"), issue.updated_src ? Html.escape(Format.dateTime(issue.updated_src)) : this.MUTED],
-      [I18n.t("detail.issue.lastSync"), Html.escape(Format.dateTime(issue.last_sync))],
-      [I18n.t("detail.issue.providerId"), issue.ext_id
-        ? `<span style="font-family:var(--mono);color:var(--fg-dim)">${Html.escape(issue.ext_id)}</span>${issue.provider_id ? ` <span style="color:var(--fg-dimmer)">· ${Html.escape(issue.provider_id)}</span>` : ""}`
-        : this.MUTED],
-    ]));
-
-    // -- CIBLES : les objets du modèle que ce ticket vise (rattachement MANUEL, décision D5). Chaque
-    //    ligne ouvre la FICHE de la cible, qui s'EMPILE — celle-ci reste vivante dessous et se
-    //    reconstruit au dépilement (son `onResume`). Le libellé est résolu par la source INJECTÉE
-    //    (`host.issueTargets`), la même que l'éditeur et que le filtre du listing. --
-    const targets: string[] = Array.isArray(issue.targets) ? issue.targets : [];
-    const targetSource = host.issueTargets || null;
-    this.sect(root, I18n.t("detail.issue.targetsSection", { count: targets.length }));
-    const twTargets = this.tbl(root, [I18n.t("detail.issue.colFamily"), I18n.t("detail.issue.colTarget"), ""], targets.map((key) => {
-      const ref = IssueTargets.parse(key);
-      const resolved = (ref && targetSource) ? targetSource.labelOf(ref.kind, ref.id) : null;
-      const family = (ref && targetSource) ? targetSource.tagOf(ref.kind) : "";
-      const icon = `<span class="gi" aria-hidden="true">${IssueForms.familyIcon(ref ? ref.kind : "")}</span> `;
-      // Cible non résolue : n'ARRIVE PAS en régime normal (la cascade partagée retire la clé quand
-      // l'objet disparaît) mais reste possible sur un document IMPORTÉ. On la GRISE avec sa clé
-      // brute plutôt que de la masquer — et surtout on n'ouvre pas une fiche qui n'existe pas.
-      const cell = resolved !== null
-        ? Html.escape(resolved)
-        : `<span style="color:var(--fg-dimmer)">${Html.escape(key)}</span>`;
-      // La CLÉ voyage sur le conteneur de l'action (et non sur le bouton) : `IconButton.html` ne
-      // porte qu'un `data-act`, et le clic du bouton remonte jusqu'à ce conteneur.
-      const open = (resolved !== null && ref)
-        ? `<span class="cell-actions" data-target-key="${Html.escape(key)}">${IconButton.html({ icon: Icons.INFO, label: I18n.t("detail.issue.openTarget") })}</span>`
-        : "";
-      return [icon + Html.escape(family || (ref ? ref.kind : "")), cell, open];
-    }), I18n.t("detail.issue.targetsEmpty"));
-    twTargets?.querySelectorAll("[data-target-key]").forEach((el) => {
-      (el as HTMLElement).onclick = () => {
-        const ref = IssueTargets.parse((el as HTMLElement).dataset.targetKey || "");
-        if (!ref) return;
-        // Routage GÉNÉRIQUE par la carte des fiches : famille → collection (table PARTAGÉE), puis
-        // `detail`. Une famille sans fiche rendrait `false` — silencieux mais impossible ici, les
-        // quatre familles liables en ont toutes une.
-        this.detail(store, host, IssueTargets.COLLECTION_BY_KIND[ref.kind] || "", ref.id, onChanged);
-      };
-    });
-
-    // -- ENRICHISSEMENTS LOCAUX (édités séparément, jamais écrasés par la synchro). --
-    this.sect(root, I18n.t("detail.issue.localSection"));
-    root.appendChild(this.grid([
-      [I18n.t("lists.col.description"), issue.description ? `<div class="md-body">${Markdown.render(issue.description)}</div>` : this.MUTED],
-      [I18n.t("lists.col.notes"), issue.notes ? `<div class="md-body">${Markdown.render(issue.notes)}</div>` : this.MUTED],
-      [I18n.t("detail.common.created"), Html.escape(Format.dateTime(issue.created_date))],
-      [I18n.t("detail.common.updated"), Html.escape(Format.dateTime(issue.updated_date))],
-    ]));
-    AuditLine.attach(root, issue, host.userDirectory);   // « Créé/Modifié par » (mode API)
-
-    // Pied d'actions : « Ne plus suivre » + « Modifier » (champs LOCAUX + cibles). Pas de
-    // « Localiser » (un ticket n'existe nulle part dans la scène et ses cibles peuvent être
-    // multiples — laquelle viser ?).
-    //
-    // « NE PLUS SUIVRE » — le geste SYMÉTRIQUE de « Suivre un ticket », sans lequel l'assiette n'a
-    // qu'une porte d'entrée : une clé mal saisie entrait au document DÉFINITIVEMENT (et était
-    // redemandée au tracker à chaque passe), et un ticket réellement supprimé chez le tracker
-    // restait « introuvable » pour toujours. Calqué sur la suppression d'une VM orpheline plus haut :
-    // fiche → confirmation → chemin de suppression STANDARD de la collection.
-    // ⚠ Disponible AUSSI en mode FICHIER, contrairement à « Suivre »/« Ouvrir » : retirer un
-    // enregistrement du document ne demande AUCUN serveur — même raison que l'édition des champs
-    // locaux et des cibles (cf. docs/issue-tracker.md § « Mode local »). On ne le conditionne donc
-    // pas au client REST, seulement au fait de ne pas être en lecture seule.
-    // ⚠ La confirmation DOIT lever la crainte naturelle devant un bouton rouge sur un ticket : le
-    // ticket n'est PAS supprimé chez le tracker, seul le suivi local cesse. Elle dit aussi ce qui
-    // est réellement perdu (notes, description locale, cibles) — c'est ce qui justifie de confirmer.
-    const footerActions: HTMLElement[] = [];
-    if (!this.isViewer()) {
-      const unfollowBtn = document.createElement("button"); unfollowBtn.type = "button"; unfollowBtn.className = "btn btn-danger";
-      unfollowBtn.textContent = I18n.t("detail.issue.unfollow");
-      unfollowBtn.title = I18n.t("detail.issue.unfollowTitle");
-      unfollowBtn.onclick = async () => {
-        const ok = await Dialog.confirm({
-          title: I18n.t("detail.issue.unfollowConfirmTitle"),
-          message: I18n.t("detail.issue.unfollowConfirmMsg", { key: label }),
-          confirmLabel: I18n.t("detail.issue.unfollowConfirm"), danger: true,
-        });
-        if (!ok) return;
-        // MÊME chemin que la suppression depuis une liste (store.remove) : la cascade PARTAGÉE et le
-        // pipeline REST/fichier existants s'appliquent — aucun chemin de suppression parallèle.
-        // Rien ne garde de trace du ticket retiré : son `ext_id` redevient LIBRE, donc le re-suivre
-        // plus tard repart proprement (le service cherche l'existant par `ext_id`, et il n'y en a plus).
-        await store.remove("issues", id);
-        host.closeModal?.();   // le ticket n'existe plus → refermer la fiche
-        onChanged?.();          // rafraîchit la liste/vue d'origine
-        Notify.toast(I18n.t("detail.issue.unfollowed"));
-      };
-      footerActions.push(unfollowBtn);
-    }
-    footerActions.push(...this.footer(() => IssueForms.edit(store, host, id, onChanged)));
-    host.openModal({
-      title: I18n.t("detail.issue.title"), subtitle: Html.escape(label), body: root, footerActions,
-      stackKey: "detail:issues/" + id, onResume: () => this.issueDetail(store, host, id, onChanged),
       hideFooter: true, wide: true,
     });
   }

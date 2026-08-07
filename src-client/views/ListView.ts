@@ -229,9 +229,9 @@ export class ListView {
     return TargetSearch.parse([...set][0]);
   }
 
-  /** POSE la dimension CIBLE sur une valeur donnée, DEPUIS L'EXTÉRIEUR — c'est ce qu'exige le
-      « Afficher plus » d'une rangée de fiche (« montre-moi les tickets de CET équipement »), qui
-      arrive par `shell.switchView(...)` puis appelle ici.
+  /** POSE la dimension CIBLE sur une valeur donnée, DEPUIS L'EXTÉRIEUR — c'est ce qu'exige un
+      « Afficher plus » de rangée de fiche (« montre-moi les X de CET équipement »), qui arrive par
+      `shell.switchView(...)` puis appelle ici.
       Pourquoi une méthode et non une mutation de l'état par l'appelant : `filterState` est privé, et
       surtout la barre de filtres tient une RÉFÉRENCE sur le `Set` de chaque dimension — on le MUTE
       donc en place (jamais de remplacement d'objet, qui laisserait la chip branchée sur l'ancien) et
