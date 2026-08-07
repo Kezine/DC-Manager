@@ -969,9 +969,14 @@ module.exports = async () => {
     ck(!stub2.calls.some((p) => p.includes("/lxc/")), "include_lxc:false → AUCUN appel de détail LXC (filtre avant orchestration)");
 
     // Échec de l'inventaire de MASSE → inventory rejette (contrat : l'appelant conserve l'état précédent).
+    // Le statut cluster est FOURNI (nom résoluble) : l'échec testé ici est bien celui de /cluster/resources
+    // (absent de la table → 404 du stub), pas l'avortement sur socle d'identité (sa propre section).
     let threw = false;
-    try { await new ProxmoxAdapter(PVE_CFG, mkPveStub({ "/api2/json/cluster/status": { data: [] } })).inventory(); }
-    catch (_) { threw = true; }
+    try {
+      await new ProxmoxAdapter(PVE_CFG, mkPveStub({
+        "/api2/json/cluster/status": { data: [{ type: "cluster", name: "prod-cluster", quorate: 1 }] },
+      })).inventory();
+    } catch (_) { threw = true; }
     ck(threw, "échec de /cluster/resources → inventory rejette (jamais un inventaire vide trompeur)");
   }
   });
@@ -1003,7 +1008,7 @@ module.exports = async () => {
   }
   });
 
-  await section("Serveur : ProxmoxAdapter.inventory — nom/quorum de cluster (nœud isolé, statut indisponible, version en échec), fromConfig", async () => {
+  await section("Serveur : ProxmoxAdapter.inventory — nom/quorum de cluster (nœud isolé, version en échec), fromConfig", async () => {
   {
     const { ProxmoxAdapter } = SERVER("vm/ProxmoxAdapter.js");
     const resources = { data: [ { vmid: 200, type: "qemu", name: "solo01", node: "pve-solo", status: "stopped" } ] };
@@ -1019,20 +1024,84 @@ module.exports = async () => {
     ck.eq(solo.cluster.quorate, null, "nœud isolé (pas d'entrée cluster) → quorate inconnu (null, jamais false)");
     ck(solo.cluster.version === null && solo.cluster.supported === false, "/version indisponible → version null + supported false (TOLÉRANT)");
     ck.eq(solo.vms.length, 1, "…l'inventaire des VMs CONTINUE malgré la version manquante (informative)");
-    // /cluster/status en échec (droits restreints) → repli sur l'id de l'instance, quorate null,
-    // l'inventaire continue ; /version reste lue (indépendante du statut cluster).
-    const fallback = await new ProxmoxAdapter(PVE_CFG, mkPveStub({
+    // Métadonnées SECONDAIRES en échec (version) alors que le socle d'identité, lui, est résolu :
+    // l'inventaire continue — c'est la frontière « tolérance » / « avortement » (section suivante).
+    const named = await new ProxmoxAdapter(PVE_CFG, mkPveStub({
       "/api2/json/version": { data: { version: "9.0.0" } },
-      "/api2/json/cluster/status": new Error("Proxmox : HTTP 403 sur /api2/json/cluster/status"),
+      "/api2/json/cluster/status": { data: [ { type: "cluster", name: "prod-cluster", quorate: 1 }, { type: "node", name: "pve1" }, { type: "node", name: "pve2" } ] },
       "/api2/json/cluster/resources": resources,
     })).inventory();
-    ck.eq(fallback.vms[0].ext_id, "pve-prod/200", "statut cluster inaccessible → repli ext_id = idInstance/vmid (inventaire non bloqué)");
-    ck.eq(fallback.cluster.name, "pve-prod", "…cluster.name = id d'instance (repli neutre)");
-    ck.eq(fallback.cluster.quorate, null, "…quorate null (statut cluster indisponible)");
-    ck(fallback.cluster.version === "9.0.0" && fallback.cluster.supported === true, "version 9.0.0 dans la gamme, indépendante du statut cluster");
+    ck.eq(named.vms[0].ext_id, "prod-cluster/200", "cluster nommé → ext_id = nomDuCluster/vmid");
+    ck(named.cluster.version === "9.0.0" && named.cluster.supported === true, "version 9.0.0 dans la gamme, indépendante du statut cluster");
     // fromConfig : construction standard (PveHttp réel, aucun appel réseau à la construction).
     const real = ProxmoxAdapter.fromConfig(PVE_CFG);
     ck(real.kind === "proxmox" && real.config === PVE_CFG, "fromConfig → adaptateur câblé sur la config (client HTTPS réel)");
+  }
+  });
+
+  await section("Serveur : ProxmoxAdapter.inventory — SOCLE D'IDENTITÉ (nom de cluster) non résolu → passe AVORTÉE (anti-doublons)", async () => {
+  {
+    const { ProxmoxAdapter } = SERVER("vm/ProxmoxAdapter.js");
+    const { VmReconcile } = SERVER("vm/VmReconcile.js");
+    const resources = { data: [ { vmid: 200, type: "qemu", name: "solo01", node: "pve1", status: "stopped" } ] };
+
+    // (0) LE DOMMAGE ÉVITÉ, mesuré sur le moteur de réconciliation : le nom du cluster préfixe
+    //     l'ext_id, donc un préfixe DIFFÉRENT le temps d'une passe ne « dégrade » pas l'inventaire —
+    //     il le RÉ-IDENTIFIE : chaque VM est vue comme inconnue (créée EN DOUBLE) pendant que son
+    //     exemplaire d'origine, absent de l'inventaire, passe orpheline. D'où l'avortement testé plus bas.
+    const existant = [
+      { id: "vm-1", provider_id: "pve-prod", ext_id: "prod-cluster/200", name: "solo01", orphan: false },
+      { id: "vm-2", provider_id: "pve-prod", ext_id: "prod-cluster/201", name: "solo02", orphan: false },
+    ];
+    const sousAutrePrefixe = VmReconcile.plan({
+      providerId: "pve-prod",
+      records: [
+        { ext_id: "pve-prod/200", provider_id: "pve-prod", vm_type: "qemu", name: "solo01", description: "", status: "stopped", host_node: "pve1", cpu: null, ram_mb: null, disk_gb: null, tags: [], nics: [] },
+        { ext_id: "pve-prod/201", provider_id: "pve-prod", vm_type: "qemu", name: "solo02", description: "", status: "stopped", host_node: "pve1", cpu: null, ram_mb: null, disk_gb: null, tags: [], nics: [] },
+      ],
+      existingVms: existant,
+      resolveHostEquipmentId: () => null,
+      newId: (() => { let n = 0; return () => "neuf-" + ++n; })(),
+      nowIso: "2026-08-07T10:00:00.000Z",
+    });
+    ck(sousAutrePrefixe.creates.length === 2 && sousAutrePrefixe.orphans.length === 2,
+      "préfixe d'ext_id changé → TOUTES les VMs recréées (doublons) + toutes les anciennes orphelines");
+
+    // (1) /cluster/status en ÉCHEC (droits restreints, 5xx, délai…) alors que /cluster/resources
+    //     répond : le socle d'identité n'est pas résolu → la passe AVORTE au lieu de réconcilier
+    //     sous un autre préfixe. C'est l'aléa d'UNE passe qui dédoublerait tout l'inventaire.
+    let erreur = null;
+    try {
+      await new ProxmoxAdapter(PVE_CFG, mkPveStub({
+        "/api2/json/version": { data: { version: "9.0.0" } },
+        "/api2/json/cluster/status": new Error("Proxmox : HTTP 403 sur /api2/json/cluster/status"),
+        "/api2/json/cluster/resources": resources,
+      })).inventory();
+    } catch (e) { erreur = e; }
+    ck(erreur !== null, "statut cluster inaccessible → inventory REJETTE (aucun inventaire sous une autre identité)");
+    ck(/nom du cluster NON RÉSOLU/.test(erreur.message), "…message NOMMANT la cause racine (nom du cluster non résolu)");
+    ck(/AVORTÉE/.test(erreur.message) && /double/.test(erreur.message), "…message ACTIONNABLE : passe avortée, risque de doublons expliqué");
+    ck(/403/.test(erreur.message), "…cause d'origine (403) transportée pour le diagnostic");
+    ck(!erreur.message.includes("SECRET-UUID"), "…et jamais le jeton dans le message (il remonte au statut/UI)");
+
+    // (2) Réponse LISIBLE mais sans identité résoluble (pas d'entrée cluster nommée, PLUSIEURS
+    //     nœuds) : même avortement — l'échec d'appel n'est pas le seul chemin vers un nom absent.
+    let erreur2 = null;
+    try {
+      await new ProxmoxAdapter(PVE_CFG, mkPveStub({
+        "/api2/json/cluster/status": { data: [ { type: "node", name: "pve1" }, { type: "node", name: "pve2" } ] },
+        "/api2/json/cluster/resources": resources,
+      })).inventory();
+    } catch (e) { erreur2 = e; }
+    ck(erreur2 !== null && /nom du cluster NON RÉSOLU/.test(erreur2.message), "réponse sans nom exploitable → même avortement");
+    ck(/sans entrée cluster nommée/.test(erreur2.message), "…cause distinguée de l'échec d'appel (réponse lisible mais muette)");
+
+    // (3) NON-RÉGRESSION : dès que le nom est résolu (cluster nommé OU nœud unique), rien ne change.
+    const ok = await new ProxmoxAdapter(PVE_CFG, mkPveStub({
+      "/api2/json/cluster/status": { data: [ { type: "cluster", name: "prod-cluster", quorate: 1 } ] },
+      "/api2/json/cluster/resources": resources,
+    })).inventory();
+    ck.eq(ok.vms[0].ext_id, "prod-cluster/200", "nom résolu → inventaire normal (l'avortement ne vise QUE l'identité manquante)");
   }
   });
 
@@ -2664,6 +2733,89 @@ module.exports = async () => {
       ck(/relance ignorée/.test(t2[0].message) && /délai minimal/.test(t2[0].message), "…la seconde reçoit le dernier statut, annoté « relance ignorée »");
       ck(t1[0].last_attempt === t2[0].last_attempt, "…même horodatage de tentative (aucune nouvelle passe)");
       ck(!/relance ignorée/.test(throttled.statusFor(doc.id)[0].message), "…l'annotation n'est PAS stockée dans le statut persistant");
+    } finally {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* dossier temp */ }
+    }
+  });
+
+  /* ============ SERVEUR : VM — socle d'identité et NON-DUPLICATION (bout en bout) ============ */
+
+  await section("Serveur : VM — /cluster/status en échec → passe avortée, AUCUN doublon dans le document (bout en bout)", async () => {
+    // Reproduction de l'incident « toutes mes VMs sont en double » : le nom du cluster préfixe
+    // l'ext_id (clé de réconciliation) ; s'il n'est pas résolu, réconcilier revient à ré-identifier
+    // tout l'inventaire. Ici l'adaptateur Proxmox RÉEL est branché sur un stub HTTP dont la seule
+    // route /cluster/status se met à échouer entre deux passes — le document ne doit PAS bouger.
+    let Sqlite = null;
+    try {
+      const Candidate = require(path.join(__dirname, "..", "..", "src-server", "node_modules", "better-sqlite3"));
+      const probeDb = new Candidate(":memory:"); probeDb.close();
+      Sqlite = Candidate;
+    } catch (_) { /* module/binaire absent → section sautée */ }
+    if (!Sqlite) { ck(true, "better-sqlite3 indisponible → section sautée"); return; }
+
+    const fs = require("fs"), os = require("os");
+    const { DocumentStore } = SERVER("documents.js");
+    const { VmSyncService } = SERVER("vm/VmSyncService.js");
+    const { ProxmoxAdapter } = SERVER("vm/ProxmoxAdapter.js");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dcm-vmid-"));
+    try {
+      const docs = new DocumentStore(dir, Sqlite);
+      const doc = docs.create("infra-identite");
+      const repo = docs.repo(doc.id);
+      const config = { id: "pve-prod", kind: "proxmox", endpoints: [{ url: "https://pve:8006", fingerprint: null }],
+        token: "sync@pve!t=SECRET-UUID", include_lxc: true, interval_sec: 0, timeout_sec: 15, ca_pem: null, management_url: null };
+      const providers = {
+        configuredDocIds: () => [doc.id],
+        providersFor: (d) => (d === doc.id ? [config] : []),
+        summariesFor: (d) => providers.providersFor(d).map((c) => ({ id: c.id, kind: c.kind, interval_sec: c.interval_sec })),
+      };
+      const clusterOk = { data: [ { type: "cluster", name: "prod-cluster", quorate: 1 }, { type: "node", name: "pve1", online: 1 }, { type: "node", name: "pve2", online: 1 } ] };
+      let statusRoute = clusterOk;   // bascule en Error au milieu du scénario
+      const routes = {
+        "/api2/json/version": { data: { version: "8.4.1" } },
+        "/api2/json/cluster/resources": { data: [
+          { vmid: 100, type: "qemu", name: "web01", node: "pve1", status: "running", maxcpu: 2 },
+          { vmid: 101, type: "qemu", name: "db01", node: "pve2", status: "running", maxcpu: 4 },
+        ] },
+      };
+      const http = { getJson: async (p) => {
+        if (p === "/api2/json/cluster/status") { if (statusRoute instanceof Error) throw statusRoute; return statusRoute; }
+        if (p in routes) return routes[p];
+        throw new Error("Proxmox : HTTP 404 sur " + p);   // configs/agent absents → tolérés
+      } };
+      const live = { events: [], publish(docId, data) { this.events.push({ docId, data }); } };
+      const service = new VmSyncService(docs, live, providers, undefined, (cfg) => new ProxmoxAdapter(cfg, http), 0);
+
+      // 1) Passe NOMINALE : 2 VMs créées sous l'identité du cluster.
+      const r1 = await service.syncDocument(doc.id);
+      ck(r1[0].ok === true && r1[0].counts.created === 2, "passe nominale : 2 VMs créées");
+      const apres1 = repo.findBy("vms", "provider_id", "pve-prod");
+      ck(apres1.map((v) => v.ext_id).sort().join(",") === "prod-cluster/100,prod-cluster/101", "ext_id préfixés du nom de cluster");
+
+      // 2) /cluster/status tombe (403) — le reste de l'API répond NORMALEMENT. AVANT le correctif,
+      //    la passe repliait l'identité sur l'id du provider : 2 créations « pve-prod/… » + 2
+      //    orphelines, soit exactement le symptôme « toutes mes VMs sont en double ».
+      statusRoute = new Error("Proxmox : HTTP 403 sur /api2/json/cluster/status");
+      const revAvant = docs.getRev(doc.id);
+      const evenementsAvant = live.events.length;
+      const r2 = await service.syncDocument(doc.id);
+      ck(r2[0].ok === false, "socle d'identité perdu → provider EN ERREUR (jamais un succès silencieux)");
+      ck(/nom du cluster NON RÉSOLU/.test(r2[0].message) && /403/.test(r2[0].message), "…message actionnable dans le statut (cause d'origine incluse)");
+      ck(!r2[0].message.includes("SECRET-UUID"), "…sans jamais exposer le jeton");
+      const apres2 = repo.findBy("vms", "provider_id", "pve-prod");
+      ck.eq(apres2.length, 2, "AUCUN doublon créé (le document garde ses 2 VMs)");
+      ck(!apres2.some((v) => v.orphan === true), "…et AUCUNE VM n'est passée orpheline (rien n'a été réconcilié)");
+      ck(apres2.every((v) => v.ext_id.startsWith("prod-cluster/")), "…les identités existantes sont intactes");
+      ck.eq(docs.getRev(doc.id), revAvant, "aucune révision consommée (aucune écriture)");
+      ck.eq(live.events.length, evenementsAvant, "aucun événement SSE (rien n'a changé pour les clients)");
+      ck(r2[0].last_success !== null, "last_success conservé : l'UI dit « en erreur depuis…, dernière réussite à… »");
+
+      // 3) RÉTABLISSEMENT : le statut cluster redevient lisible → reprise NORMALE, sans rattrapage
+      //    fantôme (les 2 VMs sont retrouvées inchangées, ni créées, ni orphelines).
+      statusRoute = clusterOk;
+      const r3 = await service.syncDocument(doc.id);
+      ck(r3[0].ok === true && r3[0].counts.created === 0 && r3[0].counts.orphaned === 0, "rétablissement : reprise idempotente (0 création, 0 orpheline)");
+      ck.eq(repo.findBy("vms", "provider_id", "pve-prod").length, 2, "…toujours 2 VMs au total");
     } finally {
       try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* dossier temp */ }
     }

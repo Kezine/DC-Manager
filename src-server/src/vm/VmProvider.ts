@@ -86,7 +86,9 @@ export interface VmClusterNode {
     OPÉRATIONNEL destiné à la vue « Clusters » — gardé en mémoire serveur, jamais écrit au document. */
 export interface VmClusterInfo {
   /** Nom du cluster — le MÊME qui préfixe les ext_id des VMs (déjà résolu par l'adaptateur, repli
-      inclus sur l'id d'instance pour un nœud isolé) : garantit la cohérence UI ↔ réconciliation. */
+      inclus sur le nom du nœud UNIQUE d'une installation isolée) : garantit la cohérence UI ↔
+      réconciliation. JAMAIS une valeur de secours arbitraire : un nom non résolu fait AVORTER
+      l'inventaire (il ré-identifierait toutes les VMs — cf. ProxmoxAdapter.requireClusterName). */
   name: string;
   /** Version du gestionnaire (ex. "8.4.1"). null = indisponible (endpoint /version en échec) — elle
       est INFORMATIVE : son absence n'empêche JAMAIS l'inventaire (décision de cadrage). */
