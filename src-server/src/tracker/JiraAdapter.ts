@@ -36,7 +36,15 @@ import { JiraHttp } from "./JiraHttp.js";
    1. BASE D'API `/rest/api/3` (Jira **Cloud**). Une instance Data Center répond,
       elle, sur `/rest/api/2` et s'authentifie en `Bearer <PAT>` : ce sera un
       adaptateur DISTINCT, pas un réglage de celui-ci.
-   2. AUTH BASIC `base64(e-mail:jeton d'API)` (cf. `JiraHttp`).
+   2. AUTH BASIC `base64(e-mail:jeton d'API)` (cf. `JiraHttp`). ✅ Schéma CONFIRMÉ
+      contre la doc officielle le 2026-08-07 (developer.atlassian.com, « Basic auth
+      for REST APIs » : en-tête, jeton créé sur id.atlassian.com/manage/api-tokens,
+      appels directs sur le site *.atlassian.net) — reste à le voir répondre sur
+      l'instance. ⚠ Une POLITIQUE d'organisation Atlassian peut INTERDIRE les
+      jetons d'API : dans ce cas le Basic ne passera pas, et l'alternative est
+      OAuth 2.0 (3LO) — flux de consentement navigateur, client_id/secret, tokens
+      à rafraîchir, appels via api.atlassian.com/ex/jira/{cloudId}/… : un
+      ADAPTATEUR/une variante à cadrer, pas un réglage de celui-ci.
    3. 🚨 RECHERCHE PAR LOTS sur `POST /rest/api/3/search/jql`, corps
       `{ jql, fields, maxResults }`, pagination par **`nextPageToken`**. Atlassian a
       REMPLACÉ l'ancien `POST /rest/api/3/search` (`startAt`/`total`) par celui-ci.
