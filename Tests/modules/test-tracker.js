@@ -1087,6 +1087,15 @@ module.exports = async () => {
     ck(ok.cfg.timeout_sec > 15, "défauts : délai PLUS GÉNÉREUX que les modules d'inventaire — une recherche SaaS n'est pas une lecture sur le LAN");
     ck(!("fingerprint" in ok.cfg) && !("ca_pem" in ok.cfg), "écart ASSUMÉ : aucun matériel TLS dans la config (un tracker SaaS a un certificat public — rien à épingler)");
 
+    // 1bis) ROGNAGE des champs communs — cause RÉELLE d'un 401 constaté le 2026-08-07 : un jeton
+    // collé depuis la boîte de dialogue du tracker embarque un retour-ligne de fin, invisible dans
+    // le formulaire mais présent dans le base64 de l'en-tête Basic. La validation doit STOCKER la
+    // valeur rognée, pas seulement valider sur elle.
+    const pasted = validate({ ...base, token: SECRET + "\n", account: "  svc@example.net  " });
+    ck(pasted.errors.length === 0 && pasted.cfg !== null, "jeton avec retour-ligne collé → valide (le rognage n'est pas un refus)");
+    ck(pasted.cfg.token === SECRET, "jeton STOCKÉ rogné (le \\n de fin n'entre pas dans le base64 de l'auth Basic)");
+    ck(pasted.cfg.account === "svc@example.net", "account STOCKÉ rogné (espaces périphériques retirés)");
+
     // 2) REQUIS + le jeton JAMAIS divulgué.
     ck(validate({ ...base, url: undefined }).errors.some((m) => /url/.test(m)), "url manquante → erreur citant le champ");
     ck(validate({ ...base, token: undefined }).errors.some((m) => /token/.test(m)), "token manquant → « token requis »");

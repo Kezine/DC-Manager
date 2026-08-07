@@ -245,7 +245,14 @@ export class TrackerProviderConfigValidate {
 
   /** Chaîne NON VIDE (après trim) → la chaîne d'origine ; sinon null. */
   private static nonEmptyString(value: unknown): string | null {
-    return typeof value === "string" && value.trim() !== "" ? value : null;
+    // ⚠ Rend la valeur ROGNÉE, pas la brute : un jeton ou un e-mail collé depuis la boîte de
+    // dialogue du tracker embarque souvent un retour-ligne ou un espace de fin — invisible dans
+    // le formulaire, mais il entre dans le base64 de l'en-tête Basic et produit un 401
+    // inexplicable (constaté sur instance réelle le 2026-08-07). Aucun des champs communs
+    // (id, kind, url, account, token) n'a d'espace périphérique SIGNIFIANT.
+    if (typeof value !== "string") return null;
+    const trimmed = value.trim();
+    return trimmed !== "" ? trimmed : null;
   }
 
   /** URL d'instance : https OBLIGATOIRE (cf. le commentaire du champ `url`). */
