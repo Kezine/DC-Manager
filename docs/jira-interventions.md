@@ -87,10 +87,19 @@ création / PUT d'une intervention répliquée (ou auto_replicate)
   marteler le tracker ;
 - l'état étant **persisté**, un **redémarrage du serveur ne perd aucune poussée** : la passe
   suivante du couple document×provider ramasse tout ce qui n'est pas `synced` ;
-- la **relecture au moment de pousser** est délibérée (`TrackerSyncService.pushIntervention`
-  relit l'intervention, il ne capture rien au moment du hook) : une édition concurrente
-  pendant l'appel distant **gagne** (« dernier état gagne »), et l'inverse pousserait une
-  version périmée ;
+- la **relecture au moment de pousser** est délibérée (`TrackerSyncService.pushOnce` relit
+  l'intervention, il ne capture rien au moment du hook) : une édition concurrente pendant l'appel
+  distant **gagne** (« dernier état gagne »), et l'inverse pousserait une version périmée ;
+- 🚨 **les poussées d'une MÊME intervention sont SÉRIALISÉES** (`TrackerSyncService.pushIntervention`,
+  champ `pushing`). La poussée n'étant pas attendue, tout autre événement du serveur entre pendant
+  l'appel distant : un second enregistrement (corriger une coquille juste après avoir enregistré
+  suffit), un « Synchroniser », une passe périodique. Deux poussées concurrentes d'une intervention
+  **pas encore répliquée** reliraient toutes deux un `tracker_ext_id` **vide** et créeraient chacune
+  un ticket — un **doublon chez un tiers**, que la doctrine « jamais de suppression distante » rend
+  irrattrapable. Une poussée demandée pendant une autre n'est pas pour autant **perdue** : elle est
+  **fusionnée** avec celle en cours, qui **rejoue une fois de plus** à la fin avec l'intervention
+  relue — sans quoi le contenu poussé resterait celui d'avant la dernière édition alors que l'état
+  passerait à `synced`. Chaque rejeu correspond à une demande réelle : ce n'est pas une rafale ;
 - 🚨 **la clé créée est écrite AVANT tout le reste.** `createRemote` enregistre l'identité
   (`tracker_provider_id`, `tracker_ext_id`, `jira_ref`, `tracker_url`) **d'abord**, et
   seulement ensuite l'état de poussée et le statut. Si l'écriture locale échoue **après** la
@@ -740,7 +749,9 @@ puis poser une période réaliste.
 - **plafond ROULANT** (`TrackerPassScope`) : ordre stable, troncature, absence de zone morte ;
 - **le pont de bout en bout** sur `interventions.db` **et** `DocumentStore` **réels** :
   poussée tolérante (tracker éteint ⇒ intervention enregistrée + `error` + reprise), survie au
-  redémarrage, retour d'état **idempotent**, introuvable, auto-réplication et ses refus ;
+  redémarrage, retour d'état **idempotent**, introuvable, auto-réplication et ses refus, et la
+  **course** de deux poussées en vol sur la même intervention (création distante **suspendue** :
+  un seul ticket, et la seconde demande rejouée en mise à jour) ;
 - **invariants** : décodeur ≡ pivot (`TRACKER_TICKET_STATE_FIELDS`), **agnosticisme de
   marque** (aucun « jira » hors des points d'extension), et les trois duplications
   client ⇄ serveur verrouillées (sentinelle « introuvable », catégories, états de poussée).

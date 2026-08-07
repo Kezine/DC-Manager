@@ -33,6 +33,10 @@ import { TrackerPassScope } from "./TrackerPassScope.js";
    par l'action manuelle, jamais en boucle immédiate (risque n°3 du cadrage).
    `pending`/`error` étant PERSISTÉS, un redémarrage du serveur ne perd aucune
    poussée : la passe suivante les ramasse.
+   🚨 COROLLAIRE DE L'ASYNCHRONE : les poussées d'une MÊME intervention sont
+   SÉRIALISÉES (cf. le champ `pushing`). Sans cela, un second enregistrement — ou
+   un « Synchroniser » — arrivant pendant l'appel distant relirait une identité
+   distante encore vide et créerait un SECOND ticket, irrattrapable.
 
    ── CE QU'ON NE DÉTRUIT JAMAIS ───────────────────────────────────────────────
    Aucune suppression distante (une intervention supprimée laisse son ticket
@@ -192,6 +196,24 @@ export class TrackerSyncService {
   private readonly cursors = new Map<string, number>();
   /** Couples document×provider EN COURS (anti-chevauchement timer ↔ synchro manuelle). */
   private readonly running = new Set<string>();
+  /** Poussées EN VOL, par INTERVENTION : clé `[docId, interventionId]` sérialisée en JSON (même
+      précaution que `cursors` — aucun identifiant n'a de jeu de caractères garanti) → drapeau
+      « une AUTRE poussée a été demandée pendant celle-ci ».
+      🚨 POURQUOI CE VERROU EXISTE. `onInterventionWrite` lance la poussée SANS l'attendre : le PUT a
+      déjà répondu, et pendant tout l'appel distant (jusqu'à `timeout_sec`) n'importe quel autre
+      événement du serveur peut entrer — un second enregistrement, un « Synchroniser » manuel, une
+      passe périodique. Sans verrou, DEUX poussées de la MÊME intervention pas encore répliquée
+      relisent toutes deux un `tracker_ext_id` VIDE et CRÉENT chacune un ticket : deux tickets chez
+      un tiers pour un seul objet, et l'effet est IRRÉVERSIBLE (doctrine « aucune suppression
+      distante »). Deux enregistrements rapprochés — corriger une coquille juste après avoir
+      enregistré — suffisent à le produire.
+      ⚠ LE DRAPEAU EST INDISSOCIABLE DU VERROU. Refuser simplement la seconde poussée PERDRAIT la
+      demande : le contenu poussé resterait celui d'AVANT la dernière édition alors que l'état
+      passerait à `synced`, et « dernier état gagne » deviendrait faux. Le drapeau fait REJOUER la
+      poussée UNE fois à la fin de celle en cours, avec l'intervention RELUE. Ce n'est pas une
+      rafale : chaque rejeu correspond à une demande réelle, et une poussée qui n'en déclenche
+      aucune ne rejoue rien. */
+  private readonly pushing = new Map<string, boolean>();
   private readonly timers: ReturnType<typeof setInterval>[] = [];
 
   constructor(
@@ -420,14 +442,45 @@ export class TrackerSyncService {
      LA POUSSÉE (sens DCM → tracker)
      -------------------------------------------------------------------------- */
 
-  /** Pousse UNE intervention : création si elle n'a pas encore d'identité distante, mise à jour
-      sinon. NE JETTE JAMAIS — elle rend un `PushOutcome` et laisse derrière elle un état PERSISTÉ
+  /** Pousse UNE intervention, en SÉRIALISANT les poussées de la MÊME intervention (cf. `pushing` :
+      deux poussées concurrentes d'une intervention pas encore répliquée créeraient DEUX tickets).
+      Une poussée demandée pendant une autre n'est pas perdue : elle est FUSIONNÉE avec celle en
+      cours, qui rejoue une fois de plus à la fin avec l'intervention relue.
+      NE JETTE JAMAIS de son propre fait — elle rend un `PushOutcome` (cf. `pushOnce`). */
+  private async pushIntervention(docId: string, interventionId: string): Promise<PushOutcome> {
+    const inFlightKey = JSON.stringify([docId, interventionId]);
+    if (this.pushing.has(inFlightKey)) {
+      this.pushing.set(inFlightKey, true);   // REDO : la poussée en vol rejouera avec le DERNIER état
+      this.log.info("tracker : poussée déjà EN VOL pour cette intervention — fusionnée avec elle (anti-doublon)", docId, interventionId);
+      // Succès DÉLIBÉRÉ : il n'y a rien à faire de plus, et rendre un échec ferait compter à la
+      // passe une poussée « ratée » (donc un `last_success` figé et une alerte notify) là où tout
+      // se déroule normalement. L'état persisté n'est PAS touché : c'est la poussée en vol qui le
+      // pose, elle seule sait ce qu'elle a réellement envoyé.
+      return { ok: true, message: "poussée déjà en cours pour cette intervention — rejouée avec le dernier état", extId: null, key: null, degraded: [] };
+    }
+    this.pushing.set(inFlightKey, false);
+    let outcome: PushOutcome;
+    let redo = false;
+    try {
+      outcome = await this.pushOnce(docId, interventionId);
+    } finally {
+      // `finally` et non la voie nominale : `pushOnce` peut jeter sur une lecture de base en panne
+      // (`getOne`), et un verrou qui survivrait à une exception bloquerait DÉFINITIVEMENT toute
+      // poussée de cette intervention.
+      redo = this.pushing.get(inFlightKey) === true;
+      this.pushing.delete(inFlightKey);
+    }
+    return redo ? await this.pushIntervention(docId, interventionId) : outcome;
+  }
+
+  /** UNE poussée : création si l'intervention n'a pas encore d'identité distante, mise à jour sinon.
+      NE JETTE JAMAIS — elle rend un `PushOutcome` et laisse derrière elle un état PERSISTÉ
       (`synced` ou `error` + message actionnable).
 
       ⚠ RELECTURE AU MOMENT DE POUSSER (risque n°4 du cadrage) : l'intervention est relue ICI, pas
       capturée au moment du hook. Une édition concurrente pendant l'appel distant gagne donc — c'est
       le comportement voulu (« dernier état gagne »), et l'inverse pousserait une version périmée. */
-  private async pushIntervention(docId: string, interventionId: string): Promise<PushOutcome> {
+  private async pushOnce(docId: string, interventionId: string): Promise<PushOutcome> {
     const degraded: string[] = [];
     const degrade: TrackerDegradeSink = (message) => {
       degraded.push(message);

@@ -1722,6 +1722,43 @@ module.exports = async () => {
       ck(statuses[0].counts !== null, "statut : … avec les compteurs de la dernière passe");
       const empty = mkService({ providers: mkProviders([]), log: mkLog(), makeAdapter: tracker.adapter });
       ck.eq(empty.statusFor(doc.id).length, 0, "statut : provider retiré de la config → plus aucune entrée (purge des états fantômes)");
+
+      /* ================================================================================
+         14) COURSE « deux poussées EN VOL sur la MÊME intervention » — jamais DEUX tickets
+         ================================================================================
+         La poussée est lancée SANS être attendue (le PUT a déjà répondu) : pendant tout l'appel
+         distant, un second enregistrement — ou un « Synchroniser », ou une passe périodique — entre
+         dans un serveur qui n'a rien à faire d'autre. Les deux poussées reliraient alors un
+         `tracker_ext_id` VIDE et créeraient chacune un ticket. Un doublon chez un tiers ne se
+         rattrape pas (aucune suppression distante, par doctrine) : c'est le scénario à interdire.
+         On reproduit la fenêtre EXACTEMENT en suspendant la création distante. */
+      declare("i10", { title: "Enregistrement initial" });
+      const releases = [];   // tous les résolveurs : sans ça, une 2e création restée en vol passerait inaperçue
+      const slow = mkTracker();
+      const slowAdapter = (config) => {
+        const inner = slow.adapter(config);
+        return Object.assign({}, inner, {
+          createIssue: async (content, onDegraded) => {
+            await new Promise((r) => { releases.push(r); });   // création SUSPENDUE : la fenêtre reste ouverte
+            return inner.createIssue(content, onDegraded);
+          },
+        });
+      };
+      const raceService = mkService({ providers: mkProviders([cfg()]), log: mkLog(), makeAdapter: slowAdapter });
+      raceService.onInterventionWrite(doc.id, "i10", "put");   // ① poussée partie, suspendue chez le tracker
+      await settle();
+      declare("i10", { title: "Coquille corrigée" });          // ② l'utilisateur ré-enregistre PENDANT l'appel
+      raceService.onInterventionWrite(doc.id, "i10", "put");
+      await settle();
+      for (const release of releases) release();               // le tracker répond enfin
+      await settle();
+      ck.eq(slow.created.length, 1,
+        "course : 🚨 deux enregistrements rapprochés ne créent QU'UN ticket (une seconde création serait un DOUBLON irréversible chez un tiers)");
+      ck.eq(slow.updates.length, 1,
+        "course : … et la seconde demande n'est PAS perdue — elle est REJOUÉE en mise à jour dès que la création est finie");
+      ck.eq(slow.updates[0].content.summary, "Coquille corrigée",
+        "course : … avec l'intervention RELUE (« dernier état gagne » : c'est la DERNIÈRE version qui atterrit chez le tracker)");
+      ck.eq(idb.getOne(doc.id, "i10").tracker_push_state, "synced", "course : l'intervention finit RÉPLIQUÉE et à jour");
     } finally {
       try { if (idb) idb.close(); } catch (_) { /* déjà fermé */ }
       try { if (docs) docs.closeAll(); } catch (_) { /* déjà fermé */ }
