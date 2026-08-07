@@ -23,10 +23,42 @@ import {
    ⚠ AUCUNE FK vers les cibles : elles vivent dans les `.db` des DOCUMENTS (bases
    SÉPARÉES) — le lien est un simple couple (kind, id), les orphelins sont TOLÉRÉS
    (c'est le client qui affichera « introuvable »).
+
+   ── COLONNES `tracker_*` : L'ÉTAT DE RÉPLICATION, ÉCRIT PAR LE PONT ──────────
+   Une intervention peut être RÉPLIQUÉE dans un tracker distant (module `tracker/`,
+   AMOVIBLE et OPTIONNEL). Les colonnes `tracker_*` portent cet état ; ce fichier
+   les DÉCLARE et les sert, mais n'en produit aucune — il n'importe RIEN de
+   `tracker/`, et le pont ne peut les écrire que par `applyTrackerState`.
+   Trois règles gouvernent ces colonnes, et elles se lisent ensemble :
+   1. `save()` NE LES TOUCHE JAMAIS (elles sont absentes du `DO UPDATE SET`) : une
+      écriture utilisateur ne peut ni poser ni effacer un état de réplication, et un
+      client qui les enverrait dans un PUT est simplement IGNORÉ — comme l'audit ;
+   2. `applyTrackerState()` ne touche JAMAIS `updated_by`/`updated_date` : le retour
+      d'état n'est pas une édition de l'utilisateur. Sans cette règle, chaque passe
+      ferait remonter en tête d'un listing trié par activité des objets que personne
+      n'a modifiés, et l'audit désignerait le serveur comme dernier éditeur ;
+   3. le pont écrit AUSSI `jira_ref` (la clé LISIBLE du ticket créé ou lié) : c'est
+      le champ que l'utilisateur consulte DÉJÀ, et le lien `JIRA_BASE_URL` existant
+      continue de marcher sans une ligne de code de plus.
+   Module `tracker/` absent ⇒ colonnes vides, comportement strictement inchangé.
    ============================================================================= */
 
 /** Nom de la base dédiée au module, DANS le dossier injecté (à côté de registry.db). */
 export const INTERVENTIONS_DB_FILE = "interventions.db";
+
+/** Colonnes d'ÉTAT DE RÉPLICATION (cf. l'en-tête). LISTE UNIQUE : elle sert à la fois au DDL
+    (migration `ensureColumn`) et à la LISTE BLANCHE d'écriture d'`applyTrackerState`. Les deux
+    ensembles doivent coïncider par construction — les tenir séparément finirait par autoriser
+    l'écriture d'une colonne qui n'existe pas, ou l'inverse. */
+const TRACKER_COLUMNS = [
+  "tracker_provider_id", "tracker_ext_id", "tracker_status", "tracker_status_category",
+  "tracker_assignee", "tracker_url", "tracker_last_sync", "tracker_push_state", "tracker_push_error",
+] as const;
+
+/** Colonnes que le pont a le droit d'écrire : les `tracker_*` PLUS `jira_ref` — la clé LISIBLE du
+    ticket, posée là où l'utilisateur la cherche déjà. ⚠ Ni `updated_by` ni `updated_date` n'y
+    figureront JAMAIS : c'est la garantie testée que le retour d'état n'est pas une édition. */
+const TRACKER_PATCH_COLUMNS: readonly string[] = [...TRACKER_COLUMNS, "jira_ref"];
 
 /** Lien vers une cible (couple opaque — aucune FK ; l'ordre du tableau fait foi). */
 export interface InterventionLink {
@@ -35,7 +67,10 @@ export interface InterventionLink {
 }
 
 /** Objet complet (liste ET détail portent la MÊME forme : aucun champ secret à masquer,
-    contrairement à certs et son key_enc). Les liens (petits) sont TOUJOURS inclus. */
+    contrairement à certs et son key_enc). Les liens (petits) sont TOUJOURS inclus.
+    Les champs `tracker_*` sont INCLUS dans les lignes rendues (l'UI affiche l'état de réplication
+    sur la fiche et le listing) mais n'ont AUCUNE place dans un corps de PUT : `save()` ne les lit
+    pas, exactement comme les champs d'audit. */
 export interface InterventionRecord {
   id: string;
   kind: string;
@@ -51,7 +86,68 @@ export interface InterventionRecord {
   planned_end: string | null;
   jira_ref: string | null;
   closed_date: string | null;
+  /** Provider de réplication (null = intervention non répliquée). */
+  tracker_provider_id: string | null;
+  /** 🚨 Identifiant INTERNE du ticket distant — JAMAIS sa clé : une clé change au déplacement de
+      projet, et la prendre pour identité produirait un doublon plus un orphelin, en silence. */
+  tracker_ext_id: string | null;
+  /** Libellé BRUT du statut distant, affiché tel quel et jamais traduit. */
+  tracker_status: string | null;
+  /** Catégorie FERMÉE du statut (`todo`/`in_progress`/`done`/`unknown`) — pastille et tri. */
+  tracker_status_category: string | null;
+  /** Assigné côté tracker (affichage seul — DC Manager n'a pas d'assignation). */
+  tracker_assignee: string | null;
+  /** Lien d'INTERFACE du ticket, persisté tel que composé par l'adaptateur. */
+  tracker_url: string | null;
+  /** Dernier retour d'état RÉUSSI (ISO). */
+  tracker_last_sync: string | null;
+  /** État de POUSSÉE : `synced` | `pending` | `error` (null = jamais poussée). */
+  tracker_push_state: string | null;
+  /** Dernier message d'échec de poussée — ACTIONNABLE (celui du tracker, intact). */
+  tracker_push_error: string | null;
   links: InterventionLink[];
+}
+
+/** Ligne d'ASSIETTE du retour d'état : une intervention RÉPLIQUÉE. Forme RÉDUITE (le pont n'a besoin
+    que de l'identité distante et de l'état affiché), volontairement MIROIR de `TrackedIntervention`
+    déclarée chez `tracker/` — dépendance INVERSÉE des deux côtés, duplication assumée et signalée. */
+export interface TrackedInterventionRow {
+  id: string;
+  jira_ref: string | null;
+  tracker_provider_id: string | null;
+  tracker_ext_id: string | null;
+  tracker_status: string | null;
+  tracker_status_category: string | null;
+  tracker_assignee: string | null;
+  tracker_url: string | null;
+  tracker_last_sync: string | null;
+}
+
+/** Ligne d'une poussée DUE. Porte son `doc_id` : le ramassage peut balayer TOUS les documents (une
+    poussée due survit à un redémarrage du serveur — c'est tout l'intérêt de la persister). */
+export interface PendingPushRow {
+  doc_id: string;
+  id: string;
+  tracker_provider_id: string | null;
+  tracker_ext_id: string | null;
+  tracker_push_state: string | null;
+}
+
+/** Écriture PARTIELLE de l'état de réplication. Toutes les clés sont OPTIONNELLES : une passe
+    idempotente n'écrit que ce qui a CHANGÉ. Une clé à `undefined` n'est PAS écrite (ce n'est pas la
+    même chose que `null`, qui EFFACE la colonne). */
+export interface InterventionTrackerPatch {
+  tracker_provider_id?: string | null;
+  tracker_ext_id?: string | null;
+  tracker_status?: string | null;
+  tracker_status_category?: string | null;
+  tracker_assignee?: string | null;
+  tracker_url?: string | null;
+  tracker_last_sync?: string | null;
+  tracker_push_state?: string | null;
+  tracker_push_error?: string | null;
+  /** ⚠ SEULE colonne HORS `tracker_*` que le pont a le droit d'écrire (cf. règle 3 de l'en-tête). */
+  jira_ref?: string | null;
 }
 
 /** Options de listing paginé. Toutes optionnelles → défauts (validation SOUPLE côté route :
@@ -138,6 +234,15 @@ export class InterventionsDb {
         jira_ref      TEXT,
         closed_date   TEXT,
         search        TEXT NOT NULL DEFAULT '',
+        tracker_provider_id     TEXT,
+        tracker_ext_id          TEXT,
+        tracker_status          TEXT,
+        tracker_status_category TEXT,
+        tracker_assignee        TEXT,
+        tracker_url             TEXT,
+        tracker_last_sync       TEXT,
+        tracker_push_state      TEXT,
+        tracker_push_error      TEXT,
         PRIMARY KEY (doc_id, id)
       );
       CREATE TABLE IF NOT EXISTS intervention_links (
@@ -157,10 +262,19 @@ export class InterventionsDb {
     this.ensureColumn("interventions", "closed_date", "TEXT");
     this.ensureColumn("interventions", "jira_ref", "TEXT");
     this.ensureColumn("interventions", "search", "TEXT NOT NULL DEFAULT ''");
+    // État de RÉPLICATION vers un tracker distant (module `tracker/`, amovible) : ces colonnes sont
+    // ajoutées À CHAUD sur une base antérieure au pont, exactement comme les trois ci-dessus. Toutes
+    // NULLABLES sans défaut : « null » signifie « pas répliquée », et c'est l'état initial correct
+    // de toute intervention existante — aucun backfill n'a de sens ici.
+    for (const column of TRACKER_COLUMNS) this.ensureColumn("interventions", column, "TEXT");
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_interventions_search ON interventions(doc_id, search);
       CREATE INDEX IF NOT EXISTS idx_interventions_status ON interventions(doc_id, status);
       CREATE INDEX IF NOT EXISTS idx_interventions_planned_start ON interventions(planned_start);
+      -- Les deux assiettes du pont : le retour d'état balaye les RÉPLIQUÉES, la poussée balaye les
+      -- DUES. Sans ces index, chaque passe ferait un balayage complet de la table.
+      CREATE INDEX IF NOT EXISTS idx_interventions_tracker_ext ON interventions(doc_id, tracker_ext_id);
+      CREATE INDEX IF NOT EXISTS idx_interventions_tracker_push ON interventions(doc_id, tracker_push_state);
     `);
   }
 
@@ -316,6 +430,64 @@ export class InterventionsDb {
   }
 
   /* --------------------------------------------------------------------------
+     ÉTAT DE RÉPLICATION — les trois surfaces consommées par le pont `tracker/`
+     (qui ne connaît, lui, que son propre contrat : cf. `TrackerProvider.ts`)
+     -------------------------------------------------------------------------- */
+
+  /** L'ASSIETTE du retour d'état : les interventions RÉPLIQUÉES d'un document (identité distante
+      posée). Ordre STABLE par id — le calcul de périmètre du pont retrie ensuite selon SA règle.
+      ⚠ `<> ''` autant que `IS NOT NULL` : une chaîne vide n'est pas une identité, et la laisser
+      passer ferait demander au tracker un identifiant qu'il ne peut que déclarer introuvable. */
+  listTracked(docId: string): TrackedInterventionRow[] {
+    return this.db.prepare(
+      "SELECT id, jira_ref, tracker_provider_id, tracker_ext_id, tracker_status, tracker_status_category, " +
+      "tracker_assignee, tracker_url, tracker_last_sync FROM interventions " +
+      "WHERE doc_id = ? AND tracker_ext_id IS NOT NULL AND tracker_ext_id <> '' ORDER BY id",
+    ).all(docId) as any[];
+  }
+
+  /** Les poussées DUES : `tracker_push_state` ∈ { pending, error }. `docId` OMIS = tous les
+      documents — c'est ce qui permet de rattraper, après un redémarrage, une poussée qu'un serveur
+      arrêté n'avait pas eu le temps de faire (l'état est PERSISTÉ, pas gardé en mémoire).
+      Ordre STABLE (document puis id) ; la priorité de traitement appartient au pont. */
+  listPushDue(docId?: string): PendingPushRow[] {
+    const columns = "doc_id, id, tracker_provider_id, tracker_ext_id, tracker_push_state";
+    const due = "tracker_push_state IN ('pending', 'error')";
+    return (docId === undefined
+      ? this.db.prepare("SELECT " + columns + " FROM interventions WHERE " + due + " ORDER BY doc_id, id").all()
+      : this.db.prepare("SELECT " + columns + " FROM interventions WHERE doc_id = ? AND " + due + " ORDER BY id").all(docId)) as any[];
+  }
+
+  /** Écrit l'état de RÉPLICATION d'une intervention. Renvoie `false` si elle n'existe plus (supprimée
+      pendant une poussée : ce n'est pas une erreur, il n'y a simplement plus rien à mettre à jour).
+
+      🚨 DEUX GARANTIES, et ce sont elles qui justifient une méthode dédiée plutôt qu'un passage par
+      `save()` :
+      1. `updated_by`/`updated_date` NE SONT JAMAIS TOUCHÉS. Le retour d'état vient du tracker, pas
+         d'un utilisateur : les estampiller ferait remonter en tête d'un listing trié par activité
+         des objets que personne n'a modifiés, et désignerait le serveur comme dernier éditeur ;
+      2. seules les colonnes de `TRACKER_PATCH_COLUMNS` sont écrites — une clé inconnue du patch est
+         IGNORÉE, jamais interpolée dans le SQL.
+      Une clé à `undefined` n'est pas écrite ; `null` EFFACE la colonne (les deux se distinguent, et
+      c'est nécessaire : effacer un message d'erreur est une opération à part entière).
+      Patch VIDE → aucune écriture (idempotence de bout en bout). */
+  applyTrackerState(docId: string, id: string, patch: InterventionTrackerPatch): boolean {
+    const assignments: string[] = [];
+    const params: Record<string, unknown> = { doc_id: docId, id };
+    for (const column of TRACKER_PATCH_COLUMNS) {
+      const value = (patch as Record<string, unknown>)[column];
+      if (value === undefined) continue;
+      assignments.push(column + " = @" + column);
+      params[column] = value;
+    }
+    if (assignments.length === 0) return this.exists(docId, id);
+    const info = this.db.prepare(
+      "UPDATE interventions SET " + assignments.join(", ") + " WHERE doc_id = @doc_id AND id = @id",
+    ).run(params);
+    return (info.changes || 0) > 0;
+  }
+
+  /* --------------------------------------------------------------------------
      Source du veilleur de rappels (fenêtres planifiées encore à démarrer)
      -------------------------------------------------------------------------- */
 
@@ -332,6 +504,11 @@ export class InterventionsDb {
      Helpers privés
      -------------------------------------------------------------------------- */
 
+  /** L'intervention existe-t-elle ? (lecture la plus légère possible — usage interne.) */
+  private exists(docId: string, id: string): boolean {
+    return !!this.db.prepare("SELECT id FROM interventions WHERE doc_id = ? AND id = ?").get(docId, id);
+  }
+
   private linksOf(docId: string, id: string): InterventionLink[] {
     return (this.db.prepare("SELECT target_kind, target_id FROM intervention_links WHERE doc_id = ? AND intervention_id = ? ORDER BY position").all(docId, id) as any[])
       .map((l) => ({ target_kind: l.target_kind, target_id: l.target_id }));
@@ -344,7 +521,21 @@ export class InterventionsDb {
       created_by: row.created_by, created_date: row.created_date,
       updated_by: row.updated_by, updated_date: row.updated_date,
       planned_start: row.planned_start, planned_end: row.planned_end,
-      jira_ref: row.jira_ref, closed_date: row.closed_date, links,
+      jira_ref: row.jira_ref, closed_date: row.closed_date,
+      // État de RÉPLICATION : INCLUS dans toute ligne rendue (fiche et listing l'affichent), et
+      // pourtant jamais lu d'un corps de PUT — `save()` passe par `InterventionsValidate`, qui ne
+      // connaît que les champs métier. Une base antérieure au pont rend `undefined` sur ces colonnes
+      // avant migration : le repli `?? null` garde la forme du contrat stable dans tous les cas.
+      tracker_provider_id: row.tracker_provider_id ?? null,
+      tracker_ext_id: row.tracker_ext_id ?? null,
+      tracker_status: row.tracker_status ?? null,
+      tracker_status_category: row.tracker_status_category ?? null,
+      tracker_assignee: row.tracker_assignee ?? null,
+      tracker_url: row.tracker_url ?? null,
+      tracker_last_sync: row.tracker_last_sync ?? null,
+      tracker_push_state: row.tracker_push_state ?? null,
+      tracker_push_error: row.tracker_push_error ?? null,
+      links,
     };
   }
 

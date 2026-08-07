@@ -1,19 +1,19 @@
-import type { IssueRecord } from "./IssueProvider.js";
+import { TRACKER_STATUS_CATEGORY_FALLBACK, type TrackerTicketState } from "./TrackerProvider.js";
 
 /* =============================================================================
-   DÉCODAGE JIRA PUR — module `issues/` AMOVIBLE, partie SPÉCIFIQUE À LA MARQUE
+   DÉCODAGE JIRA PUR — module `tracker/` AMOVIBLE, partie SPÉCIFIQUE À LA MARQUE
    (préfixe `Jira*`). Transforme les réponses JSON de l'API REST Jira Cloud
-   (`/rest/api/3/…`) en pivot `IssueRecord` (cf. `IssueProvider.ts`). Classe à
-   MÉTHODES STATIQUES, entièrement PURE : aucun accès réseau, aucun import Node,
-   aucune horloge — testable en isolation (fixtures JSON → IssueRecord).
+   (`/rest/api/3/…`) en pivot `TrackerTicketState` (cf. `TrackerProvider.ts`), et
+   traduit dans l'autre sens ce qui doit l'être (priorité, ADF). Classe à MÉTHODES
+   STATIQUES, entièrement PURE : aucun accès réseau, aucun import Node, aucune
+   horloge — testable en isolation (fixtures JSON → état).
 
    ── PRINCIPE DIRECTEUR : TOLÉRANCE ABSOLUE ────────────────────────────────────
    Ce module NE JETTE JAMAIS. Champ absent → `null` (ou "" pour les champs non
    nullables du pivot), forme inattendue → enregistrement ignoré, type inattendu →
-   valeur écartée. Raison de fond : la synchro écrit dans le document sous
-   validation partagée — une exception de décodage ferait échouer la passe ENTIÈRE
-   (et donc perdre le rafraîchissement de TOUS les tickets) pour un seul ticket mal
-   formé.
+   valeur écartée. Raison de fond : une exception de décodage ferait échouer la
+   passe ENTIÈRE (et donc perdre le rafraîchissement de TOUTES les interventions
+   répliquées) pour un seul ticket mal formé.
 
    ── 🚨 L'IDENTITÉ EST L'`id` INTERNE, JAMAIS LA CLÉ ──────────────────────────
    C'est LE risque n°1 du chantier, et il est silencieux jusqu'au jour où il frappe.
@@ -23,7 +23,7 @@ import type { IssueRecord } from "./IssueProvider.js";
    introuvable). Donc : `ext_id` = l'`id` interne, et un item SANS id est REFUSÉ
    (rendu `null`) — mieux vaut ne pas suivre un ticket que le suivre sous une
    identité mobile. `key` n'est qu'un champ d'AFFICHAGE, re-synchronisé à chaque
-   passe : un renommage de projet se reflète alors tout seul dans la colonne.
+   passe : un renommage de projet se reflète alors tout seul.
 
    ── ⚠ LE LIEN VISE L'INTERFACE, PAS L'API ────────────────────────────────────
    Le champ `self` d'une réponse Jira pointe la RESSOURCE D'API
@@ -43,22 +43,15 @@ const FIELD_ALIASES = {
   /** Conteneur des champs métier. L'API v3 les groupe sous `fields` ; on accepte aussi un objet
       APLATI (certaines routes de recherche « allégées » et bon nombre de fixtures le sont). */
   fields: ["fields"],
-  summary: ["summary", "title"],
   status: ["status"],
   statusCategory: ["statusCategory", "status_category"],
-  issueType: ["issuetype", "issueType", "type"],
-  priority: ["priority"],
   assignee: ["assignee"],
-  reporter: ["reporter", "creator"],
   labels: ["labels", "tags"],
-  resolution: ["resolution"],
-  created: ["created", "createdAt", "created_at"],
-  updated: ["updated", "updatedAt", "updated_at"],
 } as const;
 
 /** Alias du LIBELLÉ d'un objet nommé de Jira (statut, type, priorité, résolution) : ces objets sont
-    tous de la forme `{ id, name, … }`. Un seul jeu d'alias pour les quatre — ils ont la même forme,
-    et écrire quatre listes identiques les ferait diverger. */
+    tous de la forme `{ id, name, … }`. Un seul jeu d'alias pour tous — ils ont la même forme, et
+    écrire plusieurs listes identiques les ferait diverger. */
 const NAMED_ALIASES = ["name", "value", "label"] as const;
 
 /** Alias du nom AFFICHABLE d'une personne. `displayName` d'abord : c'est ce que l'opérateur voit
@@ -70,9 +63,10 @@ const PERSON_ALIASES = ["displayName", "name", "emailAddress"] as const;
 /** Alias de la CLÉ de catégorie d'état. Jira l'expose sous `statusCategory.key`. */
 const CATEGORY_KEY_ALIASES = ["key", "categoryKey"] as const;
 
-/** Correspondance EXPLICITE catégorie Jira → énumération FERMÉE du pivot (`ISSUE_STATUS_CATEGORIES`
-    du partagé). Table plutôt que suite de `if` : c'est LE point à corriger si Atlassian ajoute une
-    clé, et une valeur ABSENTE de la table tombe sur `unknown` — on ne devine jamais.
+/** Correspondance EXPLICITE catégorie Jira → énumération FERMÉE du pivot
+    (`TRACKER_STATUS_CATEGORIES`). Table plutôt que suite de `if` : c'est LE point à corriger si
+    Atlassian ajoute une clé, et une valeur ABSENTE de la table tombe sur `unknown` — on ne devine
+    jamais.
     ⚠ La clé `undefined` (littéralement, pour la catégorie « No category ») n'est pas listée : elle
     tombe donc, à juste titre, sur `unknown`. */
 const STATUS_CATEGORY_BY_JIRA_KEY: Readonly<Record<string, string>> = {
@@ -81,9 +75,18 @@ const STATUS_CATEGORY_BY_JIRA_KEY: Readonly<Record<string, string>> = {
   done: "done",
 };
 
-/** Catégorie de repli quand la clé est absente ou inconnue. Membre à part entière de l'ensemble
-    fermé du partagé : c'est ce qui rend la tolérance possible sans faire échouer la passe. */
-const STATUS_CATEGORY_FALLBACK = "unknown";
+/** Correspondance PRIORITÉ DC Manager → nom de priorité Jira. Table FIXE en v1 (§5 du cadrage) :
+    ce sont les quatre noms du schéma de priorités par DÉFAUT de Jira. La rendre configurable
+    n'apporterait rien tant que le besoin ne s'est pas manifesté — et elle vit ICI, dans le module de
+    marque, parce que « Highest » est un vocabulaire Jira, pas un concept de DC Manager.
+    ⚠ Un slug hors table rend `null` : on préfère pousser un ticket SANS priorité qu'avec une
+    priorité inventée (et le champ est de toute façon facultatif — certains projets ne l'ont pas). */
+const JIRA_PRIORITY_BY_SLUG: Readonly<Record<string, string>> = {
+  low: "Low",
+  normal: "Medium",
+  high: "High",
+  critical: "Highest",
+};
 
 /** Une PAGE de résultats de recherche, décodée. Porte les marqueurs des DEUX formes d'API connues
     (cf. l'en-tête de `JiraAdapter` § « ce qui est SUPPOSÉ de l'API Jira ») : `nextPageToken`/`isLast`
@@ -158,20 +161,19 @@ export class JiraParse {
   }
 
   /* --------------------------------------------------------------------------
-     2) TICKETS — item brut → pivot `IssueRecord`
+     2) TICKETS — item brut → pivot `TrackerTicketState`
      -------------------------------------------------------------------------- */
 
-  /** Décode UN ticket. Rend `null` quand l'item est inexploitable — c'est-à-dire quand il n'offre
-      pas d'identité INTERNE (cf. 🚨 en tête de fichier) : le réconcilier sous sa clé produirait un
-      doublon au premier déplacement de projet.
+  /** Décode l'ÉTAT d'UN ticket. Rend `null` quand l'item est inexploitable — c'est-à-dire quand il
+      n'offre pas d'identité INTERNE (cf. 🚨 en tête de fichier) : le réconcilier sous sa clé
+      produirait un doublon au premier déplacement de projet.
 
-      `provider_id` est laissé VIDE : le décodeur pur ignore l'instance d'adaptateur, c'est
-      l'adaptateur qui estampille (même partage des rôles que `UnifiParse`/`ProxmoxParse`).
-      `orphan` est posé à `false` (constat : ce ticket VIENT d'être résolu) et `last_sync` à "" (le
-      service pose UN horodatage pour toute la passe) — cf. l'AUTORITÉ des champs du pivot.
+      ⚠ Ce que ce décodeur NE lit PAS, et pourquoi : ni titre, ni description, ni type de ticket.
+      DC Manager fait FOI sur le contenu (il l'a poussé) — les rapatrier créerait deux vérités
+      concurrentes sur les mêmes champs, et la première divergence serait impossible à arbitrer.
 
       @param baseUrl URL de base de l'instance, pour COMPOSER le lien d'interface (jamais `self`). */
-  static issueRecord(raw: any, baseUrl: string): IssueRecord | null {
+  static ticketState(raw: any, baseUrl: string): TrackerTicketState | null {
     if (!raw || typeof raw !== "object") return null;
     const extId = JiraParse.firstString(raw, FIELD_ALIASES.id);
     if (!extId) return null;   // aucune identité STABLE → inréconciliable
@@ -185,37 +187,27 @@ export class JiraParse {
 
     return {
       ext_id: extId,
-      provider_id: "",                                   // estampillé par l'adaptateur
       key,
-      summary: JiraParse.firstString(fields, FIELD_ALIASES.summary) || "",
       status: JiraParse.namedLabel(status) || "",
       status_category: JiraParse.statusCategory(status),
-      issue_type: JiraParse.namedLabel(JiraParse.firstValue(fields, FIELD_ALIASES.issueType)) || "",
-      priority: JiraParse.namedLabel(JiraParse.firstValue(fields, FIELD_ALIASES.priority)),
       assignee: JiraParse.personName(JiraParse.firstValue(fields, FIELD_ALIASES.assignee)),
-      reporter: JiraParse.personName(JiraParse.firstValue(fields, FIELD_ALIASES.reporter)),
-      labels: JiraParse.labels(JiraParse.firstValue(fields, FIELD_ALIASES.labels)),
-      resolution: JiraParse.namedLabel(JiraParse.firstValue(fields, FIELD_ALIASES.resolution)),
-      created_src: JiraParse.isoDate(JiraParse.firstValue(fields, FIELD_ALIASES.created)),
-      updated_src: JiraParse.isoDate(JiraParse.firstValue(fields, FIELD_ALIASES.updated)),
       url: JiraParse.browseUrl(baseUrl, key),
-      orphan: false,
-      last_sync: "",
+      labels: JiraParse.labels(JiraParse.firstValue(fields, FIELD_ALIASES.labels)),
     };
   }
 
-  /** Décode une LISTE de tickets, en écartant les inexploitables et les DOUBLONS d'`ext_id` (une
+  /** Décode une LISTE d'états, en écartant les inexploitables et les DOUBLONS d'`ext_id` (une
       recherche paginée peut ramener deux fois le même ticket si des données bougent entre deux
-      pages — le premier gagne, comme dans la réconciliation). */
-  static issueRecords(items: any[], baseUrl: string): IssueRecord[] {
-    const out: IssueRecord[] = [];
+      pages — le premier gagne). */
+  static ticketStates(items: any[], baseUrl: string): TrackerTicketState[] {
+    const out: TrackerTicketState[] = [];
     const seen = new Set<string>();
     if (!Array.isArray(items)) return out;
     for (const item of items) {
-      const record = JiraParse.issueRecord(item, baseUrl);
-      if (!record || seen.has(record.ext_id)) continue;
-      seen.add(record.ext_id);
-      out.push(record);
+      const state = JiraParse.ticketState(item, baseUrl);
+      if (!state || seen.has(state.ext_id)) continue;
+      seen.add(state.ext_id);
+      out.push(state);
     }
     return out;
   }
@@ -224,12 +216,12 @@ export class JiraParse {
       `STATUS_CATEGORY_BY_JIRA_KEY`). Absente, exotique ou inconnue → `unknown` : la classification
       sert aux couleurs et aux tris, elle ne doit JAMAIS faire échouer une passe. */
   static statusCategory(status: any): string {
-    if (!status || typeof status !== "object") return STATUS_CATEGORY_FALLBACK;
+    if (!status || typeof status !== "object") return TRACKER_STATUS_CATEGORY_FALLBACK;
     const category = JiraParse.firstValue(status, FIELD_ALIASES.statusCategory);
-    if (!category || typeof category !== "object") return STATUS_CATEGORY_FALLBACK;
+    if (!category || typeof category !== "object") return TRACKER_STATUS_CATEGORY_FALLBACK;
     const key = JiraParse.firstString(category, CATEGORY_KEY_ALIASES);
-    if (!key) return STATUS_CATEGORY_FALLBACK;
-    return STATUS_CATEGORY_BY_JIRA_KEY[key.trim().toLowerCase()] || STATUS_CATEGORY_FALLBACK;
+    if (!key) return TRACKER_STATUS_CATEGORY_FALLBACK;
+    return STATUS_CATEGORY_BY_JIRA_KEY[key.trim().toLowerCase()] || TRACKER_STATUS_CATEGORY_FALLBACK;
   }
 
   /** Compose le lien d'INTERFACE d'un ticket : `<base>/browse/<clé>` (⚠ jamais le champ `self`, qui
@@ -246,9 +238,9 @@ export class JiraParse {
      3) RÉFÉRENCES SAISIES ET JQL
      -------------------------------------------------------------------------- */
 
-  /** Traduit une RÉFÉRENCE saisie par l'utilisateur (porte d'entrée « Suivre un ticket ») en
-      quelque chose que l'API sait résoudre : une clé lisible, un identifiant interne, ou l'un des
-      deux extrait d'une URL COLLÉE depuis le navigateur. Rend `null` si rien d'exploitable.
+  /** Traduit une RÉFÉRENCE saisie par l'utilisateur (action « Lier un ticket existant ») en quelque
+      chose que l'API sait résoudre : une clé lisible, un identifiant interne, ou l'un des deux
+      extrait d'une URL COLLÉE depuis le navigateur. Rend `null` si rien d'exploitable.
 
       Formes acceptées, et pourquoi celles-là : l'utilisateur copie ce qu'il a sous les yeux —
       soit la clé qu'il lit dans Jira, soit l'URL de la page du ticket (`…/browse/INFRA-123`), soit
@@ -256,7 +248,7 @@ export class JiraParse {
       (`…/rest/api/3/issue/10042`). Refuser l'URL l'obligerait à extraire la clé lui-même, ce qui
       est exactement le genre de friction qui fait renoncer à une fonctionnalité.
       Pure → testable, et volontairement AVARE : ce qui n'est pas reconnu rend `null` plutôt qu'une
-      supposition (une supposition fausse ferait suivre le mauvais ticket). */
+      supposition (une supposition fausse ferait lier le mauvais ticket). */
   static referenceToIdOrKey(reference: string): string | null {
     const raw = typeof reference === "string" ? reference.trim() : "";
     if (raw === "") return null;
@@ -282,10 +274,10 @@ export class JiraParse {
   /** Construit la LISTE d'identifiants d'une clause JQL `id IN (…)`. Les identifiants NUMÉRIQUES
       passent nus (c'est leur forme naturelle) ; tout le reste est CITÉ, guillemets et
       contre-obliques échappés.
-      ⚠ Ce n'est pas de la coquetterie : ces valeurs viennent du DOCUMENT (donc, à la source, d'un
-      import ou d'une écriture API). Les concaténer telles quelles laisserait une valeur forgée
-      refermer la parenthèse et poursuivre la requête — la version JQL d'une injection. Les valeurs
-      vides sont écartées. Pure → testable. */
+      ⚠ Ce n'est pas de la coquetterie : ces valeurs viennent de la base des interventions (donc, à
+      la source, d'une réponse de tracker). Les concaténer telles quelles laisserait une valeur
+      forgée refermer la parenthèse et poursuivre la requête — la version JQL d'une injection. Les
+      valeurs vides sont écartées. Pure → testable. */
   static jqlIdList(ids: string[]): string {
     const parts: string[] = [];
     for (const id of Array.isArray(ids) ? ids : []) {
@@ -297,8 +289,15 @@ export class JiraParse {
   }
 
   /* --------------------------------------------------------------------------
-     4) ADF — Atlassian Document Format (création de ticket)
+     4) POUSSÉE — priorité, échéance, ADF et lecture des REFUS
      -------------------------------------------------------------------------- */
+
+  /** Nom de priorité JIRA pour un slug DC Manager (`low`/`normal`/`high`/`critical`), ou `null` si
+      le slug est absent/inconnu (cf. `JIRA_PRIORITY_BY_SLUG`). Pure → testable. */
+  static priorityName(slug: unknown): string | null {
+    const raw = typeof slug === "string" ? slug.trim().toLowerCase() : "";
+    return raw === "" ? null : (JIRA_PRIORITY_BY_SLUG[raw] || null);
+  }
 
   /** Convertit un TEXTE BRUT en document ADF minimal — le format qu'exige l'API v3 pour une
       description (elle n'accepte PAS une chaîne : c'est le piège d'implémentation n°1 de la
@@ -321,6 +320,43 @@ export class JiraParse {
   /** UN paragraphe ADF (vide ⇒ sans nœud `text`, cf. `toAdf`). */
   private static adfParagraph(line: string): any {
     return line === "" ? { type: "paragraph", content: [] } : { type: "paragraph", content: [{ type: "text", text: line }] };
+  }
+
+  /** 🚨 LE REFUS DU TRACKER DÉSIGNE-T-IL LE CHAMP `field` ? Sert au repli « priorité refusée par le
+      projet » (risque n°2 du cadrage) : beaucoup de projets team-managed n'ont PAS de champ
+      priorité, et Jira répond alors `{ errors: { priority: "…" } }`. Sans cette lecture, la
+      réplication serait purement et simplement impossible sur ces projets-là.
+
+      DEUX sources, dans cet ordre, et l'union des deux (TOLÉRANCE assumée) :
+      1. le CORPS BRUT de la réponse, s'il est joint à l'erreur (`.body`) : la lecture est alors
+         EXACTE — les clés de `errors` sont littéralement les noms de champs refusés ;
+      2. à défaut, le MESSAGE — où le client HTTP a déjà composé « <champ> : <explication> ». Le
+         repli existe parce que le transport est INJECTÉ : un stub de test (ou une autre
+         implémentation) n'est pas tenu de joindre le corps.
+      On ne cherche PAS le nom du champ n'importe où dans le texte (« priority » peut apparaître
+      dans un titre d'intervention recopié par le tracker) : on exige la forme « champ : », qui est
+      celle d'une erreur PAR CHAMP.
+      Pure et statique → testable par fixtures. */
+  static errorMentionsField(error: unknown, field: string): boolean {
+    const wanted = String(field || "").trim().toLowerCase();
+    if (wanted === "") return false;
+
+    const body = (error as { body?: unknown } | null | undefined)?.body;
+    if (typeof body === "string" && body.trim() !== "") {
+      let parsed: any;
+      try { parsed = JSON.parse(body); } catch { parsed = null; }
+      const errors = parsed && typeof parsed === "object" ? parsed.errors : null;
+      if (errors && typeof errors === "object" && !Array.isArray(errors)) {
+        if (Object.keys(errors).some((name) => String(name).trim().toLowerCase() === wanted)) return true;
+      }
+    }
+
+    const message = error instanceof Error ? error.message : String(error ?? "");
+    if (message === "") return false;
+    // Échappement du nom de champ : il vient d'une constante du code aujourd'hui, mais une regex
+    // construite sans échappement est une bombe à retardement le jour où il vient d'ailleurs.
+    const escaped = wanted.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp("(?:^|[^A-Za-z0-9_])" + escaped + "\\s*:", "i").test(message);
   }
 
   /* --------------------------------------------------------------------------
@@ -352,10 +388,9 @@ export class JiraParse {
   }
 
   /** Étiquettes : uniquement les CHAÎNES non vides, rognées. Ni tri ni déduplication ici — le
-      décodeur rend ce qu'il a LU, la canonisation (tri + dédup) appartient à la frontière de
-      persistance, et la faire deux fois de deux façons est précisément ce qui produit un faux delta
-      à chaque passe. ⚠ Cette frontière a disparu avec la collection `issues` au pivot du 2026-08-07 :
-      le lot P2 devra la reposer côté pont (les labels `DCM-*` s'y comparent par ENSEMBLE). */
+      décodeur rend ce qu'il a LU. La canonisation (préfixe `DCM-`, normalisation, dédup) appartient
+      au module PUR `TrackerLabels`, qui est aussi celui qui calcule le diff : la faire deux fois de
+      deux façons est précisément ce qui produirait un faux delta à chaque poussée. */
   private static labels(value: any): string[] {
     if (!Array.isArray(value)) return [];
     const out: string[] = [];
@@ -383,24 +418,6 @@ export class JiraParse {
     const value = JiraParse.firstValue(raw, keys);
     if (typeof value === "string") return value.trim() === "" ? null : value.trim();
     if (typeof value === "number" && Number.isFinite(value)) return String(value);
-    return null;
-  }
-
-  /** Horodatage → ISO 8601, quelle que soit la forme reçue : chaîne datée (revalidée — Jira rend
-      « 2026-08-01T10:00:00.000+0200 », que `Date` sait lire), secondes UNIX ou millisecondes UNIX
-      (départagées par l'ordre de grandeur : au-delà de 10^11, c'est nécessairement des ms).
-      Illisible → `null`, JAMAIS une date inventée : une fausse date de création trompe l'opérateur
-      plus qu'un tiret. */
-  private static isoDate(value: any): string | null {
-    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
-      const ms = value > 1e11 ? value : value * 1000;
-      const date = new Date(ms);
-      return Number.isNaN(date.getTime()) ? null : date.toISOString();
-    }
-    if (typeof value === "string" && value.trim() !== "") {
-      const date = new Date(value.trim());
-      return Number.isNaN(date.getTime()) ? null : date.toISOString();
-    }
     return null;
   }
 

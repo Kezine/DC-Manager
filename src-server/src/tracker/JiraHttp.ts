@@ -1,5 +1,5 @@
 /* =============================================================================
-   CLIENT HTTP JIRA CLOUD — brique d'accès réseau du module `issues/` (amovible),
+   CLIENT HTTP JIRA CLOUD — brique d'accès réseau du module `tracker/` (amovible),
    partie SPÉCIFIQUE À LA MARQUE (préfixe `Jira*`).
 
    Auth BASIC sur l'API REST officielle : en-tête
@@ -37,9 +37,13 @@
 /** Erreur d'accès à l'API Jira. `retryable` distingue une défaillance de JOIGNABILITÉ (réseau,
     délai, débit) d'une erreur APPLICATIVE (le tracker a RÉPONDU : auth refusée, chemin inconnu,
     refus de création). `status` porte le code HTTP quand il y en a un — l'adaptateur en a besoin
-    pour distinguer un 404 « ce ticket n'existe pas » (qui rend `null`) d'une vraie panne. */
+    pour distinguer un 404 « ce ticket n'existe pas » (qui rend `null`) d'une vraie panne.
+    `body` porte le corps BRUT de la réponse d'échec quand il y en a un : c'est la seule lecture
+    EXACTE des erreurs PAR CHAMP de Jira (`{ errors: { priority: … } }`), dont dépend le repli
+    « priorité refusée par le projet » (cf. `JiraParse.errorMentionsField`). Le `message`, lui, n'en
+    porte qu'un résumé composé — suffisant à l'utilisateur, ambigu pour une machine. */
 export class JiraHttpError extends Error {
-  constructor(message: string, readonly retryable: boolean, readonly status: number | null = null, cause?: unknown) {
+  constructor(message: string, readonly retryable: boolean, readonly status: number | null = null, cause?: unknown, readonly body: string | null = null) {
     super(message);
     this.name = "JiraHttpError";
     // Cause CONSERVÉE (pile d'origine comprise) : indispensable au diagnostic des erreurs internes
@@ -196,10 +200,17 @@ export class JiraHttp {
     return this.request("POST", path, body);
   }
 
+  /** PUT JSON authentifié — la MISE À JOUR d'un ticket déjà répliqué. Même traitement d'erreurs et
+      de débit que POST (c'est la même boucle) : seul le verbe change. ⚠ Jira répond 204 SANS corps
+      à un PUT réussi — d'où la résolution sur `null`, qui n'est PAS une anomalie ici. */
+  putJson(path: string, body: unknown): Promise<any> {
+    return this.request("PUT", path, body);
+  }
+
   /** Boucle de requête : tentative → gestion du 429 (attente bornée) → contrôle de statut →
-      lecture PLAFONNÉE du corps → JSON. Une seule méthode pour les deux verbes : le traitement des
+      lecture PLAFONNÉE du corps → JSON. Une seule méthode pour les trois verbes : le traitement des
       erreurs et du débit est identique, le dupliquer le ferait diverger. */
-  private async request(method: "GET" | "POST", path: string, body: unknown): Promise<any> {
+  private async request(method: "GET" | "POST" | "PUT", path: string, body: unknown): Promise<any> {
     const url = new URL(path, this.baseUrl);
     // CIBLE citée dans chaque message d'erreur (origine + chemin, JAMAIS la query ni un secret) :
     // permet de vérifier dans les logs QUELLE ressource on a réellement tentée.
@@ -234,10 +245,12 @@ export class JiraHttp {
       const text = await this.readBodyCapped(response, target);
       if (status === 404) {
         throw new JiraHttpError("Tracker : ressource introuvable (404) sur " + target
-          + JiraHttp.detailSuffix(text) + " — chemin d'API inattendu, ou objet inexistant/inaccessible", false, 404);
+          + JiraHttp.detailSuffix(text) + " — chemin d'API inattendu, ou objet inexistant/inaccessible", false, 404, undefined, text);
       }
       if (status < 200 || status >= 300) {
-        throw new JiraHttpError("Tracker : HTTP " + status + " sur " + target + JiraHttp.detailSuffix(text), false, status);
+        // Le corps BRUT accompagne l'erreur : il porte les erreurs PAR CHAMP, seule lecture exacte
+        // pour décider d'un repli (cf. `JiraParse.errorMentionsField`).
+        throw new JiraHttpError("Tracker : HTTP " + status + " sur " + target + JiraHttp.detailSuffix(text), false, status, undefined, text);
       }
       // 204/205 (ou corps vide) : rien à décoder, et ce n'est pas une anomalie.
       if (text.trim() === "") return null;
@@ -251,7 +264,7 @@ export class JiraHttp {
 
   /** UNE tentative réseau. Traduit tout échec de transport en `JiraHttpError` explicite (délai,
       DNS, refus…) : au-delà, l'appelant ne voit plus que des statuts HTTP. */
-  private async send(method: "GET" | "POST", url: URL, body: unknown, target: string): Promise<Response> {
+  private async send(method: "GET" | "POST" | "PUT", url: URL, body: unknown, target: string): Promise<Response> {
     const headers: Record<string, string> = {
       Authorization: JiraHttp.authHeader(this.account, this.token),
       Accept: "application/json",

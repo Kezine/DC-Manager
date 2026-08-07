@@ -85,7 +85,11 @@ export class IssueProvidersForm {
   static readonly KIND_FIELDS: Readonly<Record<string, readonly IssueKindFieldSpec[]>> = {
     jira: [
       { name: "project_key", type: "text", fallback: "", labelKey: "issues.providers.opt.projectField", hintKey: "issues.providers.opt.projectHint", placeholderKey: "issues.providers.opt.projectPlaceholder" },
-      { name: "issue_type", type: "text", fallback: "Task", labelKey: "issues.providers.opt.typeField", hintKey: "issues.providers.opt.typeHint", placeholderKey: "issues.providers.opt.typePlaceholder" },
+      // Un type de ticket PAR NATURE d'objet DC Manager : les incidents et les interventions ne se
+      // traitent pas de la même façon côté tracker, et le projet leur a souvent deux types distincts.
+      { name: "type_incident", type: "text", fallback: "Incident", labelKey: "issues.providers.opt.typeIncidentField", hintKey: "issues.providers.opt.typeIncidentHint", placeholderKey: "issues.providers.opt.typeIncidentPlaceholder" },
+      { name: "type_intervention", type: "text", fallback: "Infrastructure", labelKey: "issues.providers.opt.typeInterventionField", hintKey: "issues.providers.opt.typeInterventionHint", placeholderKey: "issues.providers.opt.typeInterventionPlaceholder" },
+      { name: "auto_replicate", type: "toggle", fallback: true, labelKey: "issues.providers.opt.autoReplicateField", hintKey: "issues.providers.opt.autoReplicateHint" },
     ],
   };
 

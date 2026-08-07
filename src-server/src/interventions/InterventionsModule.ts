@@ -5,7 +5,11 @@ import type { LivePublisher } from "../live.js";   // publication d'événements
 import { Changeset } from "../../../src-shared/DocumentChangeset.js";   // fabrique de changeset (marqueur module partagé)
 import type { SqliteCtor } from "../db.js";
 import { Logger } from "../logger.js";
-import { InterventionsDb, type InterventionsListOpts } from "./InterventionsDb.js";
+import {
+  InterventionsDb,
+  type InterventionsListOpts, type InterventionRecord, type InterventionTrackerPatch,
+  type PendingPushRow, type TrackedInterventionRow,
+} from "./InterventionsDb.js";
 import {
   InterventionsValidate, InterventionsConfigError,
   INTERVENTION_KINDS, INTERVENTION_STATUSES, INTERVENTION_PRIORITIES,
@@ -35,10 +39,25 @@ import { InterventionReminderWatcher, type InterventionProblemReporter } from ".
    en jours ; un rappel d'intervention se joue à l'heure près). Une passe est aussi
    déclenchée après CHAQUE écriture. Le rapporteur est OPTIONNEL (sans lui, le module vit
    normalement, sans notifications).
+
+   ── LE HOOK `onWrite` : TOUT CE QUE CE MODULE APPREND DU MONDE EXTÉRIEUR ─────
+   Une intervention peut être RÉPLIQUÉE dans un tracker distant (module `tracker/`,
+   amovible LUI AUSSI). `interventions/` n'importe RIEN de `tracker/` — et
+   réciproquement : il se contente d'ANNONCER ses écritures par un rappel
+   OPTIONNEL, branché dans `index.ts` par typage structurel (même patron que le
+   pont `problems` vers `notify/`). Le rappel est BEST-EFFORT et sous `try/catch` :
+   une réplication en panne ne doit jamais empêcher d'enregistrer une intervention.
+   Sans pont branché, le module se comporte exactement comme avant.
    ============================================================================= */
 
 /** Période du timer de rappels : 5 min (les paliers 1 h / heure H exigent plus fin que l'horaire des certs). */
 const REMINDER_TICK_MS = 5 * 60 * 1000;
+
+/** ANNONCE d'écriture — le seul canal sortant du module (cf. l'en-tête). Appelé APRÈS l'écriture
+    réussie et la passe du veilleur. `kind` distingue la création/mise à jour de la suppression :
+    l'abonné n'a pas à relire la base pour savoir laquelle des deux vient d'avoir lieu (et il ne
+    POURRAIT pas, sur une suppression). */
+export type InterventionsWriteHook = (docId: string, interventionId: string, kind: "put" | "delete") => void;
 
 export class InterventionsModule {
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -57,22 +76,56 @@ export class InterventionsModule {
     private readonly problems: InterventionProblemReporter | null,
     private readonly configError: string | null,
     private readonly log: Logger,
+    /** Rappel d'écriture OPTIONNEL (pont tracker du bootstrap) — null = aucune réplication branchée. */
+    private readonly onWrite: InterventionsWriteHook | null,
   ) {}
 
-  static create(opts: { docs: DocumentStore; dataDir: string; sqlite: SqliteCtor; log?: Logger; live?: LivePublisher; problems?: InterventionProblemReporter }): InterventionsModule {
+  static create(opts: { docs: DocumentStore; dataDir: string; sqlite: SqliteCtor; log?: Logger; live?: LivePublisher; problems?: InterventionProblemReporter; onWrite?: InterventionsWriteHook }): InterventionsModule {
     const log = opts.log || new Logger("error");
     const live = opts.live || null;
+    const onWrite = opts.onWrite || null;
     try {
       const db = new InterventionsDb(opts.dataDir, opts.sqlite, log);
       const watcher = opts.problems ? new InterventionReminderWatcher(db, opts.problems, undefined, undefined, log) : null;
       log.info("module interventions prêt (interventions.db"
-        + (watcher ? ", rappels actifs)" : ", rappels SANS rapporteur)"));
-      return new InterventionsModule(opts.docs, live, db, watcher, opts.problems || null, null, log);
+        + (watcher ? ", rappels actifs" : ", rappels SANS rapporteur")
+        + (onWrite ? ", réplication branchée)" : ")"));
+      return new InterventionsModule(opts.docs, live, db, watcher, opts.problems || null, null, log, onWrite);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       log.error("module interventions en erreur — démarré désactivé", message);
-      return new InterventionsModule(opts.docs, live, null, null, opts.problems || null, message, log);
+      return new InterventionsModule(opts.docs, live, null, null, opts.problems || null, message, log, onWrite);
     }
+  }
+
+  /* --------------------------------------------------------------------------
+     SURFACE DE RÉPLICATION — lectures/écritures d'état exposées au pont
+     -------------------------------------------------------------------------- */
+
+  /* Ces quatre méthodes sont de simples RELAIS vers `InterventionsDb`. Elles existent parce que le
+     pont ne doit dépendre que de la FAÇADE (le point de branchement unique), jamais de la couche de
+     persistance : c'est cette façade qui satisfait, par typage STRUCTUREL, l'interface que
+     `tracker/` déclare chez lui. Module en erreur (base illisible) → réponses neutres, jamais une
+     exception : le pont se contente alors de ne rien trouver à faire. */
+
+  /** Interventions RÉPLIQUÉES d'un document (assiette du retour d'état). */
+  listTracked(docId: string): TrackedInterventionRow[] {
+    return this.db ? this.db.listTracked(docId) : [];
+  }
+
+  /** Poussées DUES (`pending`/`error`). `docId` omis = tous les documents. */
+  listPushDue(docId?: string): PendingPushRow[] {
+    return this.db ? this.db.listPushDue(docId) : [];
+  }
+
+  /** Détail d'une intervention (relecture au moment de pousser — le dernier état gagne). */
+  getOne(docId: string, id: string): InterventionRecord | null {
+    return this.db ? this.db.getOne(docId, id) : null;
+  }
+
+  /** Écrit l'état de réplication SANS toucher à l'audit (cf. `InterventionsDb.applyTrackerState`). */
+  applyTrackerState(docId: string, id: string, patch: InterventionTrackerPatch): boolean {
+    return this.db ? this.db.applyTrackerState(docId, id, patch) : false;
   }
 
   /** Démarre le veilleur : une passe immédiate (état au boot) puis un tick de 5 min. */
@@ -96,6 +149,18 @@ export class InterventionsModule {
       this.watcher?.scan();
     } catch (e) {
       this.log.error("interventions: passe de rappels en échec", e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  /** ANNONCE d'écriture au pont de réplication — BEST-EFFORT et jamais bloquante (cf. l'en-tête).
+      Le `try/catch` n'est pas décoratif : l'abonné est un module TIERS, et son échec ne doit pas
+      transformer un enregistrement RÉUSSI en 500. L'intervention est déjà écrite quand on arrive ici. */
+  private announceWrite(docId: string, interventionId: string, kind: "put" | "delete"): void {
+    if (!this.onWrite) return;
+    try {
+      this.onWrite(docId, interventionId, kind);
+    } catch (e) {
+      this.log.error("interventions: annonce d'écriture en échec (réplication)", docId, interventionId, e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -153,6 +218,7 @@ export class InterventionsModule {
           this.problems?.resolve(InterventionReminderWatcher.keyFor(ctx.docId, id));
         }
         this.scanQuietly();
+        this.announceWrite(ctx.docId, id, "put");   // pont de réplication (asynchrone chez l'abonné)
         this.publishLive(req, ctx.docId);   // pastille d'onglet des AUTRES clients (compte d'ouvertes / criticité)
         res.json({ intervention });
       } catch (e) {
@@ -168,6 +234,9 @@ export class InterventionsModule {
       if (!ctx.db.remove(ctx.docId, id)) { res.status(404).json({ error: "intervention inconnue" }); return; }
       // Objet disparu → son rappel n'a plus d'objet (resolve no-op côté moteur si aucune alerte).
       this.problems?.resolve(InterventionReminderWatcher.keyFor(ctx.docId, id));
+      // Annoncé quand même : l'abonné DOIT savoir qu'une intervention a disparu — c'est LUI qui
+      // décide quoi en faire (le pont tracker, lui, ne fait rien : jamais de suppression distante).
+      this.announceWrite(ctx.docId, id, "delete");
       this.publishLive(req, ctx.docId);   // pastille d'onglet des AUTRES clients (une ouverte a pu disparaître)
       res.json({ ok: true });
     });

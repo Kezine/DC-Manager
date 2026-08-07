@@ -1,7 +1,7 @@
-import type { IssueProviderConfig, IssueProviderOptions } from "./IssueProvider.js";
+import type { TrackerProviderConfig, TrackerProviderOptions } from "./TrackerProvider.js";
 
 /* =============================================================================
-   VALIDATION D'UN PROVIDER DE TICKETS — module `issues/` AMOVIBLE. Classe statique
+   VALIDATION D'UN PROVIDER DE TRACKER — module `tracker/` AMOVIBLE. Classe statique
    PURE (aucun filesystem, aucun réseau, aucun import d'adaptateur) : valide UN
    provider et applique les défauts, en poussant des messages d'erreur EXPLICITES,
    GROUPÉS (tous les griefs d'un même provider, pas seulement le premier) et en
@@ -13,7 +13,7 @@ import type { IssueProviderConfig, IssueProviderOptions } from "./IssueProvider.
    2. les options PROPRES à la marque — déclarées dans `KIND_OPTION_SPECS`, une
       entrée par `kind`. Ajouter une marque = AJOUTER UNE ENTRÉE ici (plus son
       adaptateur et son entrée de fabrique), sans toucher au reste du module. Les
-      options sont normalisées en un objet scalaire (`IssueProviderOptions`)
+      options sont normalisées en un objet scalaire (`TrackerProviderOptions`)
       persisté en JSON dans la colonne `options` — d'où l'absence de DDL à modifier.
    ⚠ `KIND_OPTION_SPECS` est le SEUL endroit de ce fichier où une marque a le droit
    d'être nommée. Un test d'invariant relit les SOURCES et refuse tout autre
@@ -40,12 +40,12 @@ import type { IssueProviderConfig, IssueProviderOptions } from "./IssueProvider.
    ============================================================================= */
 
 /** Déclaration d'UNE option propre à une marque : nom, type scalaire, défaut, et contraintes
-    facultatives. Volontairement pauvre : ce sont des réglages de connexion, pas un modèle de
-    données — une spec plus riche serait de la sur-ingénierie pour deux champs. Forme IDENTIQUE à
-    celle du module wifi (`WifiOptionSpec`), duplication ASSUMÉE et signalée : les factoriser
-    coûterait l'AMOVIBILITÉ des deux modules (chacun doit pouvoir être supprimé en retirant SON
-    dossier et une ligne de bootstrap), pour économiser huit lignes de déclaration. */
-export interface IssueOptionSpec {
+    facultatives. Volontairement pauvre : ce sont des réglages de connexion et de mapping, pas un
+    modèle de données — une spec plus riche serait de la sur-ingénierie. Forme IDENTIQUE à celle du
+    module wifi (`WifiOptionSpec`), duplication ASSUMÉE et signalée : les factoriser coûterait
+    l'AMOVIBILITÉ des deux modules (chacun doit pouvoir être supprimé en retirant SON dossier et une
+    ligne de bootstrap), pour économiser huit lignes de déclaration. */
+export interface TrackerOptionSpec {
   name: string;
   type: "string" | "boolean" | "number";
   default: string | boolean | number;
@@ -56,29 +56,37 @@ export interface IssueOptionSpec {
 }
 
 /** LE point d'extension « marque » de la validation (cf. en-tête).
-    ⚠ Doit rester EN PHASE avec la fabrique d'adaptateurs du service de synchro (lot L3) : un kind
+    ⚠ Doit rester EN PHASE avec la fabrique d'adaptateurs `TrackerSyncService.adapterFor` : un kind
     validable sans adaptateur donnerait un provider enregistrable qui échoue à chaque synchro. Un
-    test de cohérence confrontera les deux listes dès que la fabrique existera. */
-export const KIND_OPTION_SPECS: Readonly<Record<string, readonly IssueOptionSpec[]>> = {
+    test de cohérence confronte les deux listes DANS LES DEUX SENS. */
+export const KIND_OPTION_SPECS: Readonly<Record<string, readonly TrackerOptionSpec[]>> = {
   jira: [
-    // PROJET où sont CRÉÉS les tickets (« Ouvrir un ticket »). Défaut VIDE et NON contraint à être
-    // rempli, à dessein : un provider qui ne fait que MIROITER des tickets déjà existants n'a aucun
-    // projet à désigner, et refuser son enregistrement pour un champ dont il ne se sert jamais
-    // serait une friction gratuite. Le manque est signalé LÀ OÙ il compte — au moment de créer —
-    // par un message actionnable de l'adaptateur, pas ici.
-    { name: "project_key", type: "string", default: "" },
-    // TYPE de ticket créé. Défaut « Task » = le type standard d'un projet Jira ; `nonEmpty` garde
-    // le cas d'un champ VIDÉ à la main dans l'UI, qui produirait une création refusée en 400 peu
-    // lisible. Le libellé dépend de la LANGUE du projet (« Tâche » sur une instance francophone) :
-    // c'est un réglage, pas une énumération — on ne le contraint donc pas à une liste.
-    { name: "issue_type", type: "string", default: "Task", nonEmpty: true },
+    // PROJET de DESTINATION. ⚠ REQUIS depuis le pivot du chantier vers la RÉPLICATION : un provider
+    // n'existe plus que pour porter les interventions de DC Manager dans un projet — sans projet, il
+    // n'a littéralement rien à faire. (La v1 « miroir de tickets » le laissait vide parce qu'un
+    // provider en lecture seule n'avait aucune destination à désigner ; ce cas a disparu.)
+    { name: "project_key", type: "string", default: "", nonEmpty: true },
+    // TYPES de tickets, un par NATURE d'objet DC Manager (demande utilisateur explicite : les
+    // incidents sur « Incident », les interventions sur « Infrastructure »). Les libellés dépendent
+    // de la CONFIGURATION du projet Jira ET de sa langue : ce sont des RÉGLAGES, pas des
+    // énumérations — on ne les contraint donc pas à une liste. Un type inconnu du projet fera
+    // refuser la création, et le message du tracker remonte INTACT (c'est lui qui est actionnable).
+    // `nonEmpty` garde le cas d'un champ vidé à la main dans l'UI, qui produirait une création
+    // refusée en 400 peu lisible.
+    { name: "type_incident", type: "string", default: "Incident", nonEmpty: true },
+    { name: "type_intervention", type: "string", default: "Infrastructure", nonEmpty: true },
+    // RÉPLICATION AUTOMATIQUE à l'enregistrement d'une intervention (décision E2). Défaut VRAI :
+    // configurer un provider de réplication, c'est vouloir que les interventions y arrivent — un
+    // défaut à faux obligerait à répliquer chaque objet à la main sans que rien ne le suggère.
+    // ⚠ Lue par le SERVICE sous son nom générique (`OPTION_AUTO_REPLICATE`), jamais par marque.
+    { name: "auto_replicate", type: "boolean", default: true },
   ],
 };
 
 /** Kinds supportés — DÉRIVÉ de la table ci-dessus (jamais une seconde liste). */
 export const SUPPORTED_KINDS: readonly string[] = Object.keys(KIND_OPTION_SPECS);
 
-export class IssueProviderConfigValidate {
+export class TrackerProviderConfigValidate {
   /** Délai par requête par DÉFAUT, en secondes. Plus généreux que les 15 s des modules `vm/`/`wifi/`
       et c'est délibéré : là-bas une requête liste une ressource locale sur le LAN, ici une requête
       est une RECHERCHE côté SaaS (jusqu'à ~100 identifiants d'un coup) traversant Internet. Un délai
@@ -86,23 +94,23 @@ export class IssueProviderConfigValidate {
       « introuvables » à la lecture d'un opérateur pressé. */
   static readonly DEFAULT_TIMEOUT_SEC = 20;
 
-  /** Valide UN provider et applique les défauts. Renvoie l'`IssueProviderConfig` complet, ou `null`
-      si au moins une erreur a été poussée pour lui. `docId`/`index` servent UNIQUEMENT à construire
-      les libellés d'erreur (le CRUD passe l'index 0 : un seul provider validé à la fois). */
-  static parseProvider(docId: string, index: number, raw: unknown, errors: string[]): IssueProviderConfig | null {
-    if (!IssueProviderConfigValidate.isPlainObject(raw)) {
-      errors.push(IssueProviderConfigValidate.providerLabel(docId, index, null) + " : chaque provider doit être un objet");
+  /** Valide UN provider et applique les défauts. Renvoie le `TrackerProviderConfig` complet, ou
+      `null` si au moins une erreur a été poussée pour lui. `docId`/`index` servent UNIQUEMENT à
+      construire les libellés d'erreur (le CRUD passe l'index 0 : un seul provider validé à la fois). */
+  static parseProvider(docId: string, index: number, raw: unknown, errors: string[]): TrackerProviderConfig | null {
+    if (!TrackerProviderConfigValidate.isPlainObject(raw)) {
+      errors.push(TrackerProviderConfigValidate.providerLabel(docId, index, null) + " : chaque provider doit être un objet");
       return null;
     }
     const errorsBefore = errors.length;
 
     // `id` d'abord : il IDENTIFIE le provider dans tous les messages suivants (jamais le token).
-    const id = IssueProviderConfigValidate.nonEmptyString(raw["id"]);
-    const label = IssueProviderConfigValidate.providerLabel(docId, index, id);
-    if (id === null) errors.push(IssueProviderConfigValidate.providerLabel(docId, index, null) + " : champ « id » requis (chaîne non vide)");
+    const id = TrackerProviderConfigValidate.nonEmptyString(raw["id"]);
+    const label = TrackerProviderConfigValidate.providerLabel(docId, index, id);
+    if (id === null) errors.push(TrackerProviderConfigValidate.providerLabel(docId, index, null) + " : champ « id » requis (chaîne non vide)");
 
     // `kind` : requis ET connu (cf. en-tête — la validation des options en dépend).
-    const kind = IssueProviderConfigValidate.nonEmptyString(raw["kind"]);
+    const kind = TrackerProviderConfigValidate.nonEmptyString(raw["kind"]);
     if (kind === null) errors.push(label + " : champ « kind » requis (chaîne non vide)");
     else if (!(kind in KIND_OPTION_SPECS)) {
       errors.push(label + " : « kind » inconnu (« " + kind + " ») — types supportés : " + SUPPORTED_KINDS.join(", "));
@@ -110,27 +118,27 @@ export class IssueProviderConfigValidate {
 
     // `url` : base de l'instance. https EXIGÉ — le jeton voyage en en-tête d'autorisation à CHAQUE
     // requête, le laisser passer en clair reviendrait à le donner.
-    const url = IssueProviderConfigValidate.nonEmptyString(raw["url"]);
+    const url = TrackerProviderConfigValidate.nonEmptyString(raw["url"]);
     if (url === null) errors.push(label + " : champ « url » requis (chaîne non vide, ex. « https://exemple.atlassian.net »)");
-    else if (!IssueProviderConfigValidate.isValidHttpsUrl(url)) {
+    else if (!TrackerProviderConfigValidate.isValidHttpsUrl(url)) {
       errors.push(label + " : « url » invalide (« " + url + " ») — URL https attendue, ex. « https://exemple.atlassian.net »");
     }
 
     // `account` : moitié PUBLIQUE de l'identification (cf. en-tête). Sa valeur PEUT être citée.
-    const account = IssueProviderConfigValidate.nonEmptyString(raw["account"]);
+    const account = TrackerProviderConfigValidate.nonEmptyString(raw["account"]);
     if (account === null) {
       errors.push(label + " : champ « account » requis (chaîne non vide) — identifiant du COMPTE de service côté tracker, souvent l'adresse e-mail associée au jeton");
     }
 
     // `token` : requis, mais sa VALEUR reste secrète — on ne mentionne jamais son contenu.
-    const token = IssueProviderConfigValidate.nonEmptyString(raw["token"]);
+    const token = TrackerProviderConfigValidate.nonEmptyString(raw["token"]);
     if (token === null) errors.push(label + " : champ « token » requis (chaîne non vide) — valeur jamais journalisée");
 
     // `interval_sec` : optionnel, défaut 0 (= synchro MANUELLE uniquement). Entier >= 0.
-    // ⚠ À régler HAUT en usage réel : l'assiette étant pilotée par l'utilisateur, la passe coûte
-    // une requête par centaine de tickets suivis — et l'état d'un ticket n'a pas la volatilité d'un
-    // client wifi. Ce n'est pas une contrainte de validation (rien n'interdit une cadence courte),
-    // mais une recommandation portée par la documentation et le formulaire.
+    // ⚠ À régler HAUT en usage réel : une passe coûte une requête par centaine d'interventions
+    // répliquées, et l'état d'un ticket n'a pas la volatilité d'un client wifi. Ce n'est pas une
+    // contrainte de validation (rien n'interdit une cadence courte), mais une recommandation portée
+    // par la documentation et le formulaire.
     let interval_sec = 0;
     if (raw["interval_sec"] !== undefined) {
       const iv = raw["interval_sec"];
@@ -142,7 +150,7 @@ export class IssueProviderConfigValidate {
     }
 
     // `timeout_sec` : optionnel, défaut DEFAULT_TIMEOUT_SEC. Entier >= 1.
-    let timeout_sec = IssueProviderConfigValidate.DEFAULT_TIMEOUT_SEC;
+    let timeout_sec = TrackerProviderConfigValidate.DEFAULT_TIMEOUT_SEC;
     if (raw["timeout_sec"] !== undefined) {
       const to = raw["timeout_sec"];
       if (typeof to !== "number" || !Number.isInteger(to) || to < 1) {
@@ -154,7 +162,7 @@ export class IssueProviderConfigValidate {
 
     // OPTIONS PROPRES À LA MARQUE — seulement si le kind est connu (sinon on ne sait pas quoi valider).
     const options = (kind !== null && kind in KIND_OPTION_SPECS)
-      ? IssueProviderConfigValidate.parseOptions(kind, raw["options"], label, errors)
+      ? TrackerProviderConfigValidate.parseOptions(kind, raw["options"], label, errors)
       : {};
 
     // Clés inconnues au niveau provider : TOLÉRÉES — simplement non recopiées.
@@ -178,14 +186,24 @@ export class IssueProviderConfigValidate {
       (valeur fournie si valide, DÉFAUT sinon), et toute clé NON déclarée est écartée SILENCIEUSEMENT
       — pas une erreur : une option d'une autre marque (ou d'une version antérieure du même
       adaptateur) ne doit pas rendre une config irrécupérable. En revanche une option déclarée mais
-      MAL TYPÉE est une erreur explicite : c'est une faute de saisie. */
-  static parseOptions(kind: string, raw: unknown, label: string, errors: string[]): IssueProviderOptions {
+      MAL TYPÉE est une erreur explicite : c'est une faute de saisie.
+      ⚠ Une option `nonEmpty` ABSENTE retombe sur son défaut SANS grief quand ce défaut est lui-même
+      non vide, mais produit un grief quand le défaut est vide : c'est ainsi qu'une option REQUISE
+      (défaut "" + nonEmpty, cf. `project_key`) se déclare, sans étage de validation supplémentaire. */
+  static parseOptions(kind: string, raw: unknown, label: string, errors: string[]): TrackerProviderOptions {
     const specs = KIND_OPTION_SPECS[kind] || [];
-    const source = IssueProviderConfigValidate.isPlainObject(raw) ? raw : {};
-    const out: IssueProviderOptions = {};
+    const source = TrackerProviderConfigValidate.isPlainObject(raw) ? raw : {};
+    const out: TrackerProviderOptions = {};
     for (const spec of specs) {
       const value = source[spec.name];
-      if (value === undefined || value === null) { out[spec.name] = spec.default; continue; }
+      if (value === undefined || value === null) {
+        if (spec.type === "string" && spec.nonEmpty && String(spec.default).trim() === "") {
+          errors.push(label + " : option « " + spec.name + " » : requise (chaîne non vide)");
+          continue;
+        }
+        out[spec.name] = spec.default;
+        continue;
+      }
       if (spec.type === "boolean") {
         if (typeof value !== "boolean") { errors.push(label + " : option « " + spec.name + " » : booléen attendu"); continue; }
         out[spec.name] = value;
@@ -206,7 +224,7 @@ export class IssueProviderConfigValidate {
 
   /* --------------------------------------------------------------------------
      Helpers (coercitions + libellés d'erreur) — certains publics car
-     IssueProviderConfigDb les réutilise (isPlainObject/providerLabel).
+     TrackerProviderConfigDb les réutilise (isPlainObject/providerLabel).
      -------------------------------------------------------------------------- */
 
   /** Objet JSON « simple » (ni null, ni tableau). */
@@ -222,7 +240,7 @@ export class IssueProviderConfigValidate {
   /** Libellé d'un provider (docId + index + id si connu) — JAMAIS le token. */
   static providerLabel(docId: string, index: number, id: string | null): string {
     const idPart = id !== null ? " (« " + id + " »)" : "";
-    return IssueProviderConfigValidate.docLabel(docId) + ", provider #" + index + idPart;
+    return TrackerProviderConfigValidate.docLabel(docId) + ", provider #" + index + idPart;
   }
 
   /** Chaîne NON VIDE (après trim) → la chaîne d'origine ; sinon null. */
@@ -243,9 +261,9 @@ export class IssueProviderConfigValidate {
 /** Erreur de validation d'une config de provider (chemin CRUD) : porte la LISTE des messages pour
     que la route les rende en 400. Séparée d'une erreur d'IO/DB (500) : le routeur distingue
     « saisie invalide » de « panne serveur ». */
-export class IssueProviderConfigError extends Error {
+export class TrackerProviderConfigError extends Error {
   constructor(public readonly issues: string[]) {
-    super("configuration de provider de tickets invalide :\n- " + issues.join("\n- "));
-    this.name = "IssueProviderConfigError";
+    super("configuration de provider de tracker invalide :\n- " + issues.join("\n- "));
+    this.name = "TrackerProviderConfigError";
   }
 }
