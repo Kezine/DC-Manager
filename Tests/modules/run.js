@@ -36,7 +36,7 @@ const DOMAINS = [
   "./test-rapprochement-certs.js", // rapprochement cert ↔ équipement/VM (HostnameMatch/CertSubject/CertTargetMatch, pur)
   "./test-interventions.js",     // interventions : logique cliente pure (InterventionsFormat, buildQuery)
   "./test-users.js",             // annuaire utilisateurs serveur (UserProfiles pur, resolver + snapshot SQLite)
-  "./test-issues.js",            // feature REMOTE ISSUE TRACKER (lot L1, socle partagé) : frontière source/locaux `IssueSync` + délégation du modèle, clés de cible composées `IssueTargets`, spec (enum fermée, forme des targets), cascade des `targets` (lot ET récursion multi-suppressions du même ticket), catalogues de recherche fr/en verrouillés, `core/IssueStatus`
+  "./test-issues.js",            // feature REMOTE ISSUE TRACKER (L1 socle partagé → L4 UI) : frontière source/locaux `IssueSync` + délégation du modèle, clés de cible composées `IssueTargets`, spec (enum fermée, forme des targets), cascade des `targets`, catalogues de recherche fr/en verrouillés, `core/IssueStatus` (dont les PASTILLES et leur échappement), adaptateur Jira + config chiffrée, réconciliation inversée + service, garde d'URL des liens sortants (`Html.externalLink`), dimension CIBLE (where d'appartenance / restriction locale) et miroir KIND_FIELDS ⇄ KIND_OPTION_SPECS
   "./test-wifi.js",              // feature CLIENTS WIFI (module serveur amovible `wifi/`) : frontière partagée, décodage UniFi pur + pagination, adaptateur (stub), validation par marque, stockage chiffré (better-sqlite3 RÉEL), réconciliation, synchro bout en bout, invariants d'agnosticisme de marque (D9)
   "./test-server.js",            // serveur (ApiRules, SQLite réel, protocole REST)
 ];

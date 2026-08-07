@@ -1,0 +1,118 @@
+/* ============================================================================
+   Domaine `issues` — FRANÇAIS. Feature TICKETS AMOVIBLE (remote issue tracker) :
+   édition des champs locaux et des CIBLES d'un ticket, synchronisation, suivi
+   d'un ticket, gestion des providers (trackers). Agrégé par `../fr.ts`.
+   Voir docs/i18n.md.
+
+   ⚠ AGNOSTICISME DE MARQUE (exigence n°1 du chantier) : AUCUN libellé de ce
+   catalogue ne nomme un tracker. La seule chaîne qui cite une marque est le
+   LIBELLÉ du `<select>` de type (« Jira »), qui est un nom propre et vit donc
+   dans le code du formulaire, non traduit — exactement comme « Proxmox » côté VM
+   et « UniFi » côté wifi. `opt.*` regroupe les libellés des options PROPRES à une
+   marque : c'est là qu'une nouvelle marque ajoutera les siens.
+
+   ⚠ Le STATUT d'un ticket (« En recette », « Attente client »…) n'est JAMAIS
+   traduit — il vient du workflow du tracker et s'affiche tel quel (décision D3).
+   Seule sa CATÉGORIE normalisée est traduisible : elle vit dans
+   `domain.issueStatusCategory`, pas ici. */
+export const issues = {
+  common: {
+    noProvider: "Aucun provider configuré pour ce document.",
+  },
+  edit: {
+    notFound: "Ticket introuvable",
+    localOnly: "Cibles et enrichissements locaux uniquement. Les autres champs (clé, titre, statut, type, priorité, assigné…) sont gérés par la synchronisation et ne sont pas modifiables ici.",
+    descriptionHint: "Description libre (jamais écrasée par la synchronisation).",
+    notesHint: "Note libre d'enrichissement (jamais écrasée par la synchronisation).",
+    title: "Modifier le ticket (cibles et champs locaux)",
+    saveRefused: "Enregistrement refusé (données invalides).",
+    saved: "Ticket mis à jour",
+  },
+  targets: {
+    label: "Objets ciblés",
+    hint: "Objets du modèle concernés par ce ticket (équipements, VMs, spares, sous-équipements). Rattachement manuel : rien n'est déduit du tracker. Un objet supprimé est détaché automatiquement.",
+    empty: "Aucun objet ciblé.",
+    searchPlaceholder: "Rechercher un objet à lier…",
+    remove: "Retirer cet objet",
+    exists: "Cet objet est déjà lié à ce ticket.",
+  },
+  sync: {
+    syncLabel: "Synchroniser",
+    syncing: "Synchronisation…",
+    syncImpossible: "Synchronisation impossible — {{detail}}",
+  },
+  follow: {
+    title: "Suivre un ticket",
+    intro: "Le ticket est résolu côté serveur, puis rafraîchi à chaque synchronisation. Rien n'est créé chez le tracker.",
+    field: "Clé ou URL du ticket",
+    placeholder: "INFRA-123 ou https://…",
+    hint: "Collez la clé du ticket ou l'adresse de sa page. Le premier provider qui reconnaît la référence l'emporte.",
+    submit: "Suivre",
+    required: "Indiquez la clé du ticket ou l'URL de sa page.",
+    added: "Ticket suivi",
+    already: "Ce ticket est déjà suivi — il vient d'être rafraîchi.",
+  },
+  providers: {
+    title: "Providers de tickets",
+    subtitle: "Gestion des trackers interrogés pour ce document",
+    loading: "Chargement des providers…",
+    loadError: "Chargement des providers impossible — {{detail}}",
+    intro: "Trackers configurés pour ce document. Les jetons d'API sont chiffrés côté serveur et ne sont jamais réaffichés.",
+    empty: "Aucun provider configuré pour ce document. Ajoutez-en un pour pouvoir suivre des tickets.",
+    intervalManual: "manuelle",
+    colProvider: "Provider",
+    colType: "Type",
+    colUrl: "Instance",
+    colAccount: "Compte",
+    colInterval: "Intervalle",
+    colTimeout: "Timeout",
+    add: "+ Ajouter un provider",
+    back: "← Retour à la liste",
+    headingEdit: "Modifier « {{id}} »",
+    headingNew: "Nouveau provider",
+    idPlaceholder: "ex. jira-infra",
+    idField: "Identifiant du provider",
+    idHintEdit: "Immuable — c'est la clé référencée par les tickets déjà suivis.",
+    idHintNew: "Unique par document (référencé par les tickets synchronisés).",
+    typeField: "Type de tracker",
+    typeHint: "Détermine l'adaptateur utilisé et les options affichées ci-dessous.",
+    urlField: "URL de l'instance",
+    urlPlaceholder: "https://exemple.atlassian.net",
+    urlHint: "URL https de l'instance (sans chemin d'API). Le jeton voyage en en-tête à chaque requête : le https est obligatoire.",
+    accountField: "Compte de service",
+    accountPlaceholder: "service-dcmanager@exemple.fr",
+    accountHint: "Identifiant du compte associé au jeton (souvent son adresse e-mail). Ce n'est pas un secret : il est réaffiché à l'édition.",
+    tokenPlaceholderEdit: "inchangé si vide",
+    tokenPlaceholderNew: "jeton d'API (requis)",
+    tokenField: "Jeton d'API",
+    tokenHintEdit: "Laissez vide pour conserver le jeton actuel. Le jeton n'est jamais réaffiché.",
+    tokenHintNew: "Jeton d'API du compte de service, créé chez le tracker. Il est chiffré côté serveur. Préférez un compte dédié, aux droits limités au projet visé.",
+    intervalField: "Intervalle de synchro (s)",
+    intervalHint: "0 = synchronisation manuelle uniquement. À régler haut : une passe coûte une requête par centaine de tickets suivis, et l'état d'un ticket bouge lentement.",
+    timeoutField: "Timeout d'une requête (s)",
+    timeoutHint: "Délai maximal d'une requête vers le tracker. Une requête est une recherche à distance : mieux vaut être généreux.",
+    opt: {
+      section: "Options {{kind}}",
+      projectField: "Projet de création",
+      projectHint: "Projet où seront créés les tickets ouverts depuis DC Manager. Facultatif : un provider qui ne fait que suivre des tickets existants n'en a pas besoin.",
+      projectPlaceholder: "ex. INFRA",
+      typeField: "Type de ticket créé",
+      typeHint: "Type appliqué aux tickets créés depuis DC Manager. Le libellé dépend de la langue du projet.",
+      typePlaceholder: "Task",
+    },
+    test: "Tester la connexion",
+    testing: "Test en cours…",
+    testConnOk: "Connexion OK",
+    testConnFail: "Connexion en échec",
+    testApiOk: "API reconnue",
+    testApiWarn: "API à vérifier",
+    idRequired: "Identifiant du provider requis",
+    savedUpdated: "Provider mis à jour",
+    savedCreated: "Provider créé",
+    deleteTitle: "Supprimer ce provider ?",
+    deleteMessage: "Supprimer le provider « {{id}} » ? Les tickets déjà suivis restent dans le document (ils apparaîtront introuvables).",
+    deleted: "Provider supprimé",
+    disabledTitle: "Gestion des providers indisponible",
+    disabledDetail: "La gestion des providers par l'UI est désactivée côté serveur. Définissez la clé de chiffrement des secrets (DCMANAGER_SECRETS_KEY) dans l'environnement du serveur pour l'activer.",
+  },
+} as const;

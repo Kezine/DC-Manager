@@ -155,6 +155,15 @@ export const app = {
     refresh: "Actualiser",
     refreshTitle: "Recharger l'état des clusters (GET /vm/status)",
   },
+  // Actions d'en-tête de l'onglet TICKETS — mode API ET hors viewer (les trois écrivent).
+  issues: {
+    sync: "Synchroniser",
+    syncTitle: "Rafraîchir l'état des tickets déjà suivis depuis les trackers configurés pour ce document (aucun ticket n'est ajouté)",
+    follow: "Suivre un ticket…",
+    followTitle: "Ajouter un ticket au document à partir de sa clé ou de l'URL de sa page",
+    providers: "Providers…",
+    providersTitle: "Configurer les trackers interrogés (instance, compte de service, jeton, intervalle)",
+  },
   wifi: {
     sync: "Synchroniser",
     syncTitle: "Synchroniser l'inventaire des clients wifi depuis les contrôleurs configurés pour ce document",

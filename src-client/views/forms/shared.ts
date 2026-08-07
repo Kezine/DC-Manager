@@ -2,6 +2,7 @@ import type { Store } from "../../store";
 import type { ModalOptions } from "../../ui/Modal";
 import type { InterventionFicheHooks } from "../InterventionFicheHooks";
 import type { CertFicheHooks } from "../CertFicheHooks";
+import type { IssueTargetSource } from "../IssueTargetSource";
 import type { UserDirectory } from "../../core/UserDirectory";
 import { FLOORS } from "../../domain/constants";
 import { Ip } from "../../core/Ip";
@@ -99,4 +100,10 @@ export interface FormHost {
   /** Annuaire utilisateurs (résolution des auteurs d'audit — cf. `AuditLine`, docs/user-resolver.md). null en
       mode fichier → aucune ligne « Créé/Modifié par » dans les fiches. Injecté par `main.ts` (mode REST). */
   userDirectory?: UserDirectory | null;
+  /** Cibles liables d'un TICKET (feature `issues` AMOVIBLE) — alimente l'éditeur de liens de la fiche
+      et résout les libellés affichés. ⚠ Injecté dans les DEUX modes de données, contrairement aux
+      hooks interventions/certs : `targets` est une donnée DU DOCUMENT, pas du tracker, et reste donc
+      éditable sans serveur (décision D9 du cadrage). `main.ts` y passe le MÊME descripteur que la
+      dimension « Cible » du listing (`ListTargets.issueTarget`) — une seule table de familles. */
+  issueTargets?: IssueTargetSource | null;
 }

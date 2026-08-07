@@ -76,6 +76,7 @@ export const detail = {
     contact: "Contact not found",
     vm: "VM not found",
     wifiClient: "Wi-Fi client not found",
+    issue: "Issue not found",
     type: "Type not found",
   },
   cable: {
@@ -206,6 +207,27 @@ export const detail = {
     notMatched: "not matched",
     localSection: "Local enrichments",
     locateAp: "Locate the access point (the client itself is not in the scene)",
+  },
+  // Remote tracker ISSUE (REMOVABLE feature). ⚠ `notFoundTitle` explains the SAME mechanics as
+  // `vm.orphanTitle` and `wifi.disconnectedTitle`, with a THIRD meaning: an issue that can no longer
+  // be resolved signals a deletion, an archived project or a lost permission (cadrage §3).
+  issue: {
+    title: "Issue",
+    notFoundTitle: "Not resolved at the last synchronisation — deleted, archived project or lost permission. The local record is kept and will return if access is restored.",
+    reporter: "Reporter",
+    labels: "Labels",
+    resolution: "Resolution",
+    link: "Issue link",
+    createdSrc: "Created (tracker)",
+    updatedSrc: "Updated (tracker)",
+    lastSync: "Last sync",
+    providerId: "Source identity",
+    targetsSection: "Targeted objects ({{count}})",
+    targetsEmpty: "No targeted object. Link some from “Edit”.",
+    colFamily: "Family",
+    colTarget: "Object",
+    openTarget: "Open the targeted object's record",
+    localSection: "Local enrichments",
   },
   vm: {
     orphanTitle: "Disappeared at the last synchronisation",

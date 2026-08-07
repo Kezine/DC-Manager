@@ -33,18 +33,21 @@
    L'orphelinat PRIME sur la catégorie (patron `VmStatus.swatchColor`) : c'est
    l'information dominante — l'état affiché date de la dernière résolution réussie.
 
-   ── PÉRIMÈTRE (lot L1 : socle de données, aucune UI) ──────────────────────────
-   Ce module rend des DONNÉES (catégorie, couleur, clé de tri) et des LIBELLÉS
-   localisés — jamais du HTML. Les PASTILLES (`innerHTML`, patron
-   `VmStatus.pills`/`WifiStatus.pills`) viendront avec le listing et la fiche, DANS
-   CE FICHIER : il reste la source unique, on n'ouvrira pas un second endroit.
-   Quand elles arriveront, la règle d'échappement des deux aînés s'appliquera : les
-   couleurs sont un ensemble FERMÉ de constantes internes, aucune donnée du tracker
-   n'entre jamais dans un attribut `style`, et le libellé brut passe par `Html.escape`.
+   ── PÉRIMÈTRE ────────────────────────────────────────────────────────────────
+   Ce module rend des DONNÉES (catégorie, couleur, clé de tri), des LIBELLÉS
+   localisés et les PASTILLES (patron `VmStatus.pills`/`WifiStatus.pills`),
+   consommées par le LISTING, la FICHE et la palette. Les pastilles vivent ICI et
+   nulle part ailleurs : c'est la source unique, on n'ouvre pas un second endroit.
+
+   ÉCHAPPEMENT : les pastilles sont posées en `innerHTML`. Tout ce qui sort d'ici
+   est du HTML SÛR — les couleurs sont un ensemble FERMÉ de constantes internes
+   (aucune donnée du tracker n'entre jamais dans un attribut `style`) et le libellé
+   BRUT du statut, lui, passe systématiquement par `Html.escape`.
 
    FEATURE TICKETS AMOVIBLE : supprimer l'inventaire des tickets = supprimer ce
    fichier avec le modèle `Issue` et les blocs `issues` des vues.
    ============================================================================= */
+import { Html } from "./Html";
 import { I18n } from "../i18n/I18n";
 import { ISSUE_STATUS_CATEGORIES } from "../../src-shared/IssueSync";
 
@@ -85,6 +88,9 @@ export class IssueStatus {
     done: "var(--ok)",
     unknown: "var(--fg-dimmer)",
   };
+
+  /** Rendu du « pas de valeur » — MÊME chaîne que le `dim("—")` des listings et que `DetailForms.MUTED`. */
+  private static readonly MUTED = `<span style="color:var(--fg-dimmer)">—</span>`;
 
   /** Statut BRUT (rogné), "" si absent — sert à l'affichage ET au départage du tri.
       ROGNÉ comme chez `VmStatus` : un libellé entouré d'espaces trierait à part sans raison. */
@@ -138,5 +144,41 @@ export class IssueStatus {
       AFFICHÉ et le mot CHERCHABLE ne puissent pas diverger en silence. */
   static notFoundLabel(): string {
     return I18n.t("lists.ph.notFound");
+  }
+
+  /* --------------------------------------------------------------------------
+     PASTILLES (HTML SÛR — cf. l'en-tête § ÉCHAPPEMENT)
+     -------------------------------------------------------------------------- */
+
+  /** Pastille « introuvable » SEULE, suivie d'une ESPACE séparatrice — "" si le ticket est résolu.
+      `title` est l'infobulle facultative : la FICHE en pose une (elle a la place d'EXPLIQUER que
+      l'enregistrement local reste intact et reviendra si l'accès est rétabli), le LISTING non
+      (colonne étroite, pastille répétée à chaque ligne). Même partage des rôles que
+      `VmStatus.orphanPill` et `WifiStatus.disconnectedPill`. */
+  static notFoundPill(issue: IssueStatusIssue | null | undefined, title?: string): string {
+    if (!IssueStatus.isNotFound(issue)) return "";
+    const titleAttr = title ? ` title="${Html.escape(title)}"` : "";
+    return `<span class="pill" style="border-color:${IssueStatus.COLOR_NOT_FOUND};color:${IssueStatus.COLOR_NOT_FOUND}"${titleAttr}>${Html.escape(IssueStatus.notFoundLabel())}</span> `;
+  }
+
+  /** Pastille du STATUT seule — libellé BRUT du tracker, ÉCHAPPÉ et jamais traduit (D3), coloré par
+      sa CATÉGORIE (la seule chose qui puisse porter une sémantique commune à tous les providers).
+      ⚠ La couleur vient de la CATÉGORIE et non de `color()` : l'orphelinat a déjà SA pastille, qui
+      s'affiche À CÔTÉ — les deux sont rendues, jamais l'une À LA PLACE de l'autre (savoir qu'un
+      ticket introuvable était « En cours » est précisément ce qui aide à décider quoi en faire).
+      Statut vide (toléré par le pivot) → on retombe sur le LIBELLÉ DE CATÉGORIE, qui est, lui,
+      traduisible : montrer « Ouvert » vaut mieux qu'une pastille vide, et cela ne contredit pas D3
+      (on n'a PAS traduit un libellé du tracker, on affiche la classification normalisée). */
+  static statusPill(issue: IssueStatusIssue | null | undefined): string {
+    const category = IssueStatus.categoryOf(issue);
+    const color = IssueStatus.COLOR_BY_CATEGORY[category] || IssueStatus.COLOR_BY_CATEGORY.unknown;
+    const text = IssueStatus.raw(issue) || IssueStatus.categoryLabel(category);
+    if (!text) return IssueStatus.MUTED;   // ceinture : `categoryLabel` rend toujours quelque chose
+    return `<span class="pill" style="border-color:${color};color:${color}">${Html.escape(text)}</span>`;
+  }
+
+  /** Rendu COMPLET de la colonne « Statut » : introuvable EN TÊTE puis statut du tracker. */
+  static pills(issue: IssueStatusIssue | null | undefined, notFoundTitle?: string): string {
+    return IssueStatus.notFoundPill(issue, notFoundTitle) + IssueStatus.statusPill(issue);
   }
 }

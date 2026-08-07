@@ -150,6 +150,15 @@ export const app = {
     refresh: "Refresh",
     refreshTitle: "Reload the clusters status (GET /vm/status)",
   },
+  // Header actions of the ISSUES tab — API mode AND non-viewer (all three write).
+  issues: {
+    sync: "Synchronise",
+    syncTitle: "Refresh the state of the issues already followed from the trackers configured for this document (no issue is added)",
+    follow: "Follow an issue…",
+    followTitle: "Add an issue to the document from its key or the URL of its page",
+    providers: "Providers…",
+    providersTitle: "Configure the queried trackers (instance, service account, token, interval)",
+  },
   wifi: {
     sync: "Synchronise",
     syncTitle: "Synchronise the Wi-Fi client inventory from the controllers configured for this document",

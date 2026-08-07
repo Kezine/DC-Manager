@@ -46,7 +46,7 @@
    c'est la convention du dépôt. La logique qu'elles exposent vit, elle, dans le service — testée.
    Harnais et assertions : harness.js. Cadrage : .notes/toDos/remote-issue-tracker-jira-cadrage-2026-08-06.md. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, Validation, Cascade, SharedSchema, EntityRegistry, COLLECTION_THREE_IMPACT } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, Validation, Cascade, SharedSchema, EntityRegistry, COLLECTION_THREE_IMPACT, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   const { IssueSync, ISSUE_SOURCE_FIELDS, ISSUE_STATUS_CATEGORIES } = SHARED("src-shared/IssueSync.js");
@@ -439,6 +439,181 @@ module.exports = async () => {
     ck.eq(Issue.displayName({ ext_id: "10042" }), "10042", "displayName : ni clé ni titre → repli sur l'identité côté tracker");
     ck.eq(Issue.displayName({}), "", "displayName : rien d'affichable → \"\" (l'appelant décide de son repli)");
     ck.eq(Issue.displayName(null), "", "displayName : null toléré");
+  }
+  });
+
+  /* ==========================================================================================
+     LOT L4 — UI DE LECTURE : ce qui est PUR et testable sans navigateur
+     (les vues DOM restent hors test, comme partout dans le dépôt).
+     ========================================================================================== */
+
+  await section("client L4 : IssueStatus — PASTILLES (échappement, priorité de l'introuvable, couleur par catégorie)", async () => {
+  {
+    const frLists = D("i18n/locales/fr/lists.js").lists, frDomain = D("i18n/locales/fr/domain.js").domain;
+
+    // -- STATUT : le libellé BRUT est rendu TEL QUEL… mais ÉCHAPPÉ. C'est une donnée d'ORIGINE
+    //    DISTANTE posée en innerHTML : un statut de workflow contenant du balisage ne doit pas
+    //    devenir du HTML. Les couleurs, elles, sont des constantes internes — jamais une donnée. --
+    const plain = IssueStatus.statusPill({ status: "En recette", status_category: "in_progress" });
+    ck(plain.indexOf("En recette") >= 0, "statusPill : le libellé BRUT du tracker est affiché tel quel (jamais traduit — décision D3)");
+    const nasty = IssueStatus.statusPill({ status: '<img src=x onerror="alert(1)">', status_category: "todo" });
+    ck(nasty.indexOf("<img") === -1, "statusPill : un statut porteur de balisage est ÉCHAPPÉ (donnée distante en innerHTML)");
+    ck(nasty.indexOf("&lt;img") >= 0, "statusPill : … et reste LISIBLE sous forme échappée (on n'efface pas la donnée)");
+    ck(nasty.indexOf("onerror=\"") === -1, "statusPill : aucun attribut d'événement ne survit à l'échappement");
+
+    // -- COULEUR : portée par la CATÉGORIE (le seul axe commun à tous les providers), jamais par le
+    //    libellé libre. Deux catégories distinctes ⇒ deux pastilles distinctes. --
+    ck(IssueStatus.statusPill({ status: "X", status_category: "done" }) !== IssueStatus.statusPill({ status: "X", status_category: "todo" }),
+      "statusPill : MÊME libellé, catégories différentes → pastilles différentes (c'est la catégorie qui colore)");
+
+    // -- STATUT VIDE (toléré par le pivot) : repli sur le LIBELLÉ DE CATÉGORIE, qui est traduisible.
+    //    On n'a PAS traduit un libellé du tracker (D3 tient), on affiche la classification. --
+    ck(IssueStatus.statusPill({ status: "", status_category: "todo" }).indexOf(frDomain.issueStatusCategory.todo) >= 0,
+      "statusPill : statut vide → libellé de CATÉGORIE (jamais une pastille vide)");
+
+    // -- INTROUVABLE : pastille PROPRE, en tête, et les DEUX sont rendues (savoir qu'un ticket
+    //    introuvable était « En cours » est précisément ce qui aide à décider quoi en faire). --
+    ck.eq(IssueStatus.notFoundPill({}), "", "notFoundPill : ticket résolu → aucune pastille");
+    const notFound = IssueStatus.notFoundPill({ orphan: true });
+    ck(notFound.indexOf(frLists.ph.notFound) >= 0, "notFoundPill : libellé « introuvable » (et non « orphelin » ni « déconnecté »)");
+    ck(notFound.indexOf("var(--warn)") >= 0, "notFoundPill : couleur d'AVERTISSEMENT — l'enregistrement local est intact");
+    ck(/title="/.test(IssueStatus.notFoundPill({ orphan: true }, "explication")), "notFoundPill : infobulle posée quand elle est fournie (la fiche l'utilise, le listing non)");
+    ck(!/title="/.test(notFound), "notFoundPill : aucune infobulle sans titre (colonne étroite du listing)");
+    ck(IssueStatus.notFoundPill({ orphan: true }, '"><script>').indexOf("<script") === -1, "notFoundPill : l'infobulle est échappée (elle finit dans un ATTRIBUT)");
+
+    const both = IssueStatus.pills({ orphan: true, status: "En cours", status_category: "in_progress" });
+    ck(both.indexOf(frLists.ph.notFound) >= 0 && both.indexOf("En cours") >= 0,
+      "pills : les DEUX pastilles sont rendues, jamais l'une À LA PLACE de l'autre");
+    ck(both.indexOf(frLists.ph.notFound) < both.indexOf("En cours"), "pills : l'introuvable passe EN TÊTE (c'est l'état COURANT, la catégorie date de la dernière résolution)");
+  }
+  });
+
+  await section("client L4 : Html.externalLink — un lien SORTANT ne peut pas être un vecteur XSS", async () => {
+  {
+    const { Html } = D("core/Html.js");
+
+    // -- 🚨 LE cas qui justifie le helper : `url` vient d'un tiers (ou d'un document importé). Rendre
+    //    « javascript: » cliquable exécuterait ce code au premier clic — et l'échappement HTML n'y
+    //    change RIEN (la chaîne est parfaitement valide en valeur d'attribut). --
+    for (const hostile of ["javascript:alert(1)", "JavaScript:alert(1)", "  javascript:alert(1)  ", "data:text/html,<script>alert(1)</script>", "vbscript:msgbox(1)", "file:///etc/passwd"]) {
+      const out = Html.externalLink(hostile, "INFRA-1");
+      ck.eq(out, "INFRA-1", "externalLink : schéma refusé (« " + hostile.trim().slice(0, 20) + " ») → TEXTE, aucun <a>");
+      ck.eq(Html.isSafeHttpUrl(hostile), false, "isSafeHttpUrl : « " + hostile.trim().slice(0, 20) + " » refusée");
+    }
+
+    // -- Les schémas AUTORISÉS, casse comprise (URL normalise le protocole en minuscules). --
+    ck.eq(Html.isSafeHttpUrl("https://tracker.example.net/browse/INFRA-1"), true, "isSafeHttpUrl : https acceptée");
+    ck.eq(Html.isSafeHttpUrl("http://tracker.example.net/browse/INFRA-1"), true, "isSafeHttpUrl : http acceptée (intranet en clair)");
+    ck.eq(Html.isSafeHttpUrl("HTTPS://Tracker.Example.NET/x"), true, "isSafeHttpUrl : la CASSE du schéma ne contourne pas la liste blanche");
+
+    // -- Valeurs VIDES / non chaînes / RELATIVES : pas un lien (et surtout pas une exception). --
+    for (const empty of ["", "   ", null, undefined, 42, {}, "/browse/INFRA-1", "pas une url"]) {
+      ck.eq(Html.isSafeHttpUrl(empty), false, "isSafeHttpUrl : valeur non exploitable (" + JSON.stringify(empty) + ") → false, sans jeter");
+    }
+    ck.eq(Html.externalLink(null, "INFRA-1"), "INFRA-1", "externalLink : URL absente → le libellé seul, en texte");
+    ck.eq(Html.externalLink("", ""), "", "externalLink : rien à rendre → \"\"");
+
+    // -- Le lien NOMINAL : href + target + rel INDISSOCIABLES (sans `noopener`, la page ouverte peut
+    //    rediriger la nôtre — tabnabbing ; `noreferrer` évite en plus de fuiter l'URL courante). --
+    const link = Html.externalLink("https://tracker.example.net/browse/INFRA-1", "INFRA-1");
+    ck.eq(link, '<a href="https://tracker.example.net/browse/INFRA-1" target="_blank" rel="noopener noreferrer">INFRA-1</a>',
+      "externalLink : href + target=_blank + rel=noopener noreferrer");
+    ck(Html.externalLink("https://x.test/a").indexOf(">https://x.test/a<") >= 0, "externalLink : sans libellé, l'URL sert de texte");
+
+    // -- ÉCHAPPEMENT des DEUX côtés : l'URL finit dans un ATTRIBUT, le libellé dans du CONTENU. Un
+    //    guillemet dans l'URL ne doit pas pouvoir refermer l'attribut et injecter un handler. --
+    const dirty = Html.externalLink('https://x.test/a"onmouseover="alert(1)', '<b>x</b>');
+    ck(dirty.indexOf('"onmouseover="') === -1, "externalLink : un guillemet dans l'URL ne s'évade pas de l'attribut href");
+    ck(dirty.indexOf("<b>") === -1, "externalLink : le LIBELLÉ est échappé (contenu, pas du HTML de confiance)");
+  }
+  });
+
+  await section("client L4 : dimension CIBLE des tickets — familles, `where` d'appartenance et restriction locale", async () => {
+  {
+    const { ListTargets } = D("views/ListTargets.js");
+    const { I18n } = D("i18n/I18n.js");
+    const store = await makeStore();
+    const filter = ListTargets.issueTarget(store, null);   // reader null = mode FICHIER (aucun réseau)
+
+    // -- 🚨 L'INVARIANT du lot : les familles proposées par l'UI sont EXACTEMENT celles que le
+    //    partagé déclare. Une famille en trop serait liable sans cascade de détachement (référence
+    //    pendante) ; une famille en moins serait détachable mais jamais liable. --
+    const uiKinds = ISSUE_TARGET_KINDS.filter((kind) => filter.tagOf(kind) !== "");
+    ck.eq(uiKinds.join(","), ISSUE_TARGET_KINDS.join(","),
+      "familles : les 4 familles de `ISSUE_TARGET_KINDS` ont toutes un badge dans la dimension CIBLE");
+    ck.eq(filter.tagOf("famille-inconnue"), "", "familles : un slug inconnu n'a pas de badge (jamais de libellé inventé)");
+
+    // -- `where` SERVEUR : une APPARTENANCE au tableau `targets` (∈ Schema.ARRAY_FIELDS), et la clé
+    //    est RECOMPOSÉE par le module partagé — jamais concaténée à la main. --
+    ck.eq(JSON.stringify(filter.where("equipment", "E1")), JSON.stringify({ targets: "equipment:E1" }),
+      "where : appartenance au tableau `targets`, clé composée par IssueTargets");
+    ck.eq(filter.where("famille-inconnue", "X"), null, "where : famille inconnue → aucun critère serveur (la restriction cliente tranchera)");
+
+    // -- RESTRICTION CLIENTE (seul chemin du mode fichier, et repli des cibles non mappables). --
+    const rows = [
+      { id: "i1", targets: ["equipment:E1", "vm:V9"] },
+      { id: "i2", targets: ["vm:V9"] },
+      { id: "i3", targets: [] },
+      { id: "i4" },                                   // champ absent (record partiel)
+      { id: "i5", targets: ["equipment:E10"] },       // 🚨 préfixe commun avec E1 : ne doit PAS matcher
+    ];
+    ck.eq(filter.restrict(rows, "equipment", "E1").map((r) => r.id).join(","), "i1",
+      "restrict : seuls les tickets portant la clé EXACTE sont gardés (« E10 » n'est pas « E1 »)");
+    ck.eq(filter.restrict(rows, "vm", "V9").map((r) => r.id).join(","), "i1,i2", "restrict : une même cible peut être portée par plusieurs tickets");
+    ck.eq(filter.restrict(rows, "equipment", "INEXISTANT").length, 0, "restrict : cible sans ticket → aucune ligne");
+    ck.eq(filter.restrict(rows, "famille-inconnue", "X").length, 0,
+      "restrict : famille inconnue → AUCUNE ligne (jamais « toutes » : un filtre posé sans effet serait pire)");
+
+    // -- Le descripteur sert AUSSI d'ÉDITEUR de liens (cf. views/IssueTargetSource) : il doit donc
+    //    savoir NOMMER une cible et EXCLURE les cibles déjà liées de sa recherche. --
+    const eq = await store.create("equipments", { name: "SW-Coeur", type: "switch" });
+    ck.eq(filter.labelOf("equipment", eq.id), "SW-Coeur", "labelOf : la cible existante est nommée");
+    ck.eq(filter.labelOf("equipment", "inexistant"), null, "labelOf : cible disparue → null (l'UI grise, elle ne plante pas)");
+    ck.eq(filter.labelOf("famille-inconnue", eq.id), null, "labelOf : famille inconnue → null");
+    ck.eq((await filter.search("SW-Coeur")).length, 1, "search : la cible remonte dans les candidats (mode fichier, cache local)");
+    ck.eq((await filter.search("SW-Coeur", new Set(["equipment:" + eq.id]))).length, 0,
+      "search : une cible DÉJÀ liée est écartée des candidats (dédup de l'éditeur)");
+
+    // -- Le NOMMAGE d'un spare passe par sa règle propre (`displayName`), pas par `name` : sans
+    //    cela, un spare sans nom s'afficherait « (spare) » dans l'éditeur alors qu'il a une identité. --
+    const spare = await store.create("spares", { type: "hdd", brand: "Seagate", model_pn: "ST-4000", serial: "SN-42" });
+    ck.eq(filter.labelOf("spare", spare.id), spare.displayName(),
+      "labelOf : un spare sans `name` est nommé par sa règle CALCULÉE (displayName) — le repli « (spare) » n'a pas à jouer");
+    ck(filter.labelOf("spare", spare.id) !== I18n.t("lists.ph.spare"), "labelOf : … et surtout pas par le repli localisé, qui ne distinguerait plus deux spares");
+  }
+  });
+
+  await section("client L4 : KIND_FIELDS (formulaire providers) ⇄ KIND_OPTION_SPECS (serveur) — le miroir est VÉRIFIÉ", async () => {
+  {
+    // Un miroir que personne ne contrôle DIVERGE : un champ affiché mais non déclaré côté serveur
+    // serait silencieusement ignoré (les options inconnues sont écartées) et un champ déclaré mais
+    // non affiché resterait figé sur son défaut. Les deux défauts sont MUETS à l'exécution.
+    const { IssueProvidersForm } = D("views/forms/IssueProvidersForm.js");
+    const { I18n } = D("i18n/I18n.js");
+    const { KIND_OPTION_SPECS } = SERVER("issues/IssueProviderConfigValidate.js");
+    const TYPE_OF_SPEC = { string: "text", boolean: "toggle" };   // spec serveur → contrôle client
+
+    ck.eq(Object.keys(IssueProvidersForm.KIND_FIELDS).sort().join(","), Object.keys(KIND_OPTION_SPECS).sort().join(","),
+      "miroir : MÊMES marques déclarées des deux côtés (ajouter une marque = 1 entrée ici + 1 branche là-bas)");
+    for (const kind of Object.keys(KIND_OPTION_SPECS)) {
+      const server = KIND_OPTION_SPECS[kind], client = IssueProvidersForm.KIND_FIELDS[kind] || [];
+      ck.eq(client.map((f) => f.name).join(","), server.map((s) => s.name).join(","),
+        "miroir « " + kind + " » : mêmes options, dans le MÊME ordre");
+      for (const spec of server) {
+        const field = client.find((f) => f.name === spec.name);
+        ck(!!field, "miroir « " + kind + " » : l'option « " + spec.name + " » est rendue par le formulaire");
+        if (!field) continue;
+        ck.eq(field.type, TYPE_OF_SPEC[spec.type] || spec.type,
+          "miroir « " + kind + "." + spec.name + " » : le contrôle correspond au type de la spec serveur");
+        ck.eq(JSON.stringify(field.fallback), JSON.stringify(spec.default),
+          "miroir « " + kind + "." + spec.name + " » : le défaut PROPOSÉ est celui que le serveur APPLIQUE");
+        // Les libellés passent par I18n (aucune chaîne en dur) et les clés doivent EXISTER : une clé
+        // manquante s'afficherait telle quelle dans le formulaire (i18next rend la clé).
+        ck(I18n.t(field.labelKey) !== field.labelKey, "i18n : libellé présent pour « " + kind + "." + spec.name + " »");
+        ck(I18n.t(field.hintKey) !== field.hintKey, "i18n : aide présente pour « " + kind + "." + spec.name + " »");
+        if (field.placeholderKey) ck(I18n.t(field.placeholderKey) !== field.placeholderKey, "i18n : placeholder présent pour « " + kind + "." + spec.name + " »");
+      }
+    }
   }
   });
 

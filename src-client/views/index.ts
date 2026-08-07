@@ -14,6 +14,12 @@ export { VmSyncClient } from "./forms/VmSyncClient";
 export { WifiForms } from "./forms/WifiForms";
 export { WifiProvidersForm } from "./forms/WifiProvidersForm";
 export { WifiSyncClient } from "./forms/WifiSyncClient";
+// Formulaires de la feature TICKETS (AMOVIBLE) — hors chaîne `Forms`, branchés directement.
+export { IssueForms } from "./forms/IssueForms";
+export { IssueProvidersForm } from "./forms/IssueProvidersForm";
+export { IssueSyncClient } from "./forms/IssueSyncClient";
+// Cibles liables d'un ticket — contrat découplé injecté via FormHost (implémenté dans main.ts).
+export type { IssueTargetSource } from "./IssueTargetSource";
 // Sous-onglet « Clusters » de la feature VM (AMOVIBLE, mode API) — vue dédiée détachable.
 export { VmClustersView } from "./VmClustersView";
 export type { VmClustersHost } from "./VmClustersView";

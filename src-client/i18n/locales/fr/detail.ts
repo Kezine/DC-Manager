@@ -83,6 +83,7 @@ export const detail = {
     contact: "Contact introuvable",
     vm: "VM introuvable",
     wifiClient: "Client wifi introuvable",
+    issue: "Ticket introuvable",
     type: "Type introuvable",
   },
   cable: {
@@ -213,6 +214,27 @@ export const detail = {
     notMatched: "non rapproché",
     localSection: "Enrichissements locaux",
     locateAp: "Localiser le point d'accès (le client lui-même n'est pas dans la scène)",
+  },
+  // TICKET d'un tracker distant (feature AMOVIBLE). ⚠ `notFoundTitle` explique la MÊME mécanique que
+  // `vm.orphanTitle` et `wifi.disconnectedTitle`, avec un TROISIÈME sens : un ticket qu'on ne résout
+  // plus signale une suppression, un projet archivé ou une permission perdue (cadrage §3).
+  issue: {
+    title: "Ticket",
+    notFoundTitle: "Non résolu à la dernière synchronisation — supprimé, projet archivé ou permission perdue. L'enregistrement local est conservé et reviendra si l'accès est rétabli.",
+    reporter: "Rapporteur",
+    labels: "Étiquettes",
+    resolution: "Résolution",
+    link: "Lien du ticket",
+    createdSrc: "Créé (tracker)",
+    updatedSrc: "Modifié (tracker)",
+    lastSync: "Dernière synchro",
+    providerId: "Identité source",
+    targetsSection: "Objets ciblés ({{count}})",
+    targetsEmpty: "Aucun objet ciblé. Liez-en depuis « Modifier ».",
+    colFamily: "Famille",
+    colTarget: "Objet",
+    openTarget: "Ouvrir la fiche de l'objet ciblé",
+    localSection: "Enrichissements locaux",
   },
   vm: {
     orphanTitle: "Disparue à la dernière synchronisation",

@@ -23,6 +23,11 @@ export const tabs = {
     title: "Clients wifi",
     subtitle: "Clients connectés aux points d'accès, alimentés par la synchronisation d'un contrôleur. Champs source en lecture ; les enrichissements locaux se font depuis la fiche. Un client absent du dernier inventaire est marqué « déconnecté », jamais supprimé.",
   },
+  issues: {
+    label: "Tickets",
+    title: "Tickets",
+    subtitle: "Tickets suivis d'un tracker distant, rafraîchis par synchronisation. Un ticket n'entre au document que par « Suivre un ticket » — une passe n'en crée jamais. Champs source en lecture ; les cibles et les enrichissements locaux se font depuis la fiche. Un ticket qu'on ne résout plus est marqué « introuvable », jamais supprimé.",
+  },
   racks: {
     label: "Racks",
     subtitle: "Baies : emplacement, taille (U), profondeur, faces, portes et capots. « ▦ Contenu » pour monter les équipements dans les U.",

@@ -9,8 +9,9 @@ import { EntityRegistry } from "../models";
 import { BrowserStorageAdapter, RestAdapter } from "../data";
 import { Store } from "../store";
 import { RuntimeConfigLoader } from "./RuntimeConfig";
-import { GraphView, ListView, ListConfigs, Forms, DatacenterView, VmForms, VmProvidersForm, VmSyncClient, VmClustersView, WifiForms, WifiProvidersForm, WifiSyncClient, NotificationsAdminView, NotifyClient, CertsAdminView, CertsClient, InterventionsAdminView, InterventionsClient } from "../views";
+import { GraphView, ListView, ListConfigs, Forms, DatacenterView, VmForms, VmProvidersForm, VmSyncClient, VmClustersView, WifiForms, WifiProvidersForm, WifiSyncClient, IssueForms, IssueProvidersForm, IssueSyncClient, NotificationsAdminView, NotifyClient, CertsAdminView, CertsClient, InterventionsAdminView, InterventionsClient } from "../views";
 import type { InterventionTargetSource, InterventionFicheHooks } from "../views";
+import { ListTargets } from "../views/ListTargets";   // descripteur de la dimension CIBLE — partagé listing ⇄ éditeur de liens des tickets
 import { FormBase } from "../views/forms/FormBase";
 import { GlobalSearchPalette } from "../views/GlobalSearchPalette";   // palette de recherche globale (loupe topbar + Ctrl+K)
 import { GlobalSearchSources } from "../views/GlobalSearchSources";   // familles à fiche = périmètre envoyé à la recherche transverse serveur (mode API)
@@ -97,6 +98,12 @@ const vmSyncClient = REST_MODE ? new VmSyncClient(adapter as RestAdapter) : null
 // Client de synchro des CLIENTS WIFI (feature AMOVIBLE) — mode API SEULEMENT, même montage que le client VM
 // (le RestAdapter satisfait `WifiRestContext` ; routes SCOPÉES PAR DOCUMENT, `<dataBase>/wifi`).
 const wifiSyncClient = REST_MODE ? new WifiSyncClient(adapter as RestAdapter) : null;
+// Client du module TICKETS (feature AMOVIBLE) — mode API SEULEMENT, même montage que les clients VM
+// et wifi (le RestAdapter satisfait `IssueRestContext` ; routes SCOPÉES PAR DOCUMENT, `<dataBase>/issues`).
+// ⚠ null en mode fichier ⇒ « Synchroniser », « Suivre un ticket » et « Providers… » sont ABSENTS —
+// mais la collection reste lisible, filtrable, cherchable, et ses champs LOCAUX + `targets` restent
+// éditables : ce sont des données du DOCUMENT, pas du tracker (décision D9 du cadrage).
+const issueSyncClient = REST_MODE ? new IssueSyncClient(adapter as RestAdapter) : null;
 // Client du service de notifications (feature notify/ AMOVIBLE) — mode API SEULEMENT (null en mode fichier/viewer :
 // la page admin affiche alors un message d'indisponibilité). Le RestAdapter satisfait `NotifyRestContext` (apiRoot/
 // docId/headers/clientId publics) ; les routes notify sont GLOBALES (`<apiRoot>/notify`, non scopées par document).
@@ -166,6 +173,14 @@ async function boot(): Promise<void> {
   // `markDirty` : garde « modifications non enregistrées » du NIVEAU de modale, pour les éditeurs SANS
   // champ de saisie (la chaîne de route) que l'instantané de `Modal` ne peut pas voir bouger.
   const formHost: FormHost = { openModal: (o) => modal.open(o), closeModal: () => modal.close(), refreshModal: () => modal.refresh(), markDirty: () => modal.markDirty(), setDirty: () => { refreshChrome(); }, autocompleteLimit: () => prefs.autocompleteMaxResults, userDirectory };   // mutation modèle déjà suivie par la révision (store.onChange) ; userDirectory : résout les auteurs d'audit (mode API)
+  // CIBLES liables d'un TICKET (feature `issues` AMOVIBLE) : le MÊME DESCRIPTEUR que la dimension
+  // « Cible » du listing (familles, règle de nommage, source de candidats double mode) sert d'ÉDITEUR
+  // de liens à la fiche — deux surfaces, une seule table de familles à tenir à jour. Injecté dans les
+  // DEUX modes de données : `targets` appartient au document, pas au tracker (décision D9).
+  // ⚠ C'est bien une SECONDE instance (le listing construit la sienne) et c'est VOULU : chaque point
+  // de recherche porte son propre AbortController, comme la palette globale. Une instance partagée
+  // ferait annuler la requête de l'éditeur par une frappe dans le filtre du listing, et inversement.
+  formHost.issueTargets = ListTargets.issueTarget(store, entitySearchReader);
   // RECHERCHE GLOBALE (modale dédiée) — UNE instance, UNE implémentation pour les DEUX chemins
   // (déclencheur topbar + Ctrl+K). Garde d'overlay = le pattern des raccourcis undo/redo (sélecteurs
   // DOM) : la palette est un geste de NAVIGATION GLOBALE, pas un niveau de la pile de modales — son
@@ -656,6 +671,31 @@ async function boot(): Promise<void> {
     title: I18n.t("tabs.wifi.title"), subtitle: I18n.t("tabs.wifi.subtitle"),
     extraActions: wifiExtraActions.length ? wifiExtraActions : undefined,
     locate: "equipment", locateTarget: (id) => WifiLocate.apEquipmentId(store.get("wifiClients", id), store),
+  });
+  // TICKETS : onglet de PREMIER NIVEAU, LECTURE SEULE — collection MIROIR d'un tracker distant
+  // (Jira en 1re implémentation ; la marque n'est qu'un adaptateur serveur). Pas de `form`/`addLabel` :
+  // AUCUN bouton « + créer » (cf. ListConfigs.issues `actions: view`) — un ticket n'entre au document
+  // que par « Suivre un ticket », et les enrichissements locaux + les CIBLES se font depuis la fiche.
+  // Actions d'en-tête (feature amovible), MODE API ET HORS VIEWER : les trois écrivent (une passe de
+  // synchro, un suivi, une configuration) et aucune n'a de sens sans serveur à interroger.
+  //  - « Synchroniser » : rafraîchit les tickets DÉJÀ suivis (elle n'en crée jamais) ;
+  //  - « Suivre un ticket » : la PORTE D'ENTRÉE de l'assiette ;
+  //  - « Providers… » : CRUD des trackers.
+  // Pas de `locate` : un ticket n'existe pas dans la scène 3D, et il peut cibler PLUSIEURS objets —
+  // rien ne permettrait de choisir lequel cadrer à la place de l'utilisateur.
+  const issueExtraActions: NonNullable<TabOpts["extraActions"]> = [];
+  if (REST_MODE && issueSyncClient && !VIEWER) {
+    const client = issueSyncClient;   // const → non-null capturé dans les closures (garde ci-dessus)
+    issueExtraActions.push(
+      { label: I18n.t("app.issues.sync"), title: I18n.t("app.issues.syncTitle"), onClick: (btn) => { void IssueForms.sync(client, btn); } },
+      { label: I18n.t("app.issues.follow"), title: I18n.t("app.issues.followTitle"), onClick: () => IssueForms.follow(formHost, client, () => shell.refreshActive()) },
+      { label: I18n.t("app.issues.providers"), title: I18n.t("app.issues.providersTitle"), onClick: () => IssueProvidersForm.open(formHost, client, () => shell.refreshActive()) },
+    );
+  }
+  addListTab("tickets", I18n.t("tabs.issues.label"), (s) => ListConfigs.issues(s, entitySearchReader), {
+    icon: Icons.TICKET,
+    title: I18n.t("tabs.issues.title"), subtitle: I18n.t("tabs.issues.subtitle"),
+    extraActions: issueExtraActions.length ? issueExtraActions : undefined,
   });
   addListTab("racks", I18n.t("tabs.racks.label"), ListConfigs.racks, {
     icon: Icons.RACK_CONTENT,
