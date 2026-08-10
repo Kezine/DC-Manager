@@ -221,9 +221,13 @@ module.exports = async () => {
       // filtre cible « Hébergée sur » en `where` serveur, invalidation de la colonne `search`.
       'CREATE INDEX IF NOT EXISTS "idx_applications_equipment_id" ON "applications" ("equipment_id")',
       'CREATE INDEX IF NOT EXISTS "idx_applications_vm_id" ON "applications" ("vm_id")',
+      // attachments (chantier pièces jointes 2026-08-10) : les deux FK de cible — cascade DELETE
+      // equipments/subEquipments (D3), sections des fiches, invalidation de la colonne `search`.
+      'CREATE INDEX IF NOT EXISTS "idx_attachments_equipment_id" ON "attachments" ("equipment_id")',
+      'CREATE INDEX IF NOT EXISTS "idx_attachments_sub_equipment_id" ON "attachments" ("sub_equipment_id")',
     ];
     const allIndexes = RelationalSchema.allIndexDdls();
-    ck.eq(JSON.stringify(allIndexes), JSON.stringify(expectedIndexes), "index : liste exacte (41 index, ordre COLLECTIONS)");
+    ck.eq(JSON.stringify(allIndexes), JSON.stringify(expectedIndexes), "index : liste exacte (43 index, ordre COLLECTIONS)");
     // Et la phase TABLES ne contient QUE des CREATE TABLE, une par collection (le phasage tables → index
     // est la condition de l'évolution additive — cf. test-relational-evolution.js).
     const allTables = RelationalSchema.allTableDdls();

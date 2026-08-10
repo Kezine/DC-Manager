@@ -32,6 +32,11 @@ import { RackDepthPolicy } from "./RackDepthPolicy.js";
 // GÉOMÉTRIE D'ÉTAGÈRE : SOURCE UNIQUE partagée avec le rendu (`RackGeometry` la réutilise).
 // ⚠ Extension `.js` IMPÉRATIVE (même raison que ci-dessus).
 import { TrayGeometry } from "./TrayGeometry.js";
+// LISTE BLANCHE MIME des pièces jointes : SOURCE UNIQUE `Schema.ATTACHMENT_MIME_TYPES` (le front filtre à
+// la sélection, le serveur rejette à l'upload, et l'invariant `attachments.mime` ci-dessous la rejoue à
+// TOUTE écriture — trois consommateurs, une seule liste, principe n°3).
+// ⚠ Extension `.js` IMPÉRATIVE (même raison que ci-dessus).
+import { Schema } from "./Schema.js";
 
 /* ---- énumérations canoniques (alignées au domaine front — cf. test anti-divergence) ---- */
 /** Statuts de câble (cycle de vie). = `CABLE_STATUSES.map(s => s.id)` côté front. */
@@ -1100,6 +1105,24 @@ const SPEC_FIELDS = {
       equipment_id: { type: "string", nullable: true, default: null, ref: "equipments" },
       vm_id:        { type: "string", nullable: true, default: null, ref: "vms" },
   },
+  attachments: {
+      // PIÈCE JOINTE (convention de prêt, BDC, scan…) : MÉTADONNÉES seulement — le BINAIRE vit HORS du
+      // document (décision D1/D4 du cadrage 2026-08-10 : disque serveur en mode API, IndexedDB + compagnon
+      // `.nmfa` en mode fichier — cf. docs/attachments.md). Cible = équipement OU sous-équipement (D2),
+      // deux FK nullables à exclusivité SOUPLE (invariant dans COLLECTION_SPECS, patron `applications`).
+      name:             { type: "string", required: true, trim: true },   // libellé humain (« Convention de prêt 2026 ») — trimé (fiabilise le libellé)
+      description:      { type: "string", default: "" },                  // héritée d'Entity (notes libres)
+      // Nom de fichier D'ORIGINE — sert UNIQUEMENT au téléchargement (Content-Disposition assaini, D6) :
+      // il n'entre JAMAIS dans un chemin disque (l'id opaque est le nom de fichier serveur — anti-traversal D4).
+      file_name:        { type: "string", required: true, trim: true },
+      // Type MIME ∈ liste blanche partagée (invariant ci-dessous) — resservi en Content-Type au download.
+      mime:             { type: "string", required: true },
+      // Taille en octets — POSÉE PAR LE SERVEUR à l'upload (taille réelle du fichier reçu, jamais crue du
+      // client) ; informative côté fichier local.
+      size:             { type: "number", default: 0, min: 0 },
+      equipment_id:     { type: "string", nullable: true, default: null, ref: "equipments" },
+      sub_equipment_id: { type: "string", nullable: true, default: null, ref: "subEquipments" },
+  },
 } as const satisfies Record<string, Record<string, FieldSpec>>;
 
 /* Types d'ENREGISTREMENT (formes REST partagées, NORMALISÉES) dérivés de SPEC_FIELDS — SOURCE UNIQUE = la spec.
@@ -1132,6 +1155,7 @@ export namespace Records {
   export type WifiClient = RecordOf<typeof SPEC_FIELDS.wifiClients>;
   export type Contact    = RecordOf<typeof SPEC_FIELDS.contacts>;
   export type Application = RecordOf<typeof SPEC_FIELDS.applications>;
+  export type Attachment = RecordOf<typeof SPEC_FIELDS.attachments>;
 }
 
 export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
@@ -1745,6 +1769,20 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       // copie de l'invariant `ipAddresses` (même couple de FK, même sémantique). SOUPLE : les DEUX vides
       // restent permis (application recensée mais pas encore rattachée, ou hôte hors inventaire).
       { path: "vm_id", message: "Une application est hébergée sur un équipement OU une VM, pas les deux (equipment_id et vm_id mutuellement exclusifs).", holds: (app) => !(app.equipment_id && app.vm_id) },
+    ],
+  },
+  attachments: {
+    fields: SPEC_FIELDS.attachments,
+    invariants: [
+      // EXCLUSIVITÉ SOUPLE : une pièce jointe vise un ÉQUIPEMENT **ou** un SOUS-ÉQUIPEMENT, jamais les
+      // deux — copie de l'invariant `applications` (même couple de FK nullables, même sémantique).
+      // SOUPLE : les DEUX vides restent permis (pièce déposée avant d'être rattachée, ou cible retirée).
+      { path: "sub_equipment_id", message: "Une pièce jointe vise un équipement OU un sous-équipement, pas les deux (equipment_id et sub_equipment_id mutuellement exclusifs).", holds: (a) => !(a.equipment_id && a.sub_equipment_id) },
+      // MIME ∈ LISTE BLANCHE partagée (Schema.ATTACHMENT_MIME_TYPES — anti-XSS-stocké, décision D6) :
+      // l'invariant rejoue à TOUTE écriture (UI, API, import) la règle que le serveur applique déjà à
+      // l'upload — sans lui, une édition de métadonnées pourrait requalifier un binaire en type interdit.
+      // Contrôlé SEULEMENT si renseigné (patron `contacts.email`) : l'absence relève de `required`.
+      { path: "mime", message: "Type de fichier non supporté (types acceptés : " + Schema.ATTACHMENT_MIME_TYPES.join(", ") + ").", holds: (a) => !a.mime || Schema.isAttachmentMime(a.mime) },
     ],
   },
 };

@@ -72,6 +72,12 @@ module.exports = async () => {
     ck(!meta.full && meta.meta && !meta.images, "/meta → meta seul");
     const img = ApiRules.buildChangeset({}, undefined, "/images/i1");
     ck(!img.full && !img.meta && img.images, "/images → images seul");
+    // POST /attachments (création multipart d'une pièce jointe) : route LITTÉRALE mais écriture de la
+    // COLLECTION `attachments` — le périmètre est la collection, comme un CRUD unitaire. Le corps est
+    // du multipart (vide au moment de resolveRepo) : seul le CHEMIN parle.
+    const att = ApiRules.buildChangeset(undefined, undefined, "/attachments");
+    ck(!att.full && JSON.stringify(att.collections) === JSON.stringify(["attachments"]) && !att.meta && !att.images,
+      "/attachments (POST multipart) → collection attachments (pas un full — les autres clients ne rechargent qu'elle)");
     ck(ApiRules.buildChangeset({}, undefined, "/inconnu").full, "chemin inconnu → full (repli sûr)");
   }
   });

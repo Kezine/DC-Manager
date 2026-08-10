@@ -165,9 +165,11 @@ export class RestAdapter extends DataAdapter {
     return null;
   }
   async saveMeta(meta: Record<string, any>): Promise<unknown> { return this._send("PUT", "/meta", meta); }
-  /** MAINTENANCE du document courant (admin) : purge serveur des images ORPHELINES + compactage (VACUUM).
-      Renvoie le bilan { purgedImages, bytesBefore, bytesAfter } — null si aucun document ouvert. */
-  async maintenance(): Promise<{ purgedImages: number; bytesBefore: number; bytesAfter: number } | null> {
+  /** MAINTENANCE du document courant (admin) : purge serveur des images ORPHELINES et des BINAIRES de
+      pièces jointes orphelins (D5 — seul endroit où un binaire est supprimé) + compactage (VACUUM).
+      Renvoie le bilan — les compteurs de pièces jointes sont OPTIONNELS (serveur antérieur au chantier
+      pièces jointes : champs absents, le client n'affiche alors rien de plus). Null si aucun document ouvert. */
+  async maintenance(): Promise<{ purgedImages: number; purgedAttachments?: number; purgedAttachmentBytes?: number; bytesBefore: number; bytesAfter: number } | null> {
     if (!this.docId) return null;
     return this._send("POST", "/maintenance");
   }

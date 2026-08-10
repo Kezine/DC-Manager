@@ -356,6 +356,14 @@ Cas particuliers à connaître :
   garde de rendu protège en plus les données **importées** jamais passées par la spec.
 - **`applications.equipment_id` / `vm_id`** : deux FK nullables à **exclusivité souple** (invariant
   V3, copie d'`ipAddresses`) — un hôte OU l'autre, jamais les deux ; les deux vides restent permis.
+- **`attachments.mime`** est contraint par INVARIANT à la **liste blanche PARTAGÉE**
+  `Schema.ATTACHMENT_MIME_TYPES` (PDF, PNG/JPEG/WebP, ODT/ODS/DOCX/XLSX, TXT/CSV — **jamais
+  `text/html` ni `image/svg+xml`**, anti-XSS-stocké, même doctrine qu'`IMAGE_MIME_TYPES`). La règle
+  est rejouée à TOUTE écriture — pas seulement à l'upload serveur : une édition de métadonnées ne
+  peut pas requalifier un binaire en type interdit. Contrôlée seulement si renseignée (patron
+  `contacts.email`) : l'absence relève de `required`. `attachments.equipment_id` /
+  `sub_equipment_id` : exclusivité souple (copie d'`applications`) ; `size` est posée par le
+  SERVEUR à l'upload (`min 0`). Cf. [`attachments.md`](attachments.md).
 
 ## 11. Collaborateurs partagés (modules que la validation IMPORTE)
 

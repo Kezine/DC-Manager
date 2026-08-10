@@ -1626,6 +1626,91 @@ module.exports = async () => {
   }
   });
 
+  await section("shared : collection attachments (liste blanche MIME, exclusivité equipment_id/sub_equipment_id, cascade DELETE)", async () => {
+  {
+    const V = Validation.DataValidator;
+    const okRec = { name: "Convention de prêt 2026", file_name: "convention.pdf", mime: "application/pdf" };
+
+    // -- CHAMPS REQUIS : name, file_name, mime (une pièce sans libellé/nom d'origine/type n'est ni
+    //    téléchargeable ni contrôlable). --
+    const errs = (rec) => V.normalizeAndValidate("attachments", rec).errors;
+    ck.eq(errs(okRec).length, 0, "pièce jointe minimale valide (name + file_name + mime liste blanche) → 0 erreur");
+    ck.eq(errs({ ...okRec, name: "  " }).some((e) => e.path === "name" && e.code === "required"), true, "name vide (trimé) → 'required'");
+    ck.eq(errs({ ...okRec, file_name: "" }).some((e) => e.path === "file_name" && e.code === "required"), true, "file_name vide → 'required'");
+    ck.eq(errs({ ...okRec, mime: "" }).some((e) => e.path === "mime" && e.code === "required"), true, "mime vide → 'required' (et PAS l'invariant : contrôlé seulement si renseigné, patron contacts.email)");
+    ck.eq(errs({ ...okRec, mime: "" }).some((e) => e.code === "invariant"), false, "mime vide → PAS de double erreur invariant");
+
+    // -- LISTE BLANCHE MIME (invariant, source unique Schema.ATTACHMENT_MIME_TYPES — anti-XSS-stocké D6) :
+    //    les types EXÉCUTABLES par un navigateur sont bannis, JAMAIS text/html ni image/svg+xml. --
+    for (const good of ["application/pdf", "image/png", "image/jpeg", "image/webp", "text/plain", "text/csv",
+      "application/vnd.oasis.opendocument.text", "application/vnd.oasis.opendocument.spreadsheet",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]) {
+      ck.eq(errs({ ...okRec, mime: good }).length, 0, "mime « " + good + " » ∈ liste blanche → accepté");
+    }
+    for (const bad of ["text/html", "image/svg+xml", "application/javascript", "application/octet-stream"]) {
+      ck.eq(errs({ ...okRec, mime: bad }).some((e) => e.path === "mime" && e.code === "invariant"), true, "mime « " + bad + " » HORS liste → refusé (invariant)");
+    }
+    // Parité helper partagé (même doctrine que isImageMime, cf. section Schéma partagé) :
+    ck.eq(SharedSchema.isAttachmentMime("application/pdf"), true, "isAttachmentMime(application/pdf) = true");
+    ck.eq(SharedSchema.isAttachmentMime("text/html"), false, "isAttachmentMime(text/html) = false (XSS stocké)");
+    ck.eq(SharedSchema.isAttachmentMime("image/svg+xml"), false, "isAttachmentMime(image/svg+xml) = false (SVG scripté = document exécutable)");
+    ck.eq(SharedSchema.isAttachmentMime(null), false, "isAttachmentMime(null) = false");
+
+    // -- EXCLUSIVITÉ SOUPLE equipment_id/sub_equipment_id (copie de l'invariant applications) : une cible
+    //    OU l'autre, jamais les deux ; les DEUX vides restent permis. --
+    const inv = (rec) => errs(rec).filter((e) => e.code === "invariant");
+    ck.eq(inv({ ...okRec, equipment_id: "E1", sub_equipment_id: "SE1" }).length, 1, "exclusivité : les DEUX cibles posées → REFUS (invariant)");
+    ck.eq(inv({ ...okRec, equipment_id: "E1" }).length, 0, "exclusivité : équipement seul → OK");
+    ck.eq(inv({ ...okRec, sub_equipment_id: "SE1" }).length, 0, "exclusivité : sous-équipement seul → OK");
+    ck.eq(inv({ ...okRec }).length, 0, "exclusivité SOUPLE : aucune cible → OK (état permis)");
+
+    // -- NORMALISATION : FK absentes → null, size au défaut 0 (min 0 : négatif refusé), name/file_name trimés. --
+    const norm = V.normalizeRecord("attachments", { name: "  Convention  ", file_name: "  scan.pdf ", mime: "application/pdf" });
+    ck.eq(norm.equipment_id, null, "normalisation : equipment_id absent → null");
+    ck.eq(norm.sub_equipment_id, null, "normalisation : sub_equipment_id absent → null");
+    ck.eq(norm.size, 0, "normalisation : size absente → 0 (posée par le serveur à l'upload)");
+    ck.eq(norm.name, "Convention", "normalisation : name trimé");
+    ck.eq(norm.file_name, "scan.pdf", "normalisation : file_name trimé (identité de download fiabilisée)");
+    ck.eq(errs({ ...okRec, size: -1 }).some((e) => e.path === "size" && e.code === "min"), true, "size négative → refusée (min 0)");
+    // Intégrité référentielle (V2) : la cible doit EXISTER.
+    const fetchAtt = (coll, id) => ((coll === "equipments" && id === "E1") || (coll === "subEquipments" && id === "SE1")) ? { id } : null;
+    ck.eq(V.validateRecord("attachments", V.normalizeRecord("attachments", { ...okRec, equipment_id: "GHOST" }), fetchAtt)
+      .some((e) => e.path === "equipment_id" && e.code === "ref_missing"), true, "V2 : équipement cible introuvable → 'ref_missing'");
+    ck.eq(V.validateRecord("attachments", V.normalizeRecord("attachments", { ...okRec, sub_equipment_id: "SE1" }), fetchAtt).length, 0, "V2 : sous-équipement cible existant → valide");
+
+    // -- CASCADE (décision D3) : supprimer la CIBLE SUPPRIME ses pièces jointes — un DELETE, PAS un
+    //    detach (une convention orpheline n'a pas de sens, contrairement aux applications qui SURVIVENT
+    //    au détachement — les deux régimes coexistent, chacun testé). Le BINAIRE, lui, n'est jamais
+    //    touché par la cascade : sa purge est le travail EXCLUSIF de la maintenance (D5). --
+    const db = {
+      equipments: [{ id: "E1", name: "srv" }],
+      subEquipments: [{ id: "SE1", name: "drive", equipment_id: "E1" }],
+      ports: [{ id: "P1", equipment_id: "E1", sub_equipment_id: "SE1" }],
+      attachments: [
+        { id: "A-eq", name: "Convention", file_name: "c.pdf", mime: "application/pdf", equipment_id: "E1", sub_equipment_id: null },
+        { id: "A-se", name: "Garantie", file_name: "g.pdf", mime: "application/pdf", equipment_id: null, sub_equipment_id: "SE1" },
+      ],
+    };
+    const find = (coll, field, value) => (db[coll] || []).filter((r) => (Array.isArray(r[field]) ? r[field].includes(value) : r[field] === value));
+    const fetch = (coll, id) => (db[coll] || []).find((r) => r.id === id) || null;
+    // Sous-équipement supprimé → SA pièce est SUPPRIMÉE (delete), le port seulement DÉTACHÉ (régimes distincts).
+    const sePlan = Cascade.plan("subEquipments", "SE1", find, fetch);
+    ck.eq(sePlan.deletes.some((d) => d.c === "attachments" && d.id === "A-se"), true, "cascade sous-équipement : pièce jointe SUPPRIMÉE (delete, pas detach — D3)");
+    ck.eq(sePlan.detaches.some((d) => d.c === "attachments"), false, "cascade sous-équipement : AUCUN détachement de pièce jointe (jamais d'orpheline)");
+    ck.eq(sePlan.detaches.some((d) => d.c === "ports" && d.id === "P1" && d.key === "sub_equipment_id"), true, "cascade sous-équipement : le port reste DÉTACHÉ (régime inchangé)");
+    // Équipement supprimé → RÉCURSION complète : ses pièces directes ET celles de ses sous-équipements
+    // (la règle subEquipments est REJOUÉE sur SE1 par le moteur — rien n'est réécrit à la main).
+    const eqPlan = Cascade.plan("equipments", "E1", find, fetch);
+    ck.eq(eqPlan.deletes.some((d) => d.c === "attachments" && d.id === "A-eq"), true, "cascade équipement : pièce jointe DIRECTE supprimée (equipment_id)");
+    ck.eq(eqPlan.deletes.some((d) => d.c === "attachments" && d.id === "A-se"), true, "cascade équipement : pièce du SOUS-ÉQUIPEMENT supprimée AUSSI (récursion equipments → subEquipments → attachments)");
+    ck.eq(eqPlan.detaches.some((d) => d.c === "attachments"), false, "cascade équipement : aucune pièce jointe simplement détachée");
+    // Supprimer une PIÈCE JOINTE n'entraîne rien (rien ne pointe vers elle — règle déclarée vide, pas omise).
+    const attPlan = Cascade.plan("attachments", "A-eq", find, fetch);
+    ck.eq(attPlan.deletes.length + attPlan.detaches.length, 0, "cascade pièce jointe : plan VIDE (règle déclarée vide, convention wifiClients/applications)");
+  }
+  });
+
   await section("shared : couverture des specs (toutes les collections spécifiées)", async () => {
   {
     // INVARIANT : pour CHAQUE collection spécifiée, l'entité par défaut du constructeur front satisfait la spec
@@ -1636,6 +1721,9 @@ module.exports = async () => {
       ipNetworks: { cidr: "10.0.0.0/24", label: "x" }, ipAddresses: { address: "10.0.0.5" },
       dhcpRanges: { start_ip: "10.0.0.10", end_ip: "10.0.0.20" }, vms: { name: "x" }, contacts: { name: "x" },
       applications: { name: "x" },
+      // attachments : name/file_name/mime REQUIS (une pièce sans libellé, sans nom d'origine ou sans type
+      // n'est ni téléchargeable ni contrôlable) ; le mime doit être dans la liste blanche (invariant).
+      attachments: { name: "x", file_name: "x.pdf", mime: "application/pdf" },
       // subEquipments : `equipment_id` est REQUIS (un sous-équipement sans maître n'a aucune existence) —
       // divergence VOULUE avec aggregates.equipment_id, nullable. `validateRecord` sans `fetch` ne contrôle
       // pas la FK, l'id fourni n'a donc pas besoin d'exister ici (l'intégrité V2 est testée à part).
@@ -1695,7 +1783,9 @@ module.exports = async () => {
     // ailleurs — surtout une FK depuis `subEquipments` vers elle-même — ne peut pas passer inaperçue.
     const refsToSelf = Object.entries(Validation.COLLECTION_SPECS).flatMap(([coll, spec]) =>
       Object.entries(spec.fields).filter(([, f]) => f.ref === "subEquipments").map(([field]) => coll + "." + field));
-    ck.eq(JSON.stringify(refsToSelf), JSON.stringify(["ports.sub_equipment_id"]), "sous-équip. : UNE SEULE FK le vise (le port qui le dessert)");
+    // Depuis le chantier pièces jointes (2026-08-10), une SECONDE FK le vise : `attachments.sub_equipment_id`
+    // (cible d'une pièce, décision D2) — le test exhaustif a rougi comme prévu et la liste s'est étendue.
+    ck.eq(JSON.stringify(refsToSelf), JSON.stringify(["ports.sub_equipment_id", "attachments.sub_equipment_id"]), "sous-équip. : les FK qui le visent = le port qui le dessert + la pièce jointe qui le cible (liste EXHAUSTIVE)");
     ck.eq(Object.values(Validation.COLLECTION_SPECS.subEquipments.fields).some((f) => f.ref === "subEquipments"), false, "sous-équip. : AUCUNE FK auto-référente (hiérarchie plate, pas de garde anti-cycle à écrire)");
 
     // IDENTITÉ MATÉRIELLE + REPÈRE (lot 3, D5/D6) : chaînes libres à DÉFAUT "" — donc pas de null silencieux.

@@ -77,6 +77,10 @@ const CORPUS = {
     { id: "app-eq", name: "GLPI", url: "https://glpi.local", equipment_id: "eq-rack" },
     { id: "app-vm", name: "Grafana", vm_id: "vm-1" },
   ],
+  attachments: [
+    { id: "att-eq", name: "Convention de prêt 2026", file_name: "convention.pdf", mime: "application/pdf", equipment_id: "eq-rack" },
+    { id: "att-se", name: "Garantie drive", file_name: "garantie.pdf", mime: "application/pdf", sub_equipment_id: "se-1" },
+  ],
 };
 const fetchOf = (corpus) => (collection, id) => (corpus[collection] || []).find((r) => r.id === id) || null;
 const findOf = (corpus) => (collection, field, value) => (corpus[collection] || [])
@@ -145,6 +149,15 @@ module.exports = async () => {
     // le backfill/l'invalidation matérialisent côté serveur.
     ck(SearchTerms.searchText("applications", rec("applications", "app-eq"), fetchOf(CORPUS), findOf(CORPUS)).includes(norm("SW-Coeur")),
       "application : searchText contient le nom de l'hôte (colonne `search` enrichie)");
+
+    // -- PIÈCE JOINTE (search-v6) : cible équipement OU sous-équipement (patron applications) — taper
+    //    « SW-Coeur » remonte sa convention de prêt ; name/description/file_name sont des colonnes PLATES
+    //    (couvertes par ownText, pas des termes dérivés). --
+    ck(termsOf("attachments", rec("attachments", "att-eq")).includes("SW-Coeur"), "pièce jointe : nom de l'ÉQUIPEMENT cible (equipment_id → equipments.name)");
+    ck(termsOf("attachments", rec("attachments", "att-se")).includes("Drive LTO-9"), "pièce jointe : nom du SOUS-ÉQUIPEMENT cible (sub_equipment_id → subEquipments.name)");
+    ck.eq(termsOf("attachments", { id: "att-x", name: "Sans cible", file_name: "x.pdf", mime: "application/pdf" }).length, 0, "pièce jointe sans cible : AUCUN terme dérivé (colonnes plates, ownText suffit)");
+    ck(SearchTerms.searchText("attachments", rec("attachments", "att-eq"), fetchOf(CORPUS), findOf(CORPUS)).includes(norm("SW-Coeur")),
+      "pièce jointe : searchText contient le nom de la cible (colonne `search` enrichie)");
     const tSpare = termsOf("spares", rec("spares", "sp-1"));
     ck(tSpare.includes("SW-Coeur"), "spare : nom de l'équipement ATTRIBUÉ (assignedTo du listing)");
     ck(tSpare.includes("HDD (disque dur)") && tSpare.includes("HDD (hard drive)"), "spare : catalogue du type fr+en");
@@ -218,7 +231,9 @@ module.exports = async () => {
     // retard de spec les re-backfillerait sans fin. Cf. le commentaire de `SEARCH_VERSION`.
     // v5 = ajout de la collection `applications` à la spec (hôte équipement/VM résolu par lien,
     // chantier applications 2026-08-10).
-    ck.eq(SearchTerms.SEARCH_VERSION, 5, "SEARCH_VERSION = 5 (compositions v2 + wifiClients v3 + retrait d'issues v4 + applications v5 — le marqueur est MONOTONE, jamais décrémenté)");
+    // v6 = ajout de la collection `attachments` (cible équipement/sous-équipement résolue par lien,
+    // chantier pièces jointes 2026-08-10).
+    ck.eq(SearchTerms.SEARCH_VERSION, 6, "SEARCH_VERSION = 6 (compositions v2 + wifiClients v3 + retrait d'issues v4 + applications v5 + attachments v6 — le marqueur est MONOTONE, jamais décrémenté)");
 
     // équipement posé en baie : « U12 » (conditions du path client : placement rack/side/wall + rack_id + rack_u).
     ck(termsOf("equipments", rec("equipments", "eq-rack")).includes("U12"), "equipment racké (rack_u 12) : « U12 » est un terme — la position se tape telle quelle");
@@ -290,11 +305,17 @@ module.exports = async () => {
     ck(has(qEq, "ipAddresses", "equipment_id", "eq-rack") && has(qEq, "vms", "host_equipment_id", "eq-rack") && has(qEq, "spares", "assigned_equipment_id", "eq-rack"),
       "écrire un équipement → IPs, VMs hébergées, spares attribués");
     ck(has(qEq, "applications", "equipment_id", "eq-rack"), "écrire un équipement → ses APPLICATIONS hébergées (renommer l'hôte invalide leur colonne search)");
+    ck(has(qEq, "attachments", "equipment_id", "eq-rack"), "écrire un équipement → ses PIÈCES JOINTES (renommer la cible invalide leur colonne search — search-v6)");
 
     // -- écrire une VM : ses applications hébergées (search-v5) ET ses adresses rattachées. --
     const qVm = queriesFor("vms", "vm-1");
     ck(has(qVm, "applications", "vm_id", "vm-1"), "écrire une VM → ses APPLICATIONS hébergées (invalidation inverse par vm_id)");
     ck(has(qVm, "ipAddresses", "vm_id", "vm-1"), "écrire une VM → ses adresses IP rattachées");
+
+    // -- écrire un SOUS-ÉQUIPEMENT : ses pièces jointes (search-v6), EN PLUS de son maître (dérivation
+    //    par enfants, testée plus bas — les deux dérivations coexistent sur la même écriture). --
+    ck(has(queriesFor("subEquipments", "se-1"), "attachments", "sub_equipment_id", "se-1"),
+      "écrire un sous-équipement → ses PIÈCES JOINTES (invalidation inverse par sub_equipment_id)");
 
     // -- écrire un PORT / un TYPE de câble / une ÉTAGÈRE (nœud INTERMÉDIAIRE d'une chaîne). --
     ck(has(queriesFor("ports", "p-1"), "cables", "from_port_id", "p-1") && has(queriesFor("ports", "p-1"), "cables", "to_port_id", "p-1"),

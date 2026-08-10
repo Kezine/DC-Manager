@@ -54,6 +54,11 @@ export class ApiRules {
     if (p.startsWith("/snapshot")) return { full: true, collections: [], meta: true, images: true };
     if (p.startsWith("/meta")) return { full: false, collections: [], meta: true, images: false };
     if (p.startsWith("/images")) return { full: false, collections: [], meta: false, images: true };
+    // POST /attachments (création multipart d'une pièce jointe) : la route est LITTÉRALE (pas de paramètre
+    // `:collection`) mais l'écriture EST une écriture de la collection `attachments` (upsert standard) —
+    // le périmètre est donc la collection, comme pour un CRUD unitaire. ⚠ Le corps est du multipart, pas
+    // du JSON : au moment où `resolveRepo` appelle cette règle, `body` est vide — seul le CHEMIN parle.
+    if (p.startsWith("/attachments")) return { full: false, collections: ["attachments"], meta: false, images: false };
     return { full: true, collections: [], meta: true, images: true };   // inconnu → repli sûr
   }
 

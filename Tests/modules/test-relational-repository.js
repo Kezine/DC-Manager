@@ -49,7 +49,8 @@ module.exports = async () => {
 
     const repo = RelationalRepository.open(":memory:", SQLITE);
 
-    // -- ANTI-VACUITÉ 2 : les tables réellement créées (22 collections + meta + images = 24).
+    // -- ANTI-VACUITÉ 2 : les tables réellement créées (TOUTES les collections du schéma + meta + images —
+    //    compte DÉRIVÉ de Schema.COLLECTIONS, il suit tout seul l'ajout d'une collection).
     //    `repo.db` est privé TypeScript (compile-time) — accessible du test JS, assumé pour l'inspection. --
     const tables = repo.db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map((r) => r.name);
     ck.eq(tables.length, SharedSchema.COLLECTIONS.length + 2, "anti-vacuité : " + SharedSchema.COLLECTIONS.length + " tables de collection + meta + images");

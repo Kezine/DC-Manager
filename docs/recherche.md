@@ -317,6 +317,18 @@ description sont des colonnes **plates** déjà couvertes par `ownText` — aucu
 Côté palette, portée **dédiée « app: »** (décision D6) : les applications sont des entités de premier
 plan (ce qui tourne sur l'infrastructure), pas de l'inventaire secondaire.
 
+### Pièces jointes
+
+La collection `attachments` (search-v6) suit le même patron : deux dérivés par **lien** — le nom de
+la **cible**, équipement (`equipment_id` → `equipments.name`) **ou** sous-équipement
+(`sub_equipment_id` → `subEquipments.name`) — deviennent des termes de la pièce. Taper « SRV37 »
+remonte sa convention de prêt, et **renommer la cible invalide** la colonne `search` des pièces
+(requêtes inverses par FK indexées, `INDEX_SPEC.attachments`). Libellé, description et nom de fichier
+d'origine sont des colonnes **plates** couvertes par `ownText` — aucun `own`, aucun catalogue.
+Côté palette, la famille rejoindra la portée **« inv: »** avec sa fiche (décision D9 : une pièce
+jointe est de l'intendance, pas du premier plan) — l'entrée au corpus arrive avec l'UI (invariant
+corpus ≡ fiches). Cf. [`attachments.md`](attachments.md).
+
 ### Interventions et tickets répliqués
 
 Les **interventions** ne sont **pas** une collection du document : elles vivent dans une base SERVEUR

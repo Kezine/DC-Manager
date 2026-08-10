@@ -14,7 +14,7 @@ import type { InterventionTargetSource, InterventionFicheHooks } from "../views"
 import { FormBase } from "../views/forms/FormBase";
 import { GlobalSearchPalette } from "../views/GlobalSearchPalette";   // palette de recherche globale (loupe topbar + Ctrl+K)
 import { GlobalSearchSources } from "../views/GlobalSearchSources";   // familles à fiche = périmètre envoyé à la recherche transverse serveur (mode API)
-import { ImageStore, IdbImageBackend, RestImageBackend } from "../data";
+import { ImageStore, IdbImageBackend, RestImageBackend, AttachmentStore, IdbAttachmentBackend, RestAttachmentBackend } from "../data";
 import type { ListOptions, FormHost } from "../views";
 import { Modal, Notify, FormControls, Dialog, Fullscreen, RichTooltip, Icons } from "../ui";
 import { Html } from "../core/Html";
@@ -274,6 +274,11 @@ async function boot(): Promise<void> {
   FormBase.images = imageStore;   // singleton pour le picker d'image (faceEditor)
   imageStore.restoreLoadedKey();   // clé du bundle .nmfb actuellement en IndexedDB (persistée) — appariement json↔compagnon
   if (!REST_MODE) await imageStore.ready();   // en REST, le miroir est chargé à l'ouverture d'un document
+  // BINAIRES des pièces jointes (hors modèle — les MÉTADONNÉES sont la collection `attachments` du Store) :
+  // IndexedDB + compagnon .nmfa en mode fichier, endpoints REST en mode API. Cf. docs/attachments.md.
+  const attachmentBackend = REST_MODE ? new RestAttachmentBackend(API_BASE_URL) : new IdbAttachmentBackend();
+  const attachmentStore = new AttachmentStore({ backend: attachmentBackend });
+  attachmentStore.restoreLoadedKey();   // clé du bundle .nmfa actuellement en IndexedDB — appariement json↔compagnon
   Fullscreen.install();   // re-parente les overlays (modale/dialogues/toasts/menus) dans l'élément plein écran
   RichTooltip.install();  // délégation UNIQUE des tooltips enrichis (data-rich-tooltip) — idempotent
 
@@ -287,7 +292,7 @@ async function boot(): Promise<void> {
      mode dossier, compagnon .nmfb, exports) ; ici, seule l'adhérence à la boucle applicative. Les closures de
      l'hôte capturent des consts définies PLUS BAS (shell, refreshChrome, applyAutosave) — appelées après le boot. */
   const files = new FileDocumentController({
-    store, imageStore, session, prefs, handleStore, tabChannel, hasFsApi: HAS_FS_API,
+    store, imageStore, attachmentStore, session, prefs, handleStore, tabChannel, hasFsApi: HAS_FS_API,
     host: {
       refreshChrome: () => refreshChrome(),
       refreshActive: () => shell.refreshActive(),
@@ -319,7 +324,11 @@ async function boot(): Promise<void> {
      Construit UNIQUEMENT en mode REST (les callbacks 409/400 de l'adapter sont câblés à la construction). */
   const rest = REST_MODE ? new RestDocumentController({
     adapter: adapter as RestAdapter, store, imageStore, session, prefs, hasFsApi: HAS_FS_API,
-    setImagesBase: (base) => { if (imageBackend instanceof RestImageBackend) imageBackend.setBaseUrl(base); },
+    // Recale AUSSI le backend de pièces jointes : même scope document (/api/documents/{docId}) que les images.
+    setImagesBase: (base) => {
+      if (imageBackend instanceof RestImageBackend) imageBackend.setBaseUrl(base);
+      if (attachmentBackend instanceof RestAttachmentBackend) attachmentBackend.setBaseUrl(base);
+    },
     injectedLoginUrl: INJECTED.loginUrl,
     host: {
       refreshChrome: () => refreshChrome(),
@@ -372,12 +381,18 @@ async function boot(): Promise<void> {
     });
     if (!ok) return;
     if (REST_MODE) {
+      // Côté serveur, la maintenance purge AUSSI les binaires de pièces jointes orphelins (D5) —
+      // compteurs dans la réponse (`purgedAttachments`), affichage détaillé différé au lot B.
       const r = await (adapter as RestAdapter).maintenance();
       await imageStore.reloadFromBackend();
       const mb = (n: number) => (n / 1048576).toFixed(1) + " Mo";
       Notify.toast(r ? I18n.t("app.maint.purgedRest", { n: r.purgedImages, before: mb(r.bytesBefore), after: mb(r.bytesAfter) }) : I18n.t("app.maint.done"));
     } else {
       await imageStore.keepOnly(refs);
+      // Même geste pour les BINAIRES de pièces jointes (D5, mode fichier) : ne garder que ceux dont
+      // l'enregistrement existe encore dans la collection — le prochain compagnon .nmfa n'embarquera
+      // plus les orphelins. Silencieux (le toast reste celui des images ; détail au lot B).
+      await attachmentStore.keepOnly(store.all("attachments").map((a: any) => a.id));
       Notify.toast(I18n.t("app.maint.purgedFile", { n: orphans.length }));
       session.markDirty(); refreshChrome();
     }
@@ -393,7 +408,7 @@ async function boot(): Promise<void> {
         if (!ok) return;
       }
       tabChannel.release(store.meta.fileId || null);
-      await store.newDocument(); await imageStore.clearAll(); undoTimeline.reset(); files.detach(); session.markLoaded(store.histIndex());
+      await store.newDocument(); await imageStore.clearAll(); await attachmentStore.clearAll(); undoTimeline.reset(); files.detach(); session.markLoaded(store.histIndex());
       applyTheme(prefs.theme); shell.hideWelcome(); shell.switchView("equipements"); applyAutosave(); refreshChrome(); Notify.toast(I18n.t("app.main.newDocToast"));
     },
     onOpen: () => { if (rest) void rest.openChooser(); else void files.doOpen(); },

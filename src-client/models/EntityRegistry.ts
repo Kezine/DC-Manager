@@ -23,6 +23,7 @@ import { Vm } from "./Vm";
 import { WifiClient } from "./WifiClient";
 import { Contact } from "./Contact";
 import { Application } from "./Application";
+import { Attachment } from "./Attachment";
 
 type EntityCtor = new (p?: Props) => Entity;
 
@@ -58,6 +59,7 @@ const CLASSES_TYPED = {
   wifiClients: WifiClient,
   contacts: Contact,
   applications: Application,   // même position que dans Schema.COLLECTIONS (fin de liste)
+  attachments: Attachment,     // même position que dans Schema.COLLECTIONS (fin de liste, après applications)
 };
 const CLASSES: Record<string, EntityCtor> = CLASSES_TYPED;   // vue « indexable par chaîne » (entrées non fiables)
 

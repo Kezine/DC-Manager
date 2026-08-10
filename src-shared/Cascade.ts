@@ -156,7 +156,13 @@ export class Cascade {
   private static readonly SPEC: Record<string, CascadeRule> = {
     equipments: {
       // Les SOUS-ÉQUIPEMENTS suivent le maître : ils n'ont d'existence que par lui (parité `aggregates`).
-      delete: [{ coll: "ports", fk: "equipment_id" }, { coll: "aggregates", fk: "equipment_id" }, { coll: "subEquipments", fk: "equipment_id" }],
+      // Les PIÈCES JOINTES aussi — et c'est un DELETE, pas un detach (décision D3 du cadrage 2026-08-10) :
+      // une convention de prêt ORPHELINE n'a pas de sens (contrairement aux images de façade, bibliothèque
+      // PARTAGÉE entre équipements). ⚠ Seul l'ENREGISTREMENT (métadonnées) est supprimé ici : le BINAIRE
+      // sur disque/IndexedDB n'est purgé que par la MAINTENANCE (D5) — c'est ce qui rend l'undo d'une
+      // suppression capable de retrouver un binaire intact.
+      delete: [{ coll: "ports", fk: "equipment_id" }, { coll: "aggregates", fk: "equipment_id" }, { coll: "subEquipments", fk: "equipment_id" },
+        { coll: "attachments", fk: "equipment_id" }],
       // détache aussi les 2 extrémités de faisceau qui pointaient cet équipement (patch supprimé → trunk demi-terminé).
       // détache aussi les VMs HÉBERGÉES par cet équipement (host_equipment_id → null) : le lien est LÉGER (la VM
       // survit, juste « sans hôte connu »), jamais une suppression.
@@ -192,7 +198,14 @@ export class Cascade {
     aggregates: { detach: [{ coll: "ports", fk: "aggregate_id" }] },
     // Sous-équipement supprimé → ses ports sont DÉTACHÉS, jamais supprimés : le port appartient au MAÎTRE et
     // lui survit (le sous-équipement n'était qu'une étiquette de destination). Strictement parité `aggregates`.
-    subEquipments: { detach: [{ coll: "ports", fk: "sub_equipment_id" }] },
+    // Ses PIÈCES JOINTES, elles, sont SUPPRIMÉES (D3 — une garantie/un BDC sans son sous-équipement n'a pas
+    // de sens ; le binaire, lui, attend la maintenance — D5, cf. la règle `equipments`). La RÉCURSION du
+    // moteur fait le reste : supprimer un ÉQUIPEMENT supprime ses sous-équipements (règle `equipments`),
+    // dont cette règle est REJOUÉE sur chacun — leurs pièces jointes partent donc aussi, sans rien réécrire.
+    subEquipments: {
+      delete: [{ coll: "attachments", fk: "sub_equipment_id" }],
+      detach: [{ coll: "ports", fk: "sub_equipment_id" }],
+    },
     networks: {
       // multi-réseaux : retire l'id de network_ids et repointe le principal. S'applique aux CÂBLES (legacy, champs
       // dormants) ET aux PORTS terminaux (source unique actuelle du réseau) — même logique de détachement.
@@ -292,6 +305,14 @@ export class Cascade {
     // / `applications.vm_id` — vit dans les règles `equipments` et `vms` ci-dessus (c'est l'HÔTE qui est
     // supprimé, pas l'application).
     applications: { delete: [], detach: [] },
+    // PIÈCE JOINTE : RIEN ne pointe vers une pièce jointe dans le document — ni FK de spec, ni champ libre.
+    // Supprimer une pièce jointe n'entraîne donc AUCUN effet de cascade. Règle déclarée VIDE plutôt qu'omise,
+    // à dessein (même convention que `wifiClients`/`applications` ci-dessus) : une entrée vide COMMENTÉE dit
+    // « examiné, rien à faire », là où une collection ABSENTE est indiscernable d'un oubli à la relecture.
+    // ⚠ L'autre sens des liens — supprimer un ÉQUIPEMENT ou un SOUS-ÉQUIPEMENT → SUPPRIMER ses pièces
+    // jointes (D3, un DELETE et non un detach) — vit dans les règles `equipments`/`subEquipments` ci-dessus.
+    // ⚠ Le BINAIRE n'est PAS concerné : sa purge est le travail EXCLUSIF de la maintenance (D5).
+    attachments: { delete: [], detach: [] },
   };
 
   /** DÉTACHE les équipements POSÉS sur l'étagère `trayId` (placement_mode "tray") : retour « non placé »

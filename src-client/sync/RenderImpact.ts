@@ -62,6 +62,10 @@ export const COLLECTION_THREE_IMPACT: Record<string, ThreeImpact> = {
   // en dépendre. L'HÔTE (équipement, ou l'hôte d'une VM), lui, est un `equipments` ordinaire (déjà
   // `geometry`) : le rattachement `equipment_id`/`vm_id` ne change RIEN au dessin de l'hôte.
   applications: "none",
+  // Pièces jointes : même propriété du modèle que `applications` — de pures MÉTADONNÉES d'inventaire
+  // (le binaire vit hors document), sans placement ni dimension ni port : rien dans la scène 3D n'en
+  // dépend, et rattacher/détacher une pièce ne change rien au dessin de sa cible.
+  attachments: "none",
 };
 
 /** Accès à la carte d'impact de rendu (méthodes statiques regroupées — cf. CLAUDE.md). */

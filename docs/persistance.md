@@ -238,6 +238,18 @@ Deux tables échappent au modèle relationnel (cadrage §1), DDL et mécanique r
   périmée). La `maintenance()` purge les images ORPHELINES (référencées par aucun `equipments.face_image_*_id`) puis
   compacte (checkpoint TRUNCATE + optimize + VACUUM).
 
+## Les binaires de PIÈCES JOINTES : hors base, sur DISQUE
+
+Les MÉTADONNÉES des pièces jointes sont une collection ORDINAIRE (`attachments`, table dérivée de la spec comme les
+autres) ; leurs BINAIRES, eux, ne sont NI dans la table de collection NI dans une table à blobs : ils vivent sur
+disque, dans **`DOCS_DIR/attachments/<docId>/<attachmentId>`** (un dossier par document, l'id opaque = le nom de
+fichier — module `AttachmentFiles`, décision D4 du cadrage pièces jointes). Motif : better-sqlite3 est SYNCHRONE —
+un blob de dizaines de Mo dans la base gèlerait le thread Node ; sur disque, upload et download sont STREAMÉS et le
+`.db` reste petit (VACUUM/backup/WAL inchangés). `DocumentStore.maintenance` purge les binaires dont l'id a quitté la
+collection (`purgedAttachments` au rapport) ; `DocumentStore.delete` emporte le dossier avec le `.db`.
+⚠ **Sauvegarder un document = le `.db` ET son dossier `attachments/<docId>/`** (cf. `src-server/RUN.md`).
+Architecture complète, sécurité et mode fichier : [`attachments.md`](attachments.md).
+
 ## Pourquoi le relationnel, et pas JSONB
 
 Le gain visé est l'**INDEX sur le chemin chaud des `find`** de la validation. Un modèle à colonne `data TEXT`

@@ -109,6 +109,18 @@ docker volume ls                  # liste les volumes (cherche *dc-manager-data)
 docker compose down -v            # ⚠️ SUPPRIME le volume → repart de zéro (perte des documents)
 ```
 
+### Pièces jointes : binaires HORS base (sauvegarde en DEUX morceaux)
+
+Les **binaires** des pièces jointes (collection `attachments`) ne sont PAS dans le `.db` : ils vivent
+dans **`/data/documents/attachments/<docId>/`** (un fichier par pièce, nommé par son id — cf.
+[`docs/attachments.md`](../docs/attachments.md)). Conséquences d'exploitation :
+
+- **Sauvegarder un document = son `.db` ET son dossier `attachments/<docId>/`** (et restaurer les
+  deux ensemble) — un `.db` restauré seul laisse des pièces dont le téléchargement répond 404.
+- La **suppression d'un document** emporte le dossier ; le bouton **Maintenance** de l'app purge les
+  binaires dont l'enregistrement a disparu (c'est le SEUL mécanisme de purge — une suppression de
+  pièce ne supprime jamais son binaire en ligne, l'undo doit pouvoir le retrouver).
+
 ### Migration automatique blob → relationnel (2026-07, une fois par document)
 
 Les documents créés avant la migration DB relationnelle stockaient chaque enregistrement en
