@@ -306,6 +306,17 @@ est ordinaire). Tout le reste (nom, MAC, IP, SSID, type, nom d'AP brut) est une 
 couverte par `ownText` — d'où l'absence de `own` pour cette collection. Côté palette, elle a sa propre
 **portée « wifi: »** : un client wifi n'est ni un sous-réseau ni une adresse, c'est un objet de présence.
 
+### Applications
+
+La collection `applications` (search-v5) fait partie de la spec partagée. Elle apporte deux dérivés
+par **lien**, patron exact d'`ipAddresses` : le nom de l'**hôte** — équipement (`equipment_id` →
+`equipments.name`) **ou** VM (`vm_id` → `vms.name`) — devient un terme de l'application. Taper le nom
+du serveur remonte donc les applications qu'il héberge, et **renommer l'hôte invalide** la colonne
+`search` des applications (requêtes inverses par FK indexées, `INDEX_SPEC.applications`). L'URL et la
+description sont des colonnes **plates** déjà couvertes par `ownText` — aucun `own`, aucun catalogue.
+Côté palette, portée **dédiée « app: »** (décision D6) : les applications sont des entités de premier
+plan (ce qui tourne sur l'infrastructure), pas de l'inventaire secondaire.
+
 ### Interventions et tickets répliqués
 
 Les **interventions** ne sont **pas** une collection du document : elles vivent dans une base SERVEUR

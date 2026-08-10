@@ -5469,5 +5469,27 @@
   ],
   "vms": [],
   "contacts": [],
+  "applications": [
+    {
+      "id": "app-glpi",
+      "name": "GLPI",
+      "description": "Inventaire et tickets internes (démonstration).",
+      "url": "https://glpi.demo.local",
+      "equipment_id": "eq-srv-virt-01",
+      "vm_id": null,
+      "created_date": "2026-01-15T09:00:00.000Z",
+      "updated_date": "2026-01-15T09:00:00.000Z"
+    },
+    {
+      "id": "app-backup-console",
+      "name": "Console de sauvegarde",
+      "description": "Supervision des jobs de sauvegarde (démonstration).",
+      "url": "",
+      "equipment_id": "eq-srv-backup-01",
+      "vm_id": null,
+      "created_date": "2026-01-15T09:00:00.000Z",
+      "updated_date": "2026-01-15T09:00:00.000Z"
+    }
+  ],
   "faceImages": []
 }

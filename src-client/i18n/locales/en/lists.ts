@@ -143,6 +143,7 @@ export const lists = {
     vms: "No VM. Virtual machines are fed by the synchronisation of a management cluster (Proxmox).",
     wifiClients: "No Wi-Fi client. Clients are fed by the synchronisation of a Wi-Fi controller (Wi-Fi tab → “Providers…”, API mode).",
     subEquipments: "No sub-equipment. A sub-equipment is created from its master equipment's detail sheet (no « + » button here in v1).",
+    applications: "No application. Add one with “+ Application” (hosted on an equipment or a VM, optional URL).",
   },
   filter: {
     room: "Room",
@@ -150,6 +151,7 @@ export const lists = {
     // Searchable TARGET dimension of the listings (filter by entity — see views/ListTargets).
     carrier: "Carrier",
     carrierPlaceholder: "Equipment or VM…",
+    hostedOn: "Hosted on",   // target dimension of the applications listing (equipment OR VM — cf. ListTargets.applicationHost)
     master: "Equipment (master)",   // target dimension of the sub-equipment listing (SINGLE family: equipment)
     equipmentPlaceholder: "Search an equipment…",
     targetEquipment: "Equip.",
@@ -197,6 +199,9 @@ export const lists = {
     // raw sentinel written by the bridge (cf. core/TrackerStatus).
     notFound: "not found",
     wifiClient: "(Wi-Fi client)",
+    // Host of an application whose FK no longer resolves (equipment/VM deleted outside the cascade,
+    // import…): the orphan stays VISIBLE — it never masquerades as "no host" (intervention-target pattern).
+    hostMissing: "(not found)",
     floorLabel: "Floor {{n}}",
     addrCount: "{{count}} addr.",
     points_one: "{{count}} point",

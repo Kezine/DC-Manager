@@ -57,6 +57,11 @@ export const tabs = {
     title: "Sous-équipements",
     subtitle: "Contenu logique des équipements (drives d'une librairie, cartes d'un châssis). Se crée depuis la fiche du maître : filtrez par équipement maître ou par groupe, triez par achat / garantie.",
   },
+  applications: {
+    label: "Applications",
+    title: "Applications",
+    subtitle: "Applications hébergées sur l'infrastructure (GLPI, supervision, apps web internes…) : nom, description, URL, et l'équipement OU la VM qui les héberge.",
+  },
   faceimages: {
     label: "Images de façade",
     subtitle: "Bibliothèque d'images de façade (JPEG/PNG/WebP) partagées par référence. Stockées hors document (IndexedDB).",

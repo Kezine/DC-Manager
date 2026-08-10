@@ -172,6 +172,21 @@ export const rack = {
     updated: "Contact updated",
     created: "Contact created",
   },
+  application: {
+    namePlaceholder: "e.g. GLPI, Grafana, intranet…",
+    hostField: "Host",
+    hostHint: "Equipment OR VM hosting the application (at most one — leave empty if the host is outside the inventory).",
+    urlField: "URL",
+    urlHint: "Web address of the application (http/https) — leave empty if it is not a web app.",
+    // FAMILY prefixes of the single host picker's options ("Equipment · SRV37" / "VM · gitlab"):
+    // two namesakes from different families must stay distinguishable in a single list.
+    familyEquipment: "Equipment",
+    familyVm: "VM",
+    titleEdit: "Edit the application",
+    titleNew: "New application",
+    updated: "Application updated",
+    created: "Application created",
+  },
   datacenter: {
     namePlaceholder: "e.g. Room A",
     dims: "Room dimensions",

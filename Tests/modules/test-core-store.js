@@ -1932,7 +1932,9 @@ module.exports = async () => {
       // `wifiClients` (chantier provider wifi, 2026-08-03) : la collection a une FICHE, donc elle
       // ENTRE au corpus de la palette — l'égalité corpus ≡ fiches ci-dessus le vérifie dans les
       // deux sens. Sa place ici suit celle de sa déclaration dans DETAIL_OPENERS (après `vms`).
-      "vms", "wifiClients", "cableTypes", "portTypes",
+      // `applications` (chantier applications, 2026-08-10) : même mécanique — fiche déclarée en FIN
+      // de DETAIL_OPENERS, donc en fin de liste ici.
+      "vms", "wifiClients", "cableTypes", "portTypes", "applications",
     ]), "DETAIL_COLLECTIONS = la liste exacte de l'ancien switch (bascule prouvée par attentes explicites)");
     families.forEach((f) => ck(EntityRegistry.COLLECTIONS.includes(f), "famille « " + f + " » = collection réelle du modèle"));
 

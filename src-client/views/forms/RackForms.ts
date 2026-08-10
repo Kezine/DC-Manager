@@ -24,6 +24,7 @@ import {
 } from "../../domain/constants";
 import { FormUi, ORIENT_OPTS } from "./shared";
 import { FormSave } from "./FormSave";   // écriture + garde-fou « ne jamais annoncer un succès refusé »
+import { TargetSearch } from "../../core/TargetSearch";   // convention composite « <kind>:<id> » du picker d'hôte des applications
 import type { FormHost } from "./shared";
 import { CableForms } from "./CableForms";
 import { EquipmentForms } from "./EquipmentForms";   // fiche équipement (nom cliquable dans le contenu de baie)
@@ -551,6 +552,60 @@ export class RackForms extends CableForms {
         if (live.check(payload).length) return false;   // nom requis + e-mail/téléphone invalides (surlignés)
         if (!await FormSave.record(store, "contacts", c && c.id, payload)) return false;   // REFUSÉ par le Store (toast rouge nommant la règle) : ne rien annoncer, garder la saisie
         host.setDirty?.(true); Notify.toast(c ? I18n.t("rack.contact.updated") : I18n.t("rack.contact.created")); onSaved?.(); return true;
+      },
+    });
+    setTimeout(() => nameI.focus(), 30);
+  }
+
+  /** APPLICATION — hébergée sur l'infrastructure : nom (requis) · hôte (équipement OU VM) · URL ·
+      description. Placé ici, aux côtés des formulaires `site`/`contact` (autres entités « plates »
+      simples). Le champ HÔTE est UN SEUL `entityPicker` MULTI-FAMILLES (principe n°14) : options =
+      équipements PUIS VMs concaténés, values RE-PRÉFIXÉES à la convention composite EXISTANTE
+      « <kind>:<id> » (`TargetSearch.key`/`parse` — le même encodage que les liens d'intervention et le
+      filtre cible des listings, jamais un 2ᵉ). L'exclusivité equipment_id/vm_id est ainsi garantie PAR
+      CONSTRUCTION (un seul picker) — PAS deux `<select>` exclusifs à la `IpamForms` (dette identifiée
+      vs principe n°14, à ne pas propager). */
+  static application(store: Store, host: FormHost, id: string | null, onSaved?: () => void): void {
+    const app: any = id ? store.get("applications", id) : null;
+    const root = document.createElement("div");
+    const nameI = FormControls.text(app ? app.name : "", I18n.t("rack.application.namePlaceholder"));
+    root.appendChild(FormControls.fieldRow(I18n.t("lists.col.name"), nameI));
+    // Options du picker d'hôte : les MÊMES listes métier que partout (FormUi.eqOptions/vmOptions, tri par
+    // nom), re-préfixées famille par famille — libellé « Équipement · SRV37 » / « VM · gitlab » pour que
+    // deux homonymes de familles différentes restent discernables dans un picker UNIQUE. L'option « aucun »
+    // de tête reste UNE seule (les deux vides sont un état permis : app pas encore rattachée).
+    const hostOptions = [{ value: "", label: I18n.t("forms.opt.none") }]
+      .concat(FormUi.eqOptions(store, "").slice(1).map((o) => ({ value: TargetSearch.key("equipment", o.value), label: I18n.t("rack.application.familyEquipment") + " · " + o.label })))
+      .concat(FormUi.vmOptions(store, "").slice(1).map((o) => ({ value: TargetSearch.key("vm", o.value), label: I18n.t("rack.application.familyVm") + " · " + o.label })));
+    const initialHost = app && app.equipment_id ? TargetSearch.key("equipment", app.equipment_id)
+      : app && app.vm_id ? TargetSearch.key("vm", app.vm_id) : "";
+    const hostI = FormControls.entityPicker(hostOptions, initialHost);
+    root.appendChild(FormControls.fieldRow(I18n.t("rack.application.hostField"), hostI, I18n.t("rack.application.hostHint")));
+    const urlI = FormControls.text(app ? app.url : "", "https://…");
+    root.appendChild(FormControls.fieldRow(I18n.t("rack.application.urlField"), urlI, I18n.t("rack.application.urlHint")));
+    const descI = FormControls.textArea(app ? app.description : "");
+    root.appendChild(FormControls.fieldRow(I18n.t("lists.col.description"), descI));
+    // Même validation PARTAGÉE que le Store/serveur : nom requis + format `url` (http/https). L'invariant
+    // d'exclusivité equipment_id/vm_id est rattaché à `vm_id` par la spec → surligné sur le picker d'hôte
+    // (inatteignable ici par construction, mais le câblage reste complet si la spec évolue).
+    const live = new LiveValidation("applications", { name: nameI, url: urlI, vm_id: hostI });
+    live.clearOnInput();
+    host.openModal({
+      title: app ? I18n.t("rack.application.titleEdit") : I18n.t("rack.application.titleNew"),
+      subtitle: app ? Html.escape(app.name) : "",
+      body: root,
+      onSave: async () => {
+        // Décomposition de la valeur composite du picker vers les DEUX FK : l'une reçoit l'id, l'autre
+        // est explicitement remise à null (une édition qui change de famille doit VIDER l'ancienne FK).
+        const parsedHost = hostI.value ? TargetSearch.parse(hostI.value) : null;
+        const payload = {
+          name: nameI.value.trim(), url: urlI.value.trim(), description: descI.value.trim(),
+          equipment_id: parsedHost && parsedHost.kind === "equipment" ? parsedHost.id : null,
+          vm_id: parsedHost && parsedHost.kind === "vm" ? parsedHost.id : null,
+        };
+        if (live.check(payload).length) return false;   // nom requis + URL http/https (surlignés)
+        if (!await FormSave.record(store, "applications", app && app.id, payload)) return false;   // REFUSÉ par le Store (toast rouge nommant la règle) : ne rien annoncer, garder la saisie
+        host.setDirty?.(true); Notify.toast(app ? I18n.t("rack.application.updated") : I18n.t("rack.application.created")); onSaved?.(); return true;
       },
     });
     setTimeout(() => nameI.focus(), 30);

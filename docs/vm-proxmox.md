@@ -178,9 +178,11 @@ PUR `core/VmPurge`, la suppression dans `Store.removeMany`.
 | VMs d'un provider **DISPARU** (`provider_id` présent dans le document, absent de la configuration serveur) | **TOUTES** ses VMs, orphelines ou non : c'est le cas « figé sans pastille », introuvable autrement | **jamais** — ce groupe ratisse large, il ne se coche que délibérément |
 
 **Les ENRICHIES sont exclues par défaut.** Une VM porteuse d'un travail LOCAL —
-`notes`, `description`, appartenance à un **groupe** (`group_id`/`group_ids`), ou au
-moins une `ipAddress` **rattachée** — est listée **par son nom** sous son groupe, avec
-la ou les raisons, et **décochée**. Une case « Inclure aussi les N enrichies » les
+`notes`, `description`, appartenance à un **groupe** (`group_id`/`group_ids`), au
+moins une `ipAddress` **rattachée**, ou au moins une **application hébergée**
+(`applications.vm_id` — le rattachement app → VM est un travail utilisateur que la
+purge détacherait sans prévenir, cf. la cascade `vms`) — est listée **par son nom**
+sous son groupe, avec la ou les raisons, et **décochée**. Une case « Inclure aussi les N enrichies » les
 ajoute d'un geste explicite. Rien n'est recopié automatiquement : c'est à l'utilisateur
 de reporter ses enrichissements sur le jumeau conservé **avant** de purger.
 
@@ -188,7 +190,8 @@ de reporter ses enrichissements sur le jumeau conservé **avant** de purger.
 enrichies ; Z adresses IP seront détachées ». Le compte des IP vient du **plan de
 cascade réel** (`Store.cascadePreview`), jamais d'une estimation — la règle `vms` de
 `src-shared/Cascade` **détache** `ipAddresses.vm_id` (l'adresse survit, « non
-attribuée »), elle ne supprime rien. Bouton **danger** + confirmation finale.
+attribuée ») et `applications.vm_id` (l'application survit, « sans hôte »), elle ne
+supprime rien. Bouton **danger** + confirmation finale.
 
 **UNE transaction, UN undo.** `Store.removeMany` calcule **un seul** plan de cascade
 sur toutes les racines (`Cascade.planMany`) et n'émet **qu'une** transaction : une

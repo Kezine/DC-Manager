@@ -57,6 +57,11 @@ export const COLLECTION_THREE_IMPACT: Record<string, ThreeImpact> = {
   // rattachement `ap_equipment_id` ne change RIEN au dessin de l'AP.
   wifiClients:  "none",
   contacts:     "none",      // carnet de destinataires des notifications (email/sms) — vue liste, jamais dessiné
+  // Applications : `none` n'est pas ici un classement PRUDENT mais une propriété du modèle — la
+  // collection n'a ni placement, ni dimension, ni port, donc AUCUN mesh, label ou texture ne peut
+  // en dépendre. L'HÔTE (équipement, ou l'hôte d'une VM), lui, est un `equipments` ordinaire (déjà
+  // `geometry`) : le rattachement `equipment_id`/`vm_id` ne change RIEN au dessin de l'hôte.
+  applications: "none",
 };
 
 /** Accès à la carte d'impact de rendu (méthodes statiques regroupées — cf. CLAUDE.md). */

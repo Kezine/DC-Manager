@@ -1569,6 +1569,63 @@ module.exports = async () => {
   }
   });
 
+  await section("shared : collection applications (format url, exclusivité equipment_id/vm_id, cascade hôte)", async () => {
+  {
+    const V = Validation.DataValidator;
+
+    // -- FORMAT `url` (nouveau FieldSpec.format, chantier applications 2026-08-10) : http/https en LISTE
+    //    BLANCHE — jamais une liste noire, qui oublie toujours un schéma (`javascript:`, `data:`…). --
+    const errsOn = (url) => V.normalizeAndValidate("applications", { name: "GLPI", url }).errors.filter((e) => e.path === "url");
+    ck.eq(errsOn("https://glpi.exemple.local").length, 0, "url : https accepté");
+    ck.eq(errsOn("http://intranet").length, 0, "url : http + hôte interne sans TLD accepté");
+    ck.eq(errsOn("HTTPS://App.Local/chemin?q=1").length, 0, "url : casse du schéma ignorée (HTTPS://…)");
+    ck.eq(errsOn("").length, 0, "url : chaîne vide TOUJOURS permise (pas une app web)");
+    ck.eq(errsOn("   ").length, 0, "url : blancs trimés → vide → permis");
+    ck.eq(errsOn("javascript:alert(1)").length, 1, "url : `javascript:` REJETÉ (le rendu cliquable en ferait un XSS — cf. Html.isSafeHttpUrl)");
+    ck.eq(errsOn("ftp://serveur/fichier").length, 1, "url : `ftp:` REJETÉ (hors liste blanche http/https)");
+    ck.eq(errsOn("glpi.exemple.local").length, 1, "url : chaîne sans schéma REJETÉE (une URL relative ne pointe aucun service)");
+    ck.eq(errsOn("https://a b").length, 1, "url : espace REJETÉ (porte d'écriture plus stricte que la garde de rendu)");
+    ck(errsOn("nope").some((e) => e.code === "format"), "url : le refus porte bien le code 'format'");
+
+    // -- EXCLUSIVITÉ SOUPLE equipment_id/vm_id (copie de l'invariant ipAddresses) : un hôte OU l'autre,
+    //    jamais les deux ; les DEUX vides restent permis (app pas encore rattachée). --
+    const inv = (rec) => V.normalizeAndValidate("applications", rec).errors.filter((e) => e.code === "invariant");
+    ck.eq(inv({ name: "GLPI", equipment_id: "E1", vm_id: "V1" }).length, 1, "exclusivité : les DEUX hôtes posés → REFUS (invariant)");
+    ck.eq(inv({ name: "GLPI", equipment_id: "E1" }).length, 0, "exclusivité : équipement seul → OK");
+    ck.eq(inv({ name: "GLPI", vm_id: "V1" }).length, 0, "exclusivité : VM seule → OK");
+    ck.eq(inv({ name: "GLPI" }).length, 0, "exclusivité SOUPLE : aucun hôte → OK (état permis)");
+    // Normalisation : FK absentes → null (nullable), name trimé, description au défaut "".
+    const norm = V.normalizeRecord("applications", { name: "  GLPI  " });
+    ck.eq(norm.equipment_id, null, "normalisation : equipment_id absent → null");
+    ck.eq(norm.vm_id, null, "normalisation : vm_id absent → null");
+    ck.eq(norm.name, "GLPI", "normalisation : name trimé (identité fiabilisée)");
+    ck.eq(norm.description, "", "normalisation : description au défaut \"\"");
+    // Intégrité référentielle (V2) : l'hôte doit EXISTER.
+    const fetchApp = (coll, id) => (coll === "equipments" && id === "E1") || (coll === "vms" && id === "V1") ? { id } : null;
+    ck.eq(V.validateRecord("applications", V.normalizeRecord("applications", { name: "x", equipment_id: "GHOST" }), fetchApp)
+      .some((e) => e.path === "equipment_id" && e.code === "ref_missing"), true, "V2 : équipement hôte introuvable → 'ref_missing'");
+    ck.eq(V.validateRecord("applications", V.normalizeRecord("applications", { name: "x", vm_id: "V1" }), fetchApp).length, 0, "V2 : VM hôte existante → valide");
+
+    // -- CASCADE : supprimer l'HÔTE (équipement OU VM) DÉTACHE l'application — jamais une suppression
+    //    (décision D2 : l'application survit « sans hôte »). Supprimer l'application n'entraîne RIEN. --
+    const db = {
+      equipments: [{ id: "E1", name: "srv" }],
+      vms: [{ id: "V1", name: "vm" }],
+      applications: [{ id: "A1", name: "GLPI", equipment_id: "E1", vm_id: null }, { id: "A2", name: "Grafana", equipment_id: null, vm_id: "V1" }],
+    };
+    const find = (coll, field, value) => (db[coll] || []).filter((r) => (Array.isArray(r[field]) ? r[field].includes(value) : r[field] === value));
+    const fetch = (coll, id) => (db[coll] || []).find((r) => r.id === id) || null;
+    const eqPlan = Cascade.plan("equipments", "E1", find, fetch);
+    ck.eq(eqPlan.detaches.some((d) => d.c === "applications" && d.id === "A1" && d.key === "equipment_id" && d.value === null), true, "cascade équipement : application DÉTACHÉE (equipment_id → null)");
+    ck.eq(eqPlan.deletes.some((d) => d.c === "applications"), false, "cascade équipement : application JAMAIS supprimée");
+    const vmPlan = Cascade.plan("vms", "V1", find, fetch);
+    ck.eq(vmPlan.detaches.some((d) => d.c === "applications" && d.id === "A2" && d.key === "vm_id" && d.value === null), true, "cascade VM : application DÉTACHÉE (vm_id → null)");
+    ck.eq(vmPlan.deletes.some((d) => d.c === "applications"), false, "cascade VM : application JAMAIS supprimée");
+    const appPlan = Cascade.plan("applications", "A1", find, fetch);
+    ck.eq(appPlan.deletes.length + appPlan.detaches.length, 0, "cascade application : plan VIDE (rien ne pointe vers une application — règle déclarée vide, pas omise)");
+  }
+  });
+
   await section("shared : couverture des specs (toutes les collections spécifiées)", async () => {
   {
     // INVARIANT : pour CHAQUE collection spécifiée, l'entité par défaut du constructeur front satisfait la spec
@@ -1578,6 +1635,7 @@ module.exports = async () => {
       networks: { label: "x" }, groups: { label: "x" },
       ipNetworks: { cidr: "10.0.0.0/24", label: "x" }, ipAddresses: { address: "10.0.0.5" },
       dhcpRanges: { start_ip: "10.0.0.10", end_ip: "10.0.0.20" }, vms: { name: "x" }, contacts: { name: "x" },
+      applications: { name: "x" },
       // subEquipments : `equipment_id` est REQUIS (un sous-équipement sans maître n'a aucune existence) —
       // divergence VOULUE avec aggregates.equipment_id, nullable. `validateRecord` sans `fetch` ne contrôle
       // pas la FK, l'id fourni n'a donc pas besoin d'exister ici (l'intégrité V2 est testée à part).

@@ -667,6 +667,45 @@ export class ListConfigs {
     };
   }
 
+  /** APPLICATIONS hébergées sur l'infrastructure — sous-onglet de l'onglet Équipements. Une application
+      vise AU PLUS un hôte (équipement OU VM, patron `ipAddresses` — décision D1 du cadrage 2026-08-10).
+      Le filtrage PAR HÔTE passe par la dimension CIBLE « Hébergée sur » (`targetFilter` →
+      `ListTargets.applicationHost`, `where` serveur sur colonnes indexées) et non par un filtre-colonne —
+      même arbitrage que le listing des sous-équipements (pas de doublon dimension/filtre-colonne). */
+  static applications(store: Store, entitySearch: EntitySearchReader | null = null): ListOptions {
+    // Hôte : nom de l'équipement OU de la VM résolu via le store. Trois états distincts à l'affichage :
+    // résolu (nom), FK cassée → « (introuvable) » grisé (patron interventions : l'orphelin se voit, il ne
+    // se déguise pas en « aucun hôte »), aucune FK → « — » grisé (les DEUX vides sont un état permis).
+    const hostText = (a: any): string => {
+      if (a.equipment_id) { const e: any = store.get("equipments", a.equipment_id); return e ? (e.name || I18n.t("lists.ph.equipment")) : ""; }
+      if (a.vm_id) { const v: any = store.get("vms", a.vm_id); return v ? (v.name || I18n.t("lists.ph.vm")) : ""; }
+      return "";
+    };
+    const hostCell = (a: any): string => {
+      const t = hostText(a);
+      if (t) return Html.escape(t);
+      return (a.equipment_id || a.vm_id) ? dim(Html.escape(I18n.t("lists.ph.hostMissing"))) : dim("—");
+    };
+    return {
+      collection: "applications",
+      defaultSort: { key: "name", dir: "asc" },
+      emptyText: I18n.t("lists.empty.applications"),
+      actions: { view: true, edit: true, clone: false, del: true },   // clone sans objet pour une application nominative (parité contacts)
+      // Filtre CIBLE « Hébergée sur » : équipement OU VM, familles confondues dans UNE recherche
+      // (principe n°14). Le lien est une colonne → le filtre part au serveur en `where` ; la recherche
+      // de CANDIDATS est serveur-pilotée en mode API (`entitySearch`), locale en mode fichier.
+      targetFilter: ListTargets.applicationHost(store, entitySearch),
+      columns: [
+        { head: I18n.t("lists.col.name"), essential: true, cls: "cell-name", sortKey: "name", sort: (a) => a.name, render: (a) => Html.escape(a.name || I18n.t("lists.ph.noName")) },
+        { head: I18n.t("lists.col.host"), essential: true, sortKey: "host", sort: (a) => hostText(a), render: hostCell },
+        // URL cliquable via la primitive UNIQUE `Html.externalLink` (liste blanche http/https + noopener) —
+        // même patron d'affichage double listing/fiche que l'e-mail des contacts (`Html.mailtoLink`).
+        { head: "URL", sortKey: "url", sort: (a) => a.url || "", render: (a) => (a.url ? Html.externalLink(a.url) : dim("—")) },
+        { head: I18n.t("lists.col.description"), cls: "cell-desc", sort: (a) => a.description || "", render: descCell },
+      ],
+    };
+  }
+
   /** Familles distinctes d'un catalogue (pour les filtres). */
   private static _families(store: Store, coll: string): { id: string; label: string }[] {
     const s = new Set<string>();

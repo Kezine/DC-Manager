@@ -56,6 +56,11 @@ export const tabs = {
     title: "Sub-equipment",
     subtitle: "Logical content of equipment (drives of a library, cards of a chassis). Created from the master's detail sheet: filter by master equipment or by group, sort by purchase / warranty.",
   },
+  applications: {
+    label: "Applications",
+    title: "Applications",
+    subtitle: "Applications hosted on the infrastructure (GLPI, monitoring, internal web apps…): name, description, URL, and the equipment OR VM hosting them.",
+  },
   faceimages: {
     label: "Faceplate images",
     subtitle: "Library of faceplate images (JPEG/PNG/WebP) shared by reference. Stored outside the document (IndexedDB).",

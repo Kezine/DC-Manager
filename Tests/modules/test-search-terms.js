@@ -73,6 +73,10 @@ const CORPUS = {
   ],
   spares: [{ id: "sp-1", name: "Disque de rechange", type: "hdd", status: "assigned", assigned_equipment_id: "eq-rack" }],
   contacts: [{ id: "co-1", name: "Alice", email: "a@ex.org" }],
+  applications: [
+    { id: "app-eq", name: "GLPI", url: "https://glpi.local", equipment_id: "eq-rack" },
+    { id: "app-vm", name: "Grafana", vm_id: "vm-1" },
+  ],
 };
 const fetchOf = (corpus) => (collection, id) => (corpus[collection] || []).find((r) => r.id === id) || null;
 const findOf = (corpus) => (collection, field, value) => (corpus[collection] || [])
@@ -131,6 +135,16 @@ module.exports = async () => {
     // -- IP : porteur équipement OU VM ; spare : attribution + catalogue type fr+en. --
     ck(termsOf("ipAddresses", rec("ipAddresses", "ip-1")).includes("SW-Coeur"), "IP : nom de l'équipement porteur");
     ck(termsOf("ipAddresses", rec("ipAddresses", "ip-2")).includes("srv-web"), "IP : nom de la VM porteuse");
+
+    // -- APPLICATION (search-v5) : hôte équipement OU VM (patron ipAddresses) — taper « SW-Coeur »
+    //    remonte GLPI ; l'URL est une colonne PLATE (couverte par ownText, pas un terme dérivé). --
+    ck(termsOf("applications", rec("applications", "app-eq")).includes("SW-Coeur"), "application : nom de l'ÉQUIPEMENT hôte (equipment_id → equipments.name)");
+    ck(termsOf("applications", rec("applications", "app-vm")).includes("srv-web"), "application : nom de la VM hôte (vm_id → vms.name)");
+    ck.eq(termsOf("applications", { id: "app-x", name: "Sans hôte", url: "https://x.local" }).length, 0, "application sans hôte : AUCUN terme dérivé (URL/description = colonnes plates, ownText suffit)");
+    // Et le CONTENU COMPLET de la colonne (searchText) porte bien le nom de l'hôte — c'est lui que
+    // le backfill/l'invalidation matérialisent côté serveur.
+    ck(SearchTerms.searchText("applications", rec("applications", "app-eq"), fetchOf(CORPUS), findOf(CORPUS)).includes(norm("SW-Coeur")),
+      "application : searchText contient le nom de l'hôte (colonne `search` enrichie)");
     const tSpare = termsOf("spares", rec("spares", "sp-1"));
     ck(tSpare.includes("SW-Coeur"), "spare : nom de l'équipement ATTRIBUÉ (assignedTo du listing)");
     ck(tSpare.includes("HDD (disque dur)") && tSpare.includes("HDD (hard drive)"), "spare : catalogue du type fr+en");
@@ -202,7 +216,9 @@ module.exports = async () => {
     // tracker », abandonné au pivot du 2026-08-07). 🚨 Le marqueur NE REDESCEND PAS à 3 : il est
     // MONOTONE, et des bases locales ont pu passer en v4 pendant le chantier — les faire croire à un
     // retard de spec les re-backfillerait sans fin. Cf. le commentaire de `SEARCH_VERSION`.
-    ck.eq(SearchTerms.SEARCH_VERSION, 4, "SEARCH_VERSION = 4 (compositions v2 + wifiClients v3 + retrait d'issues v4 — le marqueur est MONOTONE, jamais décrémenté)");
+    // v5 = ajout de la collection `applications` à la spec (hôte équipement/VM résolu par lien,
+    // chantier applications 2026-08-10).
+    ck.eq(SearchTerms.SEARCH_VERSION, 5, "SEARCH_VERSION = 5 (compositions v2 + wifiClients v3 + retrait d'issues v4 + applications v5 — le marqueur est MONOTONE, jamais décrémenté)");
 
     // équipement posé en baie : « U12 » (conditions du path client : placement rack/side/wall + rack_id + rack_u).
     ck(termsOf("equipments", rec("equipments", "eq-rack")).includes("U12"), "equipment racké (rack_u 12) : « U12 » est un terme — la position se tape telle quelle");
@@ -273,6 +289,12 @@ module.exports = async () => {
       "écrire un équipement → faisceaux par les deux extrémités");
     ck(has(qEq, "ipAddresses", "equipment_id", "eq-rack") && has(qEq, "vms", "host_equipment_id", "eq-rack") && has(qEq, "spares", "assigned_equipment_id", "eq-rack"),
       "écrire un équipement → IPs, VMs hébergées, spares attribués");
+    ck(has(qEq, "applications", "equipment_id", "eq-rack"), "écrire un équipement → ses APPLICATIONS hébergées (renommer l'hôte invalide leur colonne search)");
+
+    // -- écrire une VM : ses applications hébergées (search-v5) ET ses adresses rattachées. --
+    const qVm = queriesFor("vms", "vm-1");
+    ck(has(qVm, "applications", "vm_id", "vm-1"), "écrire une VM → ses APPLICATIONS hébergées (invalidation inverse par vm_id)");
+    ck(has(qVm, "ipAddresses", "vm_id", "vm-1"), "écrire une VM → ses adresses IP rattachées");
 
     // -- écrire un PORT / un TYPE de câble / une ÉTAGÈRE (nœud INTERMÉDIAIRE d'une chaîne). --
     ck(has(queriesFor("ports", "p-1"), "cables", "from_port_id", "p-1") && has(queriesFor("ports", "p-1"), "cables", "to_port_id", "p-1"),

@@ -103,6 +103,7 @@ export class DetailForms extends IpamForms {
     wifiClients: (s, h, i, c) => DetailForms.wifiClientDetail(s, h, i, c),
     cableTypes: (s, h, i) => DetailForms.cableTypeDetail(s, h, i),
     portTypes: (s, h, i) => DetailForms.portTypeDetail(s, h, i),
+    applications: (s, h, i, c) => DetailForms.applicationDetail(s, h, i, c),
   };
   /** Collections OUVRABLES en fiche — dérivée de la carte, JAMAIS écrite à la main. C'est le critère
       d'inclusion du corpus de la recherche globale (cf. `views/GlobalSearchSources`, invariant testé). */
@@ -561,6 +562,42 @@ export class DetailForms extends IpamForms {
     host.openModal({ title: I18n.t("detail.contact.title"), subtitle: Html.escape(c.name || ""), body: root, footerActions, stackKey: "detail:contacts/" + id, onResume: () => this.contactDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
+  /* ---- APPLICATION (hébergée sur l'infrastructure) ---- */
+  /** Fiche détail d'une application (patron `contactDetail`) : nom, HÔTE résolu et CLIQUABLE vers sa
+      fiche (équipement OU VM — bouton-icône INFO sur la ligne de valeur, même montage que l'hôte d'une
+      VM ; « (introuvable) » grisé si la FK ne résout plus, l'orphelin se voit), URL cliquable
+      (`Html.externalLink`, liste blanche http/https) et description en markdown. */
+  static applicationDetail(store: Store, host: FormHost, id: string, onChanged?: () => void): void {
+    const app: any = store.get("applications", id);
+    if (!app) { Notify.toast(I18n.t("detail.nf.application"), "err"); return; }
+    const root = document.createElement("div");
+    // Hôte : équipement OU VM (exclusifs par la spec) — valeur + bouton d'ouverture de la fiche liée.
+    const hostEq: any = app.equipment_id ? store.get("equipments", app.equipment_id) : null;
+    const hostVm: any = app.vm_id ? store.get("vms", app.vm_id) : null;
+    let hostHtml: string;
+    if (hostEq) hostHtml = `${Html.escape(hostEq.name || "?")} ${EntityViz.equipmentLocationShort(store, hostEq)} ` + IconButton.html({ icon: Icons.INFO, label: I18n.t("detail.application.openHost"), act: "open-app-host" });
+    else if (hostVm) hostHtml = `${Html.escape(hostVm.name || "?")} <span class="pill">${Html.escape(I18n.t("lists.filter.targetVm"))}</span> ` + IconButton.html({ icon: Icons.INFO, label: I18n.t("detail.application.openHost"), act: "open-app-host" });
+    else if (app.equipment_id || app.vm_id) hostHtml = `<span style="color:var(--fg-dimmer)">${Html.escape(I18n.t("lists.ph.hostMissing"))}</span>`;   // FK cassée : l'orphelin se VOIT
+    else hostHtml = this.MUTED;   // aucun hôte — état permis (exclusivité SOUPLE)
+    root.appendChild(this.grid([
+      [I18n.t("lists.col.name"), Html.escape(app.name || I18n.t("lists.ph.noName"))],
+      [I18n.t("lists.col.host"), hostHtml],
+      ["URL", app.url ? Html.externalLink(app.url) : this.MUTED],
+      [I18n.t("lists.col.description"), app.description ? `<div class="md-body">${Markdown.render(app.description)}</div>` : this.MUTED],
+      [I18n.t("detail.common.created"), Html.escape(Format.dateTime(app.created_date))],
+      [I18n.t("detail.common.updated"), Html.escape(Format.dateTime(app.updated_date))],
+    ]));
+    // La fiche de l'hôte s'EMPILE ; CETTE fiche reste dessous et se reconstruit au retour (son `onResume`).
+    const openHostBtn = root.querySelector('[data-act="open-app-host"]') as HTMLElement | null;
+    if (openHostBtn) openHostBtn.onclick = () => {
+      if (hostEq) this.equipmentDetail(store, host, hostEq.id, onChanged);
+      else if (hostVm) this.vmDetail(store, host, hostVm.id, onChanged);
+    };
+    AuditLine.attach(root, app, host.userDirectory);   // « Créé/Modifié par » (mode API)
+    const footerActions = this.footer(() => this.application(store, host, id, onChanged));
+    host.openModal({ title: I18n.t("detail.application.title"), subtitle: Html.escape(app.name || ""), body: root, footerActions, stackKey: "detail:applications/" + id, onResume: () => this.applicationDetail(store, host, id, onChanged), hideFooter: true, wide: true });
+  }
+
   /* ---- VM (équipement virtuel — feature amovible) ---- */
   /** Fiche détail RICHE d'une VM. Sépare visuellement l'IDENTITÉ SOURCE (alimentée par la synchro, lecture
       seule) des ENRICHISSEMENTS LOCAUX (édités via `VmForms.edit`, jamais écrasés par la synchro — cf.
@@ -633,6 +670,26 @@ export class DetailForms extends IpamForms {
     // La fiche d'adresse s'EMPILE ; CETTE fiche VM reste dessous et se reconstruit au retour (son `onResume`).
     // On lui passe donc l'`onChanged` du contexte (rafraîchir la liste derrière), pas une ré-ouverture de VM.
     twAddr?.querySelectorAll("[data-addr-view]").forEach((el) => { (el as HTMLElement).onclick = () => this.ipAddressDetail(store, host, (el as HTMLElement).dataset.addrView!, onChanged); });
+
+    // -- APPLICATIONS hébergées sur cette VM (décision D5) : nom CLIQUABLE → fiche application (elle
+    //    s'empile, cette fiche VM se reconstruit au retour). Section MASQUÉE si vide (patron de la section
+    //    sous-équipements de groupDetail : on n'ajoute pas un bloc muet à une fiche déjà dense). Source
+    //    UNIQUE `Store.applicationsOfVm` — la même que l'enrichissement « applications » de la purge de
+    //    masse (core/VmPurge) : ce que la fiche montre est exactement ce que la purge protège. --
+    const hostedApps = store.applicationsOfVm(id);
+    if (hostedApps.length) {
+      this.sect(root, I18n.t("detail.application.hostedSection", { count: hostedApps.length }));
+      const twApps = this.tbl(root, [I18n.t("lists.col.name"), "URL"], hostedApps.map((a: any) => [
+        // Nom cliquable — même style que le nom d'occupant du contenu de baie (souligné pointillé, role button).
+        `<span data-app-view="${a.id}" role="button" tabindex="0" style="cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px;" title="${Html.escape(I18n.t("detail.application.openApp"))}">${Html.escape(a.name || I18n.t("lists.ph.noName"))}</span>`,
+        a.url ? Html.externalLink(a.url) : this.MUTED,
+      ]), "");
+      twApps?.querySelectorAll("[data-app-view]").forEach((el) => {
+        const open = () => this.applicationDetail(store, host, (el as HTMLElement).dataset.appView!, onChanged);
+        (el as HTMLElement).onclick = open;
+        (el as HTMLElement).onkeydown = (ev: KeyboardEvent) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); open(); } };
+      });
+    }
 
     // -- Rapprochements SUGGÉRÉS (IPAM informatif — cf. docs/vm-proxmox.md) : adresses IPAM EXISTANTES dont la valeur
     //    correspond à une IP constatée d'une vNIC, sans rattachement automatique. Bloc réservé au NON-viewer et

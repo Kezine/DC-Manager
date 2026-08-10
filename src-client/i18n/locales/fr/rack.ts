@@ -179,6 +179,21 @@ export const rack = {
     updated: "Contact mis à jour",
     created: "Contact créé",
   },
+  application: {
+    namePlaceholder: "ex. GLPI, Grafana, intranet…",
+    hostField: "Hôte",
+    hostHint: "Équipement OU VM qui héberge l'application (au plus un — laisser vide si l'hôte est hors inventaire).",
+    urlField: "URL",
+    urlHint: "Adresse web de l'application (http/https) — laisser vide si ce n'est pas une app web.",
+    // Préfixes de FAMILLE des options du picker d'hôte UNIQUE (« Équipement · SRV37 » / « VM · gitlab ») :
+    // deux homonymes de familles différentes doivent rester discernables dans une seule liste.
+    familyEquipment: "Équipement",
+    familyVm: "VM",
+    titleEdit: "Modifier l'application",
+    titleNew: "Nouvelle application",
+    updated: "Application mise à jour",
+    created: "Application créée",
+  },
   datacenter: {
     namePlaceholder: "ex. Salle A",
     dims: "Dimensions de la salle",

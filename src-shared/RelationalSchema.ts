@@ -100,6 +100,10 @@ export const INDEX_SPEC: Record<string, string[]> = {
   // alors que sa synchro fait le même `findBy` : asymétrie CONSTATÉE, non reproduite ici (l'aligner côté
   // vms est un ajustement à part, hors périmètre de ce chantier).
   wifiClients:   ["provider_id", "ap_equipment_id"],
+  // APPLICATIONS : les deux FK d'hôte sont le chemin CHAUD — la cascade `equipments`/`vms` détache par
+  // elles, le filtre cible « Hébergée sur » des listings part au serveur en `where` dessus, et
+  // l'invalidation de la colonne `search` (renommage de l'hôte) les interroge à chaque écriture.
+  applications:  ["equipment_id", "vm_id"],
 };
 
 /** GÉNÉRATEUR de DDL relationnel (méthodes statiques — cf. CLAUDE.md). Toutes les chaînes émises quotent

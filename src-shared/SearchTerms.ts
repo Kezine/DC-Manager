@@ -282,6 +282,17 @@ const SEARCH_SPECS: Readonly<Record<string, CollectionSearchSpec>> = {
     // GroupTypes.label cherché par ListConfigs.groups.searchFields (+ sub de la palette).
     catalogs: [{ field: "type", terms: SEARCH_CATALOGS.groupType }],
   },
+  applications: {
+    // l'HÔTE résolu (colonne « Hôte » de ListConfigs.applications + sub de la palette) — équipement OU VM,
+    // patron EXACT d'`ipAddresses` : taper le nom du serveur remonte les applications qu'il héberge, et
+    // RENOMMER l'hôte invalide la colonne `search` des applications (requêtes inverses par FK indexées,
+    // cf. INDEX_SPEC.applications). L'URL et la description sont des colonnes PLATES du record, déjà
+    // couvertes par `ownText` — aucun `own`, aucun catalogue.
+    links: [
+      { field: "equipment_id", target: "equipments", contributes: ["name"] },
+      { field: "vm_id", target: "vms", contributes: ["name"] },
+    ],
+  },
 };
 
 /** Requête « qui dépend de cet enregistrement ? » : les records de `collection` dont `field` vaut
@@ -302,7 +313,8 @@ export class SearchTerms {
       (dérivés par lien/enfants + catalogues fr/en) ; 2 = search-v2 (COMPOSITIONS tapables : « U12 »,
       « ét. N »/« fl. N », « 42 U », « 12 brins », « marque modèle », capacités/rpm des spares) ;
       3 = search-v3 (collection `wifiClients` : AP résolu par lien + catalogue « déconnecté » fr/en) ;
-      4 = search-v4 (RETRAIT de la collection `issues` de la spec — cf. ci-dessous).
+      4 = search-v4 (RETRAIT de la collection `issues` de la spec — cf. ci-dessous) ;
+      5 = search-v5 (collection `applications` : hôte — équipement OU VM — résolu par lien).
       À INCRÉMENTER à chaque évolution de la spec (cf. en-tête) — le backfill à l'ouverture met les
       documents existants à niveau tout seul. ⚠ Un ajout de collection COMPTE comme une évolution de
       spec : sans bump, les documents déjà ouverts garderaient une colonne `search` calculée sans elle
@@ -318,7 +330,7 @@ export class SearchTerms {
       Les documents restés en v3 se backfillent vers la spec ACTUELLE (sans `issues`), et ceux déjà en
       v4 portent une colonne `search` qui ne contient au pire que des termes d'une collection
       disparue — donc invisibles, puisque plus aucun enregistrement ne les porte. */
-  static readonly SEARCH_VERSION = 4;
+  static readonly SEARCH_VERSION = 5;
 
   /** Collections dont l'écriture exige de connaître l'enregistrement PRÉCÉDENT pour invalider
       (dérivations par ENFANTS : un sous-équipement DÉPLACÉ d'un maître à l'autre doit rafraîchir

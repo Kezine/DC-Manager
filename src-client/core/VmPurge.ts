@@ -31,15 +31,18 @@
    pour que l'UI le DISE au lieu de laisser croire à une certitude qu'elle n'a pas.
 
    ENRICHIES (arbitrage utilisateur V2) : une VM porteuse d'un travail LOCAL que la
-   purge détruirait sans retour (notes, description, appartenance à un groupe, ou au
-   moins une adresse IP rattachée) est listée NOMINATIVEMENT et DÉCOCHÉE par défaut.
+   purge détruirait sans retour (notes, description, appartenance à un groupe, au
+   moins une adresse IP rattachée, ou au moins une APPLICATION hébergée) est listée
+   NOMINATIVEMENT et DÉCOCHÉE par défaut.
    Le critère est déclaré par FAMILLE (`VmEnrichmentFamily`) : chacune se teste
    séparément, et l'UI peut dire POURQUOI une VM est retenue.
    ============================================================================ */
 
 /** Famille d'enrichissement LOCAL qui « retient » une VM (une seule suffit).
-    Ordre STABLE (celui de `FAMILY_ORDER`) : c'est aussi l'ordre d'affichage. */
-export type VmEnrichmentFamily = "notes" | "description" | "groups" | "ips";
+    Ordre STABLE (celui de `FAMILY_ORDER`) : c'est aussi l'ordre d'affichage.
+    `applications` : la VM héberge au moins une application (`applications.vm_id`) — le lien serait
+    silencieusement DÉTACHÉ par la purge (cascade `vms`), détruisant un rattachement fait à la main. */
+export type VmEnrichmentFamily = "notes" | "description" | "groups" | "ips" | "applications";
 
 /** Nature d'un groupe proposable. */
 export type VmPurgeGroupKind = "orphans" | "goneProvider";
@@ -65,6 +68,10 @@ export interface VmPurgeReaders {
   /** Nombre d'adresses IP RATTACHÉES à cette VM (`ipAddresses.vm_id`) — `Store.ipAddressesOfVm().length`
       côté application. C'est un enrichissement : l'utilisateur a rapproché l'IPAM à la main. */
   attachedIpCount(vmId: string): number;
+  /** Nombre d'APPLICATIONS hébergées sur cette VM (`applications.vm_id`) — `Store.applicationsOfVm().length`
+      côté application. Même logique que les IP : le rattachement app → VM est un travail utilisateur que
+      la purge détacherait sans prévenir (cascade `vms`) — la VM doit donc être retenue comme ENRICHIE. */
+  hostedApplicationCount(vmId: string): number;
 }
 
 /** Une VM proposée dans un groupe. */
@@ -133,6 +140,7 @@ export class VmPurge {
     const groupIds = Array.isArray(vm.group_ids) ? vm.group_ids.filter((g) => typeof g === "string" && g !== "") : [];
     if ((typeof vm.group_id === "string" && vm.group_id !== "") || groupIds.length > 0) out.push("groups");
     if (readers.attachedIpCount(vm.id) > 0) out.push("ips");
+    if (readers.hostedApplicationCount(vm.id) > 0) out.push("applications");
     return out;
   }
 
@@ -250,4 +258,4 @@ export class VmPurge {
 }
 
 /** Ordre canonique des familles, exposé pour l'UI et les tests (donnée → simple export, principe n°2). */
-export const VM_ENRICHMENT_FAMILIES: VmEnrichmentFamily[] = ["notes", "description", "groups", "ips"];
+export const VM_ENRICHMENT_FAMILIES: VmEnrichmentFamily[] = ["notes", "description", "groups", "ips", "applications"];

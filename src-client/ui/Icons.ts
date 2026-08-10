@@ -201,6 +201,11 @@ export class Icons {
   /** Famille « VM » : machine VIRTUELLE — un cadre écran contenant un cadre imbriqué. */
   static readonly VM = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4" width="19" height="13" rx="2"/><rect x="7" y="8" width="10" height="5" rx="1"/><line x1="9" y1="20.5" x2="15" y2="20.5"/></svg>';
 
+  /** APPLICATION (hébergée sur l'infrastructure) : fenêtre d'app — barre de titre à deux pastilles.
+      Intention DISTINCTE de VM (la machine qui l'héberge) et d'EQUIPMENT (le matériel) : ici c'est le
+      LOGICIEL qui tourne dessus. Sert à l'onglet Applications, sa portée de palette et ses fiches. */
+  static readonly APPLICATION = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/><line x1="6" y1="6.5" x2="6.02" y2="6.5"/><line x1="9.2" y1="6.5" x2="9.22" y2="6.5"/></svg>';
+
   /** Famille « spare » (pièce de rechange) : petit carton/boîte. */
   static readonly SPARE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg>';
 

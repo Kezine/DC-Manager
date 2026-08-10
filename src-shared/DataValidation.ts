@@ -99,9 +99,11 @@ export interface FieldSpec {
       les deux bornes encadrent une grandeur physique dont les EXTRÊMES sont légitimes (une latitude de ±90
       est un pôle, pas une erreur), d'où l'inclusivité des deux côtés. */
   max?: number;
-  /** Format attendu (chaîne) : `ipv4` (« a.b.c.d »), `cidr` (« a.b.c.d/n », n ∈ 0..32) ou `hostname`
-      (nom d'hôte / FQDN RFC 1123 : labels alphanumériques + tirets, insensible à la casse). */
-  format?: "ipv4" | "cidr" | "hostname";
+  /** Format attendu (chaîne) : `ipv4` (« a.b.c.d »), `cidr` (« a.b.c.d/n », n ∈ 0..32), `hostname`
+      (nom d'hôte / FQDN RFC 1123 : labels alphanumériques + tirets, insensible à la casse) ou `url`
+      (URL http/https UNIQUEMENT — liste blanche de schémas, cf. `isHttpUrl`). Comme tout format, il
+      ne s'applique qu'à une valeur RENSEIGNÉE : la chaîne vide traverse (champ optionnel). */
+  format?: "ipv4" | "cidr" | "hostname" | "url";
   /** Collection cible d'une clé étrangère (exploité par l'intégrité référentielle — V2). */
   ref?: string;
 }
@@ -1082,6 +1084,22 @@ const SPEC_FIELDS = {
       notes: { type: "string" },                               // notes libres (multi-lignes) — aucune contrainte
       description: { type: "string", default: "" },            // héritée d'Entity (présente sur tout enregistrement)
   },
+  applications: {
+      // APPLICATION hébergée sur l'infrastructure (GLPI, supervision, app web interne…). Une application
+      // vise AU PLUS un hôte : un équipement OU une VM — deux FK nullables à exclusivité SOUPLE (invariant
+      // dans COLLECTION_SPECS), patron EXACT d'`ipAddresses.equipment_id`/`vm_id` (décision D1 du cadrage
+      // 2026-08-10). NI groupes NI tags (décision D8 : même motif que `wifiClients` — ne pas ouvrir un
+      // 4ᵉ balayage énuméré à la main dans le `custom` de Cascade.groups).
+      name:         { type: "string", required: true, trim: true },   // identité de l'application — trimée (fiabilise le libellé)
+      description:  { type: "string", default: "" },                  // héritée d'Entity (markdown en fiche)
+      // URL de l'application (app web) — vide = pas d'app web. Format `url` : http/https UNIQUEMENT
+      // (liste blanche de schémas). Le validateur partagé est l'autorité d'ÉCRITURE ; côté client,
+      // `Html.isSafeHttpUrl` reste la garde de RENDU (elle protège aussi les données importées non
+      // validées) — règle volontairement DUPLIQUÉE, commentaire croisé dans `src-client/core/Html.ts`.
+      url:          { type: "string", default: "", trim: true, format: "url" },
+      equipment_id: { type: "string", nullable: true, default: null, ref: "equipments" },
+      vm_id:        { type: "string", nullable: true, default: null, ref: "vms" },
+  },
 } as const satisfies Record<string, Record<string, FieldSpec>>;
 
 /* Types d'ENREGISTREMENT (formes REST partagées, NORMALISÉES) dérivés de SPEC_FIELDS — SOURCE UNIQUE = la spec.
@@ -1113,6 +1131,7 @@ export namespace Records {
   export type Vm         = RecordOf<typeof SPEC_FIELDS.vms>;
   export type WifiClient = RecordOf<typeof SPEC_FIELDS.wifiClients>;
   export type Contact    = RecordOf<typeof SPEC_FIELDS.contacts>;
+  export type Application = RecordOf<typeof SPEC_FIELDS.applications>;
 }
 
 export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
@@ -1719,6 +1738,15 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
       { path: "phone", message: "Le téléphone ne doit contenir que des chiffres et les séparateurs + . - ( ) et espaces.", holds: (c) => !c.phone || /^[0-9+\s().-]+$/.test(String(c.phone)) },
     ],
   },
+  applications: {
+    fields: SPEC_FIELDS.applications,
+    invariants: [
+      // EXCLUSIVITÉ SOUPLE : une application est hébergée sur un ÉQUIPEMENT **ou** une VM, jamais les deux —
+      // copie de l'invariant `ipAddresses` (même couple de FK, même sémantique). SOUPLE : les DEUX vides
+      // restent permis (application recensée mais pas encore rattachée, ou hôte hors inventaire).
+      { path: "vm_id", message: "Une application est hébergée sur un équipement OU une VM, pas les deux (equipment_id et vm_id mutuellement exclusifs).", holds: (app) => !(app.equipment_id && app.vm_id) },
+    ],
+  },
 };
 
 /* ============================================================================
@@ -1799,6 +1827,7 @@ export class DataValidator {
       if (fieldSpec.format && typeof value === "string" && !DataValidator.matchesFormat(value, fieldSpec.format)) {
         const formatLabel = fieldSpec.format === "cidr" ? "un CIDR IPv4 (ex. 10.0.0.0/24)"
           : fieldSpec.format === "hostname" ? "un nom d'hôte valide (ex. srv1 ou srv1.dom.local)"
+          : fieldSpec.format === "url" ? "une URL http/https (ex. https://app.exemple.local)"
           : "une adresse IPv4 (ex. 10.0.0.5)";
         fail(field, "format", `Le champ « ${field} » n'est pas ${formatLabel}.`);
       }
@@ -1956,7 +1985,20 @@ export class DataValidator {
   private static matchesFormat(value: string, format: NonNullable<FieldSpec["format"]>): boolean {
     if (format === "cidr") return Ipv4.isCidr(value);
     if (format === "hostname") return DataValidator.isHostname(value);
+    if (format === "url") return DataValidator.isHttpUrl(value);
     return Ipv4.toInt(value) != null;
+  }
+
+  /** URL http/https valide — LISTE BLANCHE de schémas, jamais une liste noire (une liste noire oublie
+      toujours un schéma : `javascript:`, `data:`, `vbscript:`…). Réécriture VOLONTAIRE de la règle de
+      `src-client/core/Html.isSafeHttpUrl` (règle PERMANENTE : `src-shared/` n'importe RIEN hors du
+      dossier — le module client, lui, touche au DOM) : les deux copies se signalent mutuellement
+      (principe n°3, duplication assumée + commentaire croisé). Ici la vérification est un peu plus
+      STRICTE que le rendu : porte d'ÉCRITURE oblige, on exige `http(s)://` suivi d'au moins un
+      caractère, SANS aucune espace — là où la garde de rendu tolère ce que `new URL` sait encoder.
+      La chaîne VIDE ne passe jamais ici : `isEmpty` l'absorbe en amont (champ optionnel). */
+  private static isHttpUrl(value: string): boolean {
+    return /^https?:\/\/\S+$/i.test(value);
   }
 
   /** Nom d'hôte / FQDN valide (RFC 1123, insensible à la casse) : un ou plusieurs LABELS séparés par des points ;
