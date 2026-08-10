@@ -22,6 +22,13 @@ export const ui = {
     in: "Zoomer",
     fitLabel: "Ajuster",
   },
+  /* Sélecteur de FICHIER réutilisable (`ui/FilePicker`) : zone cliquable, effacement, messages de refus. */
+  filePicker: {
+    placeholder: "Choisir un fichier…",
+    clear: "Retirer le fichier",
+    badType: "Type de fichier non pris en charge.",
+    tooBig: "Fichier trop volumineux (max {{max}}).",
+  },
   modal: {
     errorPrefix: "Erreur : {{message}}",
     confirmCloseTitle: "Fermer sans enregistrer ?",

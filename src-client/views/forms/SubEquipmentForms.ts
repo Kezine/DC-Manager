@@ -43,6 +43,8 @@ import { InterventionFicheRow } from "./InterventionFicheRow";   // intégration
 import { FormSave } from "./FormSave";   // écriture + garde-fou « ne jamais annoncer un succès refusé »
 import { FormBase } from "./FormBase";
 import { EquipmentForms } from "./EquipmentForms";   // rebond vers la fiche du MAÎTRE (usage différé, cf. en-tête)
+import { DetailForms } from "./DetailForms";   // ouverture de la fiche d'une PIÈCE JOINTE (usage DIFFÉRÉ — cycle toléré, cf. la note du cast d'EquipmentForms)
+import { AttachmentUi } from "./AttachmentUi";   // section « Pièces jointes » de la fiche (factorisée avec la fiche équipement)
 import { FormUi } from "./shared";   // séparateur de section (bloc « Administratif », décalqué d'EquipmentForms)
 import type { FormHost } from "./shared";
 
@@ -124,6 +126,12 @@ export class SubEquipmentForms extends FormBase {
     const note = document.createElement("div"); note.className = "form-hint"; note.style.marginTop = "10px";
     note.textContent = I18n.t("subEquipment.natureHint");
     root.appendChild(note);
+
+    // PIÈCES JOINTES de ce sous-équipement (garantie, bon de commande…) : section MASQUÉE si vide, libellé
+    // cliquable → fiche pièce, taille + bouton Télécharger. MÊME brique que la fiche équipement
+    // (`AttachmentUi.section`). L'ouverture passe par `DetailForms.attachmentDetail` (import DIFFÉRÉ, comme
+    // le rebond vers le maître via EquipmentForms) — cette classe est HORS de la chaîne des fiches.
+    AttachmentUi.section(store, host, root, store.attachmentsOfSubEquipment(se.id), (attId) => DetailForms.attachmentDetail(store, host, attId, onChanged));
 
     // Intégration « fiches » : badge d'interventions ouvertes + « Déclarer une intervention » (no-op hors
     // mode API) — même rangée que les fiches équipement/VM/spare. Remplacer un drive en panne est LE motif

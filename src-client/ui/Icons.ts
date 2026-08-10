@@ -209,6 +209,11 @@ export class Icons {
   /** Famille « spare » (pièce de rechange) : petit carton/boîte. */
   static readonly SPARE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg>';
 
+  /** PIÈCE JOINTE (collection `attachments`) : trombone SOBRE. Sert à l'onglet Pièces jointes, sa fiche,
+      les sections des fiches porteuses, le sélecteur de fichier et la portée « Inventaire » de la palette.
+      Facture 24×24 stroke 2 du registre — un trombone ouvert, distinct de l'image (façade) et du document. */
+  static readonly ATTACHMENT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.5l-8.1 8.1a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></svg>';
+
   /* NB : les icônes de TYPE du domaine (équipements, rack-items, spare) vivent dans
      `domain/constants.ts` avec leurs entités, pas ici (ce registre = icônes d'ACTION/nav
      génériques). Elles y sont au même format : inner markup enveloppé par le consommateur. */

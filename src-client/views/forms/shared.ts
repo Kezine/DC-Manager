@@ -3,6 +3,7 @@ import type { ModalOptions } from "../../ui/Modal";
 import type { InterventionFicheHooks } from "../InterventionFicheHooks";
 import type { CertFicheHooks } from "../CertFicheHooks";
 import type { UserDirectory } from "../../core/UserDirectory";
+import type { AttachmentStore } from "../../data/AttachmentStore";
 import { FLOORS } from "../../domain/constants";
 import { Ip } from "../../core/Ip";
 import { FormControls } from "../../ui/FormControls";
@@ -99,4 +100,13 @@ export interface FormHost {
   /** Annuaire utilisateurs (résolution des auteurs d'audit — cf. `AuditLine`, docs/user-resolver.md). null en
       mode fichier → aucune ligne « Créé/Modifié par » dans les fiches. Injecté par `main.ts` (mode REST). */
   userDirectory?: UserDirectory | null;
+  /** Stockage des BINAIRES de pièces jointes (backend IndexedDB en mode fichier, REST en mode API — cf.
+      `data/AttachmentStore`). Injecté par `main.ts`. Sert au formulaire `Forms.attachment` (dépôt du binaire),
+      à la fiche `attachmentDetail` et aux sections des fiches porteuses (téléchargement). */
+  attachmentStore?: AttachmentStore | null;
+  /** Mode API (serveur REST) vs mode fichier (local). Injecté par `main.ts`. Le seul formulaire qui en dépend
+      est `Forms.attachment` à la CRÉATION : mode API = POST multipart atomique (fichier + enregistrement),
+      mode fichier = enregistrement puis dépôt du binaire. Le reste (édition de métadonnées, téléchargement) est
+      indifférent au mode (le backend l'abstrait). */
+  restMode?: boolean;
 }

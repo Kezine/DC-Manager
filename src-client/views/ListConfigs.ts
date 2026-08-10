@@ -706,6 +706,46 @@ export class ListConfigs {
     };
   }
 
+  /** PIÈCES JOINTES — sous-onglet de l'onglet Équipements. Une pièce vise AU PLUS une cible (équipement
+      OU sous-équipement, patron `applications` — décision D2 du cadrage 2026-08-10). Colonnes : Libellé ·
+      Cible résolue (patron de la colonne Hôte des applications) · Fichier (nom d'origine) · Taille (octets
+      formatés, tri par octets bruts) · Description. Action `download` en plus de view/edit/del (le geste
+      central). Le filtrage PAR CIBLE passe par la dimension « Attachée à » (`targetFilter` →
+      `ListTargets.attachmentTarget`, `where` serveur sur colonnes indexées). */
+  static attachments(store: Store, entitySearch: EntitySearchReader | null = null): ListOptions {
+    // Cible : nom de l'équipement OU du sous-équipement résolu via le store. Trois états à l'affichage :
+    // résolu (nom), FK cassée → « (introuvable) » grisé (l'orphelin se voit), aucune FK → « — » grisé.
+    const targetText = (a: any): string => {
+      if (a.equipment_id) { const e: any = store.get("equipments", a.equipment_id); return e ? (e.name || I18n.t("lists.ph.equipment")) : ""; }
+      if (a.sub_equipment_id) { const se: any = store.get("subEquipments", a.sub_equipment_id); return se ? (se.name || I18n.t("subEquipment.fallback")) : ""; }
+      return "";
+    };
+    const targetCell = (a: any): string => {
+      const t = targetText(a);
+      if (t) return Html.escape(t);
+      return (a.equipment_id || a.sub_equipment_id) ? dim(Html.escape(I18n.t("lists.ph.hostMissing"))) : dim("—");
+    };
+    return {
+      collection: "attachments",
+      defaultSort: { key: "name", dir: "asc" },
+      emptyText: I18n.t("lists.empty.attachments"),
+      actions: { view: true, edit: true, clone: false, del: true, download: true },   // download = le geste central ; clone sans objet (le binaire ne se duplique pas en v1)
+      // Filtre CIBLE « Attachée à » : équipement OU sous-équipement, familles confondues dans UNE recherche
+      // (principe n°14). Le lien est une colonne → le filtre part au serveur en `where` ; les CANDIDATS sont
+      // serveur-pilotés en mode API (`entitySearch`), locaux en mode fichier.
+      targetFilter: ListTargets.attachmentTarget(store, entitySearch),
+      columns: [
+        { head: I18n.t("lists.col.name"), essential: true, cls: "cell-name", sortKey: "name", sort: (a) => a.name, render: (a) => Html.escape(a.name || I18n.t("lists.ph.noName")) },
+        { head: I18n.t("lists.col.attachedTo"), essential: true, sortKey: "target", sort: (a) => targetText(a), render: targetCell },
+        { head: I18n.t("lists.col.file"), sortKey: "file", sort: (a) => a.file_name || "", render: (a) => (a.file_name ? Html.escape(a.file_name) : dim("—")) },
+        // Taille : rendue LISIBLE (Format.bytes) mais TRIÉE sur les octets bruts (une chaîne « 2 Mo » se
+        // trierait lexicographiquement, donc faux) — d'où `sort` sur `size` numérique, `cls: cell-num`.
+        { head: I18n.t("lists.col.size"), cls: "cell-num", sortKey: "size", sort: (a) => a.size || 0, render: (a) => Html.escape(Format.bytes(a.size)) },
+        { head: I18n.t("lists.col.description"), cls: "cell-desc", sort: (a) => a.description || "", render: descCell },
+      ],
+    };
+  }
+
   /** Familles distinctes d'un catalogue (pour les filtres). */
   private static _families(store: Store, coll: string): { id: string; label: string }[] {
     const s = new Set<string>();

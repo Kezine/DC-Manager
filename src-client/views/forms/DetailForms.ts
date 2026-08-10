@@ -32,6 +32,7 @@ import { WifiForms } from "./WifiForms";   // édition des champs LOCAUX (featur
 import { InterventionFicheRow } from "./InterventionFicheRow";   // intégration « fiches » de la feature interventions (AMOVIBLE)
 import { CertFicheRow } from "./CertFicheRow";   // intégration « fiches » du rapprochement certificat ↔ cible (AMOVIBLE)
 import { SubEquipmentForms } from "./SubEquipmentForms";   // fiche + formulaire des sous-équipements (hors chaîne d'héritage, cf. son en-tête)
+import { AttachmentUi } from "./AttachmentUi";   // téléchargement d'une pièce jointe (geste UNIQUE partagé avec les sections des fiches porteuses)
 import { AuditLine } from "./AuditLine";   // ligne « Créé/Modifié par {auteur} le {date} » (résolue via l'annuaire, mode API)
 
 /* =============================================================================
@@ -104,6 +105,7 @@ export class DetailForms extends IpamForms {
     cableTypes: (s, h, i) => DetailForms.cableTypeDetail(s, h, i),
     portTypes: (s, h, i) => DetailForms.portTypeDetail(s, h, i),
     applications: (s, h, i, c) => DetailForms.applicationDetail(s, h, i, c),
+    attachments: (s, h, i, c) => DetailForms.attachmentDetail(s, h, i, c),
   };
   /** Collections OUVRABLES en fiche — dérivée de la carte, JAMAIS écrite à la main. C'est le critère
       d'inclusion du corpus de la recherche globale (cf. `views/GlobalSearchSources`, invariant testé). */
@@ -598,6 +600,48 @@ export class DetailForms extends IpamForms {
     AuditLine.attach(root, app, host.userDirectory);   // « Créé/Modifié par » (mode API)
     const footerActions = this.footer(() => this.application(store, host, id, onChanged));
     host.openModal({ title: I18n.t("detail.application.title"), subtitle: Html.escape(app.name || ""), body: root, footerActions, stackKey: "detail:applications/" + id, onResume: () => this.applicationDetail(store, host, id, onChanged), hideFooter: true, wide: true });
+  }
+
+  /* ---- PIÈCE JOINTE (fichier attaché à un équipement ou un sous-équipement) ---- */
+  /** Fiche détail d'une pièce jointe (patron `applicationDetail`) : libellé, CIBLE résolue et CLIQUABLE
+      (équipement OU sous-équipement — « (introuvable) » grisé si la FK ne résout plus, « — » si aucune),
+      le fichier (nom + taille + type), un bouton « Télécharger » (mode-agnostique — cf. `AttachmentUi.download`),
+      et la description en markdown. Le binaire n'est PAS remplaçable en v1 (D10) : « Modifier » n'édite que
+      les métadonnées. */
+  static attachmentDetail(store: Store, host: FormHost, id: string, onChanged?: () => void): void {
+    const att: any = store.get("attachments", id);
+    if (!att) { Notify.toast(I18n.t("detail.nf.attachment"), "err"); return; }
+    const root = document.createElement("div");
+    // Cible : équipement OU sous-équipement (exclusifs par la spec) — valeur + bouton d'ouverture de la fiche.
+    const eq: any = att.equipment_id ? store.get("equipments", att.equipment_id) : null;
+    const sub: any = att.sub_equipment_id ? store.get("subEquipments", att.sub_equipment_id) : null;
+    let targetHtml: string;
+    if (eq) targetHtml = `${Html.escape(eq.name || "?")} ${EntityViz.equipmentLocationShort(store, eq)} ` + IconButton.html({ icon: Icons.INFO, label: I18n.t("detail.attachment.openTarget"), act: "open-att-target" });
+    else if (sub) targetHtml = `${Html.escape(sub.name || I18n.t("subEquipment.fallback"))} <span class="pill">${Html.escape(I18n.t("attachment.targetSubEquipmentPill"))}</span> ` + IconButton.html({ icon: Icons.INFO, label: I18n.t("detail.attachment.openTarget"), act: "open-att-target" });
+    else if (att.equipment_id || att.sub_equipment_id) targetHtml = `<span style="color:var(--fg-dimmer)">${Html.escape(I18n.t("lists.ph.hostMissing"))}</span>`;   // FK cassée : l'orphelin se VOIT (même « (introuvable) » que les applications)
+    else targetHtml = this.MUTED;   // aucune cible — état permis (exclusivité SOUPLE)
+    root.appendChild(this.grid([
+      [I18n.t("lists.col.name"), Html.escape(att.name || I18n.t("lists.ph.noName"))],
+      [I18n.t("attachment.form.target"), targetHtml],
+      [I18n.t("attachment.form.file"), `${Html.escape(att.file_name || "?")} <span style="color:var(--fg-dimmer)">· ${Html.escape(Format.bytes(att.size))} · ${Html.escape(att.mime || "")}</span>`],
+      [I18n.t("lists.col.description"), att.description ? `<div class="md-body">${Markdown.render(att.description)}</div>` : this.MUTED],
+      [I18n.t("detail.common.created"), Html.escape(Format.dateTime(att.created_date))],
+      [I18n.t("detail.common.updated"), Html.escape(Format.dateTime(att.updated_date))],
+    ]));
+    // La fiche de la cible s'EMPILE ; CETTE fiche reste dessous et se reconstruit au retour (son `onResume`).
+    const openTargetBtn = root.querySelector('[data-act="open-att-target"]') as HTMLElement | null;
+    if (openTargetBtn) openTargetBtn.onclick = () => {
+      if (eq) this.equipmentDetail(store, host, eq.id, onChanged);
+      else if (sub) SubEquipmentForms.detail(store, host, sub.id, onChanged);
+    };
+    AuditLine.attach(root, att, host.userDirectory);   // « Créé/Modifié par » (mode API)
+
+    // Pied : « Télécharger » (le geste central d'une pièce jointe) puis « Modifier » (métadonnées).
+    const dlBtn = document.createElement("button"); dlBtn.type = "button"; dlBtn.className = "btn btn-ghost";
+    dlBtn.innerHTML = `<span class="gi">${Icons.EXPORT}</span>${I18n.t("lists.chrome.rowDownload")}`;
+    dlBtn.onclick = () => { void AttachmentUi.download(host, att); };
+    const footerActions = [dlBtn, ...this.footer(() => this.attachment(store, host, id, onChanged))];
+    host.openModal({ title: I18n.t("detail.attachment.title"), subtitle: Html.escape(att.name || ""), body: root, footerActions, stackKey: "detail:attachments/" + id, onResume: () => this.attachmentDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
   /* ---- VM (équipement virtuel — feature amovible) ---- */

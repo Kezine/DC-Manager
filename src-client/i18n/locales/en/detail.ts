@@ -78,6 +78,7 @@ export const detail = {
     wifiClient: "Wi-Fi client not found",
     type: "Type not found",
     application: "Application not found",
+    attachment: "Attachment not found",
   },
   /* APPLICATION detail sheet + "Hosted applications" sections of the HOST sheets (equipment / VM). */
   application: {
@@ -85,6 +86,11 @@ export const detail = {
     openHost: "Open the host's detail sheet",
     openApp: "Open the application's detail sheet",
     hostedSection: "Hosted applications ({{count}})",
+  },
+  /* ATTACHMENT detail sheet (clickable target, download). */
+  attachment: {
+    title: "Attachment details",
+    openTarget: "Open the target's detail sheet",
   },
   cable: {
     from: "From",

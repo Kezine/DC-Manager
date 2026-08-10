@@ -99,7 +99,9 @@ export class GlobalSearchSources {
     // dans « Inventaire » : les applications sont des entités de PREMIER PLAN (ce qui tourne sur
     // l'infrastructure), pas de l'inventaire secondaire — et « app: » est ce qu'un exploitant tape.
     { id: "apps", icon: Icons.APPLICATION, prefix: "app:", kinds: ["applications"] },
-    { id: "inventory", icon: Icons.SPARE, prefix: "inv:", kinds: ["spares", "groups", "contacts", "cableTypes", "portTypes"] },
+    // `attachments` (pièces jointes) rangé dans « Inventaire » (D9 du cadrage 2026-08-10) — pas de portée
+    // dédiée : une pièce jointe est de l'INTENDANCE (convention de prêt, bon de commande), pas du premier plan.
+    { id: "inventory", icon: Icons.SPARE, prefix: "inv:", kinds: ["spares", "groups", "contacts", "cableTypes", "portTypes", "attachments"] },
   ];
 
   /** Ordre CANONIQUE des familles = l'ordre des portées, déplié. Sert de DÉPARTAGE aux groupes
@@ -243,6 +245,17 @@ export class GlobalSearchSources {
         const eq: any = a.equipment_id ? store.get("equipments", a.equipment_id) : null;
         const vm: any = a.vm_id ? store.get("vms", a.vm_id) : null;
         return (eq && eq.name) || (vm && vm.name) || a.url || "";
+      },
+    },
+    // PIÈCE JOINTE : sous-ligne = la CIBLE résolue (équipement OU sous-équipement — ce à quoi la pièce se
+    // rattache), sinon le nom de FICHIER (l'autre identifiant qu'on tape pour la retrouver). Pas de `path` :
+    // une pièce jointe n'a pas de localisation propre — sa cible, elle, se retrouve par sa propre famille.
+    attachments: {
+      label: (a) => a.name || "?",
+      sub: (a, store) => {
+        const eq: any = a.equipment_id ? store.get("equipments", a.equipment_id) : null;
+        const sub: any = a.sub_equipment_id ? store.get("subEquipments", a.sub_equipment_id) : null;
+        return (eq && eq.name) || (sub && sub.name) || a.file_name || "";
       },
     },
     spares: {

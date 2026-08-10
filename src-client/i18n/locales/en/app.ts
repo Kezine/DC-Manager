@@ -125,6 +125,13 @@ export const app = {
     purgedRest: "{{n}} image(s) purged · database {{before}} → {{after}}",
     done: "Maintenance done",
     purgedFile: "{{n}} image(s) purged — save to lighten the image companion.",
+    // "Attachments" segments APPENDED to the maintenance toast (D5) — omitted if nothing was purged.
+    purgedAttachmentsRest: " · {{n}} attachment(s) purged ({{bytes}})",
+    purgedAttachmentsFile: " · {{n}} attachment(s) purged from the companion.",
+    // D8 warning before an export WITHOUT binaries (standalone JSON / HTML viewer).
+    exportAttachTitle: "Attachments not included",
+    exportAttachMessage: "This document has {{n}} attachment(s). Their BINARIES will NOT be included in this export (only the metadata is). The .nmfa companion (file mode) or the server folder (API mode) is the complete channel. Continue the export?",
+    exportAttachConfirm: "Export anyway",
   },
   add: {
     equipment: "+ Equipment",
@@ -143,6 +150,7 @@ export const app = {
     dhcpRange: "+ DHCP range",
     contact: "+ Contact",
     application: "+ Application",
+    attachment: "+ Attachment",
   },
   vm: {
     netMapping: "Virtual networks…",

@@ -44,6 +44,7 @@ import type { FormHost } from "./shared";
 import { FormBase } from "./FormBase";
 import { FaceEditor } from "./FaceEditor";
 import { SubEquipmentForms } from "./SubEquipmentForms";   // section « Sous-équipements » de la fiche (import croisé différé, cf. son en-tête)
+import { AttachmentUi } from "./AttachmentUi";   // section « Pièces jointes » de la fiche (factorisée avec la fiche sous-équipement)
 import { PerspectiveEditor } from "../../ui/PerspectiveEditor";
 import { StitchEditor } from "../../ui/StitchEditor";
 import { Download } from "../../core/Download";
@@ -233,6 +234,14 @@ export class EquipmentForms extends FormBase {
         (el as HTMLElement).onkeydown = (ev: KeyboardEvent) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); open(); } };
       });
     }
+
+    // PIÈCES JOINTES de cet équipement (cadrage 2026-08-10) : section MASQUÉE si vide, libellé cliquable
+    // → fiche pièce (elle s'empile, cette fiche se reconstruit au retour), taille + bouton Télécharger.
+    // Source UNIQUE : `Store.attachmentsOfEquipment`. Section factorisée (`AttachmentUi.section`) avec la
+    // fiche sous-équipement. ⚠ Même cast `(this as any)` que la section applications ci-dessus : à l'APPEL,
+    // `this` statique résout vers `Forms` (fin de chaîne), où `attachmentDetail` existe ; importer DetailForms
+    // ici créerait un CYCLE (DetailForms hérite, via la chaîne, de ce fichier).
+    AttachmentUi.section(store, host, root, store.attachmentsOfEquipment(eq.id), (attId) => (this as any).attachmentDetail(store, host, attId, onChanged));
 
     AuditLine.attach(root, eq, host.userDirectory);   // « Créé/Modifié par » (mode API)
 
