@@ -54,7 +54,7 @@ FieldSpec = {
   enum?: readonly string[], // valeurs autorisées
   min?: number,           // borne basse INCLUSIVE (number) — seul `value < min` est rejeté
   max?: number,           // borne haute INCLUSIVE (number) — seul `value > max` est rejeté
-  format?: "ipv4" | "cidr" | "hostname", // format de chaîne — parseurs PARTAGÉS avec core/Ip (cf. §12 pour `hostname`)
+  format?: "ipv4" | "cidr" | "hostname" | "url", // format de chaîne — parseurs PARTAGÉS avec core/Ip (cf. §12 pour `hostname`, cas particuliers §10 pour `url`)
   ref?: string,           // collection cible (FK) — utilisé en V2
 }
 CollectionSpec = { fields: Record<string, FieldSpec> }   // + invariants[] en V3
@@ -345,6 +345,17 @@ Cas particuliers à connaître :
   d'enum numérique), plus deux hauteurs nullables (`height_mm`, `underfloor_mm`).
 - **`vms.nics`** et **`datacenters.doors`** sont déclarés via le type `json` ;
   `datacenters.blocked_cells` en `string[]` (cf. §4).
+- **`applications.url`** est déclaré `{ type: "string", default: "", trim: true, format: "url" }`.
+  Le format `url` n'admet que **http/https** — une **liste blanche** de schémas, jamais une liste
+  noire (une liste noire oublie toujours un schéma : `javascript:`, `data:`…) : `https?://` suivi
+  d'au moins un caractère, **sans espace**, casse du schéma ignorée. La chaîne **vide** traverse
+  toujours (champ optionnel : « pas d'app web »). La règle est volontairement **dupliquée** avec la
+  garde de **rendu** cliente `Html.isSafeHttpUrl` (l'isolement de `src-shared/` interdit d'importer
+  le module client) — duplication assumée, commentaire croisé des deux côtés (principe n°3) : le
+  validateur est l'autorité d'**écriture** (un `javascript:alert(1)` est refusé à la saisie/API), la
+  garde de rendu protège en plus les données **importées** jamais passées par la spec.
+- **`applications.equipment_id` / `vm_id`** : deux FK nullables à **exclusivité souple** (invariant
+  V3, copie d'`ipAddresses`) — un hôte OU l'autre, jamais les deux ; les deux vides restent permis.
 
 ## 11. Collaborateurs partagés (modules que la validation IMPORTE)
 

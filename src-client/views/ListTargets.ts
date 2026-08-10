@@ -64,15 +64,18 @@ export class ListTargets {
   private static readonly EQUIPMENT: TargetFamily = { kind: "equipment", collection: "equipments", fallbackKey: "lists.ph.equipment", tagKey: "lists.filter.targetEquipment" };
   private static readonly VM: TargetFamily = { kind: "vm", collection: "vms", fallbackKey: "lists.ph.vm", tagKey: "lists.filter.targetVm" };
 
-  /** PORTEUR d'une adresse IP : équipement OU VM. Le lien est une simple colonne (`equipment_id` /
-      `vm_id`) → le filtre part au SERVEUR en `where` ; le mode fichier applique le même test en mémoire.
-      `reader` (mode API) alimente la recherche de CANDIDATS serveur-pilotée ; null = mode fichier. */
-  static ipCarrier(store: Store, reader: EntitySearchReader | null = null): ListTargetFilter {
+  /** Descripteur GÉNÉRIQUE « équipement OU VM pointé par une FK directe » : la collection filtrée porte
+      le MÊME couple de colonnes `equipment_id`/`vm_id` (patron `ipAddresses`, repris tel quel par
+      `applications` — décision D1 du cadrage 2026-08-10) → `where` serveur et restriction cliente sont
+      STRUCTURELLEMENT identiques, seuls les LIBELLÉS de la dimension changent. FACTORISÉ entre
+      `ipCarrier` et `applicationHost` (principe n°3) : dupliquer le bloc aurait laissé les deux copies
+      diverger au premier ajustement de la garde « famille inconnue ». */
+  private static equipmentOrVmByFk(store: Store, reader: EntitySearchReader | null, labelKey: string, placeholderKey: string): ListTargetFilter {
     const families = [ListTargets.EQUIPMENT, ListTargets.VM];
     const source = new EntityCandidateSource(store, ListTargets.candidateFamilies(families), reader, ListTargets.SEARCH_LIMIT);
     return {
-      label: I18n.t("lists.filter.carrier"),
-      placeholder: I18n.t("lists.filter.carrierPlaceholder"),
+      label: I18n.t(labelKey),
+      placeholder: I18n.t(placeholderKey),
       search: (query) => source.fetch(query),
       labelOf: (kind, id) => ListTargets.labelOf(store, families, kind, id),
       tagOf: (kind) => ListTargets.tagOf(families, kind),
@@ -85,6 +88,20 @@ export class ListTargets {
         return rows.filter((row) => row && row[field] === id);
       },
     };
+  }
+
+  /** PORTEUR d'une adresse IP : équipement OU VM. Le lien est une simple colonne (`equipment_id` /
+      `vm_id`) → le filtre part au SERVEUR en `where` ; le mode fichier applique le même test en mémoire.
+      `reader` (mode API) alimente la recherche de CANDIDATS serveur-pilotée ; null = mode fichier. */
+  static ipCarrier(store: Store, reader: EntitySearchReader | null = null): ListTargetFilter {
+    return ListTargets.equipmentOrVmByFk(store, reader, "lists.filter.carrier", "lists.filter.carrierPlaceholder");
+  }
+
+  /** HÔTE d'une application : équipement OU VM — MÊME structure de lien que le porteur d'une adresse IP
+      (deux FK directes exclusives-souples), seule la dimension se libelle « Hébergée sur ». C'est lui qui
+      donne « les applications de tel serveur / telle VM » en un clic depuis le listing Applications. */
+  static applicationHost(store: Store, reader: EntitySearchReader | null = null): ListTargetFilter {
+    return ListTargets.equipmentOrVmByFk(store, reader, "lists.filter.hostedOn", "lists.filter.carrierPlaceholder");
   }
 
   /** ÉQUIPEMENT MAÎTRE d'un sous-équipement : le rattachement est une simple colonne (`equipment_id`) →

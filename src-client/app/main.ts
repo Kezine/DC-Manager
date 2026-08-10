@@ -595,7 +595,7 @@ async function boot(): Promise<void> {
     icon: Icons.EQUIPMENT,
     subtitle: I18n.t("tabs.equipements.subtitle"),
     form: (id, done) => Forms.equipment(store, formHost, id, done), addLabel: I18n.t("app.add.equipment"),
-    links: ["groupes", "faceimages", "spares", "sousequipements"], locate: "equipment",
+    links: ["groupes", "faceimages", "spares", "sousequipements", "applications"], locate: "equipment",
   });
   // VMs : onglet de PREMIER NIVEAU (à côté d'Équipements) — ALIMENTÉ PAR LA SYNCHRO (Proxmox…). Pas de
   // `form`/`addLabel` : AUCUN bouton « + créer » en v1 (liste en lecture seule, cf. ListConfigs.vms `actions: view`) ;
@@ -830,6 +830,16 @@ async function boot(): Promise<void> {
       if (se) Forms.subEquipment(store, formHost, se.equipment_id, id, done);
     },
   });
+  // Applications : vue SECONDAIRE d'Équipements (cadrage applications 2026-08-10) — collection du DOCUMENT
+  // (les deux modes nativement, principe n°15 sans écart). Création/édition par `Forms.application`
+  // (picker d'hôte UNIQUE équipement+VM) ; fiche via le mécanisme générique (DETAIL_OPENERS). Le filtrage
+  // par hôte passe par la dimension CIBLE « Hébergée sur » du listing (candidats serveur-pilotés en mode API).
+  addListTab("applications", I18n.t("tabs.applications.label"), (s) => ListConfigs.applications(s, entitySearchReader), {
+    icon: Icons.APPLICATION,
+    title: I18n.t("tabs.applications.title"), subtitle: I18n.t("tabs.applications.subtitle"),
+    kind: "secondary", parent: "equipements",
+    form: (id, done) => Forms.application(store, formHost, id, done), addLabel: I18n.t("app.add.application"),
+  });
   // Images de façade : bibliothèque hors modèle (ImageStore) → câblage dédié (CRUD via imageStore)
   {
     const cfg = ListConfigs.faceImages(store);
@@ -965,6 +975,7 @@ async function boot(): Promise<void> {
     vm:            { collection: "vms",           fallbackKey: "interventions.target.fallback.vm" },
     spare:         { collection: "spares",        fallbackKey: "interventions.target.fallback.spare" },
     sub_equipment: { collection: "subEquipments", fallbackKey: "interventions.target.fallback.sub_equipment" },
+    application:   { collection: "applications",  fallbackKey: "interventions.target.fallback.application" },
   };
   const targetFallback = (kind: string): string => {
     const family = TARGET_FAMILIES[kind];

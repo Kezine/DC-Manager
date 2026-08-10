@@ -3,14 +3,14 @@
 Feature **AMOVIBLE** (lot SERVEUR) : suivre, DANS l'application, les **incidents** subis
 (panne, sinistre) et les **interventions** planifiées (maintenance, changement) d'une
 infrastructure, en les **liant** aux objets déjà inventoriés (équipements, VMs, spares,
-sous-équipements).
+sous-équipements, applications).
 Chaque objet porte un cycle de vie, une priorité de traitement, une fenêtre d'intervention
 optionnelle, une référence Jira facultative et une description markdown. Un **veilleur de
 rappels** signale au service de notifications les fenêtres qui approchent de l'heure H.
 
 > **Périmètre.** Le module serveur (base, routes, veilleur), la page « Interventions » (**entièrement
 > localisée** FR/EN) et l'**intégration « fiches »** (badge d'interventions ouvertes + « Déclarer une
-> intervention » depuis une fiche équipement/VM/spare). Les messages **serveur** restent en **français** ;
+> intervention » depuis une fiche équipement/VM/spare/sous-équipement/application). Les messages **serveur** restent en **français** ;
 > les libellés localisés des slugs `kind`/`status`/`priority` sont l'affaire du **client**, via i18n.
 > Hors périmètre : badges dans les **listes** (ListView), vue **calendrier**, lecture **Jira enrichie**.
 
@@ -73,7 +73,7 @@ dénormalisée, et surveille les fenêtres à démarrer.
 
 ## Liens sans FK — politique d'orphelins
 
-Les cibles (`equipment` / `vm` / `spare` / `sub_equipment`) vivent dans les **bases des DOCUMENTS**
+Les cibles (`equipment` / `vm` / `spare` / `sub_equipment` / `application`) vivent dans les **bases des DOCUMENTS**
 (`registry.db` par document), **séparées** de `interventions.db`. Une clé étrangère
 inter-bases est impossible : un lien est donc un **simple couple opaque** `(target_kind,
 target_id)`. Conséquences **assumées** :
@@ -116,8 +116,8 @@ pour l'avenir** (pattern `CertsDb`).
   d'un listing trié par activité des objets que personne n'a modifiés). Module `tracker/` absent
   ⇒ colonnes vides, comportement **strictement inchangé**.
 - **`intervention_links`** — cibles liées en **table ORDONNÉE** : `doc_id`,
-  `intervention_id`, `position` (**PK composite**), `target_kind` (`equipment`/`vm`/`spare`/`sub_equipment`
-  — ce dernier ajouté SANS migration : la colonne est un `TEXT` contrôlé par l'enum de validation, pas par la DB),
+  `intervention_id`, `position` (**PK composite**), `target_kind` (`equipment`/`vm`/`spare`/`sub_equipment`/`application`
+  — les familles ajoutées après coup le sont SANS migration : la colonne est un `TEXT` contrôlé par l'enum de validation, pas par la DB),
   `target_id`. **FK `ON DELETE CASCADE`** `(doc_id, intervention_id) → interventions(doc_id,
   id)`. **AUCUNE FK vers la cible** (elle vit dans une autre base — cf. « Liens sans FK »).
 
@@ -272,7 +272,7 @@ interventions sont propres au document).
   (`formatWindow`, vide sinon), **Liens** (compte + détail en survol), **Jira** (lien cliquable via `jiraUrl`
   + `meta` chargée UNE fois ; texte brut si pas de base), **Créé par**, Actions.
 - **Filtre par CIBLE — dimension « à RECHERCHE »**. Le filtre par objet lié
-  (équipement / VM / spare / sous-équipement) est une **dimension ordinaire de la `FilterBar`**, dont le
+  (équipement / VM / spare / sous-équipement / application) est une **dimension ordinaire de la `FilterBar`**, dont le
   contrôle est un **`SearchPop`** au lieu d'un multiselect (principe n°14 : la liste des cibles est longue,
   croissante et à libellés composés). Il est alimenté par la **MÊME source injectée** que l'éditeur de liens
   (`InterventionTargetSource.search`) — même pertinence, même badge de famille. **DEUX points d'entrée, UN
@@ -309,7 +309,7 @@ interventions sont propres au document).
   (nature/priorité/statut), fenêtre planifiée, référence Jira, **description rendue en MARKDOWN** (`core/
   Markdown`/micromark, défauts sûrs), audit (créé/modifié par-le), et la **liste des objets liés** (icône de
   famille + libellé + badge ; orphelin « introuvable » grisé, NON cliquable). Un CLIC sur un objet lié
-  **existant** ouvre sa **fiche de détail** (equipmentDetail/vmDetail/spareDetail/SubEquipmentForms.detail),
+  **existant** ouvre sa **fiche de détail** (equipmentDetail/vmDetail/spareDetail/SubEquipmentForms.detail/applicationDetail),
   **EMPILÉE** par-dessus : ce détail reste vivant dessous et reparaît au dépilement (Annuler / ← Retour /
   Retour arrière). Mécanique : `InterventionTargetSource.openTargetDetail(kind, id)` (implémenté dans
   `main.ts` sur la machinerie des fiches) ouvre simplement la fiche — `ui/Modal` étant une **PILE**, le
@@ -324,10 +324,10 @@ interventions sont propres au document).
 ## Depuis les fiches (badge + déclaration)
 
 Point d'usage du cadrage : **déclarer une intervention DEPUIS la fiche** d'un équipement / d'une VM / d'un
-spare, et y **voir d'un coup d'œil** les interventions ouvertes.
+spare / d'un sous-équipement / d'une application, et y **voir d'un coup d'œil** les interventions ouvertes.
 
 - **Où.** Une rangée « Interventions » DISCRÈTE dans les **fiches détail** (`equipmentDetail`, `vmDetail`,
-  `spareDetail`) — placée sous l'identité de l'objet. Choix des fiches détail (et non des formulaires
+  `spareDetail`, la fiche sous-équipement et `applicationDetail`) — placée sous l'identité de l'objet. Choix des fiches détail (et non des formulaires
   d'édition) : c'est là que « voir d'un coup d'œil » a du sens, ces fiches sont en **lecture seule** (donc
   fermer proprement pour déclarer ne perd aucune saisie) et n'existent que pour un objet **déjà créé** (jamais
   en création). La rangée porte un **badge** « N ouverte(s) » (chargé en **async**, `warn` si N > 0, discret
@@ -411,9 +411,9 @@ le retirer **d'abord** (son script d'amovibilité est dans
    `main.ts` l'enregistrement de l'**onglet principal** « Interventions » (`shell.addView` + `new
    InterventionsAdminView(...)` + `interventionsClient` + l'implémentation `InterventionTargetSource` + les
    `interventionHooks`), et les exports dans `views/index.ts`. Retirer le champ `interventionHooks` de
-   `FormHost` (`views/forms/shared.ts`) et les **quatre appels `InterventionFicheRow.attach`** (+ imports) dans
-   `equipmentDetail` (`EquipmentForms.ts`), `vmDetail` et `spareDetail` (`DetailForms.ts`) et la fiche
-   sous-équipement (`SubEquipmentForms.ts`). Retirer le domaine
+   `FormHost` (`views/forms/shared.ts`) et les **cinq appels `InterventionFicheRow.attach`** (+ imports) dans
+   `equipmentDetail` (`EquipmentForms.ts`), `vmDetail`, `spareDetail` et `applicationDetail` (`DetailForms.ts`)
+   et la fiche sous-équipement (`SubEquipmentForms.ts`). Retirer le domaine
    `interventions.*` et l'entrée `tabs.interventions` des catalogues `src-client/i18n/locales/fr.ts` ET
    `en.ts` (le test de complétude vérifie la parité).
 3. **Tests** : retirer les **trois sections « Serveur : Interventions… »** de

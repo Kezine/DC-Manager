@@ -25,6 +25,7 @@ export class Schema {
     "equipments", "ports", "aggregates", "subEquipments", "cables", "networks", "groups", "racks",
     "rackItems", "portTypes", "cableTypes", "cableBundles", "datacenters",
     "waypoints", "floors", "ipNetworks", "ipAddresses", "dhcpRanges", "spares", "sites", "vms", "wifiClients", "contacts",
+    "applications",
   ];
 
   /** Champs de type TABLEAU (un filtre `where` y teste l'APPARTENANCE, pas l'égalité). `tags_src` = étiquettes

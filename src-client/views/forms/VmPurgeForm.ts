@@ -105,6 +105,9 @@ export class VmPurgeForm {
     const readers: VmPurgeReaders = {
       // Adresses IP RATTACHÉES (ipAddresses.vm_id) — le lecteur du store, injecté (le module pur ne le connaît pas).
       attachedIpCount: (vmId: string) => this.store.ipAddressesOfVm(vmId).length,
+      // Applications HÉBERGÉES (applications.vm_id) — même source que la section « Applications » de la
+      // fiche VM : ce que la fiche montre est exactement ce que la purge protège.
+      hostedApplicationCount: (vmId: string) => this.store.applicationsOfVm(vmId).length,
     };
     this.groups = VmPurge.groups(this.store.all("vms"), configuredProviderIds, readers);
     // PRÉ-SÉLECTION du raccourci « Purger… » d'une carte provider : uniquement le groupe des ORPHELINES.
@@ -270,6 +273,7 @@ export class VmPurgeForm {
       description: I18n.t("vm.purge.familyDescription"),
       groups: I18n.t("vm.purge.familyGroups"),
       ips: I18n.t("vm.purge.familyIps"),
+      applications: I18n.t("vm.purge.familyApplications"),
     };
     return entry.families.map((f) => label[f]).join(", ");
   }

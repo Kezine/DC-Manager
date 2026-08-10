@@ -163,9 +163,12 @@ export class Cascade {
       // détache aussi les CLIENTS WIFI rattachés à cet équipement (ap_equipment_id → null) : MIROIR EXACT
       // du détachement des VMs ci-dessus — le lien est LÉGER (le client survit, juste « AP non rapproché »),
       // et la synchro le RE-RÉSOUDRA d'elle-même si un équipement homonyme réapparaît (champ DÉRIVÉ, D4).
+      // détache aussi les APPLICATIONS hébergées sur cet équipement (equipment_id → null) : même sémantique
+      // que le détachement des adresses IP — l'application SURVIT, simplement « sans hôte » (décision D2).
       detach: [{ coll: "ipAddresses", fk: "equipment_id" }, { coll: "dhcpRanges", fk: "server_id" }, { coll: "ipNetworks", fk: "dhcp_server_id" },
         { coll: "cableBundles", fk: "endpoint_a_equipment_id" }, { coll: "cableBundles", fk: "endpoint_b_equipment_id" },
-        { coll: "vms", fk: "host_equipment_id" }, { coll: "wifiClients", fk: "ap_equipment_id" }],
+        { coll: "vms", fk: "host_equipment_id" }, { coll: "wifiClients", fk: "ap_equipment_id" },
+        { coll: "applications", fk: "equipment_id" }],
       // Les CÂBLES branchés sur les ports de l'équipement ne sont PLUS listés ici : la suppression des ports
       // (règle `delete` ci-dessus) rejoue la règle `ports`, qui les emporte — y compris ceux des lanes.
       custom: (find, fetch, id, _deletes, detaches) => {
@@ -268,10 +271,11 @@ export class Cascade {
       // qui l'atteint désormais par RÉCURSION — une fois par brosse de la baie).
       custom: (find, _fetch, id, _deletes, detaches) => Cascade.pruneWaypointsFromRoutes(find, new Set([id]), detaches),
     },
-    // VM (collection AMOVIBLE) : supprimer une VM DÉTACHE ses adresses IP rattachées (vm_id → null), sans les
-    // supprimer — le lien IPAM est LÉGER (parité stricte avec equipments.detach ipAddresses/equipment_id : l'adresse
-    // survit, juste « non attribuée »), jamais une suppression. Reste sans `delete` (rien à supprimer en cascade).
-    vms: { delete: [], detach: [{ coll: "ipAddresses", fk: "vm_id" }] },
+    // VM (collection AMOVIBLE) : supprimer une VM DÉTACHE ses adresses IP rattachées (vm_id → null) ET les
+    // APPLICATIONS qu'elle héberge (applications.vm_id → null), sans jamais les supprimer — les deux liens
+    // sont LÉGERS (parité stricte avec equipments.detach : l'adresse survit « non attribuée », l'application
+    // survit « sans hôte »). Reste sans `delete` (rien à supprimer en cascade).
+    vms: { delete: [], detach: [{ coll: "ipAddresses", fk: "vm_id" }, { coll: "applications", fk: "vm_id" }] },
     // CLIENT WIFI (collection AMOVIBLE) : RIEN ne pointe vers un client wifi dans le document — ni FK de
     // spec, ni champ libre. Supprimer un client n'entraîne donc AUCUN effet : pas de suppression enfant,
     // pas de détachement. La règle est déclarée VIDE plutôt qu'omise, à dessein : une collection ABSENTE
@@ -280,6 +284,14 @@ export class Cascade {
     // ⚠ L'autre sens du lien — supprimer un ÉQUIPEMENT → détacher `wifiClients.ap_equipment_id` — vit,
     // lui, dans la règle `equipments` ci-dessus (c'est l'équipement qui est supprimé, pas le client).
     wifiClients: { delete: [], detach: [] },
+    // APPLICATION : RIEN ne pointe vers une application dans le document — ni FK de spec, ni champ libre.
+    // Supprimer une application n'entraîne donc AUCUN effet. Règle déclarée VIDE plutôt qu'omise, à
+    // dessein (même convention que `wifiClients` ci-dessus) : une entrée vide COMMENTÉE dit « examiné,
+    // rien à faire », là où une collection ABSENTE est indiscernable d'un oubli à la relecture.
+    // ⚠ L'autre sens des liens — supprimer un ÉQUIPEMENT ou une VM → détacher `applications.equipment_id`
+    // / `applications.vm_id` — vit dans les règles `equipments` et `vms` ci-dessus (c'est l'HÔTE qui est
+    // supprimé, pas l'application).
+    applications: { delete: [], detach: [] },
   };
 
   /** DÉTACHE les équipements POSÉS sur l'étagère `trayId` (placement_mode "tray") : retour « non placé »

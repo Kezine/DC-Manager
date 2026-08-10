@@ -32,9 +32,11 @@ export type InterventionPriority = (typeof INTERVENTION_PRIORITIES)[number];
     les orphelins sont TOLÉRÉS (c'est le client qui affichera « introuvable »). */
 /* ⚠ « sub_equipment » = contenu LOGIQUE d'un équipement (drive d'une librairie à bandes, carte d'un
    châssis). Il n'a aucune existence physique propre, mais il TOMBE EN PANNE et se REMPLACE — c'est même
-   le motif d'intervention le plus courant sur ce genre de matériel. Aucun risque d'ajout : les liens
-   vivent dans une base séparée, sans FK, et les cibles orphelines sont tolérées par conception. */
-export const INTERVENTION_TARGET_KINDS = ["equipment", "vm", "spare", "sub_equipment"] as const;
+   le motif d'intervention le plus courant sur ce genre de matériel. « application » = un logiciel hébergé
+   sur un équipement OU une VM (collection `applications`) : « incident sur l'app GLPI » est un cas réel.
+   Aucun risque d'ajout : les liens vivent dans une base séparée, sans FK, et les cibles orphelines sont
+   tolérées par conception. */
+export const INTERVENTION_TARGET_KINDS = ["equipment", "vm", "spare", "sub_equipment", "application"] as const;
 export type InterventionTargetKind = (typeof INTERVENTION_TARGET_KINDS)[number];
 
 /** Bornes de texte — un titre/une réf. Jira tiennent en une ligne ; la description est du

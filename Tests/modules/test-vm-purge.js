@@ -21,8 +21,12 @@ const { ck, section, path, D, SERVER, Store, BrowserStorageAdapter, Validation, 
 module.exports = async () => {
   const { VmPurge } = D("core/VmPurge.js");
 
-  /* Lecteurs injectés : par défaut « aucune IP rattachée » ; `ipsOf` permet d'en simuler. */
-  const readers = (ipsOf = {}) => ({ attachedIpCount: (vmId) => ipsOf[vmId] || 0 });
+  /* Lecteurs injectés : par défaut « aucune IP rattachée, aucune application hébergée » ;
+     `ipsOf`/`appsOf` permettent d'en simuler. */
+  const readers = (ipsOf = {}, appsOf = {}) => ({
+    attachedIpCount: (vmId) => ipsOf[vmId] || 0,
+    hostedApplicationCount: (vmId) => appsOf[vmId] || 0,
+  });
   const vm = (over) => Object.assign({ id: "v", name: "vm", provider_id: "pve", orphan: false, notes: "", description: "", group_id: null, group_ids: [] }, over);
 
   /* ============ 1. LE CRITÈRE « ENRICHIE », FAMILLE PAR FAMILLE ============ */
@@ -35,13 +39,31 @@ module.exports = async () => {
     ck.eq(VmPurge.isEnriched(vm({ id: "a", group_id: "g1" }), r), true, "famille GROUPES — primaire seul (legacy sans group_ids) → enrichie");
     ck.eq(VmPurge.isEnriched(vm({ id: "a", group_ids: ["g1"] }), r), true, "famille GROUPES — liste seule → enrichie");
     ck.eq(VmPurge.isEnriched(vm({ id: "a" }), readers({ a: 1 })), true, "famille IPs — 1 adresse rattachée → enrichie");
+    ck.eq(VmPurge.isEnriched(vm({ id: "a" }), readers({}, { a: 1 })), true, "famille APPLICATIONS — 1 application hébergée → enrichie (la purge détacherait le lien sans prévenir)");
     // Ce qui NE compte PAS : blancs, listes vides, et surtout le texte venu du PROVIDER.
     ck.eq(VmPurge.isEnriched(vm({ id: "a", notes: "   ", description: "\t" }), r), false, "notes/description en BLANCS → pas un enrichissement");
     ck.eq(VmPurge.isEnriched(vm({ id: "a", group_ids: ["", null] }), r), false, "group_ids d'entrées vides → pas un enrichissement");
     ck.eq(VmPurge.isEnriched(vm({ id: "a", description_src: "front web (Proxmox)" }), r), false, "description_src (texte du PROVIDER) → PAS un enrichissement local");
     // Familles CUMULÉES, dans l'ordre canonique (c'est l'ordre d'affichage des raisons).
-    const fams = VmPurge.enrichmentFamilies(vm({ id: "a", notes: "n", description: "d", group_ids: ["g"] }), readers({ a: 3 }));
-    ck.eq(fams.join(","), "notes,description,groups,ips", "familles cumulées rendues dans l'ORDRE canonique");
+    const fams = VmPurge.enrichmentFamilies(vm({ id: "a", notes: "n", description: "d", group_ids: ["g"] }), readers({ a: 3 }, { a: 1 }));
+    ck.eq(fams.join(","), "notes,description,groups,ips,applications", "familles cumulées rendues dans l'ORDRE canonique");
+  });
+
+  await section("VmPurge : une VM hébergeant une APPLICATION est enrichie — exclue de la sélection par défaut", async () => {
+    // C'est la raison d'être de la famille `applications` (D3 du cadrage applications 2026-08-10) :
+    // sans elle, la purge de masse DÉTACHERAIT des applications sans prévenir (cascade `vms`).
+    const vms = [
+      vm({ id: "nue", name: "a", provider_id: "pve", orphan: true }),
+      vm({ id: "apphost", name: "b", provider_id: "pve", orphan: true }),
+    ];
+    const groups = VmPurge.groups(vms, ["pve"], readers({}, { apphost: 2 }));
+    ck.eq(groups[0].enrichedCount, 1, "la VM hébergeant une application COMPTE comme enrichie du groupe");
+    const entry = groups[0].entries.find((e) => e.id === "apphost");
+    ck(entry.enriched && entry.families.join(",") === "applications", "…retenue par la SEULE famille `applications` (l'UI dit pourquoi)");
+    ck.eq(VmPurge.select(groups, new Set([groups[0].key]), false).ids.join(","), "nue",
+      "groupe coché, enrichies NON incluses (défaut V2) → la VM à application est ÉPARGNÉE");
+    ck.eq(VmPurge.select(groups, new Set([groups[0].key]), true).ids.sort().join(","), "apphost,nue",
+      "inclusion EXPLICITE des enrichies → elle rejoint la sélection");
   });
 
   /* ============ 2. LES GROUPES (mode API vs mode FICHIER) ============ */

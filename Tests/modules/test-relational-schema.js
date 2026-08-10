@@ -217,9 +217,13 @@ module.exports = async () => {
       // (findBy à chaque passe) et `ap_equipment_id` la FK que la cascade `equipments` détache.
       'CREATE INDEX IF NOT EXISTS "idx_wifiClients_provider_id" ON "wifiClients" ("provider_id")',
       'CREATE INDEX IF NOT EXISTS "idx_wifiClients_ap_equipment_id" ON "wifiClients" ("ap_equipment_id")',
+      // applications (chantier applications 2026-08-10) : les deux FK d'hôte — cascade equipments/vms,
+      // filtre cible « Hébergée sur » en `where` serveur, invalidation de la colonne `search`.
+      'CREATE INDEX IF NOT EXISTS "idx_applications_equipment_id" ON "applications" ("equipment_id")',
+      'CREATE INDEX IF NOT EXISTS "idx_applications_vm_id" ON "applications" ("vm_id")',
     ];
     const allIndexes = RelationalSchema.allIndexDdls();
-    ck.eq(JSON.stringify(allIndexes), JSON.stringify(expectedIndexes), "index : liste exacte (39 index, ordre COLLECTIONS)");
+    ck.eq(JSON.stringify(allIndexes), JSON.stringify(expectedIndexes), "index : liste exacte (41 index, ordre COLLECTIONS)");
     // Et la phase TABLES ne contient QUE des CREATE TABLE, une par collection (le phasage tables → index
     // est la condition de l'évolution additive — cf. test-relational-evolution.js).
     const allTables = RelationalSchema.allTableDdls();

@@ -77,6 +77,14 @@ export const detail = {
     vm: "VM not found",
     wifiClient: "Wi-Fi client not found",
     type: "Type not found",
+    application: "Application not found",
+  },
+  /* APPLICATION detail sheet + "Hosted applications" sections of the HOST sheets (equipment / VM). */
+  application: {
+    title: "Application details",
+    openHost: "Open the host's detail sheet",
+    openApp: "Open the application's detail sheet",
+    hostedSection: "Hosted applications ({{count}})",
   },
   cable: {
     from: "From",

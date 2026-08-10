@@ -149,6 +149,7 @@ export const lists = {
     vms: "Aucune VM. Les équipements virtuels sont alimentés par la synchronisation d'un cluster de management (Proxmox).",
     wifiClients: "Aucun client wifi. Les clients sont alimentés par la synchronisation d'un contrôleur wifi (onglet Wifi → « Providers… », mode API).",
     subEquipments: "Aucun sous-équipement. Un sous-équipement se crée depuis la fiche de son équipement maître (pas de bouton « + » ici, v1).",
+    applications: "Aucune application. Ajoutez-en une avec « + Application » (hébergée sur un équipement ou une VM, URL optionnelle).",
   },
   filter: {
     room: "Salle",
@@ -156,6 +157,7 @@ export const lists = {
     // Dimension CIBLE « à recherche » des listings (filtre par entité — cf. views/ListTargets).
     carrier: "Porteur",
     carrierPlaceholder: "Équipement ou VM…",
+    hostedOn: "Hébergée sur",   // dimension cible du listing des applications (équipement OU VM — cf. ListTargets.applicationHost)
     master: "Équipement (maître)",   // dimension cible du listing des sous-équipements (famille UNIQUE : équipement)
     equipmentPlaceholder: "Rechercher un équipement…",
     targetEquipment: "Équip.",
@@ -203,6 +205,9 @@ export const lists = {
     // à la place de la sentinelle brute écrite par le pont (cf. core/TrackerStatus).
     notFound: "introuvable",
     wifiClient: "(client wifi)",
+    // Hôte d'une application dont la FK ne résout plus (équipement/VM supprimé hors cascade, import…) :
+    // l'orphelin se VOIT — il ne se déguise jamais en « aucun hôte » (patron des cibles d'intervention).
+    hostMissing: "(introuvable)",
     floorLabel: "Étage {{n}}",
     addrCount: "{{count}} adr.",
     points_one: "{{count}} point",

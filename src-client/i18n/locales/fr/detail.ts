@@ -84,6 +84,14 @@ export const detail = {
     vm: "VM introuvable",
     wifiClient: "Client wifi introuvable",
     type: "Type introuvable",
+    application: "Application introuvable",
+  },
+  /* Fiche APPLICATION + sections « Applications hébergées » des fiches HÔTES (équipement / VM). */
+  application: {
+    title: "Détail de l'application",
+    openHost: "Ouvrir la fiche de l'hôte",
+    openApp: "Ouvrir la fiche de l'application",
+    hostedSection: "Applications hébergées ({{count}})",
   },
   cable: {
     from: "De",

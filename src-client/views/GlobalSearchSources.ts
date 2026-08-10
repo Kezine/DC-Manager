@@ -95,6 +95,10 @@ export class GlobalSearchSources {
     // sous-réseau ni une adresse — c'est un objet de PRÉSENCE (qui est connecté, où, depuis quand),
     // et le préfixe « wifi: » est ce qu'un exploitant tape spontanément.
     { id: "wifi", icon: Icons.WIFI, prefix: "wifi:", kinds: ["wifiClients"] },
+    // Portée DÉDIÉE « app: » (décision D6 du cadrage applications 2026-08-10) plutôt qu'un rangement
+    // dans « Inventaire » : les applications sont des entités de PREMIER PLAN (ce qui tourne sur
+    // l'infrastructure), pas de l'inventaire secondaire — et « app: » est ce qu'un exploitant tape.
+    { id: "apps", icon: Icons.APPLICATION, prefix: "app:", kinds: ["applications"] },
     { id: "inventory", icon: Icons.SPARE, prefix: "inv:", kinds: ["spares", "groups", "contacts", "cableTypes", "portTypes"] },
   ];
 
@@ -229,6 +233,17 @@ export class GlobalSearchSources {
         : (WifiStatus.rawType(c) ? { text: WifiStatus.rawType(c), tone: "" } : null)),
       // « Localiser » un client wifi = son POINT D'ACCÈS (même règle que le listing : WifiLocate).
       locate: (c, store) => { const ap = WifiLocate.apEquipmentId(c, store); return ap ? { kind: "equipment", id: ap } : null; },
+    },
+    // APPLICATION : sous-ligne = l'HÔTE résolu (équipement OU VM — le nom qu'on associe spontanément à
+    // une app), sinon l'URL (l'autre identifiant qu'on tape pour la retrouver). Pas de `path` : une
+    // application n'a pas de localisation propre — son hôte, lui, se retrouve par sa propre famille.
+    applications: {
+      label: (a) => a.name || "?",
+      sub: (a, store) => {
+        const eq: any = a.equipment_id ? store.get("equipments", a.equipment_id) : null;
+        const vm: any = a.vm_id ? store.get("vms", a.vm_id) : null;
+        return (eq && eq.name) || (vm && vm.name) || a.url || "";
+      },
     },
     spares: {
       label: (s) => (s.displayName ? s.displayName() : s.name) || s.serial || "?",

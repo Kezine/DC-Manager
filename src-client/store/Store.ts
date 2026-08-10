@@ -755,6 +755,19 @@ export class Store {
       O(VMs de cet hôte) et jamais en balayage de la collection : le premier consommateur est la BULLE DE
       SURVOL d'un équipement, reconstruite à chaque mouvement de souris. */
   vmsOfHost(equipmentId: string): any[] { return this._byFk("vms", "host_equipment_id", equipmentId); }
+  /** Applications HÉBERGÉES sur un équipement (index `applications.equipment_id`) — SOURCE UNIQUE de la
+      section « Applications » de la fiche équipement (D5). Triées par nom : c'est leur seule identité
+      lisible (même choix que `subEquipmentsOf`). */
+  applicationsOfEquipment(equipmentId: string): any[] {
+    return this._byFk("applications", "equipment_id", equipmentId).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  }
+  /** Applications HÉBERGÉES sur une VM (index `applications.vm_id`) — parité stricte avec
+      `applicationsOfEquipment` (même relation exclusive equipment_id / vm_id sur `applications`).
+      Consommée par la fiche VM (D5) ET par l'enrichissement `applications` de la purge de masse
+      (`VmPurgeReaders.hostedApplicationCount` — cf. core/VmPurge). */
+  applicationsOfVm(vmId: string): any[] {
+    return this._byFk("applications", "vm_id", vmId).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  }
   dhcpRangesOfNetwork(netId: string): any[] { return this._byFk("dhcpRanges", "network_id", netId); }
   dhcpRangesOfServer(eqId: string): any[] { return this._byFk("dhcpRanges", "server_id", eqId); }
   ipAddressByValue(addr: string): any { const r = this._byFk("ipAddresses", "address", addr); return r.length ? r[0] : null; }

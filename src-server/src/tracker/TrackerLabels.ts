@@ -3,8 +3,8 @@ import { Schema } from "../constants.js";   // normalisation de recherche PARTAG
 /* =============================================================================
    ÉTIQUETTES `DCM-*` DES OBJETS LIÉS — module PUR (ni DB, ni réseau, ni horloge).
 
-   Les objets liés à une intervention (équipements, VMs, spares, sous-équipements)
-   sont poussés vers le tracker sous forme d'ÉTIQUETTES lisibles — `DCM-EQ-SOS13`,
+   Les objets liés à une intervention (équipements, VMs, spares, sous-équipements,
+   applications) sont poussés vers le tracker sous forme d'ÉTIQUETTES lisibles — `DCM-EQ-SOS13`,
    `DCM-VM-SOSVM` (demande utilisateur explicite). Elles servent de TAG DE
    RECHERCHE côté tracker : « tous les tickets qui touchent SOS13 ».
 
@@ -32,7 +32,7 @@ import { Schema } from "../constants.js";   // normalisation de recherche PARTAG
 
 /** UNE cible liée, telle que le service la présente après résolution contre le document. */
 export interface TrackerLabelTarget {
-  /** Famille de la cible (`equipment` | `vm` | `spare` | `sub_equipment`). */
+  /** Famille de la cible (`equipment` | `vm` | `spare` | `sub_equipment` | `application`). */
   kind: string;
   /** Nom AFFICHÉ de l'objet (déjà résolu — une cible disparue ne parvient pas jusqu'ici). */
   name: string;
@@ -63,6 +63,7 @@ export class TrackerLabels {
     vm: { code: "VM", collection: "vms" },
     spare: { code: "SP", collection: "spares" },
     sub_equipment: { code: "SEQ", collection: "subEquipments" },
+    application: { code: "APP", collection: "applications" },
   };
 
   /** Longueur maximale de la partie NOM d'une étiquette. Bornée bien en dessous de ce qu'un tracker

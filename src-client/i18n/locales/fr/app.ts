@@ -144,6 +144,7 @@ export const app = {
     floor: "+ Étage",
     dhcpRange: "+ Plage DHCP",
     contact: "+ Contact",
+    application: "+ Application",
   },
   vm: {
     netMapping: "Réseaux virtuels…",

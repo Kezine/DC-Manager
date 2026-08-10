@@ -19,4 +19,5 @@ export { CableBundle } from "./CableBundle";
 export { IpNetwork } from "./IpNetwork";
 export { IpAddress } from "./IpAddress";
 export { DhcpRange } from "./DhcpRange";
+export { Application } from "./Application";
 export { EntityRegistry } from "./EntityRegistry";

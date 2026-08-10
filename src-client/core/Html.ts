@@ -47,7 +47,12 @@ export class Html {
       dans la page au premier clic : c'est un XSS, et l'échappement HTML ne l'empêche PAS (la chaîne
       est parfaitement valide en valeur d'attribut). Le contrôle porte donc sur le SCHÉMA, pas sur
       les caractères. Une URL RELATIVE est refusée elle aussi — `new URL` jette sans base — ce qui
-      est le bon comportement pour un lien censé pointer un service externe. */
+      est le bon comportement pour un lien censé pointer un service externe.
+      ⚠ Règle DUPLIQUÉE côté validation partagée : `src-shared/DataValidation` porte un format `url`
+      (`isHttpUrl` — porte d'ÉCRITURE de `applications.url`, un peu plus strict) qui RÉÉCRIT cette
+      liste blanche parce que `src-shared/` n'importe rien hors du dossier (règle PERMANENTE). Les
+      deux copies se signalent mutuellement (principe n°3) : garder les schémas admis EN PHASE. Ici
+      reste la garde de RENDU — elle protège aussi les données importées jamais passées par la spec. */
   static isSafeHttpUrl(url: unknown): boolean {
     if (typeof url !== "string") return false;
     const raw = url.trim();
