@@ -519,8 +519,10 @@ module.exports = async () => {
     ck.eq(TrackerLabels.labelFor("vm", "SOSVM"), "DCM-VM-SOSVM", "famille vm → DCM-VM-<NOM>");
     ck.eq(TrackerLabels.labelFor("spare", "disque-1"), "DCM-SP-DISQUE-1", "famille spare → DCM-SP-<NOM>");
     ck.eq(TrackerLabels.labelFor("sub_equipment", "drive 4"), "DCM-SEQ-DRIVE-4", "famille sub_equipment → DCM-SEQ-<NOM>");
+    ck.eq(TrackerLabels.labelFor("application", "GLPI"), "DCM-APP-GLPI", "famille application → DCM-APP-<NOM>");
     ck.eq(TrackerLabels.labelFor("planet", "X"), null, "famille INCONNUE → aucun label (les liens sont des couples opaques, l'inconnu est toléré)");
     ck.eq(TrackerLabels.collectionOf("sub_equipment"), "subEquipments", "collection : la MÊME table donne où résoudre le nom");
+    ck.eq(TrackerLabels.collectionOf("application"), "applications", "collection : la famille application résout dans la collection applications");
     ck.eq(TrackerLabels.collectionOf("planet"), null, "collection : famille inconnue → null");
 
     // -- NORMALISATION : un label n'admet pas d'espace (contrainte Jira). Accents retirés, CAPITALES,

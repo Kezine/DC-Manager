@@ -593,6 +593,8 @@ export class DetailForms extends IpamForms {
       if (hostEq) this.equipmentDetail(store, host, hostEq.id, onChanged);
       else if (hostVm) this.vmDetail(store, host, hostVm.id, onChanged);
     };
+    // Intégration « fiches » : badge d'interventions ouvertes + « Déclarer une intervention » (no-op hors mode API).
+    InterventionFicheRow.attach(root, host.interventionHooks, { kind: "application", id, label: (app.name || "") }, () => host.closeModal?.());
     AuditLine.attach(root, app, host.userDirectory);   // « Créé/Modifié par » (mode API)
     const footerActions = this.footer(() => this.application(store, host, id, onChanged));
     host.openModal({ title: I18n.t("detail.application.title"), subtitle: Html.escape(app.name || ""), body: root, footerActions, stackKey: "detail:applications/" + id, onResume: () => this.applicationDetail(store, host, id, onChanged), hideFooter: true, wide: true });

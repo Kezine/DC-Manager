@@ -3304,6 +3304,9 @@ module.exports = async () => {
       // est portée par le grief « planet » juste au-dessus (le contrôle de famille existe bel et bien).
       const okSubEq = db.save("doc-A", "ise", { kind: "incident", title: "Drive HS", status: "declared", priority: "high", links: [{ target_kind: "sub_equipment", target_id: "se-1" }] }, "Testeur");
       ck.eq(okSubEq.links.map((l) => l.target_kind + ":" + l.target_id).join(","), "sub_equipment:se-1", "validation : lien sub_equipment ACCEPTÉ (4ᵉ famille, remplacement de drive)");
+      // 5ᵉ famille (lot B) : un lien vers une APPLICATION est accepté et persiste tel quel — « incident sur l'app GLPI ».
+      const okApp = db.save("doc-A", "iap", { kind: "incident", title: "GLPI KO", status: "declared", priority: "high", links: [{ target_kind: "application", target_id: "app-1" }] }, "Testeur");
+      ck.eq(okApp.links.map((l) => l.target_kind + ":" + l.target_id).join(","), "application:app-1", "validation : lien application ACCEPTÉ (5ᵉ famille, incident sur une app hébergée)");
       const gMulti = grief({ kind: "?", title: "", status: "?", priority: "?" });
       ck(!!gMulti && gMulti.length >= 4, "validation : griefs GROUPÉS (title + kind + status + priority cumulés en une passe)");
       ck.eq(raw.prepare("SELECT COUNT(*) AS n FROM interventions WHERE id='bad'").get().n, 0, "validation : un candidat rejeté n'écrit RIEN (parse avant transaction)");

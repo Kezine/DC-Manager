@@ -975,6 +975,7 @@ async function boot(): Promise<void> {
     vm:            { collection: "vms",           fallbackKey: "interventions.target.fallback.vm" },
     spare:         { collection: "spares",        fallbackKey: "interventions.target.fallback.spare" },
     sub_equipment: { collection: "subEquipments", fallbackKey: "interventions.target.fallback.sub_equipment" },
+    application:   { collection: "applications",  fallbackKey: "interventions.target.fallback.application" },
   };
   const targetFallback = (kind: string): string => {
     const family = TARGET_FAMILIES[kind];
