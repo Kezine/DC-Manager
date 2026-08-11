@@ -80,6 +80,13 @@ export const EQUIP_FACE_IMG_FIELD: Record<string, string> = {
 /** Numéro de release formel — estampillé dans meta.app_release à la sérialisation. */
 export const APP_RELEASE = "R1";
 
+/** Plafond de TAILLE d'une pièce jointe (octets) — vérifié au FRONT (FilePicker) pour une erreur immédiate
+    et lisible AVANT tout upload. DOIT rester égal au plafond multer du serveur (`api.ts`, `attachmentUpload`
+    `limits.fileSize` = 50 Mo) : au-delà, le serveur rejette de toute façon, mais le message serait moins clair.
+    Constante CLIENTE : le plafond serveur vit côté serveur (lot A, hors du partagé), on n'y touche pas — on le
+    reflète ici. 50 × 1024 × 1024 = 52 428 800 octets. */
+export const ATTACHMENT_MAX_BYTES = 50 * 1024 * 1024;
+
 /* ---- palette de couleurs (thème « couleur par type » 3D, couleurs de groupe…) ---- */
 export const COLOR_PALETTE = [
   "#ff5500", "#facc15", "#4ade80", "#38bdf8", "#a78bfa", "#f472b6", "#fb923c", "#34d399",

@@ -768,6 +768,17 @@ export class Store {
   applicationsOfVm(vmId: string): any[] {
     return this._byFk("applications", "vm_id", vmId).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
   }
+  /** Pièces jointes d'un ÉQUIPEMENT (index `attachments.equipment_id`) — SOURCE UNIQUE de la future
+      section « Pièces jointes » de la fiche équipement (lot B). Triées par nom (même choix que
+      `applicationsOfEquipment` : le libellé est leur seule identité lisible). */
+  attachmentsOfEquipment(equipmentId: string): any[] {
+    return this._byFk("attachments", "equipment_id", equipmentId).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  }
+  /** Pièces jointes d'un SOUS-ÉQUIPEMENT (index `attachments.sub_equipment_id`) — parité stricte avec
+      `attachmentsOfEquipment` (même relation exclusive equipment_id / sub_equipment_id sur `attachments`). */
+  attachmentsOfSubEquipment(subEquipmentId: string): any[] {
+    return this._byFk("attachments", "sub_equipment_id", subEquipmentId).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  }
   dhcpRangesOfNetwork(netId: string): any[] { return this._byFk("dhcpRanges", "network_id", netId); }
   dhcpRangesOfServer(eqId: string): any[] { return this._byFk("dhcpRanges", "server_id", eqId); }
   ipAddressByValue(addr: string): any { const r = this._byFk("ipAddresses", "address", addr); return r.length ? r[0] : null; }

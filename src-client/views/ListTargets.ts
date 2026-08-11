@@ -63,15 +63,19 @@ export class ListTargets {
 
   private static readonly EQUIPMENT: TargetFamily = { kind: "equipment", collection: "equipments", fallbackKey: "lists.ph.equipment", tagKey: "lists.filter.targetEquipment" };
   private static readonly VM: TargetFamily = { kind: "vm", collection: "vms", fallbackKey: "lists.ph.vm", tagKey: "lists.filter.targetVm" };
+  private static readonly SUB_EQUIPMENT: TargetFamily = { kind: "sub_equipment", collection: "subEquipments", fallbackKey: "subEquipment.fallback", tagKey: "lists.filter.targetSubEquipment" };
 
-  /** Descripteur GÉNÉRIQUE « équipement OU VM pointé par une FK directe » : la collection filtrée porte
-      le MÊME couple de colonnes `equipment_id`/`vm_id` (patron `ipAddresses`, repris tel quel par
-      `applications` — décision D1 du cadrage 2026-08-10) → `where` serveur et restriction cliente sont
-      STRUCTURELLEMENT identiques, seuls les LIBELLÉS de la dimension changent. FACTORISÉ entre
-      `ipCarrier` et `applicationHost` (principe n°3) : dupliquer le bloc aurait laissé les deux copies
-      diverger au premier ajustement de la garde « famille inconnue ». */
-  private static equipmentOrVmByFk(store: Store, reader: EntitySearchReader | null, labelKey: string, placeholderKey: string): ListTargetFilter {
-    const families = [ListTargets.EQUIPMENT, ListTargets.VM];
+  /** Descripteur GÉNÉRIQUE « cible pointée par une FK DIRECTE, parmi plusieurs familles » : la collection
+      filtrée porte une colonne `<kind>_id` par famille (patron `ipAddresses`/`applications` = equipment_id/vm_id,
+      repris par `attachments` = equipment_id/sub_equipment_id) → `where` serveur et restriction cliente sont
+      STRUCTURELLEMENT identiques d'une famille à l'autre : seule la LISTE des familles et les LIBELLÉS
+      changent. GÉNÉRALISÉ (paramètre `families`) depuis l'ancien `equipmentOrVmByFk` codé en dur pour
+      equipment/vm — dupliquer le bloc aurait laissé les copies diverger au premier ajustement de la garde
+      « famille inconnue ». Le champ FK dérive de la CONVENTION `<kind>_id` (equipment→equipment_id,
+      vm→vm_id, sub_equipment→sub_equipment_id) — la même que les couples de colonnes des specs.
+      ⚠ COMPORTEMENT INCHANGÉ pour les appelants equipment/vm : `{ [kind + "_id"]: id }` produit exactement
+      `{ equipment_id }`/`{ vm_id }`, et la garde « slug non prévu → aucune ligne » est identique. */
+  private static byFkFamilies(store: Store, reader: EntitySearchReader | null, families: readonly TargetFamily[], labelKey: string, placeholderKey: string): ListTargetFilter {
     const source = new EntityCandidateSource(store, ListTargets.candidateFamilies(families), reader, ListTargets.SEARCH_LIMIT);
     return {
       label: I18n.t(labelKey),
@@ -79,12 +83,13 @@ export class ListTargets {
       search: (query) => source.fetch(query),
       labelOf: (kind, id) => ListTargets.labelOf(store, families, kind, id),
       tagOf: (kind) => ListTargets.tagOf(families, kind),
-      where: (kind, id) => (kind === "equipment" ? { equipment_id: id } : kind === "vm" ? { vm_id: id } : null),
+      where: (kind, id) => { const family = families.find((f) => f.kind === kind); return family ? { [family.kind + "_id"]: id } : null; },
       restrict: (rows, kind, id) => {
         // Famille inconnue → AUCUNE ligne (jamais « toutes ») : un slug non prévu ne doit pas se lire
         // comme « pas de filtre » — l'utilisateur verrait un filtre posé sans effet.
-        if (kind !== "equipment" && kind !== "vm") return [];
-        const field = kind === "equipment" ? "equipment_id" : "vm_id";
+        const family = families.find((f) => f.kind === kind);
+        if (!family) return [];
+        const field = family.kind + "_id";
         return rows.filter((row) => row && row[field] === id);
       },
     };
@@ -94,14 +99,22 @@ export class ListTargets {
       `vm_id`) → le filtre part au SERVEUR en `where` ; le mode fichier applique le même test en mémoire.
       `reader` (mode API) alimente la recherche de CANDIDATS serveur-pilotée ; null = mode fichier. */
   static ipCarrier(store: Store, reader: EntitySearchReader | null = null): ListTargetFilter {
-    return ListTargets.equipmentOrVmByFk(store, reader, "lists.filter.carrier", "lists.filter.carrierPlaceholder");
+    return ListTargets.byFkFamilies(store, reader, [ListTargets.EQUIPMENT, ListTargets.VM], "lists.filter.carrier", "lists.filter.carrierPlaceholder");
   }
 
   /** HÔTE d'une application : équipement OU VM — MÊME structure de lien que le porteur d'une adresse IP
       (deux FK directes exclusives-souples), seule la dimension se libelle « Hébergée sur ». C'est lui qui
       donne « les applications de tel serveur / telle VM » en un clic depuis le listing Applications. */
   static applicationHost(store: Store, reader: EntitySearchReader | null = null): ListTargetFilter {
-    return ListTargets.equipmentOrVmByFk(store, reader, "lists.filter.hostedOn", "lists.filter.carrierPlaceholder");
+    return ListTargets.byFkFamilies(store, reader, [ListTargets.EQUIPMENT, ListTargets.VM], "lists.filter.hostedOn", "lists.filter.carrierPlaceholder");
+  }
+
+  /** CIBLE d'une pièce jointe : équipement OU sous-équipement (deux FK directes exclusives-souples,
+      `equipment_id`/`sub_equipment_id` — décision D2 du cadrage pièces jointes 2026-08-10). MÊME structure
+      que le porteur d'une adresse IP, familles différentes : c'est lui qui donne « les pièces jointes de tel
+      équipement / tel sous-équipement » en un clic depuis le listing Pièces jointes. */
+  static attachmentTarget(store: Store, reader: EntitySearchReader | null = null): ListTargetFilter {
+    return ListTargets.byFkFamilies(store, reader, [ListTargets.EQUIPMENT, ListTargets.SUB_EQUIPMENT], "lists.filter.attachedTo", "lists.filter.carrierPlaceholder");
   }
 
   /** ÉQUIPEMENT MAÎTRE d'un sous-équipement : le rattachement est une simple colonne (`equipment_id`) →

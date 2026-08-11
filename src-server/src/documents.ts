@@ -5,6 +5,8 @@ import { type RepositoryContract, type SqliteCtor, type SqliteDb } from "./db.js
 import { RelationalRepository } from "./RelationalRepository.js";
 import { LegacyMigration } from "./LegacyMigration.js";
 import { Logger } from "./logger.js";
+import { AttachmentFiles } from "./AttachmentFiles.js";   // binaires des pièces jointes : disque, HORS base (cf. docs/attachments.md)
+import { Schema } from "./constants.js";
 
 export interface DocMeta { id: string; name: string; created_date: string; updated_date: string; rev?: number; locked?: boolean }
 
@@ -15,9 +17,14 @@ export interface DocMeta { id: string; name: string; created_date: string; updat
 export class DocumentStore {
   private readonly registry: SqliteDb;
   private readonly repos = new Map<string, RepositoryContract>();
+  /** Binaires des PIÈCES JOINTES (`<dir>/attachments/<docId>/…`) — instance UNIQUE, partagée avec la
+      couche API (routes d'upload/download, cf. Api) : les métadonnées vivent dans la collection
+      `attachments` du dépôt, les fichiers ICI, la maintenance réconcilie les deux (D5). */
+  readonly attachmentFiles: AttachmentFiles;
 
   constructor(private readonly dir: string, private readonly Database: SqliteCtor, private readonly log: Logger = new Logger("error")) {
     fs.mkdirSync(dir, { recursive: true });
+    this.attachmentFiles = new AttachmentFiles(dir);
     this.registry = new Database(path.join(dir, "registry.db"));
     this.registry.pragma("journal_mode = WAL");
     this.registry.pragma("busy_timeout = 5000");    // anti-SQLITE_BUSY — mêmes réglages que Repository.open
@@ -106,6 +113,11 @@ export class DocumentStore {
       try { fs.rmSync(path.join(this.dir, id + ".db" + ext), { force: true }); }
       catch (e: any) { this.log.warn("fichier non supprimé", id + ".db" + ext, e && e.message); }
     }
+    // Le dossier des PIÈCES JOINTES suit le document (les binaires n'ont de sens que par leurs
+    // métadonnées, qui disparaissent avec le .db). Échec loggé, jamais bloquant — même doctrine que
+    // les fichiers .db ci-dessus : la ligne registre part quand même, le reste est du déchet signalé.
+    try { this.attachmentFiles.removeDocumentDir(id); }
+    catch (e: any) { this.log.warn("dossier de pièces jointes non supprimé", id, e && e.message); }
     this.registry.prepare("DELETE FROM documents WHERE id = ?").run(id);
     if (this.getSetting("defaultDocId") === id) this.setSetting("defaultDocId", null);   // le doc par défaut vient d'être supprimé → on efface le réglage périmé
     this.log.info("document supprimé", id);
@@ -130,16 +142,25 @@ export class DocumentStore {
   }
 
   /** MAINTENANCE d'un document (admin) : purge des images orphelines + compactage (cf. Repository.maintenance),
-      avec la taille du fichier .db avant/après (le VACUUM rend l'espace au système). null si document inconnu. */
-  maintenance(id: string): { purgedImages: number; bytesBefore: number; bytesAfter: number } | null {
+      PLUS la purge des binaires de PIÈCES JOINTES orphelins (D5 : le seul endroit où un binaire est supprimé —
+      la suppression d'un enregistrement ne fait JAMAIS d'unlink, c'est ce qui rend l'undo sûr), avec la taille
+      du fichier .db avant/après (le VACUUM rend l'espace au système). null si document inconnu. */
+  maintenance(id: string): { purgedImages: number; purgedAttachments: number; purgedAttachmentBytes: number; bytesBefore: number; bytesAfter: number } | null {
     const repo = this.repo(id); if (!repo) return null;
     const file = path.join(this.dir, id + ".db");
     const size = () => { try { return fs.statSync(file).size; } catch { return 0; } };
     const bytesBefore = size();
     const r = repo.maintenance();
+    // Ids RÉFÉRENCÉS = les ids de la COLLECTION `attachments` (requête sur la table de collection — PAS un
+    // scan des FK du document : une pièce momentanément sans cible reste référencée par son propre
+    // enregistrement, seule la disparition de l'ENREGISTREMENT rend son binaire orphelin).
+    const referenced = new Set<string>(repo.list("attachments", { page: 1, pageSize: Schema.PAGE_SIZE_ALL }).rows.map((row) => String(row.id)));
+    const attachmentsPurge = this.attachmentFiles.purgeOrphans(id, referenced);
     const bytesAfter = size();
-    this.log.info("maintenance", id, r.purgedImages + " image(s) purgée(s)", bytesBefore + " → " + bytesAfter + " octets");
-    return { ...r, bytesBefore, bytesAfter };
+    this.log.info("maintenance", id, r.purgedImages + " image(s) purgée(s)",
+      attachmentsPurge.purged + " binaire(s) de pièce jointe purgé(s) (" + attachmentsPurge.bytes + " octets)",
+      bytesBefore + " → " + bytesAfter + " octets");
+    return { ...r, purgedAttachments: attachmentsPurge.purged, purgedAttachmentBytes: attachmentsPurge.bytes, bytesBefore, bytesAfter };
   }
 
   /** ARRÊT PROPRE : ferme tous les dépôts ouverts puis le registre (chaque close = optimize + checkpoint du -wal,

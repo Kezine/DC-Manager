@@ -40,6 +40,7 @@ export const search = {
     vms: "VMs",
     wifiClients: "Wi-Fi clients",
     applications: "Applications",
+    attachments: "Attachments",
     spares: "Spares",
     groups: "Groups",
     contacts: "Contacts",

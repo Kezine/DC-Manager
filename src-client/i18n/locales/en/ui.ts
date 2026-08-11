@@ -16,6 +16,13 @@ export const ui = {
     in: "Zoom in",
     fitLabel: "Fit",
   },
+  /* Reusable FILE picker (`ui/FilePicker`): clickable zone, clearing, rejection messages. */
+  filePicker: {
+    placeholder: "Choose a file…",
+    clear: "Remove the file",
+    badType: "Unsupported file type.",
+    tooBig: "File too large (max {{max}}).",
+  },
   modal: {
     errorPrefix: "Error: {{message}}",
     confirmCloseTitle: "Close without saving?",

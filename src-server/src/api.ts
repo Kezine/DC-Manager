@@ -1,6 +1,10 @@
 import express, { type Router, type RequestHandler, type Request, type Response } from "express";
 import multer from "multer";
+import fs from "node:fs";
+import { randomUUID } from "node:crypto";
 import { Schema } from "./constants.js";
+import { AttachmentFiles } from "./AttachmentFiles.js";   // binaires des pièces jointes : chemins sûrs + I/O disque (instance UNIQUE portée par DocumentStore)
+import { ContentDisposition } from "./ContentDisposition.js";   // en-tête de téléchargement assaini (D6 — nom d'origine = donnée utilisateur)
 import { type RepositoryContract, type Rec, type ListOpts } from "./db.js";   // le CONTRAT (surface publique) — l'implémentation servie est relationnelle depuis la bascule L4
 import { DocumentStore } from "./documents.js";
 import { Auth, type SsoResult } from "./auth.js";
@@ -57,6 +61,23 @@ export class RequestAuthor {
 export class Api {
   private readonly upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 64 * 1024 * 1024 } });
 
+  /** Upload des PIÈCES JOINTES : multer SÉPARÉ en **diskStorage** — jamais le memoryStorage des images
+      (50 Mo en RAM par upload concurrent gèleraient le serveur ; sur disque, l'écriture est STREAMÉE et le
+      thread Node ne porte jamais le binaire entier — la raison d'être de D4, cf. AttachmentFiles). Le
+      fichier atterrit en `.tmp-…` DANS le dossier cible du document : le rename final (`promote`) reste
+      atomique (même volume). Plafond D6 : 50 Mo par pièce. Callbacks en fléchées → `this` est l'Api au
+      moment de la requête (les params du routeur document, dont docId, sont fusionnés — mergeParams). */
+  private readonly attachmentUpload = multer({
+    storage: multer.diskStorage({
+      destination: (req, _file, cb) => {
+        try { cb(null, this.docs.attachmentFiles.ensureDir((req.params as { docId?: string }).docId || "")); }
+        catch (e: any) { cb(e, ""); }
+      },
+      filename: (_req, _file, cb) => cb(null, AttachmentFiles.tempName()),
+    }),
+    limits: { fileSize: 50 * 1024 * 1024 },
+  });
+
   /** Plafond d'ids par appel à `GET /users/resolve` (anti-abus — parité avec les autres endpoints batch). */
   private static readonly USERS_RESOLVE_CAP = 200;
 
@@ -99,6 +120,15 @@ export class Api {
     data.get("/images/:id/blob", this.getImageBlob);
     data.put("/images/:id", this.upload.single("blob"), this.putImage);
     data.delete("/images/:id", this.deleteImage);
+    // -- pièces jointes : SEULES les deux routes du BINAIRE sont dédiées (création multipart streamée +
+    // download streamé). Tout le reste — listing, lecture, ÉDITION de métadonnées, SUPPRESSION — passe par
+    // les routes GÉNÉRIQUES de collection ci-dessous (`attachments` est une collection ordinaire du
+    // document : rev++, changeset, SSE, cascade). ⚠ Le POST doit précéder `POST /:collection` (sinon la
+    // route générique capterait « attachments » et créerait des métadonnées sans binaire) ; le GET blob
+    // (3 segments) ne peut pas être capté par `GET /:collection/:id` (2 segments). D5 : la suppression
+    // d'un enregistrement ne fait AUCUN unlink — la purge des binaires est le travail de la maintenance.
+    data.post("/attachments", this.attachmentUpload.single("blob"), this.createAttachment);
+    data.get("/attachments/:id/blob", this.getAttachmentBlob);
     data.post("/maintenance", this.maintenance);   // AVANT /:collection (sinon « maintenance » serait une collection)
     data.get("/search", this.searchAll);           // AVANT /:collection aussi — recherche TRANSVERSE (palette Ctrl+K, cf. docs/recherche.md)
     data.get("/:collection", this.list);
@@ -418,9 +448,73 @@ export class Api {
   };
   private deleteImage: RequestHandler = (req, res) => { this.repoOf(req).deleteImage(req.params.id); res.status(204).end(); };
 
-  /* -- MAINTENANCE (admin — tout ce routeur l'est) : purge des images orphelines + VACUUM/checkpoint/optimize.
-        Comme les autres routes d'images : pas de notification SSE ni d'incrément de révision (les images sont
-        HORS modèle ; les autres clients rechargent leur miroir à l'ouverture de document). -- */
+  /* -- pièces jointes (binaire) — cf. docs/attachments.md -- */
+  /** CRÉATION d'une pièce jointe : multipart `{ meta: JSON, blob: file }`. Discipline D5 : le FICHIER
+      d'abord (multer a déjà streamé un `.tmp-…` dans le dossier du document ; `promote` = rename atomique
+      vers l'id définitif), l'ENREGISTREMENT ensuite (upsert de la collection `attachments`, via le dépôt
+      standard : rev++/verrou/SSE sont portés par `resolveRepo` comme pour toute écriture, et le changeset
+      cible la collection — cf. ApiRules.buildChangeset, chemin `/attachments`). Un crash entre les deux
+      laisse au pire un binaire orphelin, rattrapé par la maintenance ; un échec d'insertion déclenche le
+      SEUL unlink « en ligne » légitime (l'enregistrement n'a jamais existé, D5 ne protège rien).
+      Le serveur fait AUTORITÉ sur `size` (taille RÉELLE du fichier reçu — jamais crue du client) et
+      rejoue la liste blanche MIME partagée (même doctrine anti-XSS-stocké que `putImage`). */
+  private createAttachment: RequestHandler = (req, res) => {
+    const docId = (req.params as { docId?: string }).docId || "";
+    const file = (req as { file?: { path: string; size: number } }).file;   // posé par attachmentUpload.single("blob") — diskStorage, jamais en mémoire
+    const dropTemp = () => { if (file) { try { fs.unlinkSync(file.path); } catch { /* déjà retiré */ } } };
+    // meta malformée → 400 (l'ignorer créerait un enregistrement vide) ; le temp est nettoyé au passage.
+    let meta: Rec = {};
+    try { meta = req.body && req.body.meta ? JSON.parse(req.body.meta) : {}; }
+    catch { dropTemp(); res.status(400).json({ error: "meta invalide (JSON attendu)" }); return; }
+    if (!file) { res.status(400).json({ error: "fichier manquant (multipart { meta, blob } attendu)" }); return; }
+    // Liste blanche PARTAGÉE (Schema.ATTACHMENT_MIME_TYPES) : le binaire est resservi avec le Content-Type
+    // stocké — accepter text/html ou image/svg+xml ouvrirait un XSS stocké (cf. Schema, décision D6).
+    if (!Schema.isAttachmentMime(meta.mime)) { dropTemp(); res.status(400).json({ error: "type de fichier non supporté (" + Schema.ATTACHMENT_MIME_TYPES.join(", ") + ")" }); return; }
+    meta.size = file.size;   // AUTORITÉ SERVEUR : la taille déclarée par le client est écrasée
+    // Id fourni par le client (parité mode fichier : Id.uid) OU généré ici — dans les deux cas VALIDÉ comme
+    // nom de fichier SÛR (aucune entrée libre dans un chemin — anti-traversal D4, cf. AttachmentFiles).
+    const id = (typeof meta.id === "string" && meta.id) ? meta.id : "att-" + randomUUID();
+    if (!AttachmentFiles.isSafeId(id)) { dropTemp(); res.status(400).json({ error: "id de pièce jointe invalide" }); return; }
+    const record = this.accept(res, "attachments", { ...meta, id }, this.repoFetcher(req), this.repoChildFinder(req));
+    if (!record) { dropTemp(); return; }
+    // CRÉATION STRICTE (parité `create`) : un id existant écraserait l'enregistrement hors verrou → 409.
+    if (this.repoOf(req).getOne("attachments", id)) { dropTemp(); res.status(409).json({ error: "création refusée : l'id existe déjà", collection: "attachments", id }); return; }
+    try { this.docs.attachmentFiles.promote(file.path, docId, id); }
+    catch (e: any) { dropTemp(); res.status(500).json({ error: "écriture du fichier impossible : " + (e && e.message) }); return; }
+    const stamped = AuditStamp.apply(record, null, this.authorId(req), new Date().toISOString());
+    try { this.repoOf(req).upsert("attachments", stamped, this.revOf(req)); res.status(201).json(stamped); }
+    catch (e: any) { this.docs.attachmentFiles.remove(docId, id); res.status(400).json({ error: e.message }); }
+  };
+
+  /** DOWNLOAD du binaire — STREAMÉ (fs.createReadStream → res : le serveur ne porte jamais le fichier
+      entier en mémoire, cf. D4). `Content-Disposition: attachment` TOUJOURS (D6 : jamais inline — même
+      un PDF bénin reste un téléchargement, et le nom d'origine est assaini par ContentDisposition,
+      CRLF/guillemets/non-ASCII compris). 404 si l'enregistrement OU le fichier manque. */
+  private getAttachmentBlob: RequestHandler = (req, res) => {
+    const docId = (req.params as { docId?: string }).docId || "";
+    const id = req.params.id;
+    const record = AttachmentFiles.isSafeId(id) ? this.repoOf(req).getOne("attachments", id) : null;
+    if (!record) { res.status(404).json({ error: "introuvable" }); return; }
+    const stat = this.docs.attachmentFiles.statOf(docId, id);
+    if (!stat) { res.status(404).json({ error: "binaire introuvable" }); return; }
+    res.setHeader("Content-Type", String(record.mime || "application/octet-stream"));
+    res.setHeader("Content-Length", String(stat.size));
+    res.setHeader("Content-Disposition", ContentDisposition.attachment(String(record.file_name || "")));
+    res.setHeader("Cache-Control", "private, max-age=60");   // parité images ; `nosniff` est global (Server)
+    const stream = this.docs.attachmentFiles.readStream(docId, id);
+    // Fichier disparu ENTRE le stat et l'ouverture (maintenance concurrente) : 404 si rien n'est parti,
+    // sinon on coupe la connexion (le client verra un download tronqué — mieux qu'un fichier silencieusement faux).
+    stream.on("error", () => { if (!res.headersSent) { res.status(404).json({ error: "binaire introuvable" }); } else { res.destroy(); } });
+    stream.pipe(res);
+  };
+
+  /* -- MAINTENANCE (admin — tout ce routeur l'est) : purge des images orphelines ET des binaires de pièces
+        jointes orphelins + VACUUM/checkpoint/optimize. Comme TOUTE écriture du routeur document, ce POST
+        traverse `resolveRepo` : il consomme une révision et publie un SSE (chemin non listé par
+        `ApiRules.buildChangeset` → changeset `full`, repli sûr — les autres clients rechargent, ce qui est
+        au pire un rafraîchissement inutile après une purge). ⚠ Un commentaire historique affirmait ici que
+        les routes d'IMAGES ne produisaient « ni SSE ni rev » — FAUX (rectifié, principe n°13) : elles
+        traversent `resolveRepo` comme les autres, avec un changeset `images: true` (cf. buildChangeset). -- */
   private maintenance: RequestHandler = (req, res) => {
     const r = this.docs.maintenance((req.params as any).docId);
     if (!r) { res.status(404).json({ error: "document inconnu" }); return; }

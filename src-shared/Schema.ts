@@ -25,7 +25,7 @@ export class Schema {
     "equipments", "ports", "aggregates", "subEquipments", "cables", "networks", "groups", "racks",
     "rackItems", "portTypes", "cableTypes", "cableBundles", "datacenters",
     "waypoints", "floors", "ipNetworks", "ipAddresses", "dhcpRanges", "spares", "sites", "vms", "wifiClients", "contacts",
-    "applications",
+    "applications", "attachments",
   ];
 
   /** Champs de type TABLEAU (un filtre `where` y teste l'APPARTENANCE, pas l'égalité). `tags_src` = étiquettes
@@ -53,6 +53,25 @@ export class Schema {
       XSS stocké servi par l'origine de l'app). */
   static readonly IMAGE_MIME_TYPES: readonly string[] = ["image/png", "image/jpeg", "image/webp"];
   static isImageMime(type: unknown): boolean { return Schema.IMAGE_MIME_TYPES.includes(String(type || "")); }
+
+  /** Types MIME de PIÈCE JOINTE acceptés (collection `attachments`) — liste UNIQUE front ⇄ serveur, même
+      doctrine anti-XSS-stocké que `IMAGE_MIME_TYPES` : le binaire est resservi par l'ORIGINE de l'app avec
+      son Content-Type stocké, donc tout type que le navigateur peut EXÉCUTER est banni — JAMAIS `text/html`
+      ni `image/svg+xml` (un SVG scripté est un document exécutable). La liste est une LISTE BLANCHE (jamais
+      une liste noire, qui oublie toujours un type) : documents administratifs (PDF, ODT/ODS, DOCX/XLSX),
+      images sûres (mêmes trois que les façades) et texte inerte (TXT/CSV). Le front filtre à la sélection
+      de fichier ; le serveur REJETTE en 400 tout autre type à l'upload (et le download force
+      `Content-Disposition: attachment`, décision D6 — défense en profondeur, cf. docs/attachments.md). */
+  static readonly ATTACHMENT_MIME_TYPES: readonly string[] = [
+    "application/pdf",
+    "image/png", "image/jpeg", "image/webp",
+    "application/vnd.oasis.opendocument.text",
+    "application/vnd.oasis.opendocument.spreadsheet",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "text/plain", "text/csv",
+  ];
+  static isAttachmentMime(type: unknown): boolean { return Schema.ATTACHMENT_MIME_TYPES.includes(String(type || "")); }
 
   private static readonly COLLECTION_SET = new Set(Schema.COLLECTIONS);
   static isCollection(collection: string): boolean { return Schema.COLLECTION_SET.has(collection); }

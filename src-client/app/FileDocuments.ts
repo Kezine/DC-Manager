@@ -1,9 +1,11 @@
 /* =============================================================================
    DOCUMENTS FICHIER — contrôleur du cycle de vie fichier local, EXTRAIT de
    `boot()` (main.ts, découpage P4) : File System Access (ouvrir / enregistrer /
-   rouvrir, mode « accès dossier »), fichier COMPAGNON d'images `.nmfb`
-   (appariement par clé meta.facesKey), exports (JSON autonome, visualiseur
-   HTML, bibliothèque d'images) et import de bibliothèque.
+   rouvrir, mode « accès dossier »), fichiers COMPAGNONS — images `.nmfb`
+   (appariement par clé meta.facesKey) et pièces jointes `.nmfa` (clé
+   meta.attachmentsKey, mêmes stratégies de réouverture — cf. docs/attachments.md),
+   exports (JSON autonome, visualiseur HTML, bibliothèque d'images) et import
+   de bibliothèque.
 
    L'ÉTAT fichier (handles, nom) vit ICI ; l'adhérence à la boucle applicative
    (chrome, vues, welcome, auto-save, timeline d'undo) passe par l'interface
@@ -14,6 +16,7 @@
 import type { Store } from "../store";
 import { Icons } from "../ui/Icons";
 import type { ImageStore } from "../data/ImageStore";
+import type { AttachmentStore } from "../data/AttachmentStore";
 import type { SaveState } from "./SaveState";
 import type { Prefs } from "../core/Prefs";
 import { HandleStore } from "./HandleStore";
@@ -28,6 +31,7 @@ import { I18n } from "../i18n/I18n";
 const W = window as any;
 const JSON_TYPES = [{ description: "DC Manager JSON", accept: { "application/json": [".json"] } }];
 const FACES_TYPES = [{ description: "DC Manager Faces (images)", accept: { "application/octet-stream": [".nmfb"] } }];   // fichier compagnon d'images
+const ATTACHMENTS_TYPES = [{ description: "DC Manager Attachments (pièces jointes)", accept: { "application/octet-stream": [".nmfa"] } }];   // fichier compagnon de pièces jointes
 
 /** Adhérence à la boucle applicative, injectée. */
 export interface FileDocumentsHost {
@@ -42,7 +46,7 @@ export interface FileDocumentsHost {
 }
 
 export interface FileDocumentsDeps {
-  store: Store; imageStore: ImageStore; session: SaveState; prefs: Prefs;
+  store: Store; imageStore: ImageStore; attachmentStore: AttachmentStore; session: SaveState; prefs: Prefs;
   handleStore: HandleStore; tabChannel: TabChannel; hasFsApi: boolean; host: FileDocumentsHost;
 }
 
@@ -51,7 +55,9 @@ export class FileDocumentController {
   handle: any = null;
   /** Handle du fichier compagnon d'images (.nmfb) du document courant. */
   facesHandle: any = null;
-  /** Mode « accès dossier » : handle du DOSSIER courant (couvre .json + .nmfb). */
+  /** Handle du fichier compagnon de pièces jointes (.nmfa) du document courant. */
+  attachmentsHandle: any = null;
+  /** Mode « accès dossier » : handle du DOSSIER courant (couvre .json + .nmfb + .nmfa). */
   dirHandle: any = null;
   /** Nom du fichier lié (aussi utilisé comme nom d'affichage par le mode REST). */
   name = "";
@@ -59,12 +65,14 @@ export class FileDocumentController {
   private lastRec: { handle: any; name: string } | null = null;   // dernier fichier mémorisé (réouverture)
   private readonly fileInput: HTMLInputElement;                    // import caché (navigateurs sans FS API)
   private readonly flog = Log.scope("fs");                         // trace fichier/compagnon (flag de débogage)
-  private readonly store: Store; private readonly imageStore: ImageStore; private readonly session: SaveState;
+  private readonly store: Store; private readonly imageStore: ImageStore; private readonly attachmentStore: AttachmentStore;
+  private readonly session: SaveState;
   private readonly prefs: Prefs; private readonly handleStore: HandleStore; private readonly tabChannel: TabChannel;
   private readonly hasFsApi: boolean; private readonly host: FileDocumentsHost;
 
   constructor(deps: FileDocumentsDeps) {
-    this.store = deps.store; this.imageStore = deps.imageStore; this.session = deps.session; this.prefs = deps.prefs;
+    this.store = deps.store; this.imageStore = deps.imageStore; this.attachmentStore = deps.attachmentStore;
+    this.session = deps.session; this.prefs = deps.prefs;
     this.handleStore = deps.handleStore; this.tabChannel = deps.tabChannel; this.hasFsApi = deps.hasFsApi; this.host = deps.host;
     // ---- caché : input d'import (navigateurs sans File System Access API) ----
     this.fileInput = document.createElement("input");
@@ -86,7 +94,7 @@ export class FileDocumentController {
   /** Nom de fichier proposé pour le document courant. */
   docFileName(): string { return Download.safeName(this.store.meta.docName || "dc-manager") + ".json"; }
   /** Détache tout fichier (nouveau document) : handles + nom remis à zéro. */
-  detach(): void { this.handle = null; this.facesHandle = null; this.dirHandle = null; this.name = ""; this.session.setFile(false); }
+  detach(): void { this.handle = null; this.facesHandle = null; this.attachmentsHandle = null; this.dirHandle = null; this.name = ""; this.session.setFile(false); }
   /** Nom du dernier fichier/document mémorisé (bouton « Rouvrir » du welcome), ou null. */
   async lastOpenName(): Promise<string | null> {
     try {
@@ -117,6 +125,7 @@ export class FileDocumentController {
     if (handle) this.rememberHandle(handle, name || handle.name || "");
     this.host.applyTheme(); this.session.setFile(this.hasLinkedFile); this.session.markLoaded(this.store.histIndex());
     if (!Array.isArray(raw.faceImages)) await this.loadCompanionFacesOnOpen(handle);   // .json sans images inline → recharge le compagnon .nmfb (auto si mémorisé)
+    await this.loadCompanionAttachmentsOnOpen(handle);   // binaires de pièces jointes : compagnon .nmfa (JAMAIS inline — décision D8)
     this.host.documentOpened();
   }
 
@@ -128,10 +137,16 @@ export class FileDocumentController {
   }
   /** Permission d'écriture sur le fichier COURANT (pont pour l'auto-save). */
   ensureCurrentWritePermission(): Promise<boolean> { return this.ensureWritePermission(this.handle); }
-  /** Sérialisation FS : `.json` SANS images (les images vivent dans le compagnon `.nmfb` à côté). */
+  /** Sérialisation FS : `.json` SANS images ni binaires de pièces jointes (ils vivent dans les compagnons
+      `.nmfb`/`.nmfa` à côté — seules les MÉTADONNÉES `attachments` sont dans le document). */
   private serializeJson(): string { return JSON.stringify(this.store.toJSON(), null, 2); }
   /** Repli DOWNLOAD (navigateur sans File System Access API) : fichier AUTONOME, images embarquées inline
-      (aucun compagnon n'est possible sans handle FS → on ne perd rien). */
+      (aucun compagnon n'est possible sans handle FS → on ne perd rien).
+      ⚠ PIÈCES JOINTES : les MÉTADONNÉES (collection `attachments`) sont dans le snapshot, mais les
+      BINAIRES en sont EXCLUS — décision D8 : des PDF en base64 rendraient le fichier impraticable, le
+      canal COMPLET des binaires est le compagnon `.nmfa`. Conséquence pour l'export JSON autonome et le
+      visualiseur HTML (`exportStandalone`) : les pièces y sont LISTABLES mais pas téléchargeables — le
+      lot B affichera l'avertissement UI au point d'export (cf. docs/attachments.md § Exports). */
   async snapshotWithImages(): Promise<string> {
     const obj: any = this.store.toJSON();
     if (this.imageStore.count() > 0) obj.faceImages = await this.imageStore.toLegacyArray();
@@ -375,6 +390,141 @@ export class FileDocumentController {
     catch (e: any) { if (e && e.name !== "AbortError") Notify.toast(I18n.t("app.file.imagesNotLoaded", { error: e.message || e }), "err"); }
   }
 
+  /* ---- FICHIER COMPAGNON de PIÈCES JOINTES (.nmfa) — jumeau du compagnon d'images, apparié au .json par
+         meta.attachmentsKey (décision D7 du cadrage 2026-08-10 : un compagnon SÉPARÉ du .nmfb, parce que
+         les cycles de vie diffèrent — bibliothèque d'images partagée à import-écrasement vs pièces par
+         entité). Seuls les BINAIRES y vivent : les métadonnées sont la collection `attachments` du .json.
+         ⚠ Résolution à l'ouverture AUTOMATIQUE SEULEMENT en lot A (nom mémorisé → convention <json>.nmfa →
+         scan du dossier par signature ; en mode fichier simple : handle mémorisé + popup natif de
+         permission) — AUCUN dialogue de ré-association dédié (le lot B l'ajoutera avec son UI, cf.
+         docs/attachments.md § Mode local). ---- */
+  private attachmentsNameFor(jsonName: string): string { return String(jsonName || "dc-manager.json").replace(/\.json$/i, "") + ".nmfa"; }
+  private rememberAttachmentsHandle(handle: any): void { if (handle) void this.handleStore.putAttachments(handle, handle.name || ""); }
+  /** Clé d'appariement json ⇄ compagnon de pièces jointes (patron exact de `ensureFacesKey`). */
+  private ensureAttachmentsKey(): string { if (!this.store.meta.attachmentsKey) { this.store.meta.attachmentsKey = "ak-" + Id.uid(); void this.store.persistMeta(); } return this.store.meta.attachmentsKey; }
+  /** Le document a-t-il des pièces jointes ? Les MÉTADONNÉES font foi (le binaire les suit) — justifie un
+      compagnon + une clé. */
+  private docHasAttachments(): boolean { return this.store.all("attachments").length > 0; }
+  /** Des binaires manquent-ils LOCALEMENT par rapport aux enregistrements du document ? */
+  private async attachmentsStillMissing(): Promise<boolean> {
+    const present = new Set(await this.attachmentStore.listLocalIds());
+    return this.store.all("attachments").some((a: any) => !present.has(a.id));
+  }
+  private async writeAttachmentsToHandle(handle: any): Promise<void> {
+    if (!(await this.ensureWritePermission(handle))) throw new Error("permission-refusée");
+    const records = this.store.all("attachments").map((a: any) => ({ id: a.id, mime: a.mime }));
+    const blob = await this.attachmentStore.serializeBundle(records, this.store.meta.attachmentsKey || null);
+    const w = await handle.createWritable(); await w.write(blob); await w.close();
+  }
+  /** (Ré)écrit le compagnon de pièces jointes. Sans handle connu, en demande un (suggéré à côté du .json) —
+      jumeau de `saveCompanionFaces`. */
+  private async saveCompanionAttachments(jsonHandle: any): Promise<void> {
+    if (!this.hasFsApi) return;
+    if (!this.docHasAttachments() && !this.attachmentsHandle) return;   // rien à écrire
+    // GARDE anti-écrasement : des enregistrements existent mais AUCUN de leurs binaires n'est disponible
+    // localement (compagnon jamais chargé — permission refusée, fichier absent, .json copié seul). Écrire
+    // écraserait un `.nmfa` peut-être COMPLET par un bundle VIDE : on s'abstient, le compagnon existant
+    // reste la meilleure copie (les binaires ne sont jamais reconstruisibles depuis le .json — D8).
+    if (this.docHasAttachments()) {
+      const present = new Set(await this.attachmentStore.listLocalIds());
+      if (!this.store.all("attachments").some((a: any) => present.has(a.id))) {
+        this.flog("saveCompanionAttachments → ignoré (aucun binaire local — n'écrase pas un compagnon potentiellement complet)");
+        return;
+      }
+    }
+    this.ensureAttachmentsKey();
+    // nom cible = compagnon ASSOCIÉ (meta.attachmentsFile) si présent, sinon convention <json>.nmfa
+    const wantName = (this.store.meta.attachmentsFile as string) || this.attachmentsNameFor(jsonHandle ? jsonHandle.name : this.name);
+    this.flog("saveCompanionAttachments", { wantName, dirMode: this.dirMode(), attachmentsKey: this.store.meta.attachmentsKey });
+    try {
+      if (this.dirMode() && this.dirHandle) this.attachmentsHandle = await this.dirHandle.getFileHandle(wantName, { create: true });   // dans le dossier, sans picker
+      else if (!this.attachmentsHandle) this.attachmentsHandle = await W.showSaveFilePicker({ suggestedName: wantName, startIn: jsonHandle || undefined, types: ATTACHMENTS_TYPES });
+      await this.writeAttachmentsToHandle(this.attachmentsHandle); this.rememberAttachmentsHandle(this.attachmentsHandle);
+      if (this.attachmentsHandle && this.attachmentsHandle.name) this.store.meta.attachmentsFile = this.attachmentsHandle.name;   // garde le nom à jour
+      this.attachmentStore.setLoadedKey(this.store.meta.attachmentsKey || null);
+      this.flog("saveCompanionAttachments → écrit", this.attachmentsHandle && this.attachmentsHandle.name);
+    } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast(I18n.t("app.file.attachmentsNotSaved", { error: e.message || e }), "err"); this.flog("saveCompanionAttachments → échec", e && e.message); }
+  }
+  /** Charge le compagnon de pièces jointes depuis `handle` (jumeau de `tryLoadCompanion`) : ne charge que si
+      la permission est accordée (`interactive` autorise la re-demande), puis valide l'APPARIEMENT par clé
+      (attachmentsKey du manifeste == docKey ; legacy sans clé accepté si plus rien ne manque). */
+  private async tryLoadCompanionAttachments(handle: any, interactive: boolean, docKey: string | null): Promise<boolean> {
+    if (!handle) return false;
+    const perm = await HandleStore.ensureReadPermission(handle, interactive);
+    this.flog("tryLoadCompanionAttachments", { file: handle.name, interactive, perm, docKey });
+    if (perm !== true) return false;
+    try {
+      const f = await handle.getFile();
+      const loaded = await this.attachmentStore.loadBundle(await f.arrayBuffer());   // lève si signature NMFA invalide (= scan par signature)
+      const bundleKey = this.attachmentStore.lastLoadedKey || null;
+      const keyMatch = !!(docKey && bundleKey && docKey === bundleKey), legacyNoKey = (!docKey && !bundleKey);
+      this.flog("tryLoadCompanionAttachments → bundle lu", { file: handle.name, loaded, bundleKey, keyMatch, legacyNoKey });
+      if (keyMatch || (legacyNoKey && !(await this.attachmentsStillMissing()))) { this.attachmentsHandle = handle; return true; }
+    } catch (e: any) { this.flog("tryLoadCompanionAttachments → illisible", handle.name, e && e.message); }
+    return false;
+  }
+  /** À l'ouverture : recharge le compagnon de pièces jointes SI le document en attend (clé ou
+      enregistrements). Stratégies AUTOMATIQUES seulement (cf. en-tête de section) : mode dossier = nom
+      mémorisé → convention → scan par signature ; mode fichier = handle mémorisé (permission déjà
+      accordée, sinon UNE demande native — le geste d'ouverture est encore actif). */
+  private async loadCompanionAttachmentsOnOpen(jsonHandle: any): Promise<void> {
+    const docKey = (this.store.meta.attachmentsKey as string) || null;
+    const hasRecords = this.docHasAttachments();
+    this.flog("loadCompanionAttachmentsOnOpen", { docKey, records: this.store.all("attachments").length, lastLoadedKey: this.attachmentStore.lastLoadedKey, dirMode: this.dirMode() });
+    if (!docKey && !hasRecords) { this.attachmentsHandle = null; return; }   // rien attendu
+    if (docKey && this.attachmentStore.lastLoadedKey === docKey && !(await this.attachmentsStillMissing())) { this.flog("compagnon PJ : déjà à jour"); return; }
+    if (!this.hasFsApi) return;
+    // Binaires d'un AUTRE document restés en IndexedDB : élagués aux ids du document courant (miroir du
+    // dropStale des images) — appelé sur chaque chemin d'échec ci-dessous.
+    const dropStale = async (): Promise<void> => {
+      if (docKey && this.attachmentStore.lastLoadedKey && this.attachmentStore.lastLoadedKey !== docKey) {
+        await this.attachmentStore.keepOnly(this.store.all("attachments").map((a: any) => a.id));
+        this.attachmentStore.setLoadedKey(null);
+      }
+    };
+    // MODE DOSSIER : le grant du dossier couvre le compagnon → lecture directe, sans question.
+    if (this.dirMode() && this.dirHandle) {
+      const savedName = (this.store.meta.attachmentsFile as string) || null;
+      const wantName = this.attachmentsNameFor(jsonHandle ? jsonHandle.name : this.name);
+      // 1) essai par NOM : d'abord le nom mémorisé (meta.attachmentsFile), puis la convention <json>.nmfa.
+      const byName = [savedName, wantName].filter((n, i, a) => !!n && a.indexOf(n) === i) as string[];
+      for (const nm of byName) {
+        try {
+          const fh = await this.dirHandle.getFileHandle(nm);
+          if (await this.tryLoadCompanionAttachments(fh, false, docKey)) { this.flog("compagnon PJ[dossier] : chargé par nom", nm); return; }
+        } catch (_) { this.flog("compagnon PJ[dossier] : pas de fichier nommé", nm); }
+      }
+      // 2) sinon, SCAN des .nmfa du dossier, appariement par SIGNATURE (attachmentsKey du manifeste == docKey).
+      if (docKey) {
+        try {
+          for await (const entry of this.dirHandle.values()) {
+            if (entry.kind !== "file" || !/\.nmfa$/i.test(entry.name) || byName.includes(entry.name)) continue;
+            if (await this.tryLoadCompanionAttachments(entry, false, docKey)) {
+              this.flog("compagnon PJ[dossier] : apparié par signature", entry.name);
+              this.store.meta.attachmentsFile = entry.name; await this.store.persistMeta();   // mémorise pour la prochaine fois
+              return;
+            }
+          }
+        } catch (e: any) { this.flog("compagnon PJ[dossier] : scan échoué", e && e.message); }
+      }
+      this.flog("compagnon PJ[dossier] : AUCUN compagnon correspondant trouvé");
+      await dropStale(); this.attachmentsHandle = null; return;
+    }
+    // MODE FICHIER : compagnon mémorisé — automatique si la permission est déjà accordée, sinon UNE
+    // tentative de popup NATIF (le geste d'ouverture est encore actif). Pas de dialogue dédié en lot A :
+    // l'échec est tracé (flog) et silencieux — l'UI du lot B saura le montrer et proposer l'association.
+    const rememberedMatches = docKey ? (this.attachmentStore.lastLoadedKey === docKey) : true;
+    let remembered = rememberedMatches ? await this.handleStore.getAttachments() : null;
+    remembered = (remembered && remembered.handle) ? remembered : null;
+    if (remembered && await this.tryLoadCompanionAttachments(remembered.handle, false, docKey)) return;
+    if (remembered) {
+      const perm = await HandleStore.ensureReadPermission(remembered.handle, true);   // popup natif direct
+      if (perm === true && await this.tryLoadCompanionAttachments(remembered.handle, false, docKey)) return;
+      this.flog("compagnon PJ : permission non accordée / clé non concordante", remembered.name);
+    }
+    await dropStale(); this.attachmentsHandle = null;
+  }
+
   /* ---- réouverture / ouverture / enregistrement ---- */
   /** Réouverture en MODE DOSSIER : re-demande l'accès au dossier (un seul geste) puis relit le .json mémorisé. */
   private async reopenLastDir(dirRec: { handle: any; name: string }): Promise<void> {
@@ -511,8 +661,9 @@ export class FileDocumentController {
   async doSave(): Promise<void> {
     if (!this.handle) { await this.doSaveAs(); return; }
     if (this.docHasFaceImages()) this.ensureFacesKey();   // la clé d'appariement doit être dans le .json AVANT son écriture
+    if (this.docHasAttachments()) this.ensureAttachmentsKey();   // idem pour la clé du compagnon de pièces jointes
     if (!(await this.ensureWritePermission(this.handle))) { Notify.toast(I18n.t("app.file.writePermDenied"), "err"); return; }
-    try { await this.writeToHandle(this.handle); await this.saveCompanionFaces(this.handle); this.host.refreshChrome(); Notify.toast(I18n.t("app.file.docSaved", { name: this.name })); }
+    try { await this.writeToHandle(this.handle); await this.saveCompanionFaces(this.handle); await this.saveCompanionAttachments(this.handle); this.host.refreshChrome(); Notify.toast(I18n.t("app.file.docSaved", { name: this.name })); }
     catch (e: any) { Notify.toast(I18n.t("app.file.saveError", { error: e.message || e }), "err"); }
   }
   /** « Enregistrer sous » en MODE DOSSIER : choisit le dossier (s'il manque) + un nom, écrit .json et .nmfb dedans. */
@@ -524,9 +675,11 @@ export class FileDocumentController {
     try {
       const h = await dir.getFileHandle(name, { create: true });
       if (this.docHasFaceImages()) this.ensureFacesKey();
-      this.dirHandle = dir; this.handle = h; this.name = h.name || name; this.facesHandle = null; this.session.setFile(true);
+      if (this.docHasAttachments()) this.ensureAttachmentsKey();
+      this.dirHandle = dir; this.handle = h; this.name = h.name || name; this.facesHandle = null; this.attachmentsHandle = null; this.session.setFile(true);
       await this.writeToHandle(h);
       await this.saveCompanionFaces(h);
+      await this.saveCompanionAttachments(h);
       await this.rememberDir(dir, name);
       this.tabChannel.claim(this.store.meta.fileId || null);
       this.host.applyAutosave(); this.host.refreshChrome(); Notify.toast(I18n.t("app.file.savedAs", { name: this.name }));
@@ -539,9 +692,11 @@ export class FileDocumentController {
     try {
       const h = await W.showSaveFilePicker({ suggestedName: this.docFileName(), types: JSON_TYPES });
       if (this.docHasFaceImages()) this.ensureFacesKey();   // clé d'appariement dans le .json
-      this.handle = h; this.name = h.name || this.docFileName(); this.facesHandle = null; this.session.setFile(true);   // nouveau fichier → nouveau compagnon
+      if (this.docHasAttachments()) this.ensureAttachmentsKey();
+      this.handle = h; this.name = h.name || this.docFileName(); this.facesHandle = null; this.attachmentsHandle = null; this.session.setFile(true);   // nouveau fichier → nouveaux compagnons
       await this.writeToHandle(h);
       await this.saveCompanionFaces(h);   // choisit/écrit le fichier compagnon d'images à côté
+      await this.saveCompanionAttachments(h);   // idem pour le compagnon de pièces jointes (.nmfa)
       this.tabChannel.claim(this.store.meta.fileId || null);
       this.host.applyAutosave(); this.host.refreshChrome(); Notify.toast(I18n.t("app.file.savedAs", { name: this.name }));
     } catch (e: any) { if (e && e.name !== "AbortError") Notify.toast(I18n.t("app.file.saveError", { error: e.message || e }), "err"); }

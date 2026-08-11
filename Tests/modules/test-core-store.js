@@ -1934,7 +1934,9 @@ module.exports = async () => {
       // deux sens. Sa place ici suit celle de sa déclaration dans DETAIL_OPENERS (après `vms`).
       // `applications` (chantier applications, 2026-08-10) : même mécanique — fiche déclarée en FIN
       // de DETAIL_OPENERS, donc en fin de liste ici.
-      "vms", "wifiClients", "cableTypes", "portTypes", "applications",
+      // `attachments` (chantier pièces jointes, 2026-08-10, lot B) : fiche déclarée APRÈS applications
+      // dans DETAIL_OPENERS, donc en toute fin de liste ici.
+      "vms", "wifiClients", "cableTypes", "portTypes", "applications", "attachments",
     ]), "DETAIL_COLLECTIONS = la liste exacte de l'ancien switch (bascule prouvée par attentes explicites)");
     families.forEach((f) => ck(EntityRegistry.COLLECTIONS.includes(f), "famille « " + f + " » = collection réelle du modèle"));
 

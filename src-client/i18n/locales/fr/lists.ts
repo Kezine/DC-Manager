@@ -127,6 +127,8 @@ export const lists = {
     host: "Hôte",
     tags: "Tags",
     hostname: "Hostname",
+    attachedTo: "Attachée à",   // colonne CIBLE d'une pièce jointe (équipement OU sous-équipement)
+    file: "Fichier",   // nom d'origine du binaire d'une pièce jointe
   },
   empty: {
     equipments: "Aucun équipement.",
@@ -150,6 +152,7 @@ export const lists = {
     wifiClients: "Aucun client wifi. Les clients sont alimentés par la synchronisation d'un contrôleur wifi (onglet Wifi → « Providers… », mode API).",
     subEquipments: "Aucun sous-équipement. Un sous-équipement se crée depuis la fiche de son équipement maître (pas de bouton « + » ici, v1).",
     applications: "Aucune application. Ajoutez-en une avec « + Application » (hébergée sur un équipement ou une VM, URL optionnelle).",
+    attachments: "Aucune pièce jointe. Ajoutez-en une avec « + Pièce jointe » (fichier attaché à un équipement ou un sous-équipement — convention de prêt, bon de commande, garantie…).",
   },
   filter: {
     room: "Salle",
@@ -158,10 +161,12 @@ export const lists = {
     carrier: "Porteur",
     carrierPlaceholder: "Équipement ou VM…",
     hostedOn: "Hébergée sur",   // dimension cible du listing des applications (équipement OU VM — cf. ListTargets.applicationHost)
+    attachedTo: "Attachée à",   // dimension cible du listing des pièces jointes (équipement OU sous-équipement — cf. ListTargets.attachmentTarget)
     master: "Équipement (maître)",   // dimension cible du listing des sous-équipements (famille UNIQUE : équipement)
     equipmentPlaceholder: "Rechercher un équipement…",
     targetEquipment: "Équip.",
     targetVm: "VM",
+    targetSubEquipment: "Sous-équip.",   // badge de famille « sous-équipement » (dimension cible des pièces jointes)
     targetMissing: "(supprimé)",
   },
   opt: {

@@ -62,6 +62,11 @@ export const tabs = {
     title: "Applications",
     subtitle: "Applications hébergées sur l'infrastructure (GLPI, supervision, apps web internes…) : nom, description, URL, et l'équipement OU la VM qui les héberge.",
   },
+  attachments: {
+    label: "Pièces jointes",
+    title: "Pièces jointes",
+    subtitle: "Fichiers attachés aux équipements et sous-équipements (conventions de prêt, bons de commande, garanties, scans…). Les binaires vivent hors document ; le compagnon .nmfa les conserve en mode fichier.",
+  },
   faceimages: {
     label: "Images de façade",
     subtitle: "Bibliothèque d'images de façade (JPEG/PNG/WebP) partagées par référence. Stockées hors document (IndexedDB).",

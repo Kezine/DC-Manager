@@ -214,6 +214,14 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   (`LegacyMigration`, backup `.pre-relationnel.bak`), `meta`/`images` hors migration ; **colonne `search`
   ENRICHIE** — termes dérivés/catalogues fr+en du module partagé `SearchTerms`, invalidation par FK
   indexées SANS toucher `updated_rev`, backfill `PRAGMA user_version`).
+- [`attachments.md`](docs/attachments.md) — **pièces jointes** (collection `attachments` = MÉTADONNÉES du
+  document — recherche/cascade/undo/verrou gratuits ; BINAIRES HORS document : disque serveur
+  `DOCS_DIR/attachments/<docId>/<id>` streamé (id opaque = nom de fichier, anti path-traversal par
+  construction), IndexedDB + compagnon `.nmfa` en mode fichier (enveloppe COMMUNE `BinaryBundle` avec le
+  `.nmfb` d'images) ; suppression de la cible = DELETE en cascade des pièces, mais AUCUN unlink en ligne —
+  la purge des binaires est le travail EXCLUSIF de la maintenance (l'undo retrouve un binaire intact) ;
+  liste blanche MIME partagée + `Content-Disposition: attachment` toujours ; sauvegarde d'un document
+  serveur = `.db` + dossier).
 - [`vm-proxmox.md`](docs/vm-proxmox.md) — **inventaire VM Proxmox** (module serveur AMOVIBLE `vm/`,
   pivot `VmRecord`, réconciliation source/locaux, providers PAR document dans `vm-providers.db`
   chiffrée (clé `DCMANAGER_SECRETS_KEY` requise), mapping bridge/tag → réseau, script de suppression,

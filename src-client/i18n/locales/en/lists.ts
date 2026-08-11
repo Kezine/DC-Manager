@@ -121,6 +121,8 @@ export const lists = {
     host: "Host",
     tags: "Tags",
     hostname: "Hostname",
+    attachedTo: "Attached to",   // TARGET column of an attachment (equipment OR sub-equipment)
+    file: "File",   // original file name of an attachment's binary
   },
   empty: {
     equipments: "No equipment.",
@@ -144,6 +146,7 @@ export const lists = {
     wifiClients: "No Wi-Fi client. Clients are fed by the synchronisation of a Wi-Fi controller (Wi-Fi tab → “Providers…”, API mode).",
     subEquipments: "No sub-equipment. A sub-equipment is created from its master equipment's detail sheet (no « + » button here in v1).",
     applications: "No application. Add one with “+ Application” (hosted on an equipment or a VM, optional URL).",
+    attachments: "No attachment. Add one with “+ Attachment” (a file attached to an equipment or a sub-equipment — loan agreement, purchase order, warranty…).",
   },
   filter: {
     room: "Room",
@@ -152,10 +155,12 @@ export const lists = {
     carrier: "Carrier",
     carrierPlaceholder: "Equipment or VM…",
     hostedOn: "Hosted on",   // target dimension of the applications listing (equipment OR VM — cf. ListTargets.applicationHost)
+    attachedTo: "Attached to",   // target dimension of the attachments listing (equipment OR sub-equipment — cf. ListTargets.attachmentTarget)
     master: "Equipment (master)",   // target dimension of the sub-equipment listing (SINGLE family: equipment)
     equipmentPlaceholder: "Search an equipment…",
     targetEquipment: "Equip.",
     targetVm: "VM",
+    targetSubEquipment: "Sub-equip.",   // "sub-equipment" family badge (attachments target dimension)
     targetMissing: "(deleted)",
   },
   opt: {

@@ -34,11 +34,13 @@ const DOMAINS = [
   "./test-i18n.js",              // localisation : complétude des catalogues fr ⇄ en
   "./test-certs.js",             // certificats : crypto client pure (PkiCrypto/PkiSession)
   "./test-lifecycle-format.js",  // cycle de vie matériel (core/LifecycleFormat) : âge d'achat + état de garantie (now injecté), granularité adaptative, frontière 90 j
+  "./test-format.js",            // formatage d'affichage (core/Format) : `bytes()` — taille de fichier lisible (pièces jointes, lot B)
   "./test-rapprochement-certs.js", // rapprochement cert ↔ équipement/VM (HostnameMatch/CertSubject/CertTargetMatch, pur)
   "./test-interventions.js",     // interventions : logique cliente pure (InterventionsFormat, buildQuery)
   "./test-users.js",             // annuaire utilisateurs serveur (UserProfiles pur, resolver + snapshot SQLite)
   "./test-tracker.js",           // PONT « interventions ⇄ tracker distant » (module serveur amovible `tracker/`) : décodage Jira pur + ADF + priorités + lecture des refus par champ + pagination, étiquettes `DCM-*` et DIFF en verbes (`TrackerLabels`), adaptateur (stub HTTP : création/mise à jour, repli « priorité refusée »), client HTTP sur `fetch` injecté, validation par marque, stockage chiffré (better-sqlite3 RÉEL), plafond ROULANT d'une passe (`TrackerPassScope`), PONT de bout en bout sur interventions.db + DocumentStore RÉELS (poussée tolérante, redémarrage, retour d'état idempotent, auto-réplication), `core/TrackerStatus` (dont la PASTILLE et son échappement) et `core/TrackerReplication` (état de réplication d'une intervention), garde d'URL des liens sortants (`Html.externalLink`), miroir KIND_FIELDS ⇄ KIND_OPTION_SPECS et agnosticisme de marque
   "./test-wifi.js",              // feature CLIENTS WIFI (module serveur amovible `wifi/`) : frontière partagée, décodage UniFi pur + pagination, adaptateur (stub), validation par marque, stockage chiffré (better-sqlite3 RÉEL), réconciliation, synchro bout en bout, invariants d'agnosticisme de marque (D9)
+  "./test-attachments.js",       // PIÈCES JOINTES (lot A) : bundle .nmfa via l'enveloppe GÉNÉRALISÉE BinaryBundle + non-régression .nmfb bit-identique, ContentDisposition (nom de download assaini D6), AttachmentFiles (id opaque anti-traversal, purge d'orphelins D5, fs réel), DocumentStore + maintenance (better-sqlite3 RÉEL), helpers/cascade du Store client — la spec/validation/cascade pure vit dans test-shared-validation.js
   "./test-server.js",            // serveur (ApiRules, SQLite réel, protocole REST)
 ];
 

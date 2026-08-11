@@ -12,9 +12,10 @@ import { RuntimeConfigLoader } from "./RuntimeConfig";
 import { GraphView, ListView, ListConfigs, Forms, DatacenterView, VmForms, VmProvidersForm, VmPurgeForm, VmSyncClient, VmClustersView, WifiForms, WifiProvidersForm, WifiSyncClient, NotificationsAdminView, NotifyClient, CertsAdminView, CertsClient, InterventionsAdminView, InterventionsClient, TrackerSyncClient } from "../views";
 import type { InterventionTargetSource, InterventionFicheHooks } from "../views";
 import { FormBase } from "../views/forms/FormBase";
+import { AttachmentUi } from "../views/forms/AttachmentUi";   // téléchargement d'une pièce jointe (action de ligne du sous-onglet + purge maintenance)
 import { GlobalSearchPalette } from "../views/GlobalSearchPalette";   // palette de recherche globale (loupe topbar + Ctrl+K)
 import { GlobalSearchSources } from "../views/GlobalSearchSources";   // familles à fiche = périmètre envoyé à la recherche transverse serveur (mode API)
-import { ImageStore, IdbImageBackend, RestImageBackend } from "../data";
+import { ImageStore, IdbImageBackend, RestImageBackend, AttachmentStore, IdbAttachmentBackend, RestAttachmentBackend } from "../data";
 import type { ListOptions, FormHost } from "../views";
 import { Modal, Notify, FormControls, Dialog, Fullscreen, RichTooltip, Icons } from "../ui";
 import { Html } from "../core/Html";
@@ -36,6 +37,7 @@ import { Download } from "../core/Download";
 import { Prefs } from "../core/Prefs";
 import { SessionExpiry } from "../core/SessionExpiry";   // verrou idempotent « session expirée → retour au login » (mode API)
 import { Log } from "../core/Log";
+import { Format } from "../core/Format";   // taille lisible des pièces jointes purgées (toast de maintenance)
 import { I18n } from "../i18n/I18n";
 import { APP_RELEASE, EQUIP_FACE_IMG_FIELD } from "../domain/constants";
 import { Shell } from "./Shell";
@@ -274,6 +276,16 @@ async function boot(): Promise<void> {
   FormBase.images = imageStore;   // singleton pour le picker d'image (faceEditor)
   imageStore.restoreLoadedKey();   // clé du bundle .nmfb actuellement en IndexedDB (persistée) — appariement json↔compagnon
   if (!REST_MODE) await imageStore.ready();   // en REST, le miroir est chargé à l'ouverture d'un document
+  // BINAIRES des pièces jointes (hors modèle — les MÉTADONNÉES sont la collection `attachments` du Store) :
+  // IndexedDB + compagnon .nmfa en mode fichier, endpoints REST en mode API. Cf. docs/attachments.md.
+  const attachmentBackend = REST_MODE ? new RestAttachmentBackend(API_BASE_URL) : new IdbAttachmentBackend();
+  const attachmentStore = new AttachmentStore({ backend: attachmentBackend });
+  attachmentStore.restoreLoadedKey();   // clé du bundle .nmfa actuellement en IndexedDB — appariement json↔compagnon
+  // Pièces jointes : injecte le stockage des binaires + le mode dans le host des formulaires (dépôt du binaire
+  // à la création, branche de création API/fichier, téléchargement). Posé ICI car `attachmentStore` est
+  // construit après `formHost` (au voisinage d'imageStore) ; rien ne le consomme avant le boot des vues.
+  formHost.attachmentStore = attachmentStore;
+  formHost.restMode = REST_MODE;
   Fullscreen.install();   // re-parente les overlays (modale/dialogues/toasts/menus) dans l'élément plein écran
   RichTooltip.install();  // délégation UNIQUE des tooltips enrichis (data-rich-tooltip) — idempotent
 
@@ -287,7 +299,7 @@ async function boot(): Promise<void> {
      mode dossier, compagnon .nmfb, exports) ; ici, seule l'adhérence à la boucle applicative. Les closures de
      l'hôte capturent des consts définies PLUS BAS (shell, refreshChrome, applyAutosave) — appelées après le boot. */
   const files = new FileDocumentController({
-    store, imageStore, session, prefs, handleStore, tabChannel, hasFsApi: HAS_FS_API,
+    store, imageStore, attachmentStore, session, prefs, handleStore, tabChannel, hasFsApi: HAS_FS_API,
     host: {
       refreshChrome: () => refreshChrome(),
       refreshActive: () => shell.refreshActive(),
@@ -319,7 +331,11 @@ async function boot(): Promise<void> {
      Construit UNIQUEMENT en mode REST (les callbacks 409/400 de l'adapter sont câblés à la construction). */
   const rest = REST_MODE ? new RestDocumentController({
     adapter: adapter as RestAdapter, store, imageStore, session, prefs, hasFsApi: HAS_FS_API,
-    setImagesBase: (base) => { if (imageBackend instanceof RestImageBackend) imageBackend.setBaseUrl(base); },
+    // Recale AUSSI le backend de pièces jointes : même scope document (/api/documents/{docId}) que les images.
+    setImagesBase: (base) => {
+      if (imageBackend instanceof RestImageBackend) imageBackend.setBaseUrl(base);
+      if (attachmentBackend instanceof RestAttachmentBackend) attachmentBackend.setBaseUrl(base);
+    },
     injectedLoginUrl: INJECTED.loginUrl,
     host: {
       refreshChrome: () => refreshChrome(),
@@ -372,16 +388,40 @@ async function boot(): Promise<void> {
     });
     if (!ok) return;
     if (REST_MODE) {
+      // Côté serveur, la maintenance purge AUSSI les binaires de pièces jointes orphelins (D5) —
+      // compteurs dans la réponse (`purgedAttachments`/`purgedAttachmentBytes`, posés par le lot A).
       const r = await (adapter as RestAdapter).maintenance();
       await imageStore.reloadFromBackend();
       const mb = (n: number) => (n / 1048576).toFixed(1) + " Mo";
-      Notify.toast(r ? I18n.t("app.maint.purgedRest", { n: r.purgedImages, before: mb(r.bytesBefore), after: mb(r.bytesAfter) }) : I18n.t("app.maint.done"));
+      if (r) {
+        // Segment « pièces jointes » ajouté SEULEMENT si la purge en a retiré (sinon on n'alourdit pas le toast).
+        const attPart = r.purgedAttachments ? I18n.t("app.maint.purgedAttachmentsRest", { n: r.purgedAttachments, bytes: Format.bytes(r.purgedAttachmentBytes || 0) }) : "";
+        Notify.toast(I18n.t("app.maint.purgedRest", { n: r.purgedImages, before: mb(r.bytesBefore), after: mb(r.bytesAfter) }) + attPart);
+      } else Notify.toast(I18n.t("app.maint.done"));
     } else {
       await imageStore.keepOnly(refs);
-      Notify.toast(I18n.t("app.maint.purgedFile", { n: orphans.length }));
+      // Même geste pour les BINAIRES de pièces jointes (D5, mode fichier) : ne garder que ceux dont
+      // l'enregistrement existe encore dans la collection — le prochain compagnon .nmfa n'embarquera
+      // plus les orphelins. Le compte est joint au toast (segment omis si aucune pièce purgée).
+      const purgedAttachments = await attachmentStore.keepOnly(store.all("attachments").map((a: any) => a.id));
+      const attPart = purgedAttachments ? I18n.t("app.maint.purgedAttachmentsFile", { n: purgedAttachments }) : "";
+      Notify.toast(I18n.t("app.maint.purgedFile", { n: orphans.length }) + attPart);
       session.markDirty(); refreshChrome();
     }
     shell.refreshActive();
+  };
+
+  // AVERTISSEMENT D8 avant un export SANS binaires (JSON autonome / visualiseur HTML) : si le document porte
+  // des pièces jointes, prévenir que leurs BINAIRES n'y seront PAS (seules les métadonnées y sont). Renvoie
+  // `true` s'il faut poursuivre l'export (aucune pièce jointe, ou l'utilisateur confirme malgré tout).
+  const warnAttachmentsExcluded = async (): Promise<boolean> => {
+    const count = store.all("attachments").length;
+    if (!count) return true;   // rien à prévenir → export direct
+    return await Dialog.confirm({
+      title: I18n.t("app.maint.exportAttachTitle"),
+      message: I18n.t("app.maint.exportAttachMessage", { n: count }),
+      confirmLabel: I18n.t("app.maint.exportAttachConfirm"),
+    });
   };
 
   // ---- services FICHIER / GLOBAUX (topbar) ----
@@ -393,7 +433,7 @@ async function boot(): Promise<void> {
         if (!ok) return;
       }
       tabChannel.release(store.meta.fileId || null);
-      await store.newDocument(); await imageStore.clearAll(); undoTimeline.reset(); files.detach(); session.markLoaded(store.histIndex());
+      await store.newDocument(); await imageStore.clearAll(); await attachmentStore.clearAll(); undoTimeline.reset(); files.detach(); session.markLoaded(store.histIndex());
       applyTheme(prefs.theme); shell.hideWelcome(); shell.switchView("equipements"); applyAutosave(); refreshChrome(); Notify.toast(I18n.t("app.main.newDocToast"));
     },
     onOpen: () => { if (rest) void rest.openChooser(); else void files.doOpen(); },
@@ -456,8 +496,12 @@ async function boot(): Promise<void> {
     onAutosaveToggle: (on) => { setAutosave(on); },
     onAutosaveInterval: (sec) => { prefs.autosaveInterval = sec; applyAutosave(); },
     onReopenLast: () => { void files.reopenLast(); },
-    onExportJson: () => { void files.exportJsonDownload(); },
-    onExportStandalone: () => { void files.exportStandalone(); },
+    // Export JSON autonome / visualiseur HTML : les MÉTADONNÉES des pièces jointes en font partie (collection
+    // du document), mais JAMAIS les BINAIRES (D8 — des PDF en base64 rendraient le fichier impraticable). On
+    // PRÉVIENT donc l'utilisateur si le document en porte, en pointant le canal complet (compagnon .nmfa en
+    // mode fichier / dossier serveur en mode API). Annulable — il peut vouloir le fichier binaire à côté d'abord.
+    onExportJson: () => { void (async () => { if (await warnAttachmentsExcluded()) await files.exportJsonDownload(); })(); },
+    onExportStandalone: () => { void (async () => { if (await warnAttachmentsExcluded()) await files.exportStandalone(); })(); },
     onDebugLog: (on) => { prefs.debugLog = on; Log.setEnabled(on); Notify.toast(on ? I18n.t("app.main.debugOn") : I18n.t("app.main.debugOff")); },
   };
 
@@ -508,6 +552,10 @@ async function boot(): Promise<void> {
     /** Boutons secondaires d'en-tête — même forme que `ViewDef.extraActions` du Shell, `visible` compris
         (prédicat de visibilité réévalué à chaque `refreshCounts`, cf. Shell.ts). */
     extraActions?: Array<{ label: string; onClick: (btn: HTMLButtonElement) => void; title?: string; visible?: () => boolean }>;
+    /** Action « Télécharger » d'une ligne (le listing déclare `download: true` dans `cfg.actions`). Threadée
+        ici plutôt que codée en dur comme view/edit/del : le download d'une pièce jointe passe par
+        l'`attachmentStore` (binaire hors document), pas par le Store du modèle. Absent = pas de download. */
+    onDownload?: (id: string) => void;
   }
   /** Déclare un onglet de LISTE et rend un ACCESSEUR sur sa `ListView` — null tant que l'onglet n'a
       jamais été affiché (la vue est construite au premier `onShow`, à dessein : on ne paie pas le
@@ -562,6 +610,7 @@ async function boot(): Promise<void> {
                 else openDetail(cfg.collection, id);
                 return;
               }
+              if (act === "download") { opts.onDownload?.(id); return; }   // binaire hors document (pièces jointes) — cf. onDownload
               if (act === "edit") { formFn?.(id, reRender); return; }
               if (act === "clone") {
                 const c = cfg.collection === "equipments" ? await store.cloneEquipment(id) : await store.cloneSimple(cfg.collection, id);
@@ -595,7 +644,7 @@ async function boot(): Promise<void> {
     icon: Icons.EQUIPMENT,
     subtitle: I18n.t("tabs.equipements.subtitle"),
     form: (id, done) => Forms.equipment(store, formHost, id, done), addLabel: I18n.t("app.add.equipment"),
-    links: ["groupes", "faceimages", "spares", "sousequipements", "applications"], locate: "equipment",
+    links: ["groupes", "faceimages", "spares", "sousequipements", "applications", "attachments"], locate: "equipment",
   });
   // VMs : onglet de PREMIER NIVEAU (à côté d'Équipements) — ALIMENTÉ PAR LA SYNCHRO (Proxmox…). Pas de
   // `form`/`addLabel` : AUCUN bouton « + créer » en v1 (liste en lecture seule, cf. ListConfigs.vms `actions: view`) ;
@@ -839,6 +888,18 @@ async function boot(): Promise<void> {
     title: I18n.t("tabs.applications.title"), subtitle: I18n.t("tabs.applications.subtitle"),
     kind: "secondary", parent: "equipements",
     form: (id, done) => Forms.application(store, formHost, id, done), addLabel: I18n.t("app.add.application"),
+  });
+  // Pièces jointes : vue SECONDAIRE d'Équipements (cadrage 2026-08-10) — collection du DOCUMENT (les deux
+  // modes nativement, principe n°15). Création/édition par `Forms.application`… non : `Forms.attachment`
+  // (FilePicker + picker de cible équipement/sous-équipement) ; fiche via le mécanisme générique
+  // (DETAIL_OPENERS). Le filtrage par cible passe par la dimension « Attachée à » du listing. Le download
+  // d'une ligne passe par l'`attachmentStore` (binaire HORS document) — d'où le hook dédié `onDownload`.
+  addListTab("attachments", I18n.t("tabs.attachments.label"), (s) => ListConfigs.attachments(s, entitySearchReader), {
+    icon: Icons.ATTACHMENT,
+    title: I18n.t("tabs.attachments.title"), subtitle: I18n.t("tabs.attachments.subtitle"),
+    kind: "secondary", parent: "equipements",
+    form: (id, done) => Forms.attachment(store, formHost, id, done), addLabel: I18n.t("app.add.attachment"),
+    onDownload: (id) => { void AttachmentUi.download(formHost, store.get("attachments", id)); },
   });
   // Images de façade : bibliothèque hors modèle (ImageStore) → câblage dédié (CRUD via imageStore)
   {

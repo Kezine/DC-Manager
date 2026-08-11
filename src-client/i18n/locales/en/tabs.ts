@@ -61,6 +61,11 @@ export const tabs = {
     title: "Applications",
     subtitle: "Applications hosted on the infrastructure (GLPI, monitoring, internal web apps…): name, description, URL, and the equipment OR VM hosting them.",
   },
+  attachments: {
+    label: "Attachments",
+    title: "Attachments",
+    subtitle: "Files attached to equipment and sub-equipment (loan agreements, purchase orders, warranties, scans…). Binaries live outside the document; the .nmfa companion keeps them in file mode.",
+  },
   faceimages: {
     label: "Faceplate images",
     subtitle: "Library of faceplate images (JPEG/PNG/WebP) shared by reference. Stored outside the document (IndexedDB).",

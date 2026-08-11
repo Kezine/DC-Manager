@@ -38,6 +38,9 @@ export const app = {
     imagesImported: "{{n}} image(s) importée(s). Ré-assignez les faces des équipements concernés.",
     imagesImportError: "Import des images impossible : {{error}}",
     imagesNotSaved: "Images non enregistrées : {{error}}",
+    attachmentsLoaded: "Pièces jointes chargées → {{name}}",
+    attachmentsNotLoaded: "Pièces jointes non chargées : {{error}}",
+    attachmentsNotSaved: "Pièces jointes non enregistrées : {{error}}",
     dirPermDenied: "Autorisation du dossier refusée.",
     reopened: "Rouvert → {{name}}",
     docNotFoundInDir: "Document introuvable dans le dossier — déplacé ou supprimé.",
@@ -127,6 +130,13 @@ export const app = {
     purgedRest: "{{n}} image(s) purgée(s) · base {{before}} → {{after}}",
     done: "Maintenance effectuée",
     purgedFile: "{{n}} image(s) purgée(s) — enregistrez pour alléger le compagnon d'images.",
+    // Segments « pièces jointes » AJOUTÉS au toast de maintenance (D5) — omis si rien n'a été purgé.
+    purgedAttachmentsRest: " · {{n}} pièce(s) jointe(s) purgée(s) ({{bytes}})",
+    purgedAttachmentsFile: " · {{n}} pièce(s) jointe(s) purgée(s) du compagnon.",
+    // Avertissement D8 avant un export SANS binaires (JSON autonome / visualiseur HTML).
+    exportAttachTitle: "Pièces jointes non incluses",
+    exportAttachMessage: "Ce document porte {{n}} pièce(s) jointe(s). Leurs BINAIRES ne seront PAS inclus dans cet export (seules les métadonnées le sont). Le compagnon .nmfa (mode fichier) ou le dossier serveur (mode API) est le canal complet. Poursuivre l'export ?",
+    exportAttachConfirm: "Exporter quand même",
   },
   add: {
     equipment: "+ Équipement",
@@ -145,6 +155,7 @@ export const app = {
     dhcpRange: "+ Plage DHCP",
     contact: "+ Contact",
     application: "+ Application",
+    attachment: "+ Pièce jointe",
   },
   vm: {
     netMapping: "Réseaux virtuels…",

@@ -2,6 +2,7 @@ import { Id } from "../core/Id";
 import { Download } from "../core/Download";
 import { ImageBackend, IdbImageBackend } from "./ImageBackend";
 import { SessionExpiry } from "../core/SessionExpiry";   // signale un 401 (session SSO expirée) → retour au login (idempotent)
+import { BinaryBundle } from "./BinaryBundle";           // enveloppe COMMUNE des compagnons (.nmfb images · .nmfa pièces jointes)
 
 /* =============================================================================
    STOCKAGE DES IMAGES DE FAÇADE — DISSOCIÉ DU MODÈLE (réplique OO du `imageStore`).
@@ -176,22 +177,19 @@ export class ImageStore {
     try { if (this.lastLoadedKey) localStorage.setItem("dcmanager.facesLoadedKey", this.lastLoadedKey); else localStorage.removeItem("dcmanager.facesLoadedKey"); } catch (_) { /* noop */ }
   }
   restoreLoadedKey(): void { try { this.lastLoadedKey = localStorage.getItem("dcmanager.facesLoadedKey") || null; } catch (_) { this.lastLoadedKey = null; } }
-  /** Construit le Blob `.nmfb` à partir d'enregistrements + clé (pur ; testable). */
+  /** Construit le Blob `.nmfb` à partir d'enregistrements + clé (pur ; testable). L'ENVELOPPE
+      (signature/version/manifeste/concaténation) est déléguée au module COMMUN `BinaryBundle`
+      (partagé avec le compagnon de pièces jointes `.nmfa`) — le format émis est BIT-IDENTIQUE
+      à l'historique, seuls le MANIFESTE d'images et sa clé restent propres à ce store. */
   static buildBundle(recs: ImageRec[], key: string | null): Blob {
     const manifest = { v: 1, key: key || null, images: recs.map((r) => { const face = ImageStore.face(r.face); return { id: r.id, name: r.name || "", u_height: (face === "autre") ? 1 : (r.u_height || 1), face, with_ears: ImageStore.ears(face, r.with_ears), description: r.description || "", type: r.type || (r.blob && r.blob.type) || "", bytes: r.blob ? r.blob.size : 0 }; }) };
-    const manifestBytes = new TextEncoder().encode(JSON.stringify(manifest));
-    const head = new Uint8Array(9); head.set([0x4E, 0x4D, 0x46, 0x42], 0); head[4] = 1;
-    new DataView(head.buffer).setUint32(5, manifestBytes.length, true);
-    const parts: BlobPart[] = [head, manifestBytes]; recs.forEach((r) => { if (r.blob) parts.push(r.blob); });
-    return new Blob(parts, { type: "application/octet-stream" });
+    return BinaryBundle.build("NMFB", manifest, recs.filter((r) => r.blob).map((r) => r.blob as Blob));
   }
-  /** Parse un `.nmfb` (ArrayBuffer) → { key, recs } (pur ; testable). Lève si signature invalide. */
+  /** Parse un `.nmfb` (ArrayBuffer) → { key, recs } (pur ; testable). Lève si signature invalide
+      (message HISTORIQUE conservé). Le découpage des blobs suit le manifeste (`bytes` annoncés). */
   static parseBundle(buf: ArrayBuffer): { key: string | null; recs: ImageRec[] } {
-    const dv = new DataView(buf);
-    if (buf.byteLength < 9 || dv.getUint8(0) !== 0x4E || dv.getUint8(1) !== 0x4D || dv.getUint8(2) !== 0x46 || dv.getUint8(3) !== 0x42) throw new Error("Fichier de faces invalide (signature NMFB)");
-    const mlen = dv.getUint32(5, true);
-    const manifest = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 9, mlen)));
-    let off = 9 + mlen; const recs: ImageRec[] = [];
+    const { manifest, dataOffset } = BinaryBundle.parse(buf, "NMFB", "Fichier de faces invalide (signature NMFB)");
+    let off = dataOffset; const recs: ImageRec[] = [];
     (manifest.images || []).forEach((im: any) => { const n = im.bytes || 0; const blob = new Blob([buf.slice(off, off + n)], { type: im.type || "application/octet-stream" }); off += n; const face = ImageStore.face(im.face); recs.push({ id: im.id, name: im.name || "", u_height: (face === "autre") ? 1 : (im.u_height || 1), face, with_ears: ImageStore.ears(face, im.with_ears), description: im.description || "", type: im.type || "", blob }); });
     return { key: manifest.key || null, recs };
   }

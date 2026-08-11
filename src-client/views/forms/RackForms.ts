@@ -25,6 +25,11 @@ import {
 import { FormUi, ORIENT_OPTS } from "./shared";
 import { FormSave } from "./FormSave";   // écriture + garde-fou « ne jamais annoncer un succès refusé »
 import { TargetSearch } from "../../core/TargetSearch";   // convention composite « <kind>:<id> » du picker d'hôte des applications
+import { FilePicker } from "../../ui/FilePicker";   // sélecteur de fichier RÉUTILISABLE (principe n°14) — création d'une pièce jointe
+import type { FilePickerElement } from "../../ui/FilePicker";
+import { Schema } from "../../../src-shared/Schema";   // liste blanche MIME PARTAGÉE des pièces jointes (le serveur applique la même)
+import { Id } from "../../core/Id";   // id opaque client (mode API : passé au POST multipart — anti path-traversal, cf. AttachmentFiles.isSafeId)
+import { ATTACHMENT_MAX_BYTES } from "../../domain/constants";   // plafond de taille (miroir du plafond multer serveur)
 import type { FormHost } from "./shared";
 import { CableForms } from "./CableForms";
 import { EquipmentForms } from "./EquipmentForms";   // fiche équipement (nom cliquable dans le contenu de baie)
@@ -606,6 +611,134 @@ export class RackForms extends CableForms {
         if (live.check(payload).length) return false;   // nom requis + URL http/https (surlignés)
         if (!await FormSave.record(store, "applications", app && app.id, payload)) return false;   // REFUSÉ par le Store (toast rouge nommant la règle) : ne rien annoncer, garder la saisie
         host.setDirty?.(true); Notify.toast(app ? I18n.t("rack.application.updated") : I18n.t("rack.application.created")); onSaved?.(); return true;
+      },
+    });
+    setTimeout(() => nameI.focus(), 30);
+  }
+
+  /** PIÈCE JOINTE — fichier arbitraire attaché à un équipement OU un sous-équipement (convention de prêt,
+      bon de commande, garantie, scan…). Les MÉTADONNÉES sont une collection ordinaire du document ; le
+      BINAIRE vit HORS document (disque serveur en mode API, IndexedDB + compagnon `.nmfa` en mode fichier —
+      cf. `data/AttachmentStore`, docs/attachments.md). Décalqué de `Forms.application` : un SEUL `entityPicker`
+      MULTI-FAMILLES pour la cible (équipement / sous-équipement), values à la convention composite
+      « <kind>:<id> » (`TargetSearch.key`/`parse`) → exclusivité `equipment_id`/`sub_equipment_id` garantie
+      PAR CONSTRUCTION (un seul picker).
+
+      Le FICHIER : OBLIGATOIRE à la création (`FilePicker`, liste blanche + plafond 50 Mo vérifiés au front) ;
+      en ÉDITION, le binaire n'est PAS remplaçable en v1 (D10) — le picker cède la place à une ligne
+      informative nom + taille (remplacer = supprimer puis recréer, limite documentée). L'édition ne touche
+      donc QUE les métadonnées.
+
+      DEUX MODES à la création (le mode fichier est natif, principe n°15) :
+        - mode API : POST multipart via le backend REST (le serveur crée fichier + enregistrement
+          ATOMIQUEMENT — rev/changeset/SSE), jamais un `FormSave.record` séparé ;
+        - mode fichier : `FormSave.record` PUIS `putBlob` (dans cet ordre) — un échec de `putBlob` RETIRE
+          l'enregistrement (pas de métadonnées sans binaire en local).
+      Dépendances INJECTÉES par le host (`attachmentStore`, `restMode`) — pas d'import global. */
+  static attachment(store: Store, host: FormHost, id: string | null, onSaved?: () => void): void {
+    const att: any = id ? store.get("attachments", id) : null;
+    const attachmentStore = host.attachmentStore || null;
+    const root = document.createElement("div");
+    const nameI = FormControls.text(att ? att.name : "", I18n.t("attachment.form.namePlaceholder"));
+    root.appendChild(FormControls.fieldRow(I18n.t("lists.col.name"), nameI));
+
+    // FICHIER : création = FilePicker (obligatoire) ; édition = ligne INFORMATIVE (binaire non remplaçable v1).
+    let picker: FilePickerElement | null = null;
+    if (!att) {
+      picker = FilePicker.build({ accept: Schema.ATTACHMENT_MIME_TYPES, maxBytes: ATTACHMENT_MAX_BYTES, isValidMime: (t) => Schema.isAttachmentMime(t) });
+      root.appendChild(FormControls.fieldRow(I18n.t("attachment.form.file"), picker, I18n.t("attachment.form.fileHint")));
+    } else {
+      const info = document.createElement("div");
+      info.className = "form-static";   // valeur en lecture seule, style de champ statique
+      info.style.cssText = "padding:8px 0;color:var(--fg)";
+      info.innerHTML = `${Html.escape(att.file_name || "?")} <span style="color:var(--fg-dimmer)">· ${Html.escape(Format.bytes(att.size))} · ${Html.escape(att.mime || "")}</span>`;
+      root.appendChild(FormControls.fieldRow(I18n.t("attachment.form.file"), info, I18n.t("attachment.form.editLocked")));
+    }
+
+    // CIBLE : équipement OU sous-équipement, familles CONFONDUES dans UN picker (principe n°14). Options
+    // équipements PUIS sous-équipements (mêmes moules : `FormUi.eqOptions`, et le même moule appliqué aux
+    // sous-équipements), values RE-PRÉFIXÉES à la convention composite « <kind>:<id> ». Un sous-équipement
+    // porte le nom de son MAÎTRE entre parenthèses (deux drives homonymes de librairies différentes restent
+    // discernables dans un picker unique).
+    const subEqOptions = store.all("subEquipments").slice()
+      .sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""))
+      .map((se: any) => {
+        const master: any = se.equipment_id ? store.get("equipments", se.equipment_id) : null;
+        const label = (se.name || I18n.t("subEquipment.fallback")) + (master ? ` (${master.name || I18n.t("lists.ph.equipment")})` : "");
+        return { value: TargetSearch.key("sub_equipment", se.id), label: I18n.t("attachment.form.familySubEquipment") + " · " + label };
+      });
+    const targetOptions = [{ value: "", label: I18n.t("forms.opt.none") }]
+      .concat(FormUi.eqOptions(store, "").slice(1).map((o) => ({ value: TargetSearch.key("equipment", o.value), label: I18n.t("attachment.form.familyEquipment") + " · " + o.label })))
+      .concat(subEqOptions);
+    const initialTarget = att && att.equipment_id ? TargetSearch.key("equipment", att.equipment_id)
+      : att && att.sub_equipment_id ? TargetSearch.key("sub_equipment", att.sub_equipment_id) : "";
+    const targetI = FormControls.entityPicker(targetOptions, initialTarget);
+    root.appendChild(FormControls.fieldRow(I18n.t("attachment.form.target"), targetI, I18n.t("attachment.form.targetHint")));
+
+    const descI = FormControls.textArea(att ? att.description : "");
+    root.appendChild(FormControls.fieldRow(I18n.t("lists.col.description"), descI));
+
+    // Validation PARTAGÉE (mêmes règles que le Store/serveur) : nom requis, MIME dans la liste blanche,
+    // exclusivité equipment_id/sub_equipment_id (invariant rattaché à `sub_equipment_id` par la spec →
+    // surligné sur le picker de cible, inatteignable ici par construction mais le câblage reste complet).
+    const live = new LiveValidation("attachments", { name: nameI, sub_equipment_id: targetI }, (c, i) => store.get(c, i) || null);
+    live.clearOnInput();
+
+    host.openModal({
+      title: att ? I18n.t("attachment.form.titleEdit") : I18n.t("attachment.form.titleNew"),
+      subtitle: att ? Html.escape(att.name || "") : "",
+      body: root,
+      onSave: async () => {
+        // Décomposition de la valeur composite du picker vers les DEUX FK : l'une reçoit l'id, l'autre est
+        // remise à null (changer de famille en édition doit VIDER l'ancienne FK).
+        const parsed = targetI.value ? TargetSearch.parse(targetI.value) : null;
+        const equipment_id = parsed && parsed.kind === "equipment" ? parsed.id : null;
+        const sub_equipment_id = parsed && parsed.kind === "sub_equipment" ? parsed.id : null;
+
+        if (att) {
+          // ÉDITION : métadonnées SEULEMENT (le binaire n'est pas remplaçable v1) — les deux modes.
+          const payload = { name: nameI.value.trim(), description: descI.value.trim(), equipment_id, sub_equipment_id };
+          // On revalide sur l'état COMPLET (les champs binaires inchangés viennent de l'enregistrement).
+          if (live.check({ ...payload, file_name: att.file_name, mime: att.mime, size: att.size }).length) return false;
+          if (!await FormSave.record(store, "attachments", att.id, payload)) return false;   // REFUSÉ (toast rouge du Store) : ne rien annoncer
+          host.setDirty?.(true); Notify.toast(I18n.t("attachment.form.updated")); onSaved?.(); return true;
+        }
+
+        // CRÉATION : le fichier est OBLIGATOIRE.
+        const file = picker && picker.file;
+        if (!file) { Notify.toast(I18n.t("attachment.form.fileRequired"), "err"); return false; }
+        // `file_name`/`mime` viennent du File choisi ; `size` est écrasé par le serveur en mode API.
+        const meta = { name: nameI.value.trim(), description: descI.value.trim(), file_name: file.name, mime: file.type, size: file.size, equipment_id, sub_equipment_id };
+        if (live.check(meta).length) return false;   // nom requis + MIME liste blanche (surlignés)
+
+        if (host.restMode) {
+          // Mode API : le POST multipart crée fichier + enregistrement ATOMIQUEMENT côté serveur (rev++,
+          // changeset, SSE, verrou). PAS de `FormSave.record` séparé (double écriture). L'id opaque est
+          // généré ici (base36 → sûr pour `AttachmentFiles.isSafeId`), passé au backend.
+          if (!attachmentStore) { Notify.toast(I18n.t("attachment.form.noStore"), "err"); return false; }
+          try {
+            await attachmentStore.putBlob(Id.uid(), file, meta);
+          } catch (e: any) {
+            // Le backend REMONTE le message du serveur (400 MIME/validation, 409…) — le montrer tel quel.
+            Notify.toast((e && e.message) ? String(e.message) : I18n.t("attachment.form.uploadFailed"), "err");
+            return false;
+          }
+          host.setDirty?.(true); Notify.toast(I18n.t("attachment.form.created")); onSaved?.(); return true;
+        }
+
+        // Mode fichier : enregistrement D'ABORD (métadonnées dans le document), binaire ENSUITE. Un échec de
+        // `putBlob` RETIRE l'enregistrement — jamais de métadonnées sans binaire en local (cohérence D5/undo).
+        if (!attachmentStore) { Notify.toast(I18n.t("attachment.form.noStore"), "err"); return false; }
+        const rec = await FormSave.record(store, "attachments", null, meta);
+        if (!rec) return false;   // REFUSÉ par le Store (toast rouge) : ne rien annoncer
+        try {
+          await attachmentStore.putBlob(rec.id, file, rec.toJSON ? rec.toJSON() : rec);
+        } catch (_e) {
+          await store.remove("attachments", rec.id);   // rollback : pas de métadonnées orphelines de binaire
+          Notify.toast(I18n.t("attachment.form.blobFailed"), "err");
+          return false;
+        }
+        host.setDirty?.(true); Notify.toast(I18n.t("attachment.form.created")); onSaved?.(); return true;
       },
     });
     setTimeout(() => nameI.focus(), 30);

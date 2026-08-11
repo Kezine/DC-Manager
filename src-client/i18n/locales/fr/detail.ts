@@ -85,6 +85,7 @@ export const detail = {
     wifiClient: "Client wifi introuvable",
     type: "Type introuvable",
     application: "Application introuvable",
+    attachment: "Pièce jointe introuvable",
   },
   /* Fiche APPLICATION + sections « Applications hébergées » des fiches HÔTES (équipement / VM). */
   application: {
@@ -92,6 +93,11 @@ export const detail = {
     openHost: "Ouvrir la fiche de l'hôte",
     openApp: "Ouvrir la fiche de l'application",
     hostedSection: "Applications hébergées ({{count}})",
+  },
+  /* Fiche PIÈCE JOINTE (cible cliquable, téléchargement). */
+  attachment: {
+    title: "Détail de la pièce jointe",
+    openTarget: "Ouvrir la fiche de la cible",
   },
   cable: {
     from: "De",

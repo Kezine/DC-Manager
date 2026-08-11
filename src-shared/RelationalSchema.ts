@@ -104,6 +104,11 @@ export const INDEX_SPEC: Record<string, string[]> = {
   // elles, le filtre cible « Hébergée sur » des listings part au serveur en `where` dessus, et
   // l'invalidation de la colonne `search` (renommage de l'hôte) les interroge à chaque écriture.
   applications:  ["equipment_id", "vm_id"],
+  // PIÈCES JOINTES : mêmes motifs que `applications` sur le couple de FK cible — la cascade
+  // `equipments`/`subEquipments` SUPPRIME par elles (D3), les sections « Pièces jointes » des fiches
+  // lisent par elles (Store.attachmentsOf*), et l'invalidation de `search` (renommage de la cible)
+  // les interroge à chaque écriture (SEARCH_SPECS.attachments).
+  attachments:   ["equipment_id", "sub_equipment_id"],
 };
 
 /** GÉNÉRATEUR de DDL relationnel (méthodes statiques — cf. CLAUDE.md). Toutes les chaînes émises quotent
