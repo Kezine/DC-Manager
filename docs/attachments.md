@@ -114,15 +114,73 @@ Les deux signatures sont ÉTANCHES (un `.nmfa` n'est pas lisible comme `.nmfb`, 
   TROIS fois : filtre front à la sélection (lot B), REJET 400 serveur à l'upload, et INVARIANT de la
   collection (toute écriture — édition de métadonnées comprise : on ne peut pas requalifier un
   binaire en type interdit après coup).
-- **`Content-Disposition: attachment` TOUJOURS** (D6) : jamais inline, même un PDF — le `nosniff`
-  global (Server) reste en défense en profondeur. Le nom proposé = `file_name` ASSAINI par la classe
-  pure `ContentDisposition` (contrôles/CRLF retirés — anti-injection d'en-tête —, repli ASCII pour le
-  paramètre `filename`, nom fidèle RFC 5987 dans `filename*`).
+- **`Content-Disposition: attachment` TOUJOURS** (D6, RÉVISÉ 2026-08-11) : le DOWNLOAD serveur reste la
+  règle — le binaire n'est JAMAIS servi INLINE par l'origine (le `nosniff` global reste en défense en
+  profondeur). L'affichage inline n'existe QUE via le **viewer CLIENT** (cf. § Viewer), sur un `blob:`
+  LOCAL au navigateur — jamais un flux servi par le serveur : le motif originel de D6 (XSS stocké resservi
+  par l'ORIGINE) ne s'applique donc pas au viewer. Pour le PDF, la visionneuse NATIVE du navigateur est
+  assumée (moteur sandboxé par le navigateur ; historique de CVE = risque résiduel documenté, repli =
+  téléchargement). Le nom proposé au download = `file_name` ASSAINI par la classe pure `ContentDisposition`
+  (contrôles/CRLF retirés — anti-injection d'en-tête —, repli ASCII pour le paramètre `filename`, nom
+  fidèle RFC 5987 dans `filename*`).
 - **Path traversal impossible PAR CONSTRUCTION** (D4) : aucune entrée utilisateur n'entre dans un
   chemin — les segments sont le docId (du registre) et l'id de pièce, VALIDÉ (`AttachmentFiles.isSafeId` :
   alphanumériques + `._-`, jamais de point en tête, jamais de séparateur) à chaque composition de
   chemin. Le nom d'origine ne vit QUE dans les métadonnées et l'en-tête de download.
 - **Plafond 50 Mo par pièce** (multer `limits`, en STREAM disque — jamais le binaire en RAM).
+
+## Viewer intégré (cadrage B, 2026-08-11)
+
+Afficher une pièce jointe SANS quitter l'app, **100 % client** (aucune route serveur) et dans les DEUX modes :
+`AttachmentStore.getBlob(id)` est mode-agnostique (REST = `fetch → Blob`, `Content-Disposition: attachment`
+n'affecte pas `fetch` ; fichier = lecture IndexedDB). Point d'entrée `AttachmentUi.view(host, att)`, à côté de
+`download`. Surface : **modale de la pile**, niveau `info` (`hideFooter`, SANS `onSave` → s'empile partout, y
+compris au-dessus d'un formulaire, garde D9b), `wide`, `stackKey: "view:attachments/<id>"`, pied = bouton
+« Télécharger ». Binaire absent (`getBlob` → null) → toast `attachment.binaryMissing` (cas D8 du visualiseur
+autonome).
+
+**Cycle de vie de l'objectURL** : les rendus binaires (image, PDF) créent un `URL.createObjectURL` RÉVOQUÉ à
+la fermeture du niveau via le callback `onClose` de `ModalOptions` (rappelé à toute disparition — ← Retour, ✕,
+Échap, clic hors-modale, dédup de pile). Point de révocation UNIQUE : aucune fuite par ouvertures répétées
+(même patron que `PerspectiveEditor.open`). Le viewer NE cache PAS l'objectURL dans `AttachmentStore` (chaque
+ouverture porte son create/revoke).
+
+**Choix du rendu** — module PUR testé `core/AttachmentViewKind.kindOf(mime, file_name)` → `image` | `text` |
+`markdown` | `pdf` | `null`. Décision par **MIME d'abord, extension du `file_name` en repli** : un `.md`
+historique stocké en `text/plain` rend en **markdown**, un `.csv` reste **texte**. `null` (ODT/ODS/DOCX/XLSX
+et tout inconnu) = non visualisable → **pas de bouton « Afficher »**, téléchargement seul.
+
+**Rendus** :
+- **image** (PNG/JPEG/WebP) : `<img>` centrée, `max-width:100%; max-height:70vh; object-fit:contain`.
+- **texte** (`text/plain`, `text/csv`) : `<pre>` rempli en **`textContent`** (jamais `innerHTML`), monospace,
+  retour à la ligne. **TRONCATURE à 1 Mo affiché** (bandeau « Affichage tronqué — télécharger pour le fichier
+  complet ») — la lecture elle-même est bornée à 1 Mo (un fichier de dizaines de Mo figerait l'onglet).
+- **markdown** (`text/markdown`) : `Markdown.render` (défauts micromark SÛRS) dans la variante plein-cadre
+  `.md-body-full` (largeur de lecture bornée, titres/blocs espacés, tables scrollables). Même troncature 1 Mo.
+- **PDF** (**D-B1** : iframe native) : `<iframe>` sur l'objectURL, ~75vh, `title` accessible. **PAS d'attribut
+  `sandbox`** (il bloque le plugin PDF de certains navigateurs) — le blob est local, jamais servi inline par
+  l'origine (D6 révisé) ; le moteur PDF est sandboxé par le navigateur (risque résiduel assumé). Dégradation
+  gracieuse : un navigateur qui ne rend pas l'iframe laisse le pied « Télécharger ». Validation
+  multi-navigateurs (Chrome/Edge/Firefox) à faire À L'ŒIL.
+
+**Politique d'images du markdown (D-B3)** — module PUR testé `core/MarkdownImagePolicy.classify(src, baseUri)`
+→ `local` (`blob:`/`data:`) : rendue ; `same-origin` (résolue contre `document.baseURI` — respecte le `<base>`
+du mode reverse-proxy sous-dossier) : rendue d'office ; `external` : REMPLACÉE par un lien cliquable sûr
+(l'URL visible, jamais suivie automatiquement). S'il existe au moins une image externe, le viewer affiche un
+bouton « Afficher les images externes » qui RE-REND en les autorisant, pour CETTE ouverture uniquement (aucune
+persistance). La classification est pure (testable) ; la manipulation DOM vit dans `AttachmentUi`.
+
+**Admission de `text/markdown` (D-B2)** : ajouté à `Schema.ATTACHMENT_MIME_TYPES` (les 3 gardes suivent). Le
+sélecteur `ui/FilePicker` a un **repli extension → MIME** (table `{ .md/.markdown → text/markdown, .txt →
+text/plain, .csv → text/csv }`) : `File.type` est souvent VIDE pour un `.md` (Windows/Firefox), donc quand le
+type du navigateur est vide OU inconnu de la validation, le MIME est résolu par l'extension AVANT de valider,
+et EXPOSÉ via `picker.mime` (consommé par `Forms.attachment` à la place de `file.type`). Les extensions sont
+aussi ajoutées à l'attribut `accept`.
+
+**Gestes d'ouverture (D-B4)** : bouton « Afficher » dans le pied de la fiche `attachmentDetail` (AVANT
+« Télécharger », présent seulement si visualisable, le viewer s'empile dessus) ; action « Afficher » dans le
+MENU de ligne du listing Pièces jointes (AVANT « Télécharger », présente seulement si visualisable). Les
+sections « Pièces jointes » des fiches porteuses (équipement/sous-équipement) sont INCHANGÉES.
 
 ## Exports (D8)
 

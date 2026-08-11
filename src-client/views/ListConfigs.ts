@@ -19,6 +19,7 @@ import { RackScene } from "../geometry/RackScene";
 import { FloorLayout } from "../geometry/FloorLayout";
 import { EntityViz } from "./EntityViz";
 import { ListTargets } from "./ListTargets";
+import { AttachmentViewKind } from "../core/AttachmentViewKind";   // « Afficher » de ligne : proposé seulement si visualisable
 import type { EntitySearchReader } from "../core/EntityCandidates";
 import type { ListOptions } from "./ListView";
 
@@ -729,7 +730,13 @@ export class ListConfigs {
       collection: "attachments",
       defaultSort: { key: "name", dir: "asc" },
       emptyText: I18n.t("lists.empty.attachments"),
-      actions: { view: true, edit: true, clone: false, del: true, download: true },   // download = le geste central ; clone sans objet (le binaire ne se duplique pas en v1)
+      // download = le geste central ; « show » (viewer) AVANT lui dans le menu, seulement si le type est
+      // visualisable (`AttachmentViewKind` — image/texte/markdown/PDF ; ODT/DOCX/XLSX → pas de bouton) ;
+      // clone sans objet (le binaire ne se duplique pas en v1).
+      actions: {
+        view: true, edit: true, clone: false, del: true, download: true,
+        show: true, canShow: (id: string) => { const a: any = store.get("attachments", id); return !!a && AttachmentViewKind.kindOf(a.mime, a.file_name) !== null; },
+      },
       // Filtre CIBLE « Attachée à » : équipement OU sous-équipement, familles confondues dans UNE recherche
       // (principe n°14). Le lien est une colonne → le filtre part au serveur en `where` ; les CANDIDATS sont
       // serveur-pilotés en mode API (`entitySearch`), locaux en mode fichier.

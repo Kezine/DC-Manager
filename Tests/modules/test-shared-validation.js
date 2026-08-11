@@ -1642,7 +1642,7 @@ module.exports = async () => {
 
     // -- LISTE BLANCHE MIME (invariant, source unique Schema.ATTACHMENT_MIME_TYPES — anti-XSS-stocké D6) :
     //    les types EXÉCUTABLES par un navigateur sont bannis, JAMAIS text/html ni image/svg+xml. --
-    for (const good of ["application/pdf", "image/png", "image/jpeg", "image/webp", "text/plain", "text/csv",
+    for (const good of ["application/pdf", "image/png", "image/jpeg", "image/webp", "text/plain", "text/csv", "text/markdown",
       "application/vnd.oasis.opendocument.text", "application/vnd.oasis.opendocument.spreadsheet",
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]) {

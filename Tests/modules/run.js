@@ -35,6 +35,7 @@ const DOMAINS = [
   "./test-certs.js",             // certificats : crypto client pure (PkiCrypto/PkiSession)
   "./test-lifecycle-format.js",  // cycle de vie matériel (core/LifecycleFormat) : âge d'achat + état de garantie (now injecté), granularité adaptative, frontière 90 j
   "./test-format.js",            // formatage d'affichage (core/Format) : `bytes()` — taille de fichier lisible (pièces jointes, lot B)
+  "./test-attachment-view.js",   // VIEWER intégré des pièces jointes (cadrage B) : choix du rendu par MIME/extension (core/AttachmentViewKind), politique d'images markdown (core/MarkdownImagePolicy), repli extension → MIME du sélecteur (ui/FilePicker.resolveMime)
   "./test-rapprochement-certs.js", // rapprochement cert ↔ équipement/VM (HostnameMatch/CertSubject/CertTargetMatch, pur)
   "./test-interventions.js",     // interventions : logique cliente pure (InterventionsFormat, buildQuery)
   "./test-users.js",             // annuaire utilisateurs serveur (UserProfiles pur, resolver + snapshot SQLite)
