@@ -128,6 +128,16 @@ export class EquipmentForms extends FormBase {
     // Intégration « fiches » : certificats TLS rapprochés (calculé, no-op hors mode API).
     CertFicheRow.attach(root, host.certHooks, { kind: "equipment", id: eq.id }, () => host.closeModal?.());
 
+    // PIÈCES JOINTES de cet équipement : section MASQUÉE si vide, libellé cliquable → fiche pièce (elle
+    // s'empile, cette fiche se reconstruit au retour), taille + bouton Télécharger. PLACÉE SOUS le bloc
+    // interventions/certificats (retour utilisateur 2026-08-11) : les pièces relèvent du SUIVI de
+    // l'équipement, pas de sa description physique — sous les rangées d'intégration, pas en pied de fiche.
+    // Source UNIQUE : `Store.attachmentsOfEquipment`. Section factorisée (`AttachmentUi.section`) avec la
+    // fiche sous-équipement. ⚠ Cast `(this as any)` : à l'APPEL, `this` statique résout vers `Forms` (fin
+    // de chaîne), où `attachmentDetail` existe ; importer DetailForms ici créerait un CYCLE (DetailForms
+    // hérite, via la chaîne, de ce fichier).
+    AttachmentUi.section(store, host, root, store.attachmentsOfEquipment(eq.id), (attId) => (this as any).attachmentDetail(store, host, attId, onChanged));
+
     // façade : bouton éditer + toggle « haute densité » + aperçus des faces avec contenu
     const dF = document.createElement("div"); dF.className = "section-divider"; dF.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:10px";
     const dFlabel = document.createElement("span"); dFlabel.textContent = I18n.t("equipment.detail.faceplate"); dF.appendChild(dFlabel);
@@ -234,14 +244,6 @@ export class EquipmentForms extends FormBase {
         (el as HTMLElement).onkeydown = (ev: KeyboardEvent) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); open(); } };
       });
     }
-
-    // PIÈCES JOINTES de cet équipement (cadrage 2026-08-10) : section MASQUÉE si vide, libellé cliquable
-    // → fiche pièce (elle s'empile, cette fiche se reconstruit au retour), taille + bouton Télécharger.
-    // Source UNIQUE : `Store.attachmentsOfEquipment`. Section factorisée (`AttachmentUi.section`) avec la
-    // fiche sous-équipement. ⚠ Même cast `(this as any)` que la section applications ci-dessus : à l'APPEL,
-    // `this` statique résout vers `Forms` (fin de chaîne), où `attachmentDetail` existe ; importer DetailForms
-    // ici créerait un CYCLE (DetailForms hérite, via la chaîne, de ce fichier).
-    AttachmentUi.section(store, host, root, store.attachmentsOfEquipment(eq.id), (attId) => (this as any).attachmentDetail(store, host, attId, onChanged));
 
     AuditLine.attach(root, eq, host.userDirectory);   // « Créé/Modifié par » (mode API)
 

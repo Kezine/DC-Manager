@@ -127,16 +127,17 @@ export class SubEquipmentForms extends FormBase {
     note.textContent = I18n.t("subEquipment.natureHint");
     root.appendChild(note);
 
-    // PIÈCES JOINTES de ce sous-équipement (garantie, bon de commande…) : section MASQUÉE si vide, libellé
-    // cliquable → fiche pièce, taille + bouton Télécharger. MÊME brique que la fiche équipement
-    // (`AttachmentUi.section`). L'ouverture passe par `DetailForms.attachmentDetail` (import DIFFÉRÉ, comme
-    // le rebond vers le maître via EquipmentForms) — cette classe est HORS de la chaîne des fiches.
-    AttachmentUi.section(store, host, root, store.attachmentsOfSubEquipment(se.id), (attId) => DetailForms.attachmentDetail(store, host, attId, onChanged));
-
     // Intégration « fiches » : badge d'interventions ouvertes + « Déclarer une intervention » (no-op hors
     // mode API) — même rangée que les fiches équipement/VM/spare. Remplacer un drive en panne est LE motif
     // d'intervention type sur ce genre de matériel : la 4ᵉ famille se déclare ici, pas seulement dans l'enum.
     InterventionFicheRow.attach(root, host.interventionHooks, { kind: "sub_equipment", id: se.id, label: se.name || "" }, () => host.closeModal?.());
+
+    // PIÈCES JOINTES de ce sous-équipement (garantie, bon de commande…) : section MASQUÉE si vide, libellé
+    // cliquable → fiche pièce, taille + bouton Télécharger. PLACÉE SOUS le bloc interventions (retour
+    // utilisateur 2026-08-11, parité fiche équipement). MÊME brique que la fiche équipement
+    // (`AttachmentUi.section`). L'ouverture passe par `DetailForms.attachmentDetail` (import DIFFÉRÉ, comme
+    // le rebond vers le maître via EquipmentForms) — cette classe est HORS de la chaîne des fiches.
+    AttachmentUi.section(store, host, root, store.attachmentsOfSubEquipment(se.id), (attId) => DetailForms.attachmentDetail(store, host, attId, onChanged));
 
     AuditLine.attach(root, se, host.userDirectory);   // « Créé/Modifié par » (mode API)
     const footerActions = this.footer(() => this.form(store, host, se.equipment_id, se.id, onChanged));
