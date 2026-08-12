@@ -394,11 +394,20 @@ async function boot(): Promise<void> {
   // ⚠ Fermeture sur `shell`, déclaré PLUS BAS : légal — l'appel est asynchrone, bien après le boot.
   store.onCountResolved = () => shell.refreshCounts();
   // G3 — des collections NON hydratées ont été SAUTÉES par un rechargement SSE (un autre client les a
-  // touchées). On ne les recharge PAS (ce serait annuler le lazy) : leurs COMPTEURS ont déjà été
-  // invalidés par le Store, il reste à les REDEMANDER à l'écran. C'est le seul dérivé qu'on rafraîchit
-  // ici ; la page de listing en main, elle, reste telle quelle jusqu'à la prochaine navigation —
-  // cohérent avec G3, qui refuse justement de re-tirer la collection (cf. docs/hydratation.md).
-  store.onLazyReloadDeferred = () => shell.refreshCounts();
+  // touchées, ou nous-mêmes par un chemin qui n'écrit pas dans le Store : l'upload d'une pièce jointe
+  // passe par sa route multipart). On ne les recharge PAS — ce serait annuler le lazy. Deux dérivés
+  // sont rafraîchis, tous deux à coût BORNÉ :
+  //   - les COMPTEURS (déjà invalidés par le Store) → on redemande leur rendu ;
+  //   - la PAGE en main du listing de cette collection (régime pagé G4) : on l'OUBLIE, le prochain
+  //     rendu la redemandera. Ce n'est pas un contournement de G3 (on ne re-tire pas la collection,
+  //     on redemande UNE page — ce que fait tout clic sur « ‹ › ») ; sans ça, une pièce jointe qu'on
+  //     vient d'envoyer n'apparaîtrait dans SON listing qu'au prochain changement d'onglet, alors que
+  //     la pastille, elle, se serait mise à jour. Le re-rendu suit : le contrôleur REST appelle
+  //     `refreshActive()` juste après le rechargement (cf. RestDocuments). Voir docs/hydratation.md.
+  store.onLazyReloadDeferred = (collections) => {
+    for (const collection of collections) listViewsByCollection.get(collection)?.()?.forgetServerPage();
+    shell.refreshCounts();
+  };
 
   // NETTOYAGE des images de façade NON UTILISÉES (réglages → Maintenance) : purge de la bibliothèque après
   // confirmation. Mode FICHIER : élagage IndexedDB (keepOnly) → le prochain compagnon .nmfb n'embarque plus les
@@ -442,7 +451,12 @@ async function boot(): Promise<void> {
   // des pièces jointes, prévenir que leurs BINAIRES n'y seront PAS (seules les métadonnées y sont). Renvoie
   // `true` s'il faut poursuivre l'export (aucune pièce jointe, ou l'utilisateur confirme malgré tout).
   const warnAttachmentsExcluded = async (): Promise<boolean> => {
-    const count = store.all("attachments").length;
+    // G10 (chantier lazy-load) : `store.all("attachments").length` MENTIRAIT en mode API — `attachments`
+    // est chargée PARESSEUSEMENT, le cache ne contient que ce qui a été parcouru, et l'avertissement
+    // manquerait précisément sur un document dont les pièces n'ont pas encore été ouvertes. `countOf`
+    // rend le compte LOCAL sur une collection hydratée (mode fichier : aucun réseau, inchangé) et le
+    // `COUNT(*)` serveur sinon. Le chemin est déjà asynchrone (Dialog.confirm) : aucun coût d'UI.
+    const count = await store.countOf("attachments");
     if (!count) return true;   // rien à prévenir → export direct
     return await Dialog.confirm({
       title: I18n.t("app.maint.exportAttachTitle"),
@@ -562,6 +576,9 @@ async function boot(): Promise<void> {
   };
 
   // ---- onglets de LISTE (ListView paramétré par ListConfigs) ----
+  /** Registre « collection → son listing » (accesseurs PARESSEUX : la vue n'est bâtie qu'au 1er affichage
+      de l'onglet). Rempli par `addListTab`, lu par le seul point d'accroche G3 du chantier lazy-load. */
+  const listViewsByCollection = new Map<string, () => ListView | null>();
   type FormFn = (id: string | null, onSaved: () => void) => void;
   interface TabOpts {
     title?: string; subtitle?: string; form?: FormFn; addLabel?: string; kind?: "primary" | "secondary"; parent?: string; links?: string[]; icon?: string;
@@ -673,6 +690,10 @@ async function boot(): Promise<void> {
         view.render();
       },
     });
+    // Accès au listing PAR COLLECTION (registre de l'hôte) : le seul consommateur est le point d'accroche
+    // G3 ci-dessous, qui doit périmer la page en main d'une collection lazy touchée par un autre client.
+    // Un accesseur PARESSEUX, comme le retour de cette fonction : la vue n'existe qu'une fois l'onglet ouvert.
+    listViewsByCollection.set(cfg.collection, () => view);
     return () => view;
   };
 
@@ -1099,6 +1120,17 @@ async function boot(): Promise<void> {
     .map(([kind, family]) => ({ kind, collection: family.collection, label: (r: any) => targetLabel(kind, r) }));
   const interventionCandidates = new EntityCandidateSource(store, interventionCandidateFamilies, entitySearchReader);
   const interventionTargets: InterventionTargetSource = {
+    // G10 (chantier lazy-load, cf. docs/hydratation.md § Vague 2) : `labelOf` est SYNCHRONE — la vue
+    // résout un libellé par id au moment du rendu, elle ne peut pas attendre. Or `applications` est
+    // désormais chargée PARESSEUSEMENT en mode API : une intervention liée à une application non
+    // absorbée s'afficherait « (introuvable) », comme si la cible avait été supprimée. Ce préalable
+    // charge donc, UNE fois, ce que la résolution exige — patron `NotificationsAdminView`
+    // (hydratation à la demande d'une surface qui a besoin de la liste COMPLÈTE). Les quatre autres
+    // familles (équipements, VMs, spares, sous-équipements) sont hydratées, `hydrate` les ignore ; en
+    // mode fichier c'est un no-op PAR CONSTRUCTION — aucun test de mode ici.
+    // Un ÉCHEC réseau est AVALÉ : mieux vaut un listing d'interventions complet avec un libellé en
+    // moins qu'une page qui refuse de s'afficher (même doctrine que `ensureTrackerProviders`).
+    prepareLabels: () => store.hydrate(["applications"]).then(() => undefined).catch(() => undefined),
     labelOf: (kind, id) => { const r: any = store.get(targetCollection(kind), id); return r ? targetLabel(kind, r) : null; },
     search: (query, excluded) => interventionCandidates.fetch(query, excluded),
     // Ouvre la FICHE DE DÉTAIL existante de la cible (equipment/vm/spare) via la machinerie des fiches. Le

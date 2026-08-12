@@ -171,6 +171,9 @@ export const vm = {
     intro: "Cochez les groupes à purger. La suppression DÉTACHE les adresses IP rattachées et les applications hébergées (rien de tout cela n'est supprimé) et se défait d'un seul « Annuler » : tout le lot est écrit en une seule transaction.",
     introFile: "Mode fichier : la liste des providers configurés est inconnue (aucun serveur). Seules les VMs ORPHELINES sont proposées, groupées par identifiant de provider — impossible de distinguer ici un provider configuré d'un provider disparu.",
     providersUnavailable: "Liste des providers illisible ({{detail}}) — repli sur les seules VMs orphelines, groupées par identifiant de provider.",
+    // Aperçu des effets INDISPONIBLE (aperçu de cascade serveur — cf. docs/hydratation.md § G5) : on ne
+    // remplace JAMAIS le compte par une estimation locale, qui sous-estimerait sur un corpus partiel.
+    previewUnavailable: "Effets de la purge incalculables ({{detail}}) — réessayez ; la purge reste refusée tant qu'ils ne sont pas annonçables.",
     nothing: "Aucune VM à purger : ni orpheline, ni VM d'un provider disparu.",
     groupOrphans: "Provider « {{provider}} » : {{count}} orpheline(s)",
     groupOrphansUnknown: "Identifiant de provider « {{provider}} » : {{count}} orpheline(s)",

@@ -10,13 +10,18 @@ manquante — l'**état d'hydratation par collection** — et les **gardes** qui
 Modules concernés : `src-client/core/HydrationState.ts` (état + prédicats, pur),
 `src-client/core/LazyCollections.ts` (LA liste des collections paresseuses),
 `src-client/core/CollectionCountCache.ts` (compteurs async, pur),
-`src-client/store/Store.ts` (câblage G1/G2/G3/G4/G6 + hydratation à la demande),
+`src-client/store/Store.ts` (câblage G1/G2/G3/G4/G6 + hydratation à la demande + jumeaux async des
+sections G7 + aperçu de cascade G5 + purge du résidu M4),
 `src-client/core/ListRowEngine.ts` + `src-client/core/StoreListRowSource.ts` + `views/ListView.ts`
 (pager serveur réel), `src-client/core/ListServerSort.ts` + `src-shared/ListOrder.ts` (tri serveur
-du régime pagé — pagination ordonnée complète, lot 1b), `src-client/app/FileDocuments.ts`
-(branchement export), `src-client/core/HydrationStats.ts` (instrumentation). Tests :
-`Tests/modules/test-hydration.js` (lot 0) et `Tests/modules/test-lazy-contacts.js` (vague 1 + tri
-du lot 1b) ; côté serveur `Tests/modules/test-relational-schema.js` (liste blanche + ORDER BY) et
+du régime pagé — pagination ordonnée complète, lot 1b), `src-client/views/forms/AsyncSection.ts` +
+`AttachmentUi.ts` + `ApplicationUi.ts` (sections de fiches asynchrones, vague 2),
+`src-server/src/api.ts` (endpoint d'aperçu de cascade + compte rendu du résidu),
+`src-client/app/FileDocuments.ts` (branchement export), `src-client/core/HydrationStats.ts`
+(instrumentation). Tests : `Tests/modules/test-hydration.js` (lot 0),
+`Tests/modules/test-lazy-contacts.js` (vague 1 + tri du lot 1b) et
+`Tests/modules/test-lazy-vague2.js` (vague 2) ; côté serveur
+`Tests/modules/test-relational-schema.js` (liste blanche + ORDER BY) et
 `test-relational-repository.js` (tri SQL réel).
 
 ## Le modèle d'état
@@ -116,8 +121,10 @@ consommateur de `Store.toJSON()` à visée d'export (`_persistAll` est couvert p
 **Point d'accroche** : `Store.onLazyReloadDeferred: ((collections: string[]) => void) | null` —
 appelé avec les collections sautées. Le Store y invalide d'abord SES dérivés (les compteurs G6, seul
 dérivé recalculable à bas coût), puis appelle l'accroche pour ceux de l'hôte : `main.ts` y redemande
-un rendu des pastilles (`shell.refreshCounts()`). La PAGE de listing en main, elle, n'est pas
-rafraîchie — re-tirer la collection est précisément ce que G3 refuse.
+un rendu des pastilles (`shell.refreshCounts()`) et **oublie la page en main** du listing de cette
+collection (`ListView.forgetServerPage()`, vague 2 — cf. § « Vague 2 »). Oublier une PAGE n'est pas
+re-tirer la COLLECTION : c'est ce que G3 refuse, et la distinction est nette — le prochain rendu
+redemande une page, exactement comme un clic sur « ‹ › ».
 
 ## Vague 1 — `contacts` chargée paresseusement (mode API)
 
@@ -249,9 +256,9 @@ Ce que le pager réel apporte concrètement :
   (repli assumé, documenté dans `ListColumn.sortField`). Sur le listing contacts, TOUTES les
   colonnes triables déclarent leur champ : aucune n'est concernée.
 - **Filtres de colonne** : appliqués à la page reçue, pas au corpus.
-- **Événement SSE d'un autre client** sur une collection lazy : G3 saute délibérément son
-  rechargement, la page en main n'est donc PAS rafraîchie. Seul le COMPTEUR l'est (cf. G6). Cohérent
-  avec G3 — refuser de re-tirer la collection ET la re-tirer pour repeindre serait contradictoire.
+- **Événement SSE d'un autre client** sur une collection lazy : G3 saute délibérément le rechargement
+  de la COLLECTION. Le compteur est rafraîchi (cf. G6) et — depuis la vague 2 — la page en main est
+  OUBLIÉE, donc redemandée au rendu suivant : une page, jamais la collection.
 
 Le listing des collections **hydratées** ne change pas d'un pixel : `page()` y rend `null` et la vue
 reprend son chemin historique, ligne pour ligne.
@@ -341,16 +348,219 @@ collatéral : le contact ainsi absorbé devient résoluble dans les « récents 
 tout), les 20+ autres listings, le mode fichier et le visualiseur. `contacts` n'ayant ni FK ni
 cascade ni index dérivé, aucune règle métier ne dépend de sa présence en cache.
 
-## Gardes à venir (hors vague 1)
+## Vague 2 — `attachments` + `applications` chargées paresseusement (mode API)
 
-Instruites par le cadrage `.notes/toDos/lazy-load-collections-cadrage-2026-08-11.md` § 2, livrées
-avec les vagues suivantes : **G5** aperçu de cascade (endpoint serveur), **G7** sections de fiches
-(`fetchBy` + rendu async), **G10** divers mesurés (`warnAttachmentsExcluded`, `labelOf` des cibles
-d'intervention, consommateurs cachés de `vms`). **G4**, **G6**, **G8** et **G9** sont livrées ci-dessus
-sous une forme GÉNÉRIQUE (elles ne connaissent que l'état d'hydratation, jamais `contacts`) : les
-vagues 2-3 en héritent en ajoutant leur collection à `LAZY_COLLECTIONS_API` — restent à traiter,
-pour elles, les points durs qui leur sont propres (facettes distinctes serveur, sections de fiches,
-aperçu de cascade).
+Deux collections plus RICHES que le pilote : elles ont des FK entrantes (les sections de fiches), un
+rôle dans la CASCADE (supprimer un équipement supprime ses pièces jointes et détache ses applications)
+et, pour `applications`, un statut de CIBLE D'INTERVENTION. Le patron du pilote se rejoue tel quel ;
+ce qui suit ne décrit que les points DURS propres à la vague.
+
+### Ce qui est acquis sans rien écrire
+
+Ajouter les deux noms à `LAZY_COLLECTIONS_API` suffit à obtenir : le boot qui ne les tire plus
+(`skipCollections`), la re-déclaration après `_hydrate` (`Store.init`), G1/G2/G3 (gardes de sûreté),
+le **pager serveur réel** G4 avec son **tri serveur** (lot 1b), les **compteurs** G6 des pastilles
+d'onglet (`count: () => store.countHint(cfg.collection)` est déclaré UNE fois pour tous les onglets de
+liste, cf. `main.ts addListTab`) et les dégradations G9 de la palette. Ces gardes ne connaissent que
+l'ÉTAT d'hydratation — jamais un nom de collection.
+
+### Listings : tri serveur, et pas de facette à traiter
+
+`ListConfigs.applications` / `ListConfigs.attachments` déclarent le `sortField` de chaque colonne dont
+l'accesseur `sort` lit un champ SCALAIRE du modèle — `name`, `url`, `description` pour les
+applications ; `name`, `file_name`, `size`, `description` pour les pièces jointes (`size` est
+NUMÉRIQUE : l'`ORDER BY` serveur n'y applique pas `COLLATE NOCASE`, donc 9 avant 10). En régime pagé,
+ces critères ordonnent le CORPUS entier.
+
+Deux colonnes n'en déclarent PAS, à dessein : **« Hébergée sur »** et **« Attachée à »** trient un nom
+d'équipement/VM/sous-équipement RÉSOLU par jointure CLIENTE, que la table de la collection ne porte
+pas. C'est le repli documenté de `ListColumn.sortField` : la découpe suit l'ordre serveur par défaut
+et le critère ne trie que la page affichée.
+
+**G8 est SANS OBJET pour cette vague** (mesuré) : aucun des deux listings n'a de facette de colonne.
+Le filtrage par cible passe par la dimension CIBLE (`targetFilter` → `where` SERVEUR sur colonnes
+indexées), qui reste donc JUSTE sur corpus partiel — le serveur filtre, le cache ne sert de rien.
+
+⚠ **Raffinement de G3 apporté par la vague** — mesuré sur un geste très courant : l'UPLOAD d'une pièce
+jointe passe par sa route multipart dédiée, donc **hors du Store** ; le client le découvre par le SSE
+de sa propre écriture (cette route n'envoie pas `X-Client-Id`, l'événement n'est donc pas filtré). En
+régime hydraté, la collection était re-tirée et la nouvelle pièce apparaissait ; en régime lazy, G3
+saute le rechargement — la pastille se mettait à jour, mais la page du listing restait telle quelle. Le
+point d'accroche G3 **oublie donc désormais la page en main** du listing concerné
+(`ListView.forgetServerPage`, registre `collection → listing` tenu par `main.ts`) : le rendu qui suit
+immédiatement (`RestDocuments` appelle `refreshActive()` après tout rechargement) en redemande une
+fraîche. Coût BORNÉ — une page, jamais la collection — et le bénéfice vaut aussi pour la vague 1.
+
+### 🚨 G7 — les sections de fiches deviennent ASYNCHRONES
+
+Les fiches affichent la section « Pièces jointes » (équipement, sous-équipement) et le bloc
+« Applications hébergées » (équipement, VM) en lisant l'index FK du **cache**. Sur une collection
+lazy, elles s'afficheraient **VIDES** alors que le serveur a des lignes — le pire mode de panne du
+chantier : une fiche qui affirme qu'il n'y a rien.
+
+Le Store expose donc les **jumeaux ASYNC** de ses quatre helpers de relation —
+`attachmentsOfEquipmentAsync`, `attachmentsOfSubEquipmentAsync`, `applicationsOfEquipmentAsync`,
+`applicationsOfVmAsync`. Corps UNIQUE (`Store._sectionRows`) : cache si la collection est `full`,
+sinon `fetchBy` (la FK est indexée côté serveur — c'est exactement la requête que pose la section),
+**même tri** que les jumeaux synchrones (comparateur écrit une fois, `Store.BY_NAME`). Les lignes
+reçues sont **ABSORBÉES**, donc la fiche de la pièce ou de l'application s'ouvre ensuite normalement
+(`store.get` la trouve). En mode fichier : promesse résolue sur le cache, **aucun réseau, aucun écart
+visible** (principe n°15) — l'appelant n'écrit aucun test de mode.
+
+Côté rendu, une fiche se construit d'un trait, de haut en bas : un `appendChild` au retour d'une
+promesse poserait la section EN FIN de fiche. `views/forms/AsyncSection` réserve donc la **place**
+tout de suite et la remplit ensuite —
+- **jamais de flash « vide »** : « Chargement… » tant que rien n'est arrivé (en mode fichier la
+  promesse est résolue avant le premier rendu du navigateur : le libellé n'est jamais vu) ;
+- liste vide → conteneur laissé vide, la section reste **masquée** (comportement historique) ;
+- échec réseau → ligne discrète « Chargement impossible », jamais un silence qui se lirait « aucune
+  pièce jointe ».
+
+Le rendu du bloc « Applications » était RECOPIÉ dans la fiche équipement et dans la fiche VM ; il est
+extrait dans `views/forms/ApplicationUi` (jumeau d'`AttachmentUi`), sans quoi le passage à l'async
+aurait recopié une seconde mécanique par-dessus la première.
+
+**Limite assumée** : chaque (re)construction d'une fiche redemande sa section (les fiches se
+reconstruisent à chaque `onResume`). C'est une requête par FK indexée, plafonnée par le nombre de
+lignes de la relation — le prix, mesuré, de ne pas garder de cache d'affichage à invalider.
+
+### 🚨 G5 — l'aperçu de cascade passe par un ENDPOINT SERVEUR
+
+L'EXÉCUTION d'une suppression était déjà sûre (le serveur recalcule le plan résiduel,
+`ApiRules.residualCascade`). L'APERÇU, lui, était calculé sur les index du CACHE : il
+**sous-estimerait** dès qu'une collection du périmètre est lazy (« 0 adresse détachée » alors que le
+serveur en détachera trois).
+
+**Route** (montée sous `/documents/:docId`) :
+
+```
+POST /cascade-preview     { collection: string, ids: string[] }
+  → 200 { deletes: [{ c, id }], detaches: [{ c, id, key, value }] }
+```
+
+- la réponse EST le `CascadePlan` partagé, tel quel : l'aperçu serveur et l'aperçu local rendent le
+  MÊME objet, donc l'appelant les emploie indifféremment ;
+- le moteur est celui de la suppression (`Cascade.planMany`, partagé, MULTI-RACINES — ce que la purge
+  de masse demande) : l'aperçu ne peut pas diverger de ce que `DELETE`/`/transact` feront ;
+- 🚨 **LECTURE PURE** : la route est montée **AVANT** `resolveRepo` et résout le dépôt par la moitié
+  lecture de ce middleware (`resolveRepoRead`, extraite pour l'occasion). Passée par le chemin
+  d'écriture, elle consommerait une **révision** et publierait un **SSE** à chaque ouverture de modale
+  de confirmation. Elle est POST par sa CHARGE (une liste d'ids ne tient pas dans une query string sur
+  une purge de masse), pas par son effet ;
+- 400 sur `ids` non-tableau ou au-delà du plafond (`CASCADE_PREVIEW_CAP` = 1000 racines), 404 sur
+  collection inconnue ; les ids inconnus sont simplement ignorés par le moteur.
+
+**Critère client** (`Store.cascadePreviewAsync`, LE point d'entrée des UI) : **corpus intégralement
+hydraté → plan LOCAL ; sinon → plan SERVEUR**. Volontairement CONSERVATEUR plutôt qu'exact — restreindre
+le critère au périmètre RÉEL de la cascade demanderait de déclarer à la main les collections qu'atteint
+chaque règle `custom` de `Cascade.SPEC` (fonctions opaques), et une déclaration oubliée ferait
+sous-estimer EN SILENCE, exactement la panne que G5 existe pour empêcher. Le prix de la prudence est UN
+aller-retour sur une modale déjà asynchrone. Conséquences : en **mode fichier** l'état inerte est
+toujours « tout full » → le chemin est TOUJOURS local, sans réseau ni écart ; un adaptateur sans aperçu
+serveur (contrat par défaut de `DataAdapter`, qui rend `null`) **retombe sur le plan local** ; une
+sélection vide ne part jamais sur le réseau.
+
+**Consommateur** : la purge de masse des VMs (`VmPurgeForm`), seul aperçu de cascade de l'app — la
+modale de suppression générique, elle, n'affiche aucun effet (mesuré : `app.main.deleteGenericMessage`
+ne dit que le nom). Elle a DEUX dépendances au corpus, qui ne posent pas la même question :
+
+| Question | Réponse | Pourquoi |
+|---|---|---|
+| « que va emporter la purge ? » (PLAN) | `cascadePreviewAsync` | le plan est une propriété du corpus — le serveur fait autorité |
+| « cette VM héberge-t-elle une application ? » (critère d'ENRICHISSEMENT, par VM, AVANT toute sélection) | `store.hydrate(["applications"])` à l'ouverture de la modale | aucun plan ne répond à ça : il liste les applications détachées, pas leur VM d'origine. Sans hydratation, des VMs enrichies seraient proposées comme « nues » et purgées avec leur rattachement, sans que rien ne le signale |
+
+Le récapitulatif devient donc asynchrone : plan **mémoïsé par sélection** (cocher puis décocher ne
+redemande rien), **jeton d'obsolescence** (une réponse devancée ne peint pas), « en attente » plutôt
+qu'un compte d'IP provisoire, et le bouton de purge reste piloté par la seule SÉLECTION (il ne se
+désactive jamais le temps d'un aller-retour). La confirmation finale lit le MÊME mémo : aucun
+aller-retour de plus dans le cas nominal.
+
+### M4 — purger du cache ce que le serveur a supprimé EN PLUS
+
+Le client ignore l'événement SSE de sa PROPRE écriture (`X-Client-Id`) : rien ne lui apprendrait que le
+serveur a supprimé plus que son plan. Le cas est réel et vient de G3 — une collection lazy n'est pas
+rechargée sur événement SSE, sa copie en cache peut donc être PÉRIMÉE (un autre client a re-ciblé une
+pièce jointe vers l'équipement qu'on supprime) ; et une pièce jamais absorbée n'entre pas dans notre
+plan, mais compte dans le TOTAL affiché par la pastille.
+
+Mesuré : `POST /transact` (le chemin de TOUTE suppression du client, cf. `Store._removeTargets`)
+répondait **204 sans corps** — il n'y avait donc rien sur quoi purger. Il rend désormais un **compte
+rendu du résidu** (changement ADDITIF : aucun appelant ne lisait ce corps) :
+
+```
+POST /transact  → 200 { residual: { deletes: [{ collection, id }], updates: [{ collection, id }] } }
+```
+
+`Store._applyResidualDeletes` en retire du cache les enregistrements supprimés (données + index id +
+index FK) et **invalide leurs compteurs**. Tolérant par construction : sans `residual.deletes`
+(adaptateur fichier, serveur antérieur), c'est un no-op strict. `residual.updates` est rapporté pour
+l'exhaustivité du compte rendu ; le Store ne l'exploite pas — un enregistrement lazy DÉTACHÉ côté
+serveur garde sa FK périmée en cache jusqu'au prochain chargement de la collection (limite résiduelle
+de G3, de la même famille que « la page en main n'est pas rafraîchie »).
+
+### G10 — les consommateurs synchrones, un par un
+
+Relevé EXHAUSTIF des lectures synchrones des deux collections, et statut de chacune :
+
+| Consommateur | Statut |
+|---|---|
+| Sections « Pièces jointes » des fiches équipement / sous-équipement | **ASYNC** (G7) |
+| Bloc « Applications hébergées » des fiches équipement / VM | **ASYNC** (G7) |
+| Pastilles d'onglet « Applications » / « Pièces jointes » | déjà générique — `store.countHint` (G6) |
+| `warnAttachmentsExcluded` (avertissement D8 avant un export sans binaires, `main.ts`) | **corrigé** : `await store.countOf("attachments")` — le chemin était déjà async (`Dialog.confirm`) |
+| `labelOf` des cibles d'intervention (`applications` est une famille de cibles) | **corrigé** : préalable `InterventionTargetSource.prepareLabels()` (voir ci-dessous) |
+| `VmPurgeForm` : critère d'enrichissement + aperçu | **corrigé** : hydratation ciblée + `cascadePreviewAsync` (G5) |
+| Listing : `onDownload` / `onShow` / `canShow` (`store.get("attachments", id)`) | **rien à faire** : la ligne vient d'être servie par le listing, donc ABSORBÉE au cache |
+| `AttachmentUi.section` (bouton Télécharger → `store.get`) | **rien à faire** : même raison, les lignes affichées sont absorbées |
+| Fiches `attachmentDetail` / `applicationDetail` (`store.get`) | **rien à faire** : atteintes depuis un listing (absorbé), une section de fiche (absorbée par `fetchBy`), ou la palette (lecture unitaire `fetchOne` du lot 1) |
+| Viewer intégré + téléchargement du binaire | **rien à faire** (vérifié) : `AttachmentUi.view`/`download` lisent le BINAIRE par `attachmentStore.getBlob(id)` / `downloadUrl(id)` — lecture UNITAIRE ou URL streamée, jamais `store.all` |
+| `FileDocuments` : `docHasAttachments`, `attachmentsStillMissing`, `writeAttachmentsToHandle`, compagnon `.nmfa` | **rien à faire, prouvé** : appelés depuis `loadFromText` (import, où `Store.replaceAll` vient de re-marquer TOUT `full`) ou APRÈS `writeToHandle`, qui appelle `hydrateAll()` (G2) |
+| `keepOnly` (purge des binaires orphelins) | **rien à faire, prouvé** : `main.ts` l'appelle dans la branche `else` d'`if (REST_MODE)` (mode fichier strict) et `FileDocuments.loadCompanionAttachmentsOnOpen` sur le chemin d'ouverture d'un `.json` (corpus complet par construction) |
+| Palette de recherche globale (corpus local, « récents ») | **dégradation ACTÉE** — cf. G9 ci-dessous |
+
+#### `applications`, cible d'intervention : le préalable de résolution
+
+`InterventionTargetSource.labelOf` est SYNCHRONE — la vue « Interventions » résout un libellé de cible
+par id au moment du rendu (colonne « Liens », liste de la fiche, chip de filtre, éditeur de liens) et
+ne peut pas attendre. Une intervention liée à une application non absorbée s'afficherait
+« introuvable », comme si la cible avait été supprimée.
+
+Le contrat gagne donc **`prepareLabels(): Promise<void>`** : un préalable IDEMPOTENT, attendu par la
+vue avant tout rendu qui résout des libellés — `reload()` (en parallèle du chargement de la page, les
+deux I/O étant indépendantes) et `openDetailById()` (l'entrée depuis une fiche, où la page n'a
+peut-être jamais été affichée — exactement le motif de l'`ensureMeta` voisin). L'hôte (`main.ts`)
+l'implémente en `store.hydrate(["applications"])` : no-op en mode fichier PAR CONSTRUCTION, no-op
+après le premier appel, et **échec AVALÉ** — mieux vaut un listing complet avec un libellé en moins
+qu'une page qui refuse de s'afficher (même doctrine que `ensureTrackerProviders`). Les quatre autres
+familles de cibles (équipements, VMs, spares, sous-équipements) sont hydratées : `hydrate` les ignore.
+
+C'est le patron `NotificationsAdminView` de la vague 1 (une surface qui a besoin de la liste COMPLÈTE
+la charge à son ouverture, une fois), posé cette fois sur le SEAM déjà prévu par la feature — la vue
+interventions ne touche toujours pas le Store.
+
+### G9 — les dégradations de la palette s'étendent, telles quelles
+
+Les trois dégradations actées de la vague 1 valent identiquement pour les deux collections : les
+« consultés récemment » d'une pièce jointe ou d'une application non absorbée ne se résolvent pas ; un
+échec de `/search` replie sur un corpus local incomplet (résultats ET compteurs par famille) ; le mode
+fichier est inchangé. **Ouvrir** un résultat reste couvert par la lecture unitaire `fetchOne` de
+`GlobalSearchPalette.activate` (correctif du lot 1, générique).
+
+### Ce que la vague 2 ne change PAS
+
+La cascade elle-même (le moteur partagé est inchangé), l'undo, la validation, le formulaire d'upload
+d'une pièce jointe, les binaires (disque serveur / IndexedDB / compagnon `.nmfa`), les 20+ autres
+listings, le mode fichier et le visualiseur.
+
+## Gardes à venir (hors vagues 1-2)
+
+Instruites par le cadrage `.notes/toDos/lazy-load-collections-cadrage-2026-08-11.md` § 2 : reste la
+**vague 3** (`wifiClients`, la plus volumineuse), qui héritera de tout ce qui précède et n'aura à
+traiter que ses points durs propres — **facettes distinctes SERVEUR** (arbitrage n°4 : le calcul
+sur-page des petites collections ne tient plus sur un corpus de synchro) et le « localiser l'AP ».
+**G5**, **G7** et **G10** sont désormais livrées (vague 2) sous une forme réutilisable : endpoint
+d'aperçu générique (n'importe quelle collection), jumeaux async au Store + `AsyncSection`, et le
+préalable `prepareLabels` pour toute famille de cibles hébergée dans une collection lazy.
 
 ## Arbitrages actés (utilisateur, 2026-08-12)
 
@@ -402,3 +612,14 @@ suivant, `hydrate` ciblée et idempotente, compteurs locaux ⇄ serveur avec leu
 (écriture locale, SSE sauté), décision de régime `isServerPaged` (état et non liste de noms) et
 machinerie de page du moteur (compteurs serveur, anti-relance, cohérence lignes ⇄ compteurs pendant
 le vol, annulation d'une page devancée, échec sans boucle, oubli sur mutation).
+
+`Tests/modules/test-lazy-vague2.js` (vague 2) : liste centrale ÉTENDUE + boot qui saute bien les trois
+collections lazy ; **G7** — jumeaux async (lecture par FK indexée quand la collection est partielle,
+CACHE quand elle est hydratée, absorption + indexation des lignes reçues, tri identique aux jumeaux
+synchrones, et mode fichier qui n'émet AUCUN `findBy`) ; **G5** — critère de bascule de
+`cascadePreviewAsync` (corpus complet → local sans réseau, corpus partiel → serveur, sélection vide
+sans aller-retour, ids dédupliqués et NON filtrés sur le cache, repli local si l'adaptateur n'offre pas
+d'aperçu, mode fichier toujours local) ; **M4** — une suppression dont le serveur rapporte un résidu
+purge le cache et invalide le compteur, et l'absence de résidu est un no-op strict ; enfin les
+`sortField` des deux listings, confrontés à la liste blanche PARTAGÉE (un nom fautif dégraderait en
+silence vers le repli).

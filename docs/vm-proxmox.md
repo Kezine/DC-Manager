@@ -188,10 +188,20 @@ de reporter ses enrichissements sur le jumeau conservé **avant** de purger.
 
 **Récapitulatif exact** avant confirmation : « X VMs seront supprimées, dont Y
 enrichies ; Z adresses IP seront détachées ». Le compte des IP vient du **plan de
-cascade réel** (`Store.cascadePreview`), jamais d'une estimation — la règle `vms` de
+cascade réel** (`Store.cascadePreviewAsync`), jamais d'une estimation — la règle `vms` de
 `src-shared/Cascade` **détache** `ipAddresses.vm_id` (l'adresse survit, « non
 attribuée ») et `applications.vm_id` (l'application survit, « sans hôte »), elle ne
 supprime rien. Bouton **danger** + confirmation finale.
+
+⚠ **Corpus PARTIEL (mode API, chantier lazy-load — cf. `docs/hydratation.md` § Vague 2).**
+`applications` est chargée PARESSEUSEMENT : la modale ne peut donc plus lire le cache pour ses deux
+dépendances, et les traite différemment parce qu'elles ne posent pas la même question. Le **plan**
+passe par `Store.cascadePreviewAsync`, qui interroge le SERVEUR tant que le corpus n'est pas complet
+(garde G5) — d'où un récapitulatif asynchrone, mémoïsé par sélection, « en attente » plutôt qu'un
+compte provisoire. Le critère d'**enrichissement** « héberge au moins une application », lui, se pose
+PAR VM et AVANT toute sélection : aucun plan n'y répond, la modale **hydrate** donc `applications` à
+son ouverture (échec avalé — les autres familles d'enrichissement restent exactes). En **mode
+fichier**, les deux sont des no-op par construction : comportement strictement inchangé.
 
 **UNE transaction, UN undo.** `Store.removeMany` calcule **un seul** plan de cascade
 sur toutes les racines (`Cascade.planMany`) et n'émet **qu'une** transaction : une

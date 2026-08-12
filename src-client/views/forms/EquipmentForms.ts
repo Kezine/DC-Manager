@@ -45,6 +45,7 @@ import { FormBase } from "./FormBase";
 import { FaceEditor } from "./FaceEditor";
 import { SubEquipmentForms } from "./SubEquipmentForms";   // section « Sous-équipements » de la fiche (import croisé différé, cf. son en-tête)
 import { AttachmentUi } from "./AttachmentUi";   // section « Pièces jointes » de la fiche (factorisée avec la fiche sous-équipement)
+import { ApplicationUi } from "./ApplicationUi";   // section « Applications hébergées » de la fiche (factorisée avec la fiche VM)
 import { PerspectiveEditor } from "../../ui/PerspectiveEditor";
 import { StitchEditor } from "../../ui/StitchEditor";
 import { Download } from "../../core/Download";
@@ -132,11 +133,14 @@ export class EquipmentForms extends FormBase {
     // s'empile, cette fiche se reconstruit au retour), taille + bouton Télécharger. PLACÉE SOUS le bloc
     // interventions/certificats (retour utilisateur 2026-08-11) : les pièces relèvent du SUIVI de
     // l'équipement, pas de sa description physique — sous les rangées d'intégration, pas en pied de fiche.
-    // Source UNIQUE : `Store.attachmentsOfEquipment`. Section factorisée (`AttachmentUi.section`) avec la
-    // fiche sous-équipement. ⚠ Cast `(this as any)` : à l'APPEL, `this` statique résout vers `Forms` (fin
-    // de chaîne), où `attachmentDetail` existe ; importer DetailForms ici créerait un CYCLE (DetailForms
-    // hérite, via la chaîne, de ce fichier).
-    AttachmentUi.section(store, host, root, store.attachmentsOfEquipment(eq.id), (attId) => (this as any).attachmentDetail(store, host, attId, onChanged));
+    // Source UNIQUE : `Store.attachmentsOfEquipmentAsync` — le jumeau ASYNC (garde G7, cf.
+    // docs/hydratation.md § Vague 2) : `attachments` est chargée PARESSEUSEMENT en mode API, la lecture
+    // synchrone du cache afficherait donc une section VIDE à tort. La place de la section est réservée
+    // tout de suite, son contenu arrive ensuite (mode fichier : promesse déjà résolue, aucun écart
+    // visible). Section factorisée (`AttachmentUi`) avec la fiche sous-équipement. ⚠ Cast `(this as any)` :
+    // à l'APPEL, `this` statique résout vers `Forms` (fin de chaîne), où `attachmentDetail` existe ;
+    // importer DetailForms ici créerait un CYCLE (DetailForms hérite, via la chaîne, de ce fichier).
+    AttachmentUi.sectionAsync(store, host, root, store.attachmentsOfEquipmentAsync(eq.id), (attId) => (this as any).attachmentDetail(store, host, attId, onChanged));
 
     // façade : bouton éditer + toggle « haute densité » + aperçus des faces avec contenu
     const dF = document.createElement("div"); dF.className = "section-divider"; dF.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:10px";
@@ -224,26 +228,15 @@ export class EquipmentForms extends FormBase {
 
     // APPLICATIONS hébergées sur cet équipement (décision D5 du cadrage applications 2026-08-10) : nom
     // CLIQUABLE → fiche application (elle s'empile, cette fiche se reconstruit au retour via `onResume`).
-    // Section MASQUÉE si vide, comme les spares ci-dessus. Source UNIQUE : `Store.applicationsOfEquipment`.
+    // Section MASQUÉE si vide, comme les spares ci-dessus. Source UNIQUE : le jumeau ASYNC
+    // `Store.applicationsOfEquipmentAsync` (garde G7 — `applications` est chargée paresseusement en mode
+    // API). Rendu factorisé avec la fiche VM dans `ApplicationUi` : les deux blocs étaient recopiés, et
+    // le passage à l'async aurait recopié une mécanique de plus.
     // ⚠ `applicationDetail` vit chez un DESCENDANT de la chaîne (DetailForms) : au typage d'ICI, `this`
     // (typeof EquipmentForms) ne le connaît pas — mais à l'APPEL, `this` statique résout vers `Forms`
     // (fin de chaîne), où la méthode existe. Le cast est le prix d'une section posée chez l'ancêtre :
     // importer DetailForms créerait un CYCLE de modules (DetailForms hérite, via la chaîne, de ce fichier).
-    const hostedApps = store.applicationsOfEquipment(eq.id);
-    if (hostedApps.length) {
-      const dA = document.createElement("div"); dA.className = "section-divider"; dA.textContent = I18n.t("detail.application.hostedSection", { count: hostedApps.length }); root.appendChild(dA);
-      const tw = document.createElement("div"); tw.className = "table-wrap";
-      const rows = hostedApps.map((a: any) =>
-        `<tr><td class="cell-name"><span data-app-view="${a.id}" role="button" tabindex="0" style="cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px;" title="${Html.escape(I18n.t("detail.application.openApp"))}">${Html.escape(a.name || I18n.t("lists.ph.noName"))}</span></td><td>${a.url ? Html.externalLink(a.url) : '<span style="color:var(--fg-dimmer)">—</span>'}</td></tr>`,
-      ).join("");
-      tw.innerHTML = `<table><thead><tr><th>${I18n.t("lists.col.name")}</th><th>URL</th></tr></thead><tbody>${rows}</tbody></table>`;
-      root.appendChild(tw);
-      tw.querySelectorAll("[data-app-view]").forEach((el) => {
-        const open = () => (this as any).applicationDetail(store, host, (el as HTMLElement).dataset.appView!, onChanged);
-        (el as HTMLElement).onclick = open;
-        (el as HTMLElement).onkeydown = (ev: KeyboardEvent) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); open(); } };
-      });
-    }
+    ApplicationUi.sectionAsync(root, store.applicationsOfEquipmentAsync(eq.id), (appId) => (this as any).applicationDetail(store, host, appId, onChanged));
 
     AuditLine.attach(root, eq, host.userDirectory);   // « Créé/Modifié par » (mode API)
 

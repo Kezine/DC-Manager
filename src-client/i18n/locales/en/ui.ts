@@ -38,6 +38,13 @@ export const ui = {
   notify: {
     busy: "Loading…",
   },
+  /* Fiche section fed ASYNCHRONOUSLY (`views/forms/AsyncSection`, lazy-load guard G7): transient state
+     and read failure. A block that has not loaded yet must never read as “no items” — and a network
+     failure must SAY so, otherwise the fiche claims there is nothing. */
+  section: {
+    loading: "Loading…",
+    loadError: "Could not load.",
+  },
   search: {
     clear: "Clear the search",
   },

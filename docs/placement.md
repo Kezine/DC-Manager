@@ -2389,7 +2389,13 @@ du besoin — verrouillé par des tests anti-divergence).
 - `src-server/src/ApiRules.ts` — `residualCascade` : cascade RÉSIDUELLE d'un `/transact`, calculée en UN
   SEUL `planMany` sur toutes les suppressions du lot, puis retranchée de ce que le lot contient déjà
   (§6.17). Le filtre final reste indispensable pour les suppressions RÉSIDUELLES, que le plan ne peut pas
-  connaître comme « déjà dans le lot ».
+  connaître comme « déjà dans le lot ». ⚠ Ce résidu est désormais RAPPORTÉ au client dans la réponse du
+  `/transact` (`{ residual: { deletes, updates } }`) : sur un cache PARTIEL, c'est la seule chose qui lui
+  apprend ce que le serveur a supprimé en plus (garde M4, cf. `docs/hydratation.md`).
+- `src-server/src/api.ts` — `POST /documents/:docId/cascade-preview` : **APERÇU** du plan (mêmes
+  `planMany`, mêmes lecteurs que le `DELETE`), pour les UI qui annoncent les effets d'une suppression
+  alors que le cache client peut être partiel. LECTURE PURE — montée avant `resolveRepo`, donc sans
+  révision ni SSE. Contrat et critère de bascule client : `docs/hydratation.md` § « G5 ».
 - `src-shared/TrayGeometry.ts` — géométrie de l'ÉTAGÈRE, SOURCE UNIQUE (plateau utile, empreinte, position,
   chevauchement, verdict de tenue) : consommée par le RENDU (`RackGeometry.tray*` délègue) et par la
   VALIDATION (T2d/V6e), qui l'IMPORTE directement (`./TrayGeometry.js`), comme `RackDepthPolicy`. Elle était

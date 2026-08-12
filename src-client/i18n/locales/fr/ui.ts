@@ -44,6 +44,13 @@ export const ui = {
   notify: {
     busy: "Chargement…",
   },
+  /* SECTION de fiche alimentée en ASYNC (`views/forms/AsyncSection`, garde G7 du lazy-load) : état
+     transitoire et échec de lecture. Un bloc « pas encore chargé » ne doit jamais se lire « aucun
+     élément » — et un échec réseau doit se DIRE, sinon la fiche affirme qu'il n'y a rien. */
+  section: {
+    loading: "Chargement…",
+    loadError: "Chargement impossible.",
+  },
   search: {
     clear: "Effacer la recherche",
   },

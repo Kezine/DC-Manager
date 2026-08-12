@@ -714,6 +714,35 @@ export class Store {
     return this._cascadePlan(targets);
   }
 
+  /** 🚨 G5 — APERÇU DE CASCADE des UI, en corpus éventuellement PARTIEL (docs/hydratation.md § Vague 2).
+      C'est le point d'entrée que doivent utiliser les surfaces qui ANNONCENT les effets d'une
+      suppression : `cascadePreview` (ci-dessus) calcule le plan sur les index du CACHE, donc
+      SOUS-ESTIME dès qu'une collection du périmètre est chargée paresseusement (une pièce jointe
+      jamais absorbée n'apparaîtrait pas dans « ce qui sera supprimé »).
+
+      CRITÈRE de bascule retenu (arbitrage n°2, endpoint serveur) : **corpus intégralement hydraté →
+      plan LOCAL, sinon plan SERVEUR**. Volontairement CONSERVATEUR plutôt qu'exact :
+      - il est EXACT là où ça compte — en mode fichier/visualiseur l'état inerte est toujours
+        « tout full », donc le chemin est TOUJOURS local, sans réseau ni écart (principe n°15) ; et
+        une collection lazy redevenue `full` (export G2, hydratation à la demande) y revient aussi ;
+      - restreindre le critère au PÉRIMÈTRE RÉEL de la cascade demanderait de déclarer à la main les
+        collections qu'atteint chaque règle `custom` de `Cascade.SPEC` (fonctions opaques) : une
+        déclaration oubliée ferait SOUS-ESTIMER en silence — exactement la panne que G5 existe pour
+        empêcher. Le coût de la prudence est UN aller-retour sur une modale de confirmation, qui est
+        déjà asynchrone.
+
+      Adaptateur sans aperçu serveur (mode fichier, adaptateur d'avant la vague 2) → repli sur le plan
+      local : jamais d'erreur, jamais d'aperçu vide. */
+  async cascadePreviewAsync(collection: string, ids: ReadonlyArray<string>): Promise<{ deletes: CascadeDelete[]; detaches: CascadeDetach[] }> {
+    const unique = [...new Set((ids || []).filter(Boolean))];
+    if (!unique.length) return { deletes: [], detaches: [] };   // rien à supprimer → aucun aller-retour
+    if (this.hydration.isFullyHydrated()) return this.cascadePreview(collection, unique);
+    // Les ids sont transmis TELS QUELS (pas de filtre `_existingTargets`) : sur un corpus partiel, une
+    // racine absente du cache n'est pas une racine inexistante — c'est le serveur qui fait autorité.
+    const plan = await this.adapter.cascadePreview(collection, unique);
+    return plan || this.cascadePreview(collection, unique);
+  }
+
   /* Racines RÉELLEMENT supprimables d'un lot : ids vides, doublons et entités absentes du cache écartés.
      Partagé par `removeMany` et `cascadePreview` pour qu'aperçu et exécution portent sur le MÊME ensemble. */
   private _existingTargets(collection: string, ids: ReadonlyArray<string>): CascadeTarget[] {
@@ -753,9 +782,41 @@ export class Store {
       updates: detaches.map((d) => { const o = this.get(d.c, d.id); return o ? { collection: d.c, id: d.id, record: o.toJSON() } : null; }).filter(Boolean) as Transaction["updates"],
       deletes: deletes.map((d) => ({ collection: d.c, id: d.id })).concat(targets.map((t) => ({ collection: t.collection, id: t.id }))),
     };
-    await this.adapter.transact(tx);
+    const result = await this.adapter.transact(tx);
     this._counts.invalidate(Object.keys(delByColl));   // G6 : les totaux des collections purgées ont bougé
+    // M4 (chantier lazy-load) : le SERVEUR a pu supprimer PLUS que notre plan — sa cascade RÉSIDUELLE
+    // (cf. ApiRules.residualCascade) porte ce que notre cache ne pouvait pas savoir. Deux effets sinon :
+    // un enregistrement absorbé mais supprimé côté serveur resterait AFFICHÉ, et la pastille d'une
+    // collection lazy garderait un COUNT périmé (notre invalidation ne couvre que le plan local). On
+    // applique donc le résidu que la réponse rapporte. En mode fichier : aucun résidu (pas de serveur).
+    this._applyResidualDeletes(result);
     this._emit();
+  }
+
+  /** M4 — retire du cache les enregistrements supprimés par la cascade RÉSIDUELLE du serveur.
+      Le résidu vient de la RÉPONSE de l'écriture (`POST /transact` → `{ residual: { deletes } }`) et
+      non d'un événement SSE : le client IGNORE ses propres événements (X-Client-Id), donc rien
+      d'autre ne le lui apprendrait avant un F5. Tolérant à toute autre forme de retour (adaptateur
+      fichier, serveur d'avant la vague 2) : sans `residual.deletes`, c'est un no-op strict. */
+  private _applyResidualDeletes(result: unknown): void {
+    const residual = (result as any)?.residual;
+    const deletes: Array<{ collection?: string; id?: string }> = Array.isArray(residual?.deletes) ? residual.deletes : [];
+    if (!deletes.length) return;
+    const touched = new Set<string>();
+    for (const d of deletes) {
+      const c = d && d.collection, id = d && d.id;
+      if (!c || !id || !this._idIndex[c]) continue;
+      touched.add(c);
+      const obj = this._idIndex[c].get(id);
+      if (!obj) continue;   // jamais absorbé : rien à retirer du cache (mais le COMPTE a bougé)
+      if (this._fk[c]) this._fk[c].remove(obj);
+      this._idIndex[c].delete(id);
+      this.data[c] = this.data[c].filter((o) => o.id !== id);
+    }
+    if (touched.size) {
+      Log.d("store", "cascade résiduelle du serveur appliquée au cache (M4)", [...touched]);
+      this._counts.invalidate([...touched]);
+    }
   }
 
   /* Plan de cascade (intégrité référentielle) : entités à SUPPRIMER + à DÉTACHER. Délègue au calcul
@@ -946,26 +1007,62 @@ export class Store {
       section « Applications » de la fiche équipement (D5). Triées par nom : c'est leur seule identité
       lisible (même choix que `subEquipmentsOf`). */
   applicationsOfEquipment(equipmentId: string): any[] {
-    return this._byFk("applications", "equipment_id", equipmentId).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    return this._byFk("applications", "equipment_id", equipmentId).sort(Store.BY_NAME);
   }
   /** Applications HÉBERGÉES sur une VM (index `applications.vm_id`) — parité stricte avec
       `applicationsOfEquipment` (même relation exclusive equipment_id / vm_id sur `applications`).
       Consommée par la fiche VM (D5) ET par l'enrichissement `applications` de la purge de masse
       (`VmPurgeReaders.hostedApplicationCount` — cf. core/VmPurge). */
   applicationsOfVm(vmId: string): any[] {
-    return this._byFk("applications", "vm_id", vmId).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    return this._byFk("applications", "vm_id", vmId).sort(Store.BY_NAME);
   }
   /** Pièces jointes d'un ÉQUIPEMENT (index `attachments.equipment_id`) — SOURCE UNIQUE de la future
       section « Pièces jointes » de la fiche équipement (lot B). Triées par nom (même choix que
       `applicationsOfEquipment` : le libellé est leur seule identité lisible). */
   attachmentsOfEquipment(equipmentId: string): any[] {
-    return this._byFk("attachments", "equipment_id", equipmentId).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    return this._byFk("attachments", "equipment_id", equipmentId).sort(Store.BY_NAME);
   }
   /** Pièces jointes d'un SOUS-ÉQUIPEMENT (index `attachments.sub_equipment_id`) — parité stricte avec
       `attachmentsOfEquipment` (même relation exclusive equipment_id / sub_equipment_id sur `attachments`). */
   attachmentsOfSubEquipment(subEquipmentId: string): any[] {
-    return this._byFk("attachments", "sub_equipment_id", subEquipmentId).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    return this._byFk("attachments", "sub_equipment_id", subEquipmentId).sort(Store.BY_NAME);
   }
+
+  /* ---- G7 : les JUMEAUX ASYNC des relations de SECTION DE FICHE (docs/hydratation.md § Vague 2) ----
+
+     Les quatre helpers ci-dessus lisent l'index FK du CACHE. Sur une collection chargée
+     PARESSEUSEMENT, ce cache ne contient que ce qui a été absorbé : la section « Pièces jointes »
+     d'un équipement s'afficherait VIDE alors que le serveur en a. Les fiches consomment donc ces
+     jumeaux, qui rendent la MÊME liste (même contenu, même tri) mais vont la CHERCHER quand il le
+     faut — la FK est indexée côté serveur, c'est exactement la requête que la section pose.
+
+     Mode fichier (et toute collection hydratée) : promesse résolue sur le cache, AUCUN réseau, aucun
+     écart visible (principe n°15). L'appelant n'écrit donc aucun test de mode. */
+
+  /** Pièces jointes d'un équipement — jumeau ASYNC de `attachmentsOfEquipment` (G7). */
+  attachmentsOfEquipmentAsync(equipmentId: string): Promise<any[]> { return this._sectionRows("attachments", "equipment_id", equipmentId); }
+  /** Pièces jointes d'un sous-équipement — jumeau ASYNC de `attachmentsOfSubEquipment` (G7). */
+  attachmentsOfSubEquipmentAsync(subEquipmentId: string): Promise<any[]> { return this._sectionRows("attachments", "sub_equipment_id", subEquipmentId); }
+  /** Applications hébergées sur un équipement — jumeau ASYNC de `applicationsOfEquipment` (G7). */
+  applicationsOfEquipmentAsync(equipmentId: string): Promise<any[]> { return this._sectionRows("applications", "equipment_id", equipmentId); }
+  /** Applications hébergées sur une VM — jumeau ASYNC de `applicationsOfVm` (G7). */
+  applicationsOfVmAsync(vmId: string): Promise<any[]> { return this._sectionRows("applications", "vm_id", vmId); }
+
+  /** Corps UNIQUE des jumeaux async (principe n°3) : cache si la collection est INTÉGRALEMENT en
+      mémoire, lecture serveur par FK indexée sinon (`fetchBy`, qui ABSORBE les lignes — la fiche
+      d'une pièce ainsi listée s'ouvre donc normalement, `store.get` la trouve). C'est l'ÉTAT qui
+      décide, jamais une liste de noms : une collection lazy redevenue `full` reprend le chemin local. */
+  private async _sectionRows(collection: string, field: string, value: string): Promise<any[]> {
+    const rows = this.hydration.isHydrated(collection)
+      ? this._byFk(collection, field, value)
+      : await this.fetchBy(collection, field, value);
+    return rows.slice().sort(Store.BY_NAME);
+  }
+
+  /** Comparateur de TRI des relations ci-dessus : par nom. Écrit UNE fois — les quatre helpers (et
+      leurs jumeaux async) doivent trier à l'identique, sinon la même liste change d'ordre selon le
+      chemin qui l'a produite. */
+  private static readonly BY_NAME = (a: any, b: any): number => String(a.name || "").localeCompare(String(b.name || ""));
   dhcpRangesOfNetwork(netId: string): any[] { return this._byFk("dhcpRanges", "network_id", netId); }
   dhcpRangesOfServer(eqId: string): any[] { return this._byFk("dhcpRanges", "server_id", eqId); }
   ipAddressByValue(addr: string): any { const r = this._byFk("ipAddresses", "address", addr); return r.length ? r[0] : null; }

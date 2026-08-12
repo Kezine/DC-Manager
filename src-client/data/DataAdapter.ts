@@ -38,7 +38,17 @@ export abstract class DataAdapter {
   }
 
   /* ---- transaction (lot atomique multi-entités) ---- */
+  /** Applique le lot. Le retour est LIBRE (chaque adaptateur y met ce que son support rapporte) ; le
+      Store n'y lit qu'une chose, de façon TOLÉRANTE : la cascade RÉSIDUELLE d'un serveur qui aurait
+      supprimé plus que le plan client (`{ residual: { deletes } }`, garde M4 — cf. docs/hydratation.md). */
   async transact(_tx: Transaction): Promise<unknown> { throw new Error("DataAdapter.transact() non implémenté"); }
+
+  /* ---- APERÇU de cascade SERVEUR (garde G5, cf. docs/hydratation.md § Vague 2) ----
+     Plan de suppression calculé par le SERVEUR sur le corpus COMPLET, pour les UI qui annoncent les
+     effets d'une suppression alors que le cache client peut être partiel. `null` = cet adaptateur
+     n'offre pas d'aperçu serveur (mode fichier : le cache EST le document, le plan local fait foi) →
+     le Store retombe sur son plan local, sans test de mode chez l'appelant. */
+  async cascadePreview(_collection: string, _ids: readonly string[]): Promise<{ deletes: Array<{ c: string; id: string }>; detaches: Array<{ c: string; id: string; key: string; value: any }> } | null> { return null; }
 
   /* ---- lectures granulaires (par élément) ---- */
   async list(_collection: string, _opts?: ListOptions): Promise<ListResult> { throw new Error("DataAdapter.list() non implémenté"); }

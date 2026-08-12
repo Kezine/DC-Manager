@@ -29,7 +29,9 @@ pièces), **cascade**, **undo modèle**, verrou optimiste, changeset/SSE, listin
   binaire INTACT ; aucune hook post-transaction ; un crash entre « fichier écrit » et
   « enregistrement inséré » laisse au pire un orphelin rattrapé par la maintenance.
 - `Store.attachmentsOfEquipment` / `attachmentsOfSubEquipment` (index FK, cf. `INDEX_SPEC.attachments`)
-  sont la source unique des futures sections « Pièces jointes » des fiches.
+  sont la source unique des sections « Pièces jointes » des fiches — via leurs **jumeaux ASYNC**
+  (`…Async`) depuis que la collection est chargée PARESSEUSEMENT en mode API, cf. § « Chargement
+  paresseux » plus bas.
 
 ## Mode API : binaires sur DISQUE, streamés
 
@@ -189,6 +191,32 @@ partie du document) mais **JAMAIS les binaires** — des PDF en base64 rendraien
 impraticable. Le canal complet des binaires est le compagnon `.nmfa` (mode fichier) ou le dossier
 serveur (mode API). L'avertissement UI au point d'export arrive avec le lot B
 (cf. `FileDocuments.snapshotWithImages`).
+
+## Chargement PARESSEUX de la collection (mode API — vague 2 du chantier lazy-load)
+
+`attachments` fait partie des collections **non tirées au boot** en mode API (cf.
+`docs/hydratation.md` § « Vague 2 » — c'est là que vivent le modèle, les gardes et leurs limites). Ce
+qui est OBSERVABLE ici :
+
+- **le sous-onglet « Pièces jointes » est paginé par le SERVEUR** : le pager dit la vérité
+  (`COUNT(*)`), chaque page est une requête, et le critère de tri ordonne le corpus entier — sauf sur
+  la colonne « Attachée à », qui trie un nom résolu par jointure cliente (repli documenté) ;
+- **les sections « Pièces jointes » des fiches sont ASYNCHRONES** : elles chargent les pièces de leur
+  cible par FK indexée (`Store.attachmentsOf*Async`), affichent « Chargement… » le temps de la
+  réponse, restent MASQUÉES si la cible n'en a aucune, et disent « Chargement impossible » en cas
+  d'échec réseau — jamais un silence qui se lirait « aucune pièce jointe » ;
+- **l'avertissement avant export sans binaires** (D8, ci-dessous) compte les pièces côté SERVEUR
+  (`store.countOf`) : il ne dépend plus de ce qui a été parcouru ;
+- **la pastille de l'onglet** affiche le `COUNT(*)` serveur (mémoïsé) ;
+- **rien ne change en mode fichier ni dans le visualiseur** : le document EST le fichier, toute
+  collection y est réputée complète PAR CONSTRUCTION (les mêmes chemins de code, sans réseau).
+
+La **purge des binaires** (`AttachmentStore.keepOnly`, mode fichier) et le compagnon `.nmfa` restent
+adossés à `store.all("attachments")`, et c'est SÛR — vérifié : le seul appel de `keepOnly` en dehors du
+mode fichier strict (branche `else` d'`if (REST_MODE)` dans `main.ts`) est celui de
+`FileDocuments.loadCompanionAttachmentsOnOpen`, atteint uniquement par `loadFromText`, où
+`Store.replaceAll` vient de re-marquer TOUT le corpus complet ; et l'écriture du compagnon suit
+`writeToHandle`, qui hydrate tout (garde G2).
 
 ## Limites assumées
 

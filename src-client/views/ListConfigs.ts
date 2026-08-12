@@ -698,6 +698,14 @@ export class ListConfigs {
       if (t) return Html.escape(t);
       return (a.equipment_id || a.vm_id) ? dim(Html.escape(I18n.t("lists.ph.hostMissing"))) : dim("—");
     };
+    // `sortField` (pagination ORDONNÉE complète, lot 1b — cf. `ListColumn.sortField`) : déclaré par les
+    // colonnes dont l'accesseur `sort` lit UN champ scalaire du modèle, pour qu'en régime pagé (vague 2 :
+    // `applications` est chargée PARESSEUSEMENT en mode API) le critère ordonne le CORPUS entier via
+    // l'ORDER BY serveur. La colonne « Hébergée sur » en est DÉPOURVUE à dessein : son tri lit un nom
+    // d'équipement/VM RÉSOLU par jointure côté client, qu'aucune colonne de `applications` ne porte —
+    // repli assumé (l'ordre serveur par défaut découpe les pages, le critère trie la page affichée).
+    // Aucune facette de colonne sur ce listing (G8 sans objet) : le filtrage par hôte passe par la
+    // dimension CIBLE ci-dessous, traduite en `where` SERVEUR — donc juste sur corpus partiel.
     return {
       collection: "applications",
       defaultSort: { key: "name", dir: "asc" },
@@ -708,12 +716,12 @@ export class ListConfigs {
       // de CANDIDATS est serveur-pilotée en mode API (`entitySearch`), locale en mode fichier.
       targetFilter: ListTargets.applicationHost(store, entitySearch),
       columns: [
-        { head: I18n.t("lists.col.name"), essential: true, cls: "cell-name", sortKey: "name", sort: (a) => a.name, render: (a) => Html.escape(a.name || I18n.t("lists.ph.noName")) },
+        { head: I18n.t("lists.col.name"), essential: true, cls: "cell-name", sortKey: "name", sort: (a) => a.name, sortField: "name", render: (a) => Html.escape(a.name || I18n.t("lists.ph.noName")) },
         { head: I18n.t("lists.col.host"), essential: true, sortKey: "host", sort: (a) => hostText(a), render: hostCell },
         // URL cliquable via la primitive UNIQUE `Html.externalLink` (liste blanche http/https + noopener) —
         // même patron d'affichage double listing/fiche que l'e-mail des contacts (`Html.mailtoLink`).
-        { head: "URL", sortKey: "url", sort: (a) => a.url || "", render: (a) => (a.url ? Html.externalLink(a.url) : dim("—")) },
-        { head: I18n.t("lists.col.description"), cls: "cell-desc", sort: (a) => a.description || "", render: descCell },
+        { head: "URL", sortKey: "url", sort: (a) => a.url || "", sortField: "url", render: (a) => (a.url ? Html.externalLink(a.url) : dim("—")) },
+        { head: I18n.t("lists.col.description"), cls: "cell-desc", sort: (a) => a.description || "", sortField: "description", render: descCell },
       ],
     };
   }
@@ -752,14 +760,21 @@ export class ListConfigs {
       // (principe n°14). Le lien est une colonne → le filtre part au serveur en `where` ; les CANDIDATS sont
       // serveur-pilotés en mode API (`entitySearch`), locaux en mode fichier.
       targetFilter: ListTargets.attachmentTarget(store, entitySearch),
+      // `sortField` : même règle que le listing `applications` ci-dessus (pagination ORDONNÉE complète du
+      // lot 1b, `attachments` étant chargée PARESSEUSEMENT en mode API). La colonne « Attachée à » n'en
+      // déclare PAS : elle trie sur un nom d'équipement/sous-équipement RÉSOLU par jointure cliente, que
+      // la table `attachments` ne porte pas (repli assumé — cf. `ListColumn.sortField`). Aucune facette de
+      // colonne ici non plus (G8 sans objet) : le filtrage par cible est la dimension CIBLE (`where` serveur).
       columns: [
-        { head: I18n.t("lists.col.name"), essential: true, cls: "cell-name", sortKey: "name", sort: (a) => a.name, render: (a) => Html.escape(a.name || I18n.t("lists.ph.noName")) },
+        { head: I18n.t("lists.col.name"), essential: true, cls: "cell-name", sortKey: "name", sort: (a) => a.name, sortField: "name", render: (a) => Html.escape(a.name || I18n.t("lists.ph.noName")) },
         { head: I18n.t("lists.col.attachedTo"), essential: true, sortKey: "target", sort: (a) => targetText(a), render: targetCell },
-        { head: I18n.t("lists.col.file"), sortKey: "file", sort: (a) => a.file_name || "", render: (a) => (a.file_name ? Html.escape(a.file_name) : dim("—")) },
+        { head: I18n.t("lists.col.file"), sortKey: "file", sort: (a) => a.file_name || "", sortField: "file_name", render: (a) => (a.file_name ? Html.escape(a.file_name) : dim("—")) },
         // Taille : rendue LISIBLE (Format.bytes) mais TRIÉE sur les octets bruts (une chaîne « 2 Mo » se
         // trierait lexicographiquement, donc faux) — d'où `sort` sur `size` numérique, `cls: cell-num`.
-        { head: I18n.t("lists.col.size"), cls: "cell-num", sortKey: "size", sort: (a) => a.size || 0, render: (a) => Html.escape(Format.bytes(a.size)) },
-        { head: I18n.t("lists.col.description"), cls: "cell-desc", sort: (a) => a.description || "", render: descCell },
+        // Colonne NUMÉRIQUE côté serveur aussi : `ListOrder` n'y applique pas `COLLATE NOCASE`, l'ORDER BY
+        // trie donc bien 9 avant 10 (ce qu'un tri de chaînes ne ferait pas).
+        { head: I18n.t("lists.col.size"), cls: "cell-num", sortKey: "size", sort: (a) => a.size || 0, sortField: "size", render: (a) => Html.escape(Format.bytes(a.size)) },
+        { head: I18n.t("lists.col.description"), cls: "cell-desc", sort: (a) => a.description || "", sortField: "description", render: descCell },
       ],
     };
   }

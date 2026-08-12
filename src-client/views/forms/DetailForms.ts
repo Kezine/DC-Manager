@@ -33,6 +33,7 @@ import { InterventionFicheRow } from "./InterventionFicheRow";   // intégration
 import { CertFicheRow } from "./CertFicheRow";   // intégration « fiches » du rapprochement certificat ↔ cible (AMOVIBLE)
 import { SubEquipmentForms } from "./SubEquipmentForms";   // fiche + formulaire des sous-équipements (hors chaîne d'héritage, cf. son en-tête)
 import { AttachmentUi } from "./AttachmentUi";   // téléchargement + viewer d'une pièce jointe (gestes UNIQUES partagés avec les sections des fiches porteuses)
+import { ApplicationUi } from "./ApplicationUi";   // section « Applications hébergées » de la fiche VM (factorisée avec la fiche équipement)
 import { AttachmentViewKind } from "../../core/AttachmentViewKind";   // « Afficher » conditionnel : présent seulement si le type est visualisable
 import { AuditLine } from "./AuditLine";   // ligne « Créé/Modifié par {auteur} le {date} » (résolue via l'annuaire, mode API)
 
@@ -729,22 +730,12 @@ export class DetailForms extends IpamForms {
     // -- APPLICATIONS hébergées sur cette VM (décision D5) : nom CLIQUABLE → fiche application (elle
     //    s'empile, cette fiche VM se reconstruit au retour). Section MASQUÉE si vide (patron de la section
     //    sous-équipements de groupDetail : on n'ajoute pas un bloc muet à une fiche déjà dense). Source
-    //    UNIQUE `Store.applicationsOfVm` — la même que l'enrichissement « applications » de la purge de
-    //    masse (core/VmPurge) : ce que la fiche montre est exactement ce que la purge protège. --
-    const hostedApps = store.applicationsOfVm(id);
-    if (hostedApps.length) {
-      this.sect(root, I18n.t("detail.application.hostedSection", { count: hostedApps.length }));
-      const twApps = this.tbl(root, [I18n.t("lists.col.name"), "URL"], hostedApps.map((a: any) => [
-        // Nom cliquable — même style que le nom d'occupant du contenu de baie (souligné pointillé, role button).
-        `<span data-app-view="${a.id}" role="button" tabindex="0" style="cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px;" title="${Html.escape(I18n.t("detail.application.openApp"))}">${Html.escape(a.name || I18n.t("lists.ph.noName"))}</span>`,
-        a.url ? Html.externalLink(a.url) : this.MUTED,
-      ]), "");
-      twApps?.querySelectorAll("[data-app-view]").forEach((el) => {
-        const open = () => this.applicationDetail(store, host, (el as HTMLElement).dataset.appView!, onChanged);
-        (el as HTMLElement).onclick = open;
-        (el as HTMLElement).onkeydown = (ev: KeyboardEvent) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); open(); } };
-      });
-    }
+    //    UNIQUE : le jumeau ASYNC `Store.applicationsOfVmAsync` (garde G7 — `applications` est chargée
+    //    PARESSEUSEMENT en mode API : la lecture synchrone du cache montrerait une section vide à tort),
+    //    la même relation que l'enrichissement « applications » de la purge de masse (core/VmPurge) : ce
+    //    que la fiche montre est exactement ce que la purge protège. Rendu factorisé avec la fiche
+    //    ÉQUIPEMENT dans `ApplicationUi` (les deux blocs étaient recopiés à l'identique). --
+    ApplicationUi.sectionAsync(root, store.applicationsOfVmAsync(id), (appId) => this.applicationDetail(store, host, appId, onChanged));
 
     // -- Rapprochements SUGGÉRÉS (IPAM informatif — cf. docs/vm-proxmox.md) : adresses IPAM EXISTANTES dont la valeur
     //    correspond à une IP constatée d'une vNIC, sans rattachement automatique. Bloc réservé au NON-viewer et

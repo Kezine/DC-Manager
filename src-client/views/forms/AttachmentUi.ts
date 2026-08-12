@@ -8,6 +8,7 @@ import { I18n } from "../../i18n/I18n";
 import { Markdown } from "../../core/Markdown";
 import { AttachmentViewKind } from "../../core/AttachmentViewKind";
 import { MarkdownImagePolicy } from "../../core/MarkdownImagePolicy";
+import { AsyncSection } from "./AsyncSection";
 import type { FormHost } from "./shared";
 
 /* =============================================================================
@@ -209,6 +210,16 @@ export class AttachmentUi {
     note.className = "attachment-view-note";
     note.textContent = I18n.t("attachment.view.readError");
     root.appendChild(note);
+  }
+
+  /** Section « Pièces jointes » d'une fiche porteuse, alimentée en ASYNC (garde G7, cf.
+      docs/hydratation.md § Vague 2) : `rows` est la promesse d'un jumeau async du Store
+      (`attachmentsOfEquipmentAsync` / `attachmentsOfSubEquipmentAsync`). La PLACE de la section est
+      réservée immédiatement (`AsyncSection`), son contenu arrive ensuite — sans quoi elle se
+      retrouverait en fin de fiche. C'est le point d'entrée des FICHES ; `section` (synchrone) reste le
+      rendu, appelé une fois les lignes connues. */
+  static sectionAsync(store: Store, host: FormHost, root: HTMLElement, rows: Promise<any[]>, openAttachment: (id: string) => void): void {
+    AsyncSection.attach(root, rows, (holder, list) => AttachmentUi.section(store, host, holder, list, openAttachment));
   }
 
   /** Ajoute la section « Pièces jointes » à une fiche PORTEUSE — MASQUÉE si `rows` est vide (on n'ajoute

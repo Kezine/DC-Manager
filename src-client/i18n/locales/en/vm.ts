@@ -167,6 +167,9 @@ export const vm = {
     intro: "Tick the groups to purge. Deletion DETACHES the attached IP addresses and the hosted applications (none of them is deleted) and is undone by a single “Undo”: the whole batch is written in one transaction.",
     introFile: "File mode: the list of configured providers is unknown (no server). Only ORPHAN VMs are offered, grouped by provider identifier — a configured provider cannot be told apart from a vanished one here.",
     providersUnavailable: "Provider list unreadable ({{detail}}) — falling back to orphan VMs only, grouped by provider identifier.",
+    // Effects preview UNAVAILABLE (server-side cascade preview — see docs/hydratation.md § G5): the count
+    // is NEVER replaced by a local estimate, which would under-report on a partially loaded corpus.
+    previewUnavailable: "Purge effects cannot be computed ({{detail}}) — try again; the purge stays refused until they can be announced.",
     nothing: "No VM to purge: neither orphans nor VMs of a vanished provider.",
     groupOrphans: "Provider “{{provider}}”: {{count}} orphan(s)",
     groupOrphansUnknown: "Provider identifier “{{provider}}”: {{count}} orphan(s)",

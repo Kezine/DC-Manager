@@ -72,6 +72,14 @@ import type { TrackerSyncClient, TrackerProviderSummary } from "./forms/TrackerS
     orphelin toléré) ; `search` alimente la SÉLECTION unifiée (SearchPop) de l'éditeur de liens ;
     `openTargetDetail` ouvre la fiche de la cible PAR-DESSUS le détail d'intervention (pile de modales). */
 export interface InterventionTargetSource {
+  /** PRÉALABLE de résolution : charge ce dont `labelOf` (synchrone) a besoin pour ne pas mentir.
+      Attendu AVANT tout rendu qui résout des libellés — le listing (`reload`) et l'ouverture d'un
+      détail PAR ID depuis une fiche (`openDetailById`, où la page n'a peut-être jamais été affichée).
+      Motif : une famille de cibles peut vivre dans une collection chargée PARESSEUSEMENT côté hôte
+      (cf. docs/hydratation.md § Vague 2) ; sans ce préalable, ses cibles s'afficheraient « introuvable ».
+      IDEMPOTENT et bon marché après le premier appel ; NE REJETTE JAMAIS (l'hôte avale ses échecs : un
+      libellé manquant ne doit pas empêcher la page de s'afficher). Rien à charger → promesse résolue. */
+  prepareLabels(): Promise<void>;
   /** Libellé d'une cible précise, ou null si elle n'existe plus dans le document (orphelin). */
   labelOf(kind: string, id: string): string | null;
   /** Recherche UNIFIÉE sur TOUTES les familles liables (équipements + VMs + spares CONFONDUS) : renvoie des
@@ -163,8 +171,10 @@ export class InterventionsAdminView {
 
   private async reload(): Promise<void> {
     await this.guarded(async () => {
-      await this.ensureMeta();
-      await this.loadPage();
+      // Préalable de résolution des LIBELLÉS de cible (une famille peut vivre dans une collection
+      // chargée paresseusement côté hôte) : mené EN PARALLÈLE de la page — les deux I/O sont
+      // indépendantes, et `render()` a besoin des deux. Le contrat garantit qu'il ne rejette pas.
+      await Promise.all([this.ensureMeta().then(() => this.loadPage()), this.targets.prepareLabels()]);
       this.render();
     });
   }
@@ -714,6 +724,7 @@ export class InterventionsAdminView {
     void (async () => {
       try {
         await this.ensureMeta();   // base Jira : le détail rend son lien même si la page n'a jamais été affichée
+        await this.targets.prepareLabels();   // … et ses LIBELLÉS de cible se résolvent pour la même raison (cf. le contrat)
         this.detailModalById(await this.client!.getOne(id));
       } catch (e) {
         if (e instanceof InterventionsError && e.status === 404) Notify.toast(I18n.t("interventions.toast.notFound"), "info");

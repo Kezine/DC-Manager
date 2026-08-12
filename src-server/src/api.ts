@@ -82,6 +82,12 @@ export class Api {
   /** Plafond d'ids par appel à `GET /users/resolve` (anti-abus — parité avec les autres endpoints batch). */
   private static readonly USERS_RESOLVE_CAP = 200;
 
+  /** Plafond de racines par appel à `POST /cascade-preview` (anti-abus, même esprit que ci-dessus).
+      Dimensionné sur le plus gros geste réel — la purge de masse des VMs orphelines, qui en prévisualise
+      quelques dizaines (cf. docs/vm-proxmox.md) : 1000 laisse une marge confortable sans ouvrir un
+      calcul de cascade illimité à une requête unique. */
+  private static readonly CASCADE_PREVIEW_CAP = 1000;
+
   constructor(private readonly docs: DocumentStore, private readonly auth: Auth, private readonly live: LiveBus,
               private readonly resolver: UserResolver, private readonly extensions: ApiExtension[] = []) {}
 
@@ -110,6 +116,12 @@ export class Api {
 
     // -- données SCOPÉES par document (/documents/:docId/...) --
     const data = express.Router({ mergeParams: true });
+    // 🚨 APERÇU DE CASCADE — monté AVANT `resolveRepo`, et c'est TOUT l'intérêt : la route est un POST
+    // par sa CHARGE (une liste d'ids ne tient pas dans une query string sur une purge de masse), mais
+    // c'est une LECTURE PURE. Passée par `resolveRepo`, elle consommerait une révision et réveillerait
+    // tous les clients par SSE à chaque ouverture de modale de confirmation. Elle résout donc le dépôt
+    // par la moitié LECTURE de ce middleware (`resolveRepoRead`). Cf. docs/hydratation.md § G5.
+    data.post("/cascade-preview", this.resolveRepoRead, this.cascadePreview);
     data.use(this.resolveRepo);
     data.get("/events", this.events);      // canal live (SSE) — notifie les changements du document
     data.get("/meta", this.getMeta);
@@ -254,16 +266,31 @@ export class Api {
     return ApiRules.buildChangeset(req.body, (req.params as any).collection, req.path || "");
   }
 
+  /** Résolution du dépôt en LECTURE SEULE : 404 si le document est inconnu, dépôt posé sur la requête,
+      révision exposée — RIEN d'autre. Aucun verrou, aucune révision consommée, aucun SSE. Middleware
+      DISTINCT parce que certaines LECTURES ne peuvent pas être des GET : leur charge (une liste d'ids)
+      ne tient pas dans une query string. Seul cas à ce jour : l'aperçu de cascade (cf. `router()`). */
+  private resolveRepoRead: RequestHandler = (req, res, next) => {
+    const id = (req.params as any).docId;
+    const repo = this.docs.repo(id);
+    if (!repo) { res.status(404).json({ error: "document inconnu" }); return; }
+    (req as RepoRequest).repo = repo;
+    res.setHeader("X-Doc-Rev", String(this.docs.getRev(id)));
+    next();
+  };
+
   /** Résout le Repository du document (404 si inconnu). En écriture : VERROU OPTIMISTE par entité (409 si une entité
       visée a été modifiée après la révision de base du client, en-tête `X-Base-Rev`), sinon incrémente la révision
       (entête `X-Doc-Rev`), estampille `docRev` pour les handlers, et publie l'événement live (si succès).
       En lecture : expose la rev. */
   private resolveRepo: RequestHandler = (req, res, next) => {
+    // LECTURE : exactement le traitement des routes de lecture pure — délégué plutôt que recopié
+    // (principe n°3 : deux copies de la résolution/404/rev finiraient par diverger).
+    if (req.method === "GET") { this.resolveRepoRead(req, res, next); return; }
     const id = (req.params as any).docId;
     const repo = this.docs.repo(id);
     if (!repo) { res.status(404).json({ error: "document inconnu" }); return; }
     (req as RepoRequest).repo = repo;
-    if (req.method === "GET") { res.setHeader("X-Doc-Rev", String(this.docs.getRev(id))); next(); return; }
     // verrou optimiste : `baseRev` = snapshot sur lequel le client s'appuie. Rejet AVANT toute mutation /
     // incrément de rev / publication SSE → l'écriture refusée ne consomme pas de révision et ne réveille personne.
     // DÉCISION (audit P5) : l'en-tête `X-Base-Rev` reste FACULTATIF — le client de l'app l'envoie toujours
@@ -313,6 +340,30 @@ export class Api {
     const body = req.body;
     if (!body || typeof body !== "object" || Array.isArray(body)) { res.status(400).json({ error: "meta invalide (objet JSON attendu)" }); return; }
     this.repoOf(req).setMeta(body); res.status(204).end();
+  };
+
+  /* -- APERÇU de cascade (lecture pure — cf. le montage dans `router()`) -- */
+  /** Plan de cascade d'une suppression, calculé sur le corpus SERVEUR. Corps :
+      `{ collection: string, ids: string[] }` → réponse `{ deletes: [{c,id}], detaches: [{c,id,key,value}] }`,
+      c'est-à-dire le `CascadePlan` PARTAGÉ tel quel — l'aperçu serveur et l'aperçu local rendent le MÊME
+      objet, ce qui permet à l'appelant de les employer indifféremment (cf. `Store.cascadePreviewAsync`).
+      Le moteur est celui de la SUPPRESSION (`Cascade.planMany`, partagé) : l'aperçu ne peut pas diverger
+      de ce que `DELETE` / `/transact` feront. AUCUNE écriture : ni mutation, ni révision, ni SSE.
+      Plafond d'ids par appel (parité avec les autres endpoints batch) ; ids inconnus simplement ignorés
+      par le moteur (une racine déjà supprimée n'entraîne rien). */
+  private cascadePreview: RequestHandler = (req, res) => {
+    const body: any = req.body || {};
+    const collection = String(body.collection || "");
+    if (!Schema.isCollection(collection)) { res.status(404).json({ error: "collection inconnue" }); return; }
+    if (!Array.isArray(body.ids)) { res.status(400).json({ error: "ids invalides (tableau attendu)" }); return; }
+    const ids = [...new Set(body.ids.filter((id: any) => typeof id === "string" && id))] as string[];
+    if (ids.length > Api.CASCADE_PREVIEW_CAP) { res.status(400).json({ error: "trop d'ids (max " + Api.CASCADE_PREVIEW_CAP + ")" }); return; }
+    if (!ids.length) { res.json({ deletes: [], detaches: [] }); return; }
+    // MULTI-RACINES en UN plan (`planMany`) : c'est une exigence de CORRECTION, pas une optimisation
+    // (composition des retraits de liste, garde anti-résurrection — cf. src-shared/Cascade.ts) ; c'est
+    // aussi ce que la purge de masse demande, elle qui prévisualise des dizaines de VMs d'un coup.
+    const plan = Cascade.planMany(ids.map((id) => ({ collection, id })), this.repoChildFinder(req), this.repoFetcher(req));
+    res.json(plan);
   };
 
   /* -- lot atomique / import -- */
@@ -378,7 +429,18 @@ export class Api {
     const stampedUpdates = [...updates, ...residual.updates].map(stampUpdate);
     try {
       repo.transact({ ...body, creates: stampedCreates, updates: stampedUpdates, deletes: [...(body.deletes || []), ...residual.deletes] }, this.revOf(req));
-      res.status(204).end();
+      // COMPTE RENDU du lot (garde M4 du chantier lazy-load, cf. docs/hydratation.md) : le client
+      // IGNORE l'événement SSE de sa PROPRE écriture — sans ce corps, rien ne lui apprendrait que le
+      // serveur a supprimé PLUS que son plan (cascade résiduelle sur des enregistrements qu'il n'avait
+      // pas en cache, ou dont sa copie était périmée). Il en purge son cache et invalide les compteurs
+      // des collections touchées. Le corps remplace le 204 historique : additif, aucun appelant ne le
+      // lisait (le client n'en lit toujours que `residual`).
+      res.json({
+        residual: {
+          deletes: residual.deletes.map((d: any) => ({ collection: d.collection, id: d.id })),
+          updates: residual.updates.map((u: any) => ({ collection: u.collection, id: u.record && u.record.id })),
+        },
+      });
     }
     catch (e: any) { res.status(400).json({ error: e.message }); }
   };

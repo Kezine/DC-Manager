@@ -3,7 +3,7 @@ import { FormControls } from "../../ui/FormControls";
 import { Notify } from "../../ui/Notify";
 import { Dialog } from "../../ui/Dialog";
 import { VmPurge } from "../../core/VmPurge";
-import type { VmPurgeGroup, VmPurgeEntry, VmEnrichmentFamily, VmPurgeReaders } from "../../core/VmPurge";
+import type { VmPurgeGroup, VmPurgeEntry, VmEnrichmentFamily, VmPurgeReaders, VmPurgeSelection, VmPurgeCascadePlan } from "../../core/VmPurge";
 import { VmSyncError } from "./VmSyncClient";
 import type { VmSyncClient } from "./VmSyncClient";
 import type { FormHost } from "./shared";
@@ -21,7 +21,22 @@ import { I18n } from "../../i18n/I18n";
    comptes) vit dans le module PUR `core/VmPurge`, testé en isolation ; la
    suppression est celle du Store (`removeMany` → UNE transaction, UNE révision, UN
    événement SSE, UNE entrée d'undo) ; les comptes du récapitulatif viennent du PLAN
-   de cascade réel (`Store.cascadePreview`), jamais d'une estimation refaite ici.
+   de cascade réel (`Store.cascadePreviewAsync`), jamais d'une estimation refaite ici.
+
+   CORPUS PARTIEL (chantier lazy-load, cf. docs/hydratation.md § Vague 2) — DEUX
+   dépendances de cette modale portent sur `applications`, chargée PARESSEUSEMENT en
+   mode API, et elles se traitent différemment parce qu'elles ne posent pas la même
+   question :
+   - « cette VM héberge-t-elle une application ? » (critère d'ENRICHISSEMENT, par
+     VM et avant toute sélection) : aucun plan de cascade ne répond à ça. La modale
+     HYDRATE donc la collection à l'ouverture — patron des surfaces qui ont besoin de
+     la liste complète. Sans ça, des VMs enrichies seraient proposées comme « nues »
+     et purgées avec leur rattachement, sans que rien ne le signale ;
+   - « que va emporter la purge ? » (PLAN) : `cascadePreviewAsync`, qui interroge le
+     serveur tant que le corpus n'est pas complet (garde G5). D'où un récapitulatif
+     ASYNCHRONE, mémoïsé par sélection et protégé par un jeton d'obsolescence : une
+     case cochée puis décochée ne redemande rien, et une réponse devancée ne peint pas.
+   Mode fichier : les deux sont des no-op par construction (tout y est hydraté).
 
    MODE FICHIER (principe n°15) : aucun `VmSyncClient` → la liste des providers
    configurés est INCONNUE, les groupes fusionnent en « orphelines par provider_id »
@@ -49,6 +64,13 @@ export class VmPurgeForm {
   private recapEl: HTMLElement | null = null;
   /** Sous-listes nominatives d'enrichies, par clé de groupe — masquées tant que le groupe n'est pas coché. */
   private readonly enrichedBlocks = new Map<string, HTMLElement>();
+  /** PLANS de cascade déjà obtenus, par signature de sélection (ids triés) : cocher puis décocher un
+      groupe ne redemande rien. Le contenu du document ne bouge pas pendant que la modale est ouverte
+      (la purge la ferme), donc un plan reste valable pour toute sa durée de vie. */
+  private readonly planCache = new Map<string, VmPurgeCascadePlan>();
+  /** Jeton d'OBSOLESCENCE des demandes de plan : seule la dernière peint (deux clics rapides ne
+      laissent pas la réponse la plus lente écraser la plus récente — patron du pager de listing). */
+  private planToken = 0;
 
   private constructor(
     private readonly store: Store,
@@ -95,6 +117,12 @@ export class VmPurgeForm {
   private async load(client: VmSyncClient | null): Promise<void> {
     let configuredProviderIds: string[] | null = null;
     let degradedReason: string | null = null;
+    // Les DEUX I/O de l'ouverture, menées EN PARALLÈLE (indépendantes) : la liste des providers
+    // configurés, et l'hydratation d'`applications` — dont le critère d'enrichissement a besoin PAR VM
+    // (cf. l'en-tête). L'hydratation est un no-op en mode fichier et sur une collection déjà complète.
+    // Son échec est AVALÉ : la purge doit rester possible, quitte à ne pas savoir retenir une VM sur ce
+    // critère-là ; les autres familles (notes, description, groupes, IP) restent, elles, exactes.
+    const hydrated = this.store.hydrate(["applications"]).catch(() => []);
     if (client) {
       try {
         configuredProviderIds = (await client.providers()).map((p) => p.id);
@@ -102,6 +130,7 @@ export class VmPurgeForm {
         degradedReason = VmPurgeForm.errText(e);
       }
     }
+    await hydrated;
     const readers: VmPurgeReaders = {
       // Adresses IP RATTACHÉES (ipAddresses.vm_id) — le lecteur du store, injecté (le module pur ne le connaît pas).
       attachedIpCount: (vmId: string) => this.store.ipAddressesOfVm(vmId).length,
@@ -207,20 +236,63 @@ export class VmPurgeForm {
   }
 
   /** Rafraîchit ce qui DÉPEND de la sélection : visibilité des sous-listes d'enrichies, récapitulatif
-      (comptes dérivés du PLAN de cascade), libellé et état du bouton de purge. */
+      (comptes dérivés du PLAN de cascade — désormais ASYNCHRONE, cf. l'en-tête), libellé et état du
+      bouton de purge. La sélection, elle, est connue TOUT DE SUITE : le bouton est donc réglé sans
+      attendre, et seul le nombre d'adresses IP détachées (qui vient du plan) est différé. */
   private refresh(): void {
     this.enrichedBlocks.forEach((el, key) => { el.style.display = this.selectedKeys.has(key) ? "" : "none"; });
     const selection = VmPurge.select(this.groups, this.selectedKeys, this.includeEnriched);
-    const summary = VmPurge.summary(selection, this.store.cascadePreview("vms", selection.ids));
-    if (this.recapEl) {
-      this.recapEl.textContent = summary.vms
-        ? I18n.t("vm.purge.recap", { vms: summary.vms, enriched: summary.enriched, ips: summary.detachedIps })
-        : I18n.t("vm.purge.recapNone");
-    }
-    if (this.saveButton) {
-      this.saveButton.textContent = summary.vms ? I18n.t("vm.purge.purge", { count: summary.vms }) : I18n.t("vm.purge.purgeIdle");
-      this.saveButton.disabled = summary.vms === 0;
-    }
+    this.paintSaveButton(selection);
+    const token = ++this.planToken;
+    void this.planFor(selection, token)
+      .then((plan) => { if (token === this.planToken) this.paintRecap(selection, plan); })
+      // ÉCHEC RÉEL de l'aperçu (réseau, 5xx) : on le DIT — sans quoi le récapitulatif resterait
+      // indéfiniment sur « analyse en cours ». On n'affiche JAMAIS un plan de repli local à la place :
+      // il sous-estimerait en silence sur corpus partiel, ce que la garde G5 existe pour empêcher. La
+      // purge elle-même reste refusée tant que ses effets ne sont pas annonçables (cf. `purge`).
+      .catch((e) => {
+        if (token !== this.planToken || !this.recapEl) return;   // sélection devancée : la plus récente peindra
+        this.recapEl.textContent = I18n.t("vm.purge.previewUnavailable", { detail: VmPurgeForm.errText(e) });
+      });
+  }
+
+  /** Plan de cascade de cette sélection, MÉMOÏSÉ (aucune peinture) : le point d'accès unique au plan,
+      partagé par le récapitulatif et par la confirmation finale — laquelle ne redemande donc rien quand
+      la sélection n'a pas bougé. Clé = les ids TRIÉS (l'ordre de cochage ne fait pas un autre plan). */
+  private async fetchPlan(selection: VmPurgeSelection): Promise<VmPurgeCascadePlan> {
+    const key = selection.ids.slice().sort().join(",");
+    const known = this.planCache.get(key);
+    if (known) return known;
+    const plan = await this.store.cascadePreviewAsync("vms", selection.ids);
+    this.planCache.set(key, plan);
+    return plan;
+  }
+
+  /** Plan pour le RÉCAPITULATIF : peint « en attente » tant que le plan n'est pas connu. Le JETON est
+      posé par l'appelant (`refresh`), qui s'en sert aussi pour filtrer les échecs devancés — une seule
+      autorité d'obsolescence, sinon les deux points de contrôle divergeraient. */
+  private planFor(selection: VmPurgeSelection, token: number): Promise<VmPurgeCascadePlan> {
+    const key = selection.ids.slice().sort().join(",");
+    if (!this.planCache.has(key) && token === this.planToken) this.paintRecap(selection, null);   // jamais un compte d'IP provisoire en attendant le vrai
+    return this.fetchPlan(selection);
+  }
+
+  /** Récapitulatif « X VMs supprimées, dont Y enrichies ; Z adresses IP détachées ». `plan` null =
+      le plan est en vol : on annonce l'attente plutôt qu'un compte provisoire (qui se lirait comme définitif). */
+  private paintRecap(selection: VmPurgeSelection, plan: VmPurgeCascadePlan | null): void {
+    if (!this.recapEl) return;
+    if (!selection.ids.length) { this.recapEl.textContent = I18n.t("vm.purge.recapNone"); return; }
+    if (!plan) { this.recapEl.textContent = I18n.t("vm.purge.loading"); return; }
+    const summary = VmPurge.summary(selection, plan);
+    this.recapEl.textContent = I18n.t("vm.purge.recap", { vms: summary.vms, enriched: summary.enriched, ips: summary.detachedIps });
+  }
+
+  /** Libellé + état du bouton de purge — dérivés de la SEULE sélection (aucun plan requis) : le bouton
+      ne doit pas rester désactivé le temps d'un aller-retour. */
+  private paintSaveButton(selection: VmPurgeSelection): void {
+    if (!this.saveButton) return;
+    this.saveButton.textContent = selection.ids.length ? I18n.t("vm.purge.purge", { count: selection.ids.length }) : I18n.t("vm.purge.purgeIdle");
+    this.saveButton.disabled = selection.ids.length === 0;
   }
 
   /* --------------------------------------------------------------------------
@@ -231,7 +303,9 @@ export class VmPurgeForm {
   private async purge(): Promise<boolean> {
     const selection = VmPurge.select(this.groups, this.selectedKeys, this.includeEnriched);
     if (!selection.ids.length) { Notify.toast(I18n.t("vm.purge.recapNone"), "err"); this.refresh(); return false; }
-    const summary = VmPurge.summary(selection, this.store.cascadePreview("vms", selection.ids));
+    // Plan de cascade RÉEL pour la confirmation : servi par le MÊME mémo que le récapitulatif (aucun
+    // aller-retour de plus dans le cas nominal — la sélection n'a pas bougé depuis son affichage).
+    const summary = VmPurge.summary(selection, await this.fetchPlan(selection));
     // Confirmation FINALE (geste destructeur de masse) : le message reprend les comptes EXACTS.
     const ok = await Dialog.confirm({
       title: I18n.t("vm.purge.confirmTitle", { count: summary.vms }),

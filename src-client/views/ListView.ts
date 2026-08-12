@@ -286,6 +286,15 @@ export class ListView {
     this._filterBar?.syncChips();   // la chip retirable : la barre ne voit pas une mutation externe
   }
 
+  /** Oublie la PAGE serveur en main (régime pagé, G4) : le prochain rendu la redemandera. Point d'entrée
+      de l'HÔTE pour le cas que le listing ne peut pas voir tout seul — un événement SSE portant sur une
+      collection chargée PARESSEUSEMENT (G3 saute son rechargement, donc `store.onChange` ne part PAS et
+      le filet de l'abonnement ci-dessus ne joue pas), alors que la page reçue est bel et bien périmée.
+      Ce n'est PAS un contournement de G3 : on ne re-tire pas la collection, on redemande UNE page — ce
+      que le pager fait de toute façon à chaque navigation. No-op hors régime pagé.
+      Cf. docs/hydratation.md § « Vague 2 ». */
+  forgetServerPage(): void { this.rowEngine?.forgetPage(); }
+
   /** Lignes BRUTES du listing (avant filtres de colonne, tri et pagination).
       - source CUSTOM (`items`, hors collections du document) : chemin HISTORIQUE inchangé — relevé
         `searchFields` explicite, jamais le moteur partagé (cf. `ListOptions.searchFields`) ;

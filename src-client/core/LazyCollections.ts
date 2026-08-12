@@ -5,10 +5,13 @@
    POURQUOI UN SEUL ENDROIT : une collection lazy touche plusieurs chemins — ce
    que le boot NE tire PAS (`RestAdapter.load`), ce que le Store DÉCLARE après
    chaque hydratation complète (`Store.init` → `HydrationState.declareLazy`), et
-   ce dont les gardes G1-G9 dérivent leur comportement. La liste doit donc être
-   posée UNE fois : chaque vague du chantier ajoute SA collection ici, et rien
-   d'autre ne change (vague 2 : `attachments` + `applications` ; vague 3 :
-   `wifiClients` — `vms` est EXCLU du chantier, cf. le cadrage).
+   ce dont les gardes G1-G10 dérivent leur comportement. La liste doit donc être
+   posée UNE fois : chaque vague du chantier ajoute SA collection ici, et le reste
+   suit (vague 3 : `wifiClients` — `vms` est EXCLU du chantier, cf. le cadrage).
+   ⚠ « et rien d'autre ne change » vaut pour les gardes GÉNÉRIQUES (G1-G4, G6, G9) ;
+   une collection a ses POINTS DURS propres — sections de fiches (G7), aperçu de
+   cascade (G5), consommateurs synchrones divers (G10) —, qui se traitent avec les
+   patrons établis, une fois, à l'ajout du nom (cf. docs/hydratation.md § Vague 2).
 
    ⚠ Cette liste est une INTENTION, pas un état : la vérité d'exécution vit dans
    `core/HydrationState` (`store.hydration.isHydrated(c)`), qui sait qu'une
@@ -24,8 +27,10 @@
    aucune collection ne peut être déclarée lazy (cf. `Store` constructeur).
    ============================================================================= */
 
-/** Collections chargées PARESSEUSEMENT en mode API (vague 1 : `contacts`).
+/** Collections chargées PARESSEUSEMENT en mode API (vague 1 : `contacts` ; vague 2 :
+    `attachments` + `applications`).
     DONNÉE pure (cf. CLAUDE.md principe n°2 : les tables restent de simples exports).
     Les noms doivent appartenir à `EntityRegistry.COLLECTIONS` — un nom fautif serait
-    silencieusement sans effet, d'où l'invariant testé (Tests/modules/test-lazy-contacts.js). */
-export const LAZY_COLLECTIONS_API: readonly string[] = ["contacts"];
+    silencieusement sans effet, d'où l'invariant testé (Tests/modules/test-lazy-contacts.js
+    pour la vague 1, test-lazy-vague2.js pour la vague 2). */
+export const LAZY_COLLECTIONS_API: readonly string[] = ["contacts", "attachments", "applications"];

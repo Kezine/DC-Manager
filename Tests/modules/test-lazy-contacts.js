@@ -83,7 +83,9 @@ function apiStore(adapter) { return new Store(adapter, new HydrationState(), ["c
 module.exports = async () => {
 
   await section("Lazy-load : la LISTE CENTRALE des collections paresseuses (core/LazyCollections)", async () => {
-    ck.eq(LAZY_COLLECTIONS_API.join(","), "contacts", "vague 1 : `contacts` et elle seule (les vagues 2-3 s'ajouteront ICI)");
+    // Le CONTENU exact de la liste (et son extension par vague) est verrouillé par test-lazy-vague2.js :
+    // ici, seule la présence du PILOTE compte — ce fichier teste son comportement de bout en bout.
+    ck(LAZY_COLLECTIONS_API.indexOf("contacts") !== -1, "vague 1 : `contacts` est déclarée lazy (les vagues suivantes s'ajoutent à la MÊME liste)");
     const unknown = LAZY_COLLECTIONS_API.filter((c) => EntityRegistry.COLLECTIONS.indexOf(c) === -1);
     ck.eq(unknown.join(","), "", "🎯 INVARIANT : chaque nom est une VRAIE collection — un nom fautif serait sans effet, en silence");
     // Les exclusions ACTÉES du cadrage : les y voir un jour serait une régression de conception, pas un détail.

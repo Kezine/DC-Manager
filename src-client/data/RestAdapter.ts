@@ -171,13 +171,27 @@ export class RestAdapter extends DataAdapter {
   }
 
   /* Lot APPLIQUÉ ATOMIQUEMENT côté serveur (1 transaction SQLite) — remplace l'ancienne boucle d'appels par
-     entité (non atomique). Le serveur applique deletes → updates → creates → meta en tout-ou-rien. */
-  async transact(tx: Transaction): Promise<null> {
-    await this._send("POST", "/transact", {
+     entité (non atomique). Le serveur applique deletes → updates → creates → meta en tout-ou-rien.
+     RETOUR : le compte rendu du serveur, dont la cascade RÉSIDUELLE qu'il a fusionnée au lot
+     (`{ residual: { deletes, updates } }`) — le Store en purge son cache (garde M4, cf.
+     docs/hydratation.md). Serveur d'avant la vague 2 (204 sans corps) → `null`, et M4 est un no-op. */
+  async transact(tx: Transaction): Promise<unknown> {
+    return this._send("POST", "/transact", {
       creates: tx.creates || [], updates: tx.updates || [], deletes: tx.deletes || [],
       ...(tx.meta ? { meta: tx.meta } : {}),
     });
-    return null;
+  }
+
+  /** APERÇU de cascade calculé par le SERVEUR (garde G5) : le plan complet d'une suppression d'un ou
+      plusieurs enregistrements d'UNE collection, sur le corpus SERVEUR — donc juste même quand le
+      cache client est partiel. LECTURE PURE : la route ne consomme aucune révision et ne publie aucun
+      SSE (elle est POST par sa CHARGE — une liste d'ids —, pas par son effet). Sans document scopé :
+      `null` (parité de garde avec load/list/maintenance). */
+  async cascadePreview(collection: string, ids: readonly string[]): Promise<{ deletes: Array<{ c: string; id: string }>; detaches: Array<{ c: string; id: string; key: string; value: any }> } | null> {
+    if (!this.docId) return null;
+    const res = await this._send("POST", "/cascade-preview", { collection, ids: [...ids] });
+    if (!res) return null;   // 409/400 routés par le protocole (corps null) → repli sur le plan local
+    return { deletes: Array.isArray(res.deletes) ? res.deletes : [], detaches: Array.isArray(res.detaches) ? res.detaches : [] };
   }
   async saveMeta(meta: Record<string, any>): Promise<unknown> { return this._send("PUT", "/meta", meta); }
   /** MAINTENANCE du document courant (admin) : purge serveur des images ORPHELINES et des BINAIRES de
