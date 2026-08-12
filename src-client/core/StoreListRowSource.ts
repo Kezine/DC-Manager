@@ -127,4 +127,20 @@ export class StoreListRowSource implements ListRowSource {
       page: pageRequest.page, pageSize: pageRequest.pageSize, where: null, sort: pageRequest.sort || null, signal,
     });
   }
+
+  /** G8 — valeurs SERVEUR d'une facette de colonne, ou `null` si ce listing garde ses options locales.
+      DEUX conditions, exactement celles du pager (même doctrine, même ordre) :
+      1. l'hôte offre un chemin serveur (mode API — `null` en mode fichier, principe n°15 : les options
+         locales y sont exactes PAR CONSTRUCTION, « le document EST le fichier ») ;
+      2. la collection n'est PAS intégralement en cache : c'est l'ÉTAT qui décide, jamais une liste de
+         noms — une collection lazy redevenue `full` (export G2, hydratation à la demande) retrouve
+         aussitôt ses options locales, sans que rien d'autre ne change.
+      ⚠ Pas de 3ᵉ condition « requête au repos », contrairement au pager : les options d'un filtre
+      décrivent le CORPUS, pas le jeu affiché — elles ne doivent pas se rétrécir parce qu'une recherche
+      est en cours (le filtre et la recherche se composent). */
+  facetOptions(collection: string, field: string): string[] | null {
+    if (!this.reader) return null;
+    if (this.store.hydration.isHydrated(collection)) return null;
+    return this.store.facetValues(collection, field);
+  }
 }

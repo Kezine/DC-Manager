@@ -32,6 +32,11 @@ export interface SearchAllOpts { collections?: string[] | null; perCollectionLim
 /** Résultat de `searchAll` : records par collection (collections MUETTES omises — payload lean) + les collections
     dont la liste a été TRONQUÉE au plafond (l'appelant peut le signaler ; la palette v1 l'assume silencieusement). */
 export interface SearchAllResult { results: Record<string, Rec[]>; truncated: string[] }
+/** Résultat d'un relevé de FACETTE (`facetValues` — garde G8 du lazy-load, cf. docs/hydratation.md) : les
+    valeurs DISTINCTES non vides d'une colonne, plus le drapeau de TRONCATURE au plafond partagé
+    (`ListFacets.VALUES_CAP`). `truncated` est un signal de DIAGNOSTIC : une facette qui l'atteint n'en est
+    pas une (colonne quasi unique) — l'UI, elle, se contente des valeurs. */
+export interface FacetValuesResult { values: string[]; truncated: boolean }
 export interface ImageMeta { id: string; name?: string; u_height?: number; face?: string; with_ears?: boolean; description?: string; type?: string; bytes?: number }
 
 /** CONTRAT du dépôt d'un document : la SURFACE PUBLIQUE que doit offrir toute implémentation de la
@@ -87,6 +92,14 @@ export interface RepositoryContract {
       Requête vide/blanche → aucun résultat. Le CLASSEMENT reste client (décision de cadrage : pas de
       ranking serveur en v1). */
   searchAll(query: string, opts?: SearchAllOpts): SearchAllResult;
+
+  /** FACETTE d'une colonne : ses valeurs DISTINCTES non vides (garde G8 du chantier lazy-load — un
+      listing dont la collection n'est PAS en cache ne peut pas construire ses options de filtre en
+      balayant le corpus, cf. docs/hydratation.md § « Vague 3 »). `field` est validé contre la liste
+      blanche PARTAGÉE `ListFacets` (hors liste → throw, jamais d'interpolation) ; `limit` plafonne le
+      nombre de valeurs (défaut `ListFacets.VALUES_CAP`) et le dépassement remonte en `truncated`.
+      DISTINCT sensible à la CASSE et vides EXCLUS : parité STRICTE avec les options locales (cf. ListFacets). */
+  facetValues(collection: string, field: string, limit?: number): FacetValuesResult;
 
   /* ---- meta ---- */
   /** Le sac `meta` du document (objet JSON libre), ou `{}` s'il est absent. */

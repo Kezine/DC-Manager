@@ -47,7 +47,9 @@ enregistrement » pour toute l'application.
 | `src-server/src/RelationalRepository.searchAll` | Recherche transverse : un LIKE sur la colonne `search` par collection, plafond par collection, troncature signalée. |
 | `src-server/src/RelationalRepository.list` | Listing d'UNE collection : LIKE sur `search` + `where` de colonnes + pagination + tri `sort`/`dir` (liste blanche partagée `ListOrder`, cf. § « Tri SERVEUR du régime pagé ») — la route que consomment les listings serveur-pilotés. |
 | `src-shared/ListOrder.ts` + `src-client/core/ListServerSort.ts` | Tri SERVEUR du régime pagé (pagination ordonnée complète) : liste blanche des colonnes triables DÉRIVÉE de la spec + fragment `ORDER BY` (partagé), et mapping critère de vue → champ du modèle (client, pur). |
+| `src-shared/ListFacets.ts` + `src-client/core/CollectionFacetCache.ts` | FACETTES du régime pagé : liste blanche des colonnes facettables DÉRIVÉE de la spec + `SELECT DISTINCT` (partagé), et valeurs async servies en synchrone aux options de filtre (client, pur). |
 | `GET /api/documents/:docId/search` | La route transverse (api.ts) — même garde que toute lecture du document (session SSO + SUPER_ADMIN). |
+| `GET /api/documents/:docId/facets/:collection` | Valeurs DISTINCTES d'une colonne (api.ts) — même garde, lecture PURE (cf. § « Facettes du régime pagé »). |
 
 ## Exécution DOUBLE (principe n°15)
 
@@ -127,6 +129,11 @@ pas `store.all()` : leurs lignes viennent d'un **moteur à source injectée**.
           total = COUNT(*), pager RÉEL ; ORDER BY = le critère de tri du listing
           sur le CORPUS entier (pagination ordonnée complète, lot 1b)
           (cf. docs/hydratation.md § « Vague 1 — contacts »)
+
+     … et ses OPTIONS de filtre d'énumération viennent alors du serveur :
+     source.facetOptions(collection, champ)   ← la SOURCE tranche (état d'hydratation)
+       └→ GET …/facets/<collection>?field=<champ>   → valeurs DISTINCTES du CORPUS
+          (mémoïsées, servies en synchrone — cf. § « Facettes du régime pagé »)
 ```
 
 ### Les règles du moteur
@@ -199,6 +206,36 @@ source, client ET serveur — principe n°3) :
 - Côté client, le critère actif est mappé en champ serveur par le module pur
   **`core/ListServerSort`** (critères de date intrinsèques + colonnes déclarant leur
   `ListColumn.sortField`, opt-in), validé contre la MÊME liste blanche avant d'être envoyé.
+
+### FACETTES du régime pagé (valeurs distinctes serveur — vague 3 du lazy-load)
+
+Le régime pagé prive aussi les **filtres d'énumération** de leur matière : leurs options se bâtissent
+en balayant `store.all(collection)`, qui ne contient alors que les pages parcourues. Une seconde
+route les sert, sur le même modèle que le tri (module PARTAGÉ **`src-shared/ListFacets`**, jumeau de
+`ListOrder`) :
+
+```
+GET /api/documents/:docId/facets/:collection?field=<champ>
+  → 200 { field, values: string[], truncated }   ·   400 champ hors liste blanche   ·   404 collection inconnue
+```
+
+- **Liste blanche DÉRIVÉE de la spec** : les champs de type `string` UNIQUEMENT (les `number` ont
+  autant de valeurs distinctes que de lignes, les `boolean` n'apprennent rien, les `string[]`/`json`
+  demanderaient un `json_each`, les colonnes d'audit une valeur par ligne). Sous-ensemble STRICT de la
+  liste blanche de tri, invariant testé. Barrière anti-injection identique : 400 côté route, throw
+  côté dépôt, jamais d'interpolation d'un nom venu du client ;
+- **`SELECT DISTINCT` sensible à la CASSE**, vides exclus, ordre déterminé, plafonné
+  (`ListFacets.VALUES_CAP` = 500, `LIMIT cap+1` → `truncated`, cap assumé du même esprit que
+  `SEARCH_ALL_LIMIT`). La casse est PRÉSERVÉE parce que le filtre compare par égalité exacte : replier
+  deux graphies en une option donnerait un identifiant qui ne matcherait que la moitié des lignes ;
+- **LECTURE PURE** : un GET, donc aucune révision consommée ni SSE publié. Montée sous
+  `/facets/:collection` (et non `/:collection/facets`) pour ne pas faire dépendre le routage de la
+  valeur d'un identifiant ;
+- côté client, l'opt-in est **`ListColumn.filter.field`** (le champ scalaire que lit `valueOf`), la
+  bascule est décidée par `StoreListRowSource.facetOptions` — état d'hydratation, jamais un nom de
+  collection — et les valeurs sont mémoïsées par le module pur `core/CollectionFacetCache`. Détail et
+  limites : `docs/hydratation.md` § « Vague 3 » (dont la limite résiduelle « le filtre s'applique à la
+  page reçue, les options au corpus »).
 
 ### Coût de la recherche locale et mémoïsation
 

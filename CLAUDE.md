@@ -275,14 +275,19 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   `core/ListRowEngine`/`StoreListRowSource`, recherche sur la MÊME assiette que la colonne serveur
   (`core/RecordSearch` + index mémoïsé), tri/pagination restés CLIENT, plafond du jeu serveur ;
   **filtre CIBLE unifié** — dimension `FilterBar` « à recherche » (SearchPop), chips à valeur libre,
-  `where` serveur ⇄ restriction cliente à 2 sauts).
+  `where` serveur ⇄ restriction cliente à 2 sauts ; **FACETTES du régime pagé** — route
+  `GET …/facets/:collection?field=…`, liste blanche partagée `ListFacets`).
 - [`hydratation.md`](docs/hydratation.md) — **hydratation du cache client** (état PAR COLLECTION
   `full`/`partial`/`none` — module pur `core/HydrationState`, injection nulle : mode fichier/visualiseur
   = tout `full` PAR CONSTRUCTION ; gardes de sûreté — 🚨 **G1 anti-snapshot** : `_persistAll` refuse
   BRUYAMMENT (`HydrationError`) un `PUT /snapshot` dérivé d'un cache partiel, import/`newDocument`
   légitimes par construction ; **G2 export = hydrater TOUT avant** (`Store.hydrateAll`, arbitrage acté) ;
   **G3 SSE** : `reloadCollections` ne re-tire que l'hydraté, point d'accroche `onLazyReloadDeferred` ;
-  gardes G4-G10 et vagues à venir ; instrumentation `HydrationStats`, seuils D3 5 Mo / 1 s).
+  **G8 facettes SERVEUR** — liste blanche partagée `ListFacets` dérivée de la spec (⊂ celle du tri) +
+  route de LECTURE PURE `GET …/facets/:collection?field=…` (`SELECT DISTINCT` sensible à la casse,
+  vides exclus, plafond), options async mémoïsées `CollectionFacetCache` servies en synchrone ;
+  gardes G4-G10, vagues 1-3 livrées (`contacts`, `attachments`+`applications`, `wifiClients`) ;
+  instrumentation `HydrationStats`, seuils D3 5 Mo / 1 s).
 - [`i18n.md`](docs/i18n.md) — **localisation du client** (i18next enveloppé par la classe `I18n`,
   catalogues `.ts` par domaine `fr`/`en`, détection de locale + préférence persistée, bascule =
   reload assumé, pilote = libellés d'onglets, test de complétude fr⇄en, phase 2 = codes serveur).

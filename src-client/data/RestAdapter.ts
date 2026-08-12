@@ -193,6 +193,17 @@ export class RestAdapter extends DataAdapter {
     if (!res) return null;   // 409/400 routés par le protocole (corps null) → repli sur le plan local
     return { deletes: Array.isArray(res.deletes) ? res.deletes : [], detaches: Array.isArray(res.detaches) ? res.detaches : [] };
   }
+  /** FACETTE d'une colonne calculée par le SERVEUR (garde G8) : `GET …/facets/<collection>?field=<champ>`
+      → les valeurs DISTINCTES non vides, plafonnées (`ListFacets.VALUES_CAP`). LECTURE PURE (un GET :
+      ni révision, ni SSE). Le drapeau `truncated` de la réponse n'est PAS remonté à l'appelant : l'UI
+      n'affiche que des valeurs, et une facette qui heurte le plafond n'en est pas une — le diagnostic
+      se lit côté serveur. Sans document scopé : `null` (parité de garde avec load/list/maintenance),
+      donc repli sur le calcul local. */
+  async facetValues(collection: string, field: string): Promise<string[] | null> {
+    if (!this.docId) return null;
+    const res = await this._send("GET", "/facets/" + collection + "?field=" + encodeURIComponent(field));
+    return (res && Array.isArray(res.values)) ? res.values.map((v: any) => String(v)) : null;
+  }
   async saveMeta(meta: Record<string, any>): Promise<unknown> { return this._send("PUT", "/meta", meta); }
   /** MAINTENANCE du document courant (admin) : purge serveur des images ORPHELINES et des BINAIRES de
       pièces jointes orphelins (D5 — seul endroit où un binaire est supprimé) + compactage (VACUUM).

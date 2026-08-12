@@ -10,19 +10,21 @@ manquante — l'**état d'hydratation par collection** — et les **gardes** qui
 Modules concernés : `src-client/core/HydrationState.ts` (état + prédicats, pur),
 `src-client/core/LazyCollections.ts` (LA liste des collections paresseuses),
 `src-client/core/CollectionCountCache.ts` (compteurs async, pur),
-`src-client/store/Store.ts` (câblage G1/G2/G3/G4/G6 + hydratation à la demande + jumeaux async des
+`src-client/core/CollectionFacetCache.ts` (valeurs de facette async, pur — vague 3),
+`src-client/store/Store.ts` (câblage G1/G2/G3/G4/G6/G8 + hydratation à la demande + jumeaux async des
 sections G7 + aperçu de cascade G5 + purge du résidu M4),
 `src-client/core/ListRowEngine.ts` + `src-client/core/StoreListRowSource.ts` + `views/ListView.ts`
-(pager serveur réel), `src-client/core/ListServerSort.ts` + `src-shared/ListOrder.ts` (tri serveur
-du régime pagé — pagination ordonnée complète, lot 1b), `src-client/views/forms/AsyncSection.ts` +
+(pager serveur réel + facettes serveur), `src-client/core/ListServerSort.ts` + `src-shared/ListOrder.ts`
+(tri serveur du régime pagé — pagination ordonnée complète, lot 1b), `src-shared/ListFacets.ts`
+(liste blanche + `SELECT DISTINCT` des facettes, vague 3), `src-client/views/forms/AsyncSection.ts` +
 `AttachmentUi.ts` + `ApplicationUi.ts` (sections de fiches asynchrones, vague 2),
-`src-server/src/api.ts` (endpoint d'aperçu de cascade + compte rendu du résidu),
+`src-server/src/api.ts` (endpoint d'aperçu de cascade + endpoint de facettes + compte rendu du résidu),
 `src-client/app/FileDocuments.ts` (branchement export), `src-client/core/HydrationStats.ts`
 (instrumentation). Tests : `Tests/modules/test-hydration.js` (lot 0),
-`Tests/modules/test-lazy-contacts.js` (vague 1 + tri du lot 1b) et
-`Tests/modules/test-lazy-vague2.js` (vague 2) ; côté serveur
-`Tests/modules/test-relational-schema.js` (liste blanche + ORDER BY) et
-`test-relational-repository.js` (tri SQL réel).
+`Tests/modules/test-lazy-contacts.js` (vague 1 + tri du lot 1b),
+`Tests/modules/test-lazy-vague2.js` (vague 2) et `Tests/modules/test-lazy-vague3.js` (vague 3) ;
+côté serveur `Tests/modules/test-relational-schema.js` (liste blanche + ORDER BY) et
+`test-relational-repository.js` (tri SQL réel + `SELECT DISTINCT` réel).
 
 ## Le modèle d'état
 
@@ -288,7 +290,7 @@ offert à l'hôte pour SES propres dérivés ; `main.ts` y redemande un rendu de
 ### G8 — facette « Organisation » du listing
 
 Arbitrage n°4 : **calcul sur-page** pour les petites collections (le `SELECT DISTINCT` serveur est
-réservé aux volumineuses de la vague 3). Concrètement, `ListConfigs.contacts` continue de lire
+réservé aux volumineuses — cf. § « Vague 3 »). Concrètement, `ListConfigs.contacts` continue de lire
 `store.all("contacts")` — qui, en régime lazy, ne contient que **les pages déjà parcourues**.
 
 - **Limite** : la facette ne propose que les organisations VUES, et le filtre s'applique à la page.
@@ -552,15 +554,220 @@ La cascade elle-même (le moteur partagé est inchangé), l'undo, la validation,
 d'une pièce jointe, les binaires (disque serveur / IndexedDB / compagnon `.nmfa`), les 20+ autres
 listings, le mode fichier et le visualiseur.
 
-## Gardes à venir (hors vagues 1-2)
+## Vague 3 — `wifiClients` chargée paresseusement (mode API)
 
-Instruites par le cadrage `.notes/toDos/lazy-load-collections-cadrage-2026-08-11.md` § 2 : reste la
-**vague 3** (`wifiClients`, la plus volumineuse), qui héritera de tout ce qui précède et n'aura à
-traiter que ses points durs propres — **facettes distinctes SERVEUR** (arbitrage n°4 : le calcul
-sur-page des petites collections ne tient plus sur un corpus de synchro) et le « localiser l'AP ».
-**G5**, **G7** et **G10** sont désormais livrées (vague 2) sous une forme réutilisable : endpoint
-d'aperçu générique (n'importe quelle collection), jumeaux async au Store + `AsyncSection`, et le
-préalable `prepareLabels` pour toute famille de cibles hébergée dans une collection lazy.
+La collection la plus **VOLUMINEUSE** de l'app, et la seule alimentée par une **synchro** serveur
+(inventaire d'un contrôleur wifi, cf. `docs/wifi-unifi.md`) : c'est elle qui porte le gain réel du
+chantier. Elle hérite de tout ce qui précède ; ne sont décrits ici que ses points durs propres.
+
+### Ce qui est acquis sans rien écrire
+
+Ajouter `"wifiClients"` à `LAZY_COLLECTIONS_API` suffit à obtenir le boot qui ne la tire plus
+(`skipCollections`), la re-déclaration après `_hydrate`, G1/G2/G3, le **pager serveur réel** G4 avec
+son tri (lot 1b), les **compteurs** G6 de la pastille d'onglet, l'oubli de la page en main sur
+événement SSE, l'aperçu de cascade serveur G5 et les dégradations G9 de la palette. Ces gardes ne
+connaissent que l'ÉTAT d'hydratation — jamais un nom de collection.
+
+**G7 est SANS OBJET** (mesuré) : aucune fiche n'affiche de section « clients wifi ». La seule FK
+entrante du modèle est `wifiClients.ap_equipment_id` → `equipments`, et elle ne sert qu'à la colonne
+« Point d'accès » du listing et au bouton « Localiser ». Il n'existe donc aucun bloc de fiche à
+rendre asynchrone (`AsyncSection` reste disponible le jour où l'on voudrait « les clients de CETTE
+borne » sur la fiche d'un équipement).
+
+### Listing : tri serveur, et les quatre colonnes qui n'en déclarent pas
+
+`ListConfigs.wifiClients` déclare le `sortField` des seules colonnes dont l'accesseur `sort` lit un
+champ SCALAIRE : **`mac`**, **`ssid`**, **`connected_since`**. Les quatre autres colonnes triables en
+sont dépourvues, chacune pour une raison mesurée — repli assumé (`ListColumn.sortField`) : la découpe
+suit l'ordre serveur par défaut et le critère ne trie que la page affichée.
+
+| Colonne | Ce que trie l'accesseur | Pourquoi pas de `sortField` |
+|---|---|---|
+| **Nom** | `WifiClient.displayName` = nom **sinon la MAC** | aucune colonne SQL ne porte cette expression. Trier sur `name` seul grouperait à l'extrémité **tous** les clients sans hostname — le cas NOMINAL côté wifi — alors que la colonne affiche leur MAC : un ordre visiblement faux, pire qu'un repli |
+| **Type** | présence PUIS type (`WifiStatus.sortKey` + `rawType`) | deux colonnes en une |
+| **IP** | `Ip.toInt(c.ip)` — un ENTIER | la colonne est du TEXT : l'`ORDER BY` mettrait « 10.0.0.10 » avant « 10.0.0.9 », le contraire de ce que la vue montre |
+| **Point d'accès** | nom d'ÉQUIPEMENT résolu par jointure CLIENTE | même repli que « Hébergée sur » / « Attachée à » (vague 2) |
+
+⚠ **« Nom » est le critère par DÉFAUT du listing** : au repos, la vue affiche donc la page 1 de
+l'ordre serveur par défaut (`created_date`), triée côté client. C'est la limite résiduelle la plus
+visible de la vague. Deux leviers, aucun retenu ici : basculer le tri par défaut sur une colonne
+serveur-triable (changement d'UX non demandé), ou apprendre une EXPRESSION à `ListOrder`
+(`COALESCE(name, mac)`) — ce qui ouvrirait la liste blanche à autre chose que des noms de colonnes.
+
+### 🚨 G8 — les facettes deviennent un `SELECT DISTINCT` SERVEUR
+
+C'est le morceau neuf de la vague, et l'application de l'**arbitrage n°4** : le calcul « sur-page »
+des petites collections (vague 1) n'a plus de sens sur un corpus de synchro. Le listing wifi a trois
+facettes de colonne — **Type**, **SSID**, **Point d'accès** — bâties en balayant
+`store.all("wifiClients")`, qui ne contient que les pages parcourues.
+
+#### La liste blanche, partagée (`src-shared/ListFacets`)
+
+Jumeau de `ListOrder`, et pour la même raison : le CLIENT doit savoir ce qu'il peut demander (sinon
+il dégraderait mal), le SERVEUR doit valider ce qu'il interpole (sinon c'est une injection SQL). Une
+seule source — la spec déclarative :
+
+- **facettable = champ de spec de type `string`**. Sont exclus les `number` (autant de valeurs
+  distinctes que de lignes), les `boolean` (deux cases n'apprennent rien qu'une colonne triable ne
+  dise), les `string[]`/`json` (le DISTINCT porterait sur le JSON **sérialisé**, pas sur les
+  éléments — une facette d'appartenance demande un `json_each`, à instruire au besoin), les 4
+  colonnes d'**audit**, `id`, `search` et `updated_rev` ;
+- **invariant testé** : facettable ⊂ triable, sur TOUTES les collections. Inclusion **stricte** — la
+  réciproque est fausse par construction ;
+- `ListFacets.distinctSql` **REFUSE** (throw nommé) toute colonne hors liste : la liste blanche est
+  la seule porte, jamais d'interpolation silencieuse.
+
+Sémantique du SQL, calquée sur ce que font les options **locales** du même filtre :
+
+```sql
+SELECT DISTINCT "col" AS value FROM "coll" WHERE "col" IS NOT NULL AND "col" <> '' ORDER BY 1 LIMIT ?
+```
+
+- 🚨 **DISTINCT sensible à la CASSE** (collation binaire — surtout pas `COLLATE NOCASE`) : le filtre
+  compare par ÉGALITÉ EXACTE de chaîne (`set.has(String(v))`), donc replier « WIRELESS » et
+  « wireless » en une option produirait un identifiant qui ne matcherait que la moitié des lignes.
+  Le filtre paraîtrait cassé. Les deux valeurs restent DEUX options, comme en mode fichier ;
+- **NULL et chaîne vide exclus** — parité du `if (v)` local : « pas de valeur » n'est pas une option
+  (`ListView` la traduit en sentinelle `__none__`, qu'aucune option ne porte) ;
+- **`ORDER BY 1`** rend le plafond déterministe ; le tri d'AFFICHAGE, lui, reste client et applique
+  la MÊME règle qu'en local ;
+- **plafond `VALUES_CAP` = 500**, détecté par `LIMIT cap+1` (la ruse de `searchAll` : la ligne
+  excédentaire dit « tronqué » sans payer un `COUNT(DISTINCT …)`). Cap ASSUMÉ — une colonne qui
+  l'atteint n'est pas une facette. `truncated` est un signal de DIAGNOSTIC serveur, non remonté à
+  l'UI (qui n'affiche que des valeurs).
+
+#### La route
+
+```
+GET /documents/:docId/facets/:collection?field=<champ>
+  → 200 { field: string, values: string[], truncated: boolean }
+  → 400 champ absent ou hors liste blanche · 404 collection inconnue
+```
+
+- **LECTURE PURE au sens le plus simple** : c'est un GET, donc `resolveRepo` délègue à sa moitié
+  lecture (`resolveRepoRead`) — aucune révision consommée, aucun SSE. Contrairement à l'aperçu de
+  cascade (POST par sa CHARGE : une liste d'ids), la charge tient ici dans une query string ; rien ne
+  justifierait un POST, ni le middleware dédié qu'il a fallu extraire pour lui ;
+- **montée sous `/facets/:collection`**, et non `/:collection/facets` : le second ferait dépendre le
+  routage de la VALEUR d'un identifiant (un enregistrement dont l'id vaudrait « facets » masquerait
+  la route via `GET /:collection/:id`). Elle rejoint donc `/search` et `/maintenance`, les routes non
+  collectionnelles déjà montées avant le CRUD générique ;
+- **400 explicite** sur un champ hors liste, jamais un silence : une facette demandée et non servie
+  ferait croire à un filtre vide alors que la colonne existe. Le dépôt re-refuse de toute façon
+  (défense en profondeur, parité `list`) ;
+- **aucun compte** dans la réponse. Mesuré : la barre de filtres n'affiche que des libellés
+  (`MultiItem = { id, label }`) — un `GROUP BY … COUNT(*)` serait payé pour rien. Le jour où l'UI
+  montrerait « SSID · Corp (312) », c'est ce contrat qui s'étend, pas un second endpoint.
+
+#### Côté client : des options SYNCHRONES servies par une valeur ASYNCHRONE
+
+`ListColumn.filter.options()` est synchrone par contrat (réévalué à chaque rendu). Le patron est
+**strictement celui des compteurs G6**, transposé — deux mécaniques différentes pour le même
+problème auraient divergé :
+
+| | Compteurs (G6) | Facettes (G8) |
+|---|---|---|
+| module pur | `core/CollectionCountCache` | `core/CollectionFacetCache` |
+| accesseur du Store | `countHint(c)` | `facetValues(c, field)` |
+| point d'arrivée | `store.onCountResolved` → `shell.refreshCounts()` | `store.onFacetResolved` → `ListView.refreshFacetOptions()` |
+
+- `Store.facetValues(collection, field)` : collection **hydratée** → balayage du CACHE, exact et sans
+  réseau (donc le mode fichier et le visualiseur, PAR CONSTRUCTION) ; collection **partielle** → les
+  dernières valeurs connues du DISTINCT serveur, liste VIDE en attendant, relevé déclenché (au plus
+  un en vol par (collection, champ)) ;
+- **opt-in `ListColumn.filter.field`** : le nom du champ scalaire que lit `valueOf`. Déclaré sur
+  **Type** (`client_type`) et **SSID** (`ssid`). ⚠ **PAS sur « Point d'accès »**, à dessein : sa
+  valeur est le nom de l'ÉQUIPEMENT rapproché (jointure cliente sur `ap_equipment_id`), et ne retombe
+  sur `ap_name` qu'à défaut — un DISTINCT sur `ap_name` proposerait donc des valeurs que la colonne
+  n'affiche pas (casse et espaces du contrôleur, borne renommée dans DC Manager) et le filtre, une
+  fois posé, ne matcherait rien. Repli assumé : options du cache, comme la vague 1 ;
+- la bascule est opérée par **`StoreListRowSource.facetOptions`**, qui rend `null` — « garde tes
+  options locales » — en mode fichier et sur une collection hydratée. Mêmes conditions que le pager,
+  **moins la troisième** : pas de « requête au repos ». Les options d'un filtre décrivent le CORPUS,
+  pas le jeu affiché ; les rétrécir pendant une recherche serait un piège (filtre et recherche se
+  composent) ;
+- 🚨 **une valeur SÉLECTIONNÉE figure toujours dans les options** (`CollectionFacetCache.withSelected`).
+  `ListView` purge de l'état de filtre tout ce qui n'est pas une option (« parité historique » : une
+  valeur disparue ne laisse pas de chip fantôme). Servies en async, les options sont VIDES au premier
+  rendu — sans cette union, un filtre restauré depuis la session serait effacé **en silence**, avant
+  même la réponse du serveur. Avec elle, la purge est un no-op tant que le relevé n'est pas arrivé,
+  et redevient exacte ensuite, sans que `ListView` connaisse le régime ;
+- **invalidation** : les mêmes points que les compteurs — création, suppression/cascade (y compris le
+  résidu M4), clonage, `_refetchWhole`, `_hydrate`, et le point d'accroche G3 — **plus les MISES À
+  JOUR**, que les compteurs ignorent : un total ne bouge pas quand on édite un enregistrement, une
+  valeur de colonne si ;
+- **aucune chaîne d'UI nouvelle** (donc aucune clé i18n) : la demande part au PREMIER rendu du
+  listing et la réponse repeint la barre. Une dimension vide n'est visible que dans la fenêtre d'un
+  aller-retour, avant même que l'utilisateur ait ouvert le menu « + Filtre ».
+
+#### ⚠ La limite résiduelle que G8 rend plus visible
+
+Les **filtres de colonne s'appliquent à la PAGE reçue**, pas au corpus (limite déjà documentée pour
+le pilote). Tant que les options ne proposaient que les valeurs vues, l'écart passait inaperçu ;
+maintenant qu'elles couvrent le corpus entier, choisir une valeur absente de la page en main donne un
+listing **vide** sous un compteur qui annonce toujours le total serveur (« 4 217 éléments · page
+1/169 »). C'est cohérent avec le régime pagé mais déroutant, et c'est **le premier candidat à
+instruire** pour une suite : porter les filtres de colonne actifs en `where` sur la route paginée.
+Ce n'est pas un ajustement — la sélection est MULTI-valeurs alors que le `where` serveur est une
+égalité mono-valeur (`whereClause` prend le premier élément d'un tableau), il faudrait donc un `IN`,
+sa validation, sa place dans la signature de page, et l'articulation avec `_applyColumnFilters`.
+
+### Synchro wifi ⇄ SSE : ce que voit l'utilisateur (statué)
+
+Une passe de synchro écrit côté serveur puis publie un SSE `origin: "wifi-sync"` avec
+`changeset.collections = ["wifiClients"]` (`WifiSyncService`). Aucun client ne porte cet id : **tous**
+rechargent, y compris celui qui a cliqué « Synchroniser ». En régime lazy, G3 **saute** le
+rechargement de la collection — et c'est voulu : la re-tirer entière à chaque passe annulerait le
+chantier. Ce qui se passe alors, dans l'ordre :
+
+1. `Store.reloadCollections` invalide le **compteur** (G6) **et les valeurs de facette** (G8 — une
+   passe peut apporter un SSID ou un type de raccordement inédit), puis appelle `onLazyReloadDeferred` ;
+2. `main.ts` **oublie la page en main** du listing wifi (`ListView.forgetServerPage`, mécanique de la
+   vague 2) et redemande le rendu des pastilles ;
+3. `RestDocuments.reload` appelle `refreshActive()` juste après → le listing se repeint, **redemande
+   sa page** et ses facettes.
+
+**Verdict : un listing wifi OUVERT pendant une synchro se rafraîchit tout seul**, sans intervention —
+pastille juste, page fraîche, options de filtre à jour. Le coût reste BORNÉ : une page et deux
+`SELECT DISTINCT`, jamais la collection. Onglet fermé : rien n'est tiré, et la page sera demandée à
+la prochaine navigation. Ce qui NE se rafraîchit pas : une **fiche** de client wifi ouverte pendant
+la passe garde ses valeurs à l'écran (elle lit le cache) — comportement inchangé par la vague, et le
+même que pour toute autre collection dont la fiche est ouverte au moment d'un rechargement.
+
+### G10 — les consommateurs synchrones, un par un
+
+Relevé EXHAUSTIF des lectures synchrones de `wifiClients`, et statut de chacune. **Une seule ligne
+demandait une correction — aucune** : tous les chemins partent d'un enregistrement déjà ABSORBÉ.
+
+| Consommateur | Statut |
+|---|---|
+| Listing « Wifi » (colonnes, tri, filtres) | **régime pagé** (G4) + facettes serveur (G8) |
+| Pastille d'onglet « Wifi » | déjà générique — `store.countHint` (G6) |
+| **« Localiser » d'une ligne** (`WifiLocate.apEquipmentId(store.get("wifiClients", id), store))`, `main.ts`) | **rien à faire, prouvé** : l'action part de la LIGNE du listing, donc d'un enregistrement que le pager vient d'absorber. L'AP visé est un `equipments` — collection HYDRATÉE, hors chantier —, et `store.equipmentLocatable` reste exact |
+| Bouton « Localiser » de la FICHE (`DetailForms.wifiClientDetail`) | **rien à faire** : la fiche a déjà l'enregistrement en main (elle vient de le lire) |
+| Fiche `wifiClientDetail` (`store.get`) | **rien à faire** : atteinte depuis le listing (absorbé) ou depuis la palette — couverte par la lecture unitaire `fetchOne` de `GlobalSearchPalette.activate` (correctif générique du lot 1) |
+| `WifiForms.edit` (`store.get`, édition des champs LOCAUX) | **rien à faire** : ouverte depuis la fiche, donc sur une ligne absorbée |
+| Cascade : supprimer un ÉQUIPEMENT **détache** `wifiClients.ap_equipment_id` | **rien à faire, prouvé** : l'EXÉCUTION est sûre (le serveur recalcule le plan résiduel), la modale de suppression générique n'affiche AUCUN effet, et l'aperçu de `VmPurgeForm` — seul aperçu de l'app — passe déjà par `cascadePreviewAsync` (G5), qui bascule sur le serveur dès que le corpus est partiel. ⚠ Limite héritée de G3 : un client wifi absorbé garde sa FK périmée en cache jusqu'au prochain chargement (`residual.updates` est rapporté, non appliqué) — sans conséquence visible ici, la colonne « Point d'accès » retombant sur `ap_name` quand l'équipement a disparu, et la page en main étant de toute façon oubliée par l'écriture locale |
+| Synchro / providers (`WifiForms.sync`, `WifiProvidersForm`, `WifiSyncClient`) | **rien à faire, vérifié** : ces surfaces parlent aux routes `…/wifi/*` du module serveur ; elles ne lisent JAMAIS la collection |
+| Script de suppression de la feature (`docs/wifi-unifi.md`) | **doc mise à jour** : retirer `"wifiClients"` de `core/LazyCollections` fait désormais partie de la procédure |
+| Palette de recherche globale (corpus local, « récents ») | **dégradation ACTÉE** — G9, à l'identique des vagues 1-2 |
+
+### Ce que la vague 3 ne change PAS
+
+La synchro elle-même (serveur, inchangée), la frontière SOURCE/LOCAUX (`src-shared/WifiSync`), la
+réconciliation, le rapprochement de l'AP, la cascade, l'undo, la validation, les 20+ autres listings
+(aucun ne déclare de `filter.field` : `contacts` GARDE son calcul sur-page de la vague 1, `vms` reste
+exclue du chantier), le mode fichier et le visualiseur.
+
+## Gardes à venir (hors vagues 1-3)
+
+Le cadrage `.notes/toDos/lazy-load-collections-cadrage-2026-08-11.md` § 3 ne laisse qu'une candidate
+non instruite : **`spares`** (vague 4, ⚖ à arbitrer — cascade `custom` qui LIT le nom, `labelOf`
+synchrone des cibles d'intervention), et **`vms`** reste EXCLUE (transverse : graphe, purge, certs,
+IPAM, bulle 3D). Tout l'outillage est désormais livré sous une forme réutilisable : endpoint d'aperçu
+de cascade générique (G5), jumeaux async au Store + `AsyncSection` (G7), préalable `prepareLabels`
+pour toute famille de cibles hébergée dans une collection lazy (G10), et facettes serveur génériques
+(G8 — n'importe quelle collection, n'importe quelle colonne `string`).
 
 ## Arbitrages actés (utilisateur, 2026-08-12)
 
@@ -612,6 +819,21 @@ suivant, `hydrate` ciblée et idempotente, compteurs locaux ⇄ serveur avec leu
 (écriture locale, SSE sauté), décision de régime `isServerPaged` (état et non liste de noms) et
 machinerie de page du moteur (compteurs serveur, anti-relance, cohérence lignes ⇄ compteurs pendant
 le vol, annulation d'une page devancée, échec sans boucle, oubli sur mutation).
+
+`Tests/modules/test-lazy-vague3.js` (vague 3) : liste centrale étendue à `wifiClients` + boot qui saute
+les QUATRE ; **G8 partagé** — dérivation de la liste blanche `ListFacets` depuis la spec, exclusions
+prouvées une par une (number/boolean/tableau/json/audit/id/search), invariant « facettable ⊂ triable »
+sur TOUTES les collections (inclusion stricte), `SELECT DISTINCT` golden et barrière anti-injection ;
+**G8 pur** — `CollectionFacetCache` (normalisation identique aux options locales, valeur async servie
+en synchrone, déduplication, notification collection+champ, invalidation par collection, échec non
+mémorisé) et surtout `withSelected`, la règle qui empêche la purge de `ListView` d'effacer un filtre
+restauré ; **G8 Store** — `facetValues` local ⇄ serveur, casse préservée, invalidation par la MISE À
+JOUR (que les compteurs ignorent) et par le SSE sauté de G3, mode fichier sans le moindre relevé ;
+**G8 source** — `facetOptions` qui rend `null` sur une collection hydratée et en mode fichier ; enfin
+les `sortField` ET les `filter.field` du listing wifi, confrontés aux DEUX listes blanches partagées,
+avec la preuve que les colonnes à valeur dérivée n'en déclarent aucun et que `contacts` garde son
+calcul sur-page. Côté serveur, `test-relational-repository.js` prouve le `SELECT DISTINCT` RÉEL
+(doublon fondu, vide et NULL exclus, casse préservée, plafond + `truncated`, throw anti-injection).
 
 `Tests/modules/test-lazy-vague2.js` (vague 2) : liste centrale ÉTENDUE + boot qui saute bien les trois
 collections lazy ; **G7** — jumeaux async (lecture par FK indexée quand la collection est partielle,

@@ -13,6 +13,7 @@ import type { DocumentChangeset } from "../../src-shared/DocumentChangeset.js"; 
 import { DataValidator, type ValidationError, type EntityFetcher, type ChildFinder } from "../../src-shared/DataValidation.js";   // normalisation + validation PARTAGÉES
 import { Cascade } from "../../src-shared/Cascade.js";   // cascade de suppression PARTAGÉE (intégrité référentielle en DELETE)
 import { ListOrder } from "../../src-shared/ListOrder.js";   // liste blanche PARTAGÉE des colonnes triables (tri serveur de la route paginée)
+import { ListFacets } from "../../src-shared/ListFacets.js";   // liste blanche PARTAGÉE des colonnes facettables (valeurs distinctes — garde G8)
 import { ApiRules } from "./ApiRules.js";             // règles PURES de la couche HTTP (verrou, changeset, lot) — testables sans Express
 import { AuditStamp } from "./AuditStamp.js";         // règles PURES d'estampillage « qui a écrit, quand » (created_by/updated_by + dates serveur)
 import { UserProfiles } from "./users/UserProfiles.js";   // logique PURE de l'annuaire (clé canonique, caviardage, parsing d'ids)
@@ -144,6 +145,12 @@ export class Api {
     data.get("/attachments/:id/blob", this.getAttachmentBlob);
     data.post("/maintenance", this.maintenance);   // AVANT /:collection (sinon « maintenance » serait une collection)
     data.get("/search", this.searchAll);           // AVANT /:collection aussi — recherche TRANSVERSE (palette Ctrl+K, cf. docs/recherche.md)
+    // FACETTES d'un listing (garde G8, cf. docs/hydratation.md § « Vague 3 ») : valeurs DISTINCTES d'une
+    // colonne, pour un listing dont la collection n'est PAS en cache. ⚠ Le segment `facets` vient EN TÊTE
+    // (et non `/:collection/facets`) précisément pour ne rien ambiguïser : un chemin en `/:collection/:id`
+    // ferait dépendre le routage de la valeur d'un id. Comme `/search` et `/maintenance`, la route est
+    // montée AVANT le CRUD générique et `facets` n'est pas un nom de collection.
+    data.get("/facets/:collection", this.facets);
     data.get("/:collection", this.list);
     data.get("/:collection/:id", this.getOne);
     data.post("/:collection", this.create);
@@ -599,6 +606,24 @@ export class Api {
     const q = req.query as Record<string, any>;
     const collections = q.collections ? String(q.collections).split(",").filter(Boolean) : null;
     res.json(this.repoOf(req).searchAll(String(q.q || ""), { collections }));
+  };
+
+  /** FACETTE d'une colonne : `GET …/facets/:collection?field=<champ>` → `{ field, values, truncated }`.
+      LECTURE PURE au sens le plus simple qui soit — c'est un GET, donc `resolveRepo` délègue à sa moitié
+      lecture (`resolveRepoRead`) : aucune révision consommée, aucun SSE. Contrairement à l'aperçu de
+      cascade (POST par sa CHARGE), la charge tient ici dans une query string : rien ne justifierait un POST.
+      `field` est validé contre la liste blanche PARTAGÉE `ListFacets` → **400 explicite**, jamais un
+      silence : une facette demandée et non servie ferait croire à un filtre vide alors que la colonne
+      existe. Le dépôt re-refuse de toute façon (défense en profondeur, parité `list`).
+      Cf. docs/hydratation.md § « Vague 3 » et docs/recherche.md § « Listings serveur-pilotés ». */
+  private facets: RequestHandler = (req, res) => {
+    const collection = req.params.collection;
+    if (!Schema.isCollection(collection)) { res.status(404).json({ error: "collection inconnue" }); return; }
+    const field = String((req.query as Record<string, any>).field || "");
+    if (!ListFacets.isFacetable(collection, field)) {
+      res.status(400).json({ error: "colonne de facette invalide : " + field }); return;
+    }
+    res.json({ field, ...this.repoOf(req).facetValues(collection, field) });
   };
 
   /* -- CRUD générique par collection -- */

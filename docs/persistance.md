@@ -146,6 +146,12 @@ que du TYPE de contrat, jamais d'une classe concrète, de sorte que le choix d'i
   `id ASC` systématique (découpe en pages stable), vides en extrémité « plus grand », `COLLATE NOCASE` sur les
   colonnes TEXT (sémantique rapprochée du tri client — écarts résiduels : accents, ordre numérique naturel).
   Détails : `docs/recherche.md` § « Tri SERVEUR du régime pagé ».
+- **`facetValues` : valeurs DISTINCTES sur liste blanche** (garde G8 du lazy-load, vague 3). Même doctrine que
+  le tri, autre module PARTAGÉ — `src-shared/ListFacets` : liste blanche DÉRIVÉE de la spec (champs `string`
+  seulement ; exclus nombres, booléens, tableaux/`json`, audit, `id`/`search`), `SELECT DISTINCT` **sensible à
+  la casse** (le filtre client compare par égalité exacte) avec NULL et vides exclus, plafond `VALUES_CAP`
+  détecté par `LIMIT cap+1` (`truncated`, sans `COUNT(DISTINCT …)`). Hors liste → throw, jamais d'interpolation ;
+  la route `GET …/facets/:collection` pré-valide en 400. Détails : `docs/hydratation.md` § « Vague 3 ».
 - **`findBy` lean** : les `find` de la validation (V5b/V6) renvoient TOUTES les lignes correspondantes, SANS
   `COUNT(*)`, SANS `ORDER BY`, SANS pagination — le finder itère l'ensemble, il n'a besoin ni du total ni d'un tri.
   C'est le chemin CHAUD (un save de port déclenche plusieurs `find` V6/dependents ; un save d'équipement écrit P

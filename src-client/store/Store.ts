@@ -11,6 +11,7 @@ import { Waypoint } from "../models/Waypoint";
 import { PortRoles } from "../registries/PortRoles";
 import { HydrationState } from "../core/HydrationState";
 import { CollectionCountCache } from "../core/CollectionCountCache";
+import { CollectionFacetCache } from "../core/CollectionFacetCache";
 import { Id } from "../core/Id";
 import { Log } from "../core/Log";
 import { PatchDiff } from "../core/PatchDiff";
@@ -105,6 +106,11 @@ export class Store {
   /** Notifié quand un COMPTE relevé en async vient d'arriver : l'hôte repeint ce qui l'affiche
       (pastilles d'onglet). Sans lui, la valeur entrerait au cache sans que rien ne la peigne. */
   onCountResolved: ((collection: string, count: number) => void) | null = null;
+  /** VALEURS DE FACETTE relevées en ASYNC et mémoïsées (garde G8, vague 3) — cf. `facetValues`. */
+  private readonly _facets: CollectionFacetCache;
+  /** Notifié quand des valeurs de FACETTE viennent d'arriver : l'hôte repeint la barre de filtres du
+      listing concerné (`ListView.refreshFacetOptions`). Même rôle que `onCountResolved` pour les pastilles. */
+  onFacetResolved: ((collection: string, field: string) => void) | null = null;
   private _idIndex: Record<string, Map<string, any>>;
   private _fk: Record<string, FieldIndex>;
   private _listeners: Array<() => void>;
@@ -132,6 +138,12 @@ export class Store {
     this._counts = new CollectionCountCache(
       (collection) => this.adapter.count(collection, null),
       (collection, count) => this.onCountResolved?.(collection, count),
+    );
+    // FACETTES async mémoïsées (G8) : le relevé est le `SELECT DISTINCT` de l'adaptateur (`null` en
+    // mode fichier — le chemin n'y est de toute façon jamais emprunté, tout y est `full`).
+    this._facets = new CollectionFacetCache(
+      (collection, field) => this.adapter.facetValues(collection, field).then((values) => values || []),
+      (collection, field) => this.onFacetResolved?.(collection, field),
     );
     this.data = {};
     COLLECTIONS.forEach((c) => { this.data[c] = []; });
@@ -173,6 +185,39 @@ export class Store {
       compte est le SEUL dérivé qu'on puisse rafraîchir à bas coût). */
   invalidateCounts(collections: readonly string[]): void { this._counts.invalidate(collections); }
 
+  /* ---- FACETTES de listing (garde G8, cf. docs/hydratation.md § « Vague 3 ») ----
+     Les options d'un filtre d'énumération se calculent en balayant `store.all(c)` — qui, sur une
+     collection paresseuse, ne contient que les pages parcourues. Les listings passent donc par ici. */
+
+  /** Valeurs DISTINCTES non vides d'un champ SCALAIRE — SYNCHRONE, parce que les options de filtre
+      le sont (`ListColumn.filter.options()`). Deux régimes, et c'est l'ÉTAT d'hydratation qui tranche
+      (jamais un nom de collection) :
+      - collection HYDRATÉE : balayage du CACHE, exact et sans le moindre aller-retour. C'est aussi,
+        PAR CONSTRUCTION, le seul chemin du mode fichier et du visualiseur (principe n°15) ;
+      - collection partielle : les dernières valeurs connues du `SELECT DISTINCT` serveur — une liste
+        VIDE en attendant, le relevé étant DÉCLENCHÉ (au plus un en vol), son arrivée passant par
+        `onFacetResolved` pour que l'hôte repeigne. Patron STRICTEMENT identique à `countHint` (G6).
+      ⚠ Le champ doit être une colonne SCALAIRE du modèle : une facette dont la valeur d'affichage est
+      RÉSOLUE par jointure cliente (le nom d'un équipement…) n'a pas de champ en face — son listing ne
+      déclare alors pas de `field` et garde ses options locales (repli documenté, cf. `ListColumn`).
+      ⚠ Le chemin des LISTINGS court-circuite la première branche en amont (`StoreListRowSource.facetOptions`
+      rend `null` sur une collection hydratée, pour que la vue garde ses options locales — qui passent, elles,
+      par le `valueOf` de la colonne, parfois différent du champ brut). Cette branche n'en est pas moins le
+      contrat : tout appelant obtient une réponse JUSTE dans les deux modes, sans écrire de test de mode. */
+  facetValues(collection: string, field: string): string[] {
+    if (this.hydration.isHydrated(collection)) {
+      const rows = this.data[collection] || [];
+      return CollectionFacetCache.normalize(rows.map((o: any) => String(o[field] == null ? "" : o[field])));
+    }
+    return this._facets.values(collection, field);
+  }
+
+  /** Invalide les valeurs de facette de ces collections (le prochain accès les relèvera). Appelée en
+      interne à chaque mutation/rechargement ; publique pour l'hôte, par parité avec `invalidateCounts`.
+      ⚠ Invalidée par les MISES À JOUR aussi, contrairement aux compteurs : un total ne bouge pas quand
+      on édite un enregistrement, une valeur de colonne si. */
+  invalidateFacets(collections: readonly string[]): void { this._facets.invalidate(collections); }
+
   /* ---- (dé)sérialisation ---- */
   toJSON(): Snapshot {
     const out: Snapshot = { meta: Object.assign({}, this.meta, { app_release: APP_RELEASE }) };
@@ -200,6 +245,7 @@ export class Store {
     // `newDocument`, eux, ne re-déclarent RIEN : leur cache contient VRAIMENT tout le document.
     this.hydration.markAllFull();
     this._counts.invalidateAll();   // remplacement total du cache : tout compte relevé est périmé
+    this._facets.invalidateAll();   // … et toute valeur de facette relevée avec lui (G8)
   }
   /** MIGRATION one-shot (EN MÉMOIRE) : profondeur d'équipement enum legacy (full/half/quarter) → mm.
       Référence = cage de SA baie s'il est racké, cage de la baie par défaut sinon (mêmes fractions que
@@ -347,6 +393,10 @@ export class Store {
       // prochaine écriture locale. Invalidé ICI (le Store possède ce cache) ; le point d'accroche, lui,
       // reste offert à l'hôte pour SES dérivés (repeindre les pastilles, jeter une facette…).
       this._counts.invalidate(deferred);
+      // … et ses VALEURS DE FACETTE (G8, vague 3) : une passe de synchro wifi chez le serveur peut
+      // introduire un SSID ou un type de raccordement inédit. Second dérivé à bas coût — un relevé
+      // `SELECT DISTINCT` au prochain rendu du listing, pas un rechargement de collection.
+      this._facets.invalidate(deferred);
       this.onLazyReloadDeferred?.(deferred);
     }
     if (!refetch.length) return [];
@@ -371,8 +421,10 @@ export class Store {
       this.hydration.markFull(c);      // le cache contient désormais TOUTE la collection (vérité d'état)
     });
     // La collection redevient hydratée : son compte redevient LOCAL et exact — le relevé serveur mémoïsé
-    // n'a plus lieu d'être (et serait périmé s'il datait d'avant ce re-tirage).
+    // n'a plus lieu d'être (et serait périmé s'il datait d'avant ce re-tirage). Idem pour ses facettes,
+    // désormais calculées sur le cache complet (G8).
     this._counts.invalidate(collections);
+    this._facets.invalidate(collections);
   }
 
   /** HYDRATATION À LA DEMANDE (vague 1) : recharge EN ENTIER les collections indiquées qui ne sont pas
@@ -621,6 +673,7 @@ export class Store {
     this._indexAdd(collection, obj);
     await this.adapter.createOne(collection, obj.toJSON());
     this._counts.invalidate([collection]);   // G6 : le total de la collection a bougé (pastille d'onglet)
+    this._facets.invalidate([collection]);   // G8 : la création peut apporter une valeur de facette inédite
     this._emit();
     return obj;
   }
@@ -647,6 +700,9 @@ export class Store {
     if (!this.accepts(collection, { ...obj.toJSON(), ...normalizedPatch })) return null;
     this._applyPatch(collection, obj, normalizedPatch);
     await this.adapter.updateOne(collection, id, obj.toJSON());
+    // G8 : le TOTAL n'a pas bougé (aucune invalidation de compteur ici), mais une valeur de colonne a
+    // pu changer — donc l'ensemble des valeurs distinctes de la collection aussi.
+    this._facets.invalidate([collection]);
     this._emit();
     return obj;
   }
@@ -673,7 +729,11 @@ export class Store {
       this._applyPatch(collection, obj, patch);
       updates!.push({ collection, id, record: obj.toJSON() });
     }
-    if (updates!.length) { await this.adapter.transact({ updates }); this._emit(); }
+    if (updates!.length) {
+      await this.adapter.transact({ updates });
+      this._facets.invalidate([...new Set(updates!.map((u) => u.collection))]);   // G8 : mêmes motifs que `update`
+      this._emit();
+    }
     return updates!.length;
   }
   async remove(collection: string, id: string): Promise<void> {
@@ -784,6 +844,8 @@ export class Store {
     };
     const result = await this.adapter.transact(tx);
     this._counts.invalidate(Object.keys(delByColl));   // G6 : les totaux des collections purgées ont bougé
+    // G8 : suppressions ET détachements changent l'ensemble des valeurs distinctes des collections touchées.
+    this._facets.invalidate([...new Set([...Object.keys(delByColl), ...detaches.map((d) => d.c)])]);
     // M4 (chantier lazy-load) : le SERVEUR a pu supprimer PLUS que notre plan — sa cascade RÉSIDUELLE
     // (cf. ApiRules.residualCascade) porte ce que notre cache ne pouvait pas savoir. Deux effets sinon :
     // un enregistrement absorbé mais supprimé côté serveur resterait AFFICHÉ, et la pastille d'une
@@ -816,6 +878,7 @@ export class Store {
     if (touched.size) {
       Log.d("store", "cascade résiduelle du serveur appliquée au cache (M4)", [...touched]);
       this._counts.invalidate([...touched]);
+      this._facets.invalidate([...touched]);   // G8 : le résidu a retiré des lignes — leurs valeurs aussi
     }
   }
 
@@ -877,6 +940,7 @@ export class Store {
         .concat(newPorts.map((p) => ({ collection: "ports", record: p.toJSON() }))),
     });
     this._counts.invalidate(["equipments", "aggregates", "ports"]);   // G6 : trois totaux ont bougé
+    this._facets.invalidate(["equipments", "aggregates", "ports"]);   // G8 : et leurs valeurs distinctes avec
     this._emit();
     return copy;
   }
@@ -895,6 +959,7 @@ export class Store {
     this._indexAdd(collection, copy);
     await this.adapter.createOne(collection, copy.toJSON());
     this._counts.invalidate([collection]);   // G6 : le total de la collection a bougé
+    this._facets.invalidate([collection]);   // G8 : le clone peut porter une valeur inédite (libellé « (copie) »)
     this._emit();
     return copy;
   }

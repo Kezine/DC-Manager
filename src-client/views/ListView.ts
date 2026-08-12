@@ -4,9 +4,10 @@ import { Text } from "../core/Text";
 import { Sort } from "../core/Sort";
 import { TargetSearch } from "../core/TargetSearch";
 import { RecordSearchIndex } from "../core/RecordSearchIndex";
-import { ListRowEngine, type ListRowRequest, type ListRowServerSort, type ListRowTarget } from "../core/ListRowEngine";
+import { ListRowEngine, type ListRowRequest, type ListRowServerSort, type ListRowSource, type ListRowTarget } from "../core/ListRowEngine";
 import { ListServerSort } from "../core/ListServerSort";
 import { StoreListRowSource, type RemoteListReader } from "../core/StoreListRowSource";
+import { CollectionFacetCache } from "../core/CollectionFacetCache";
 import { EntityCandidateSource } from "../core/EntityCandidates";
 import { FormControls } from "../ui/FormControls";
 import { FilterBar, type FilterBarDimension } from "../ui/FilterBar";
@@ -32,7 +33,16 @@ export interface ListColumn {
       assumé = tri de la page reçue (cf. `core/ListServerSort` et docs/hydratation.md § « Vague 1 »).
       Sans effet hors régime pagé (collections hydratées, mode fichier : tri client local, inchangé). */
   sortField?: string;
-  filter?: { label?: string; options: () => FilterOption[]; valueOf: (o: any) => any };
+  /** Filtre d'ÉNUMÉRATION de la colonne. `options()` construit les valeurs proposées (typiquement un
+      balayage du cache) et `valueOf` extrait, d'une ligne, la valeur à comparer.
+      `field` (OPT-IN — garde G8, vague 3 du lazy-load) : nom du champ SCALAIRE du modèle que lit
+      `valueOf`, à déclarer quand c'est le cas. En régime pagé (collection chargée paresseusement en
+      mode API), les options viennent alors d'un `SELECT DISTINCT` SERVEUR — sans quoi elles ne
+      proposeraient que les valeurs des pages parcourues. Jamais déduit : beaucoup de `valueOf` sont
+      dérivés (un nom d'équipement RÉSOLU par jointure cliente) et n'ont aucune colonne en face ; sans
+      `field`, repli assumé = options du cache (cf. docs/hydratation.md § « Vague 1 », G8). Sans effet
+      hors régime pagé (collections hydratées, mode fichier : options locales exactes, inchangées). */
+  filter?: { label?: string; options: () => FilterOption[]; valueOf: (o: any) => any; field?: string };
   /** Colonne ESSENTIELLE : seule conservée en mode « Compact » (cf. ListView). À défaut de toute colonne
       essentielle pour une collection, le mode compact retombe sur les 3 premières colonnes. */
   essential?: boolean;
@@ -136,6 +146,10 @@ export class ListView {
   private readonly searchIndex: RecordSearchIndex;
   /** Moteur de lignes (source injectée : cache local / serveur) — absent sur une source CUSTOM. */
   private readonly rowEngine: ListRowEngine | null;
+  /** La SOURCE du listing, gardée à part du moteur : les LIGNES passent par le moteur (anti-rebond,
+      annulation, pagination), les OPTIONS de facette (G8) s'adressent directement à la source — elles
+      n'ont ni requête, ni vol, ni page. Absente sur une source CUSTOM (aucune collection derrière). */
+  private readonly rowSource: ListRowSource | null;
   private emptyText: string;
   private actions: ListActions;
   private onAction?: (act: string, id: string) => void;
@@ -174,10 +188,11 @@ export class ListView {
       (collection, id) => store.get(collection, id),
       (collection, field, value) => store.findByField(collection, field, value),
     );
-    this.rowEngine = this.items ? null : new ListRowEngine(
-      new StoreListRowSource(store, this.searchIndex, this.targetFilter, opts.remoteList || null),
+    this.rowSource = this.items ? null : new StoreListRowSource(store, this.searchIndex, this.targetFilter, opts.remoteList || null);
+    this.rowEngine = this.rowSource ? new ListRowEngine(
+      this.rowSource,
       () => this.render({ typing: true }),   // réponse serveur : on repeint SANS jeter l'index (rien n'a muté)
-    );
+    ) : null;
     // Filet d'invalidation : une écriture qui ne repasse pas par ce listing (SSE, autre onglet) rendrait
     // l'index périmé — et un index périmé, c'est une recherche qui ment (cf. RecordSearchIndex).
     // Même filet pour la PAGE serveur en main (G4) : une création ou une suppression déplace les lignes
@@ -294,6 +309,32 @@ export class ListView {
       que le pager fait de toute façon à chaque navigation. No-op hors régime pagé.
       Cf. docs/hydratation.md § « Vague 2 ». */
   forgetServerPage(): void { this.rowEngine?.forgetPage(); }
+
+  /** Repeint après l'ARRIVÉE de valeurs de facette serveur (G8) : la barre de filtres se reconstruit
+      d'elle-même, sa signature d'options ayant changé (`_ensureToolbar`). `typing: true` — rien n'a
+      muté dans le document, l'index de recherche mémoïsé survit (même sémantique qu'une réponse de
+      recherche serveur). Point d'entrée de l'HÔTE, câblé sur `Store.onFacetResolved` (main.ts), comme
+      `forgetServerPage` l'est sur `onLazyReloadDeferred`. */
+  refreshFacetOptions(): void { this.render({ typing: true }); }
+
+  /** Options d'un filtre de COLONNE pour l'état courant — LE point où G8 bascule.
+      - régime SERVEUR (collection lazy + `field` déclaré + source qui le propose) : les valeurs
+        distinctes du CORPUS, UNIES aux valeurs SÉLECTIONNÉES. Cette union n'est pas cosmétique : les
+        valeurs arrivent en asynchrone, et `_ensureToolbar` PURGE de l'état tout ce qui n'est pas une
+        option — sans elle, un filtre restauré de la session serait effacé au premier rendu, en
+        silence, avant même la réponse du serveur (cf. `CollectionFacetCache.withSelected`) ;
+      - sinon : les options déclarées par la colonne, mot pour mot (les 20+ listings hydratés et le
+        mode fichier ne changent pas d'un pixel).
+      Le LIBELLÉ d'une valeur serveur EST sa valeur : une facette distincte porte des chaînes brutes
+      (SSID, type de raccordement), comme le fait déjà le calcul local qu'elle remplace. */
+  private _filterOptions(column: ListColumn): FilterOption[] {
+    const filter = column.filter!;
+    const field = filter.field;
+    const serverValues = (field && this.rowSource?.facetOptions) ? this.rowSource.facetOptions(this.collection, field) : null;
+    if (!serverValues) return filter.options() || [];
+    const selected = this.filterState[this._colKey(column)];
+    return CollectionFacetCache.withSelected(serverValues, selected || []).map((value) => ({ id: value, label: value }));
+  }
 
   /** Lignes BRUTES du listing (avant filtres de colonne, tri et pagination).
       - source CUSTOM (`items`, hors collections du document) : chemin HISTORIQUE inchangé — relevé
@@ -466,7 +507,10 @@ export class ListView {
       les chips (FilterBar) + le corps, laissant un panneau ouvert intact. Aucune colonne filtrable → hôtes vidés. */
   private _ensureToolbar(): void {
     const filterCols = this.columns.filter((c) => c.filter);
-    const sig = filterCols.map((c) => (c.filter!.options() || []).map((o) => o.id).join(",")).join("|");
+    // Signature bâtie sur `_filterOptions` (et non sur `options()` brut) : c'est ce qui fait qu'une
+    // facette SERVEUR arrivée en cours de route (G8) reconstruit bien la barre — sa signature change.
+    const optionsByColumn = new Map<ListColumn, FilterOption[]>(filterCols.map((c) => [c, this._filterOptions(c)]));
+    const sig = filterCols.map((c) => optionsByColumn.get(c)!.map((o) => o.id).join(",")).join("|");
     if (this._toolbarSig === sig && this._filterBar) return;
     this._toolbarSig = sig;
     if (!filterCols.length && !this.targetFilter) { this._filtersHostEl.replaceChildren(); this._chipsHostEl.replaceChildren(); this._resetHostEl.replaceChildren(); this._filterBar = null; return; }
@@ -474,7 +518,7 @@ export class ListView {
       const key = this._colKey(c);
       if (!this.filterState[key]) this.filterState[key] = new Set();
       const set = this.filterState[key];
-      const items = c.filter!.options() || [];
+      const items = optionsByColumn.get(c)!;
       const valid = new Set(items.map((i) => i.id));
       [...set].forEach((id) => { if (!valid.has(id)) set.delete(id); });   // purge des valeurs disparues (parité historique)
       return { key, label: c.filter!.label || c.head, options: items.slice(), selected: set };

@@ -635,11 +635,31 @@ export class ListConfigs {
     // la synchro — le mécanisme de filtres réévalue `options()` à chaque re-rendu). Même patron que
     // les filtres « Hôte »/« Tags » du listing VMs : la correspondance porte sur la MÊME valeur que
     // l'affichage, donc filtre et colonne ne peuvent pas se contredire.
+    //
+    // 🚨 GARDE G8 (chantier lazy-load, VAGUE 3 — cf. docs/hydratation.md) : en mode API, `wifiClients`
+    // est chargée PARESSEUSEMENT, et ce balayage ne verrait alors que les pages parcourues. C'est LA
+    // collection pour laquelle l'arbitrage n°4 a tranché le `SELECT DISTINCT` SERVEUR (elle est
+    // alimentée par une synchro : son corpus est le plus volumineux de l'app, et le calcul « sur-page »
+    // des petites collections n'y a plus de sens). Le basculement est déclaré par `filter.field` —
+    // le NOM DU CHAMP scalaire que lit `valueOf` — et opéré par `ListView` ; ces `options()` restent
+    // le chemin des collections HYDRATÉES et du mode fichier, où elles sont exactes.
     const distinct = (valueOf: (c: any) => string) => (): { id: string; label: string }[] => {
       const s = new Set<string>();
       store.all("wifiClients").forEach((c: any) => { const v = valueOf(c); if (v) s.add(v); });
       return [...s].sort().map((v) => ({ id: v, label: v }));
     };
+    // `sortField` (pagination ORDONNÉE complète, lot 1b — cf. `ListColumn.sortField`) : déclaré par les
+    // seules colonnes dont l'accesseur `sort` lit UN champ scalaire du modèle. TROIS colonnes n'en
+    // déclarent pas, chacune pour une raison MESURÉE, et le repli (tri de la page reçue, découpe à
+    // l'ordre serveur par défaut) est assumé :
+    //  - « Nom » trie sur `WifiClient.displayName` = nom SINON MAC (le repli est le cas NOMINAL côté
+    //    wifi) : aucune colonne SQL ne porte cette expression, et trier sur `name` seul grouperait à
+    //    l'extrémité tous les clients sans hostname alors que la colonne affiche leur MAC — un ordre
+    //    visiblement faux, pire qu'un repli. ⚠ C'est le critère par DÉFAUT du listing (cf. docs) ;
+    //  - « Type » trie sur la présence PUIS le type (`WifiStatus.sortKey` + `rawType`) : deux colonnes ;
+    //  - « IP » trie sur l'ENTIER de l'adresse (`Ip.toInt`) ; la colonne est du TEXT, dont l'ordre
+    //    lexicographique met « 10.0.0.10 » avant « 10.0.0.9 » — le contraire de ce que la vue montre ;
+    //  - « AP » résout un nom d'ÉQUIPEMENT par jointure CLIENTE (même repli que « Hébergée sur »).
     return {
       collection: "wifiClients",
       defaultSort: { key: "name", dir: "asc" },
@@ -658,23 +678,29 @@ export class ListConfigs {
           head: I18n.t("lists.col.type"), essential: true, sortKey: "type",
           sort: (c) => WifiStatus.sortKey(c) + "_" + WifiStatus.rawType(c),
           render: (c) => WifiStatus.pills(c),
-          filter: { label: I18n.t("lists.col.type"), options: distinct((c) => WifiStatus.rawType(c)), valueOf: (c) => WifiStatus.rawType(c) },
+          // `field` : `valueOf` lit le champ scalaire `client_type` → facette SERVEUR en régime pagé (G8).
+          filter: { label: I18n.t("lists.col.type"), options: distinct((c) => WifiStatus.rawType(c)), valueOf: (c) => WifiStatus.rawType(c), field: "client_type" },
         },
         { head: "IP", essential: true, sortKey: "ip", sort: (c) => Ip.toInt(c.ip) || 0, render: (c) => (c.ip ? `<code>${Html.escape(c.ip)}</code>` : dim("—")) },
-        { head: "MAC", sortKey: "mac", sort: (c) => c.mac || "", render: (c) => (c.mac ? `<code>${Html.escape(c.mac)}</code>` : dim("—")) },
+        { head: "MAC", sortKey: "mac", sort: (c) => c.mac || "", sortField: "mac", render: (c) => (c.mac ? `<code>${Html.escape(c.mac)}</code>` : dim("—")) },
         {
-          head: I18n.t("lists.col.ssid"), sortKey: "ssid", sort: (c) => c.ssid || "",
+          head: I18n.t("lists.col.ssid"), sortKey: "ssid", sort: (c) => c.ssid || "", sortField: "ssid",
           render: (c) => (c.ssid ? `<span class="pill">${Html.escape(c.ssid)}</span>` : dim("—")),
-          filter: { label: I18n.t("lists.col.ssid"), options: distinct((c) => c.ssid || ""), valueOf: (c) => c.ssid || "" },
+          filter: { label: I18n.t("lists.col.ssid"), options: distinct((c) => c.ssid || ""), valueOf: (c) => c.ssid || "", field: "ssid" },
         },
         {
           head: I18n.t("lists.col.accessPoint"), essential: true, sortKey: "ap", sort: (c) => apText(c),
           render: (c) => { const t = apText(c); return t ? Html.escape(t) : dim("—"); },
+          // PAS de `field` : `valueOf` rend le nom de l'ÉQUIPEMENT rapproché (jointure CLIENTE sur
+          // `ap_equipment_id`), et retombe sur `ap_name` seulement à défaut. Un DISTINCT sur `ap_name`
+          // rendrait donc des valeurs qui ne correspondraient pas à celles que la colonne AFFICHE
+          // (casse et espaces du contrôleur, borne renommée dans DC Manager) : le filtre se croirait
+          // posé et ne matcherait rien. Repli assumé — options du cache, comme la vague 1.
           filter: { label: I18n.t("lists.col.accessPoint"), options: distinct(apText), valueOf: (c) => apText(c) },
         },
         // Connecté depuis : horodatage ISO trié LEXICOGRAPHIQUEMENT (= chronologiquement, contrat
         // existant des colonnes de date du dépôt) et rendu localisé.
-        { head: I18n.t("lists.col.connectedSince"), cls: "cell-num", sortKey: "since", sort: (c) => c.connected_since || "", render: (c) => (c.connected_since ? Html.escape(Format.dateTime(c.connected_since)) : dim("—")) },
+        { head: I18n.t("lists.col.connectedSince"), cls: "cell-num", sortKey: "since", sort: (c) => c.connected_since || "", sortField: "connected_since", render: (c) => (c.connected_since ? Html.escape(Format.dateTime(c.connected_since)) : dim("—")) },
       ],
     };
   }

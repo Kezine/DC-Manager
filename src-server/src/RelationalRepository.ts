@@ -90,11 +90,12 @@
 import { Schema } from "./constants.js";
 import { RelationalSchema } from "../../src-shared/RelationalSchema.js";
 import { ListOrder } from "../../src-shared/ListOrder.js";
+import { ListFacets } from "../../src-shared/ListFacets.js";   // liste blanche PARTAGÉE des colonnes facettables + SELECT DISTINCT (G8)
 import { COLLECTION_SPECS, type FieldSpec, type EntityFetcher, type ChildFinder } from "../../src-shared/DataValidation.js";
 import { SearchTerms, type DependentQuery } from "../../src-shared/SearchTerms.js";
 import type {
   RepositoryContract, SqliteCtor, SqliteDb, SqliteStatement,
-  Rec, Snapshot, Tx, ListOpts, ListResult, ImageMeta, SearchAllOpts, SearchAllResult,
+  Rec, Snapshot, Tx, ListOpts, ListResult, ImageMeta, SearchAllOpts, SearchAllResult, FacetValuesResult,
 } from "./db.js";
 import type { Logger } from "./logger.js";
 
@@ -569,6 +570,24 @@ export class RelationalRepository implements RepositoryContract {
       results[collection] = rows.map((row) => this.rebuild(collection, row));
     }
     return { results, truncated };
+  }
+
+  /** FACETTE d'une colonne (contrat — garde G8 du lazy-load, cf. docs/hydratation.md § « Vague 3 ») :
+      les valeurs DISTINCTES non vides de `field`, plafonnées. Le SQL vient du module PARTAGÉ
+      `ListFacets` — c'est LUI qui porte la liste blanche (barrière anti-injection : une colonne hors
+      liste fait THROW, jamais d'interpolation) et la sémantique (DISTINCT sensible à la casse, vides
+      exclus, ordre déterminé) alignée sur les options LOCALES du même filtre.
+      TRONCATURE détectée à moindre coût par la ruse de `searchAll` : `LIMIT cap+1` — la ligne
+      excédentaire dit « tronqué » sans payer un `COUNT(DISTINCT …)`. Collection inconnue → résultat
+      vide (défensif : le nom vient d'une route, qui répond déjà 404). */
+  facetValues(collection: string, field: string, limit: number = ListFacets.VALUES_CAP): FacetValuesResult {
+    if (!Schema.isCollection(collection)) return { values: [], truncated: false };
+    const sql = ListFacets.distinctSql(collection, field);   // AVANT toute requête : une colonne invalide refuse tout
+    const cap = Math.max(1, limit | 0);
+    const rows = this.db.prepare(sql).all(cap + 1);
+    const truncated = rows.length > cap;
+    if (truncated) rows.length = cap;
+    return { values: rows.map((row) => String(row.value)), truncated };
   }
 
   /** DIAGNOSTIC (méthode publique HORS `RepositoryContract`, comme `upsertRaw`) : lignes `detail` de l'EXPLAIN QUERY PLAN

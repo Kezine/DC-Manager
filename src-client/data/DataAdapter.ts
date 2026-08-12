@@ -63,6 +63,14 @@ export abstract class DataAdapter {
     return res.total;
   }
 
+  /* ---- FACETTE d'une colonne (garde G8, cf. docs/hydratation.md § Vague 3) ----
+     Valeurs DISTINCTES non vides d'un champ, calculées par le SERVEUR : les options d'un filtre
+     d'énumération d'un listing dont la collection n'est PAS en cache (le balayage local ne verrait
+     que les pages parcourues). `null` = cet adaptateur n'offre pas de facettes serveur (mode fichier :
+     le cache EST le document, les options locales sont exactes) → le Store calcule en local, sans
+     test de mode chez l'appelant. */
+  async facetValues(_collection: string, _field: string): Promise<string[] | null> { return null; }
+
   /* ---- écritures unitaires (défaut : via transact → undo/historique inclus) ---- */
   async createOne(collection: string, record: RawRecord): Promise<RawRecord> {
     await this.transact({ creates: [{ collection, record }] });

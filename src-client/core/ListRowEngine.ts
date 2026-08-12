@@ -87,6 +87,15 @@ export interface ListRowSource {
   isServerPaged?(request: ListRowRequest): boolean;
   /** Tire UNE page serveur. Appelée uniquement quand `isServerPaged` a répondu oui. */
   fetchPage?(request: ListRowRequest, page: ListRowPageRequest, signal: AbortSignal): Promise<ListRowPage>;
+  /** Valeurs d'une FACETTE de colonne servies par le SERVEUR (garde G8, vague 3 du lazy-load), ou
+      `null` quand cette source n'en propose pas — mode fichier, ou collection intégralement en cache :
+      les options LOCALES du filtre sont alors exactes et la vue les garde, inchangées.
+      SYNCHRONE et consulté à chaque rendu, comme `isServerPaged` : la source rend les dernières
+      valeurs connues (vide en attendant) et déclenche le relevé. Absent (sources d'avant G8, sources
+      de test) = jamais de facette serveur → comportement historique intégral.
+      ⚠ Vit sur la SOURCE et non sur le moteur : le moteur ne s'occupe que des LIGNES. C'est la vue qui
+      interroge sa source pour ses options, comme elle l'interroge — via le moteur — pour ses lignes. */
+  facetOptions?(collection: string, field: string): string[] | null;
 }
 
 export class ListRowEngine {

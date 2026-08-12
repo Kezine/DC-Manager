@@ -318,6 +318,27 @@ entièrement **lisible, filtrable, cherchable** (palette Ctrl+K comprise, via la
 `SearchTerms`) et ses champs **LOCAUX restent éditables**. Seules les actions
 « Synchroniser » et « Providers… » sont masquées — il n'y a pas de serveur à interroger.
 
+### Chargement de la collection : PARESSEUX en mode API, complet en mode fichier
+
+Depuis la **vague 3 du chantier lazy-load** (cf. `docs/hydratation.md` § « Vague 3 »),
+`wifiClients` — la collection la plus VOLUMINEUSE de l'app, puisqu'elle est alimentée par une
+synchro — n'est **plus tirée au démarrage** en mode API. Ce qui change à l'usage :
+
+- l'onglet « Wifi » sert des **pages SERVEUR** réelles (le compteur « n éléments · page x/y » dit la
+  vérité du serveur), et son tri porte sur le CORPUS entier pour les colonnes MAC, SSID et
+  « Connecté depuis » ; les autres critères ne trient que la page affichée (repli documenté) ;
+- les options des filtres **Type** et **SSID** viennent d'un `SELECT DISTINCT` serveur — elles
+  couvrent donc tout l'inventaire, pas seulement les pages parcourues. Le filtre **Point d'accès**,
+  lui, garde ses options locales : sa valeur est un nom d'ÉQUIPEMENT résolu côté client ;
+- après une passe de synchro, un listing OUVERT se rafraîchit tout seul (pastille, page et options) —
+  la collection entière, elle, n'est jamais re-tirée : c'est le sens du chargement paresseux ;
+- **« Localiser »**, la fiche et l'édition des champs locaux sont **inchangés** : ils partent tous
+  d'une ligne déjà affichée, donc déjà en cache.
+
+**Mode fichier / visualiseur : STRICTEMENT rien ne change**, par construction — « le document EST le
+fichier », toute collection y est réputée complète (cf. `docs/hydratation.md` § « Mode local »). Les
+options de filtre y sont calculées sur le document entier, comme avant.
+
 **Évolution.** Si un besoin de saisie manuelle apparaît (déclarer un client connu sans
 contrôleur), il suivra le chemin prévu pour les VMs : un provider « Manuel », qui devra
 fonctionner **aussi** en mode fichier.
@@ -339,7 +360,10 @@ fonctionner **aussi** en mode fichier.
    ligne dans les agrégateurs) et les clés `tabs.wifi`, `app.wifi`, `detail.wifi`,
    `detail.nf.wifiClient`, `lists.empty.wifiClients`, `lists.ph.disconnected`,
    `lists.ph.wifiClient`, `lists.col.ssid|accessPoint|connectedSince`,
-   `search.family.wifiClients`, `search.scope.wifi`.
+   `search.family.wifiClients`, `search.scope.wifi`. ⚠ Retirer aussi `"wifiClients"` de
+   `core/LazyCollections.LAZY_COLLECTIONS_API` (la collection y est déclarée chargée
+   PARESSEUSEMENT depuis la vague 3 — cf. `docs/hydratation.md`) : le nom deviendrait sinon
+   silencieusement sans effet, et l'invariant testé de la liste échouerait.
 3. **Partagé** : retirer `"wifiClients"` de `Schema.COLLECTIONS`, la spec `wifiClients` de
    `DataValidation.ts` (champs **et** entrée de `COLLECTION_SPECS`, plus le type
    `Records.WifiClient`), l'entrée `wifiClients` de `Cascade.ts` **et** le détachement

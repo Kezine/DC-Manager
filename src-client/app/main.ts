@@ -77,8 +77,8 @@ const adapter = REST_MODE
   ? new RestAdapter({ baseUrl: API_BASE_URL })
   : new BrowserStorageAdapter({ persistent: false, onUndoable: noteUndoable });
 // ÉTAT D'HYDRATATION par collection (chantier lazy-load — cf. docs/hydratation.md) : en mode API, état
-// TRAÇANT + la liste des collections chargées PARESSEUSEMENT (vague 1 : `contacts`, cf.
-// `core/LazyCollections` — le SEUL endroit où cette liste s'écrit) ; en mode fichier/visualiseur,
+// TRAÇANT + la liste des collections chargées PARESSEUSEMENT (cf. `core/LazyCollections` — le SEUL
+// endroit où cette liste s'écrit) ; en mode fichier/visualiseur,
 // INJECTION NULLE → le Store fabrique l'état INERTE « tout full, par construction » et IGNORE la liste
 // (« le document EST le fichier », principe n°15). D'où UN seul test de mode ici, aucun dans les modules.
 const store = new Store(adapter, REST_MODE ? new HydrationState() : null, LAZY_COLLECTIONS_API);
@@ -393,6 +393,10 @@ async function boot(): Promise<void> {
   // SEUL moment où la vraie valeur peut atteindre l'écran (patron du badge « Interventions »).
   // ⚠ Fermeture sur `shell`, déclaré PLUS BAS : légal — l'appel est asynchrone, bien après le boot.
   store.onCountResolved = () => shell.refreshCounts();
+  // G8 (vague 3) — les VALEURS d'une facette servie par le serveur viennent d'arriver : seule la barre
+  // de filtres du listing concerné les affiche, et son rendu est synchrone. Même patron que G6 pour les
+  // pastilles, avec le registre « collection → listing » déjà tenu pour le point d'accroche G3.
+  store.onFacetResolved = (collection) => listViewsByCollection.get(collection)?.()?.refreshFacetOptions();
   // G3 — des collections NON hydratées ont été SAUTÉES par un rechargement SSE (un autre client les a
   // touchées, ou nous-mêmes par un chemin qui n'écrit pas dans le Store : l'upload d'une pièce jointe
   // passe par sa route multipart). On ne les recharge PAS — ce serait annuler le lazy. Deux dérivés

@@ -237,6 +237,41 @@ module.exports = async () => {
   }
   });
 
+  await section("Serveur : RelationalRepository — facetValues (SELECT DISTINCT, garde G8 lazy-load vague 3)", async () => {
+  {
+    if (!requireSqlite()) return;
+    const { RelationalRepository } = SERVER("RelationalRepository.js");
+    const repo = RelationalRepository.open(":memory:", SQLITE);
+    // Corpus wifi : deux SSID dont un DOUBLON, une casse mêlée sur le type (« wireless »/« WIRELESS »),
+    // un SSID VIDE et un NULL — les quatre cas que la sémantique du DISTINCT doit trancher.
+    repo.upsert("wifiClients", { id: "w1", ssid: "Corp",  client_type: "WIRELESS" }, 1);
+    repo.upsert("wifiClients", { id: "w2", ssid: "Guest", client_type: "wireless" }, 1);
+    repo.upsert("wifiClients", { id: "w3", ssid: "Corp",  client_type: "WIRED" }, 1);
+    repo.upsert("wifiClients", { id: "w4", ssid: "",      client_type: "WIRED" }, 1);
+    repo.upsert("wifiClients", { id: "w5", ssid: null,    client_type: null }, 1);
+
+    ck.eq(repo.facetValues("wifiClients", "ssid").values.join(","), "Corp,Guest",
+      "🎯 DISTINCT : doublon fondu, chaîne VIDE et NULL EXCLUS (parité du `if (v)` des options locales)");
+    ck.eq(repo.facetValues("wifiClients", "client_type").values.join(","), "WIRED,WIRELESS,wireless",
+      "🎯 DISTINCT sensible à la CASSE : « wireless » ≠ « WIRELESS ». Les replier donnerait un identifiant d'option qui ne matcherait que la moitié des lignes (le filtre compare par ÉGALITÉ EXACTE)");
+    ck.eq(repo.facetValues("wifiClients", "ssid").truncated, false, "sous le plafond : `truncated` faux");
+
+    // -- PLAFOND : LIMIT cap+1 → la ligne excédentaire signale la troncature sans COUNT(DISTINCT …). --
+    const capped = repo.facetValues("wifiClients", "ssid", 1);
+    ck.eq(capped.values.length, 1, "plafond : la liste est tronquée à la limite demandée");
+    ck.eq(capped.truncated, true, "🎯 … et la troncature est SIGNALÉE (une facette qui l'atteint n'en est pas une)");
+
+    // -- BARRIÈRE anti-injection (défense en profondeur : la route pré-valide déjà en 400). --
+    const throws = (fn) => { try { fn(); return null; } catch (e) { return String(e.message || e); } };
+    ck(/colonne de facette invalide/.test(throws(() => repo.facetValues("wifiClients", 'ssid"; DROP TABLE wifiClients;--'))),
+      "🎯 injection : le dépôt REFUSE (throw) un champ hors liste blanche — jamais d'interpolation");
+    ck(/colonne de facette invalide/.test(throws(() => repo.facetValues("wifiClients", "orphan"))),
+      "colonne non facettable (boolean) : refusée aussi");
+    ck.eq(repo.facetValues("inconnue", "ssid").values.length, 0, "collection inconnue → résultat vide (la route répond déjà 404)");
+    repo.close();
+  }
+  });
+
   await section("Serveur : RelationalRepository — findBy, verrou optimiste, transact ATOMIQUE, snapshot (Q7), meta, images", async () => {
   {
     if (!requireSqlite()) return;

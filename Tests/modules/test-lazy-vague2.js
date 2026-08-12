@@ -85,8 +85,11 @@ function apiStore(adapter) { return new Store(adapter, new HydrationState(), LAZ
 module.exports = async () => {
 
   await section("Vague 2 : la liste centrale s'étend à `attachments` + `applications`", async () => {
-    ck.eq(LAZY_COLLECTIONS_API.join(","), "contacts,attachments,applications",
-      "vague 2 : les deux collections rejoignent le pilote (la vague 3 ajoutera `wifiClients` ICI)");
+    // Le CONTENU EXACT de la liste (vagues 1 à 3) est verrouillé par test-lazy-vague3.js, le dernier
+    // à l'avoir étendue : ici, seule la présence des DEUX collections de CETTE vague compte — c'est
+    // leur comportement que ce fichier éprouve.
+    ck(LAZY_COLLECTIONS_API.indexOf("attachments") !== -1 && LAZY_COLLECTIONS_API.indexOf("applications") !== -1,
+      "vague 2 : les deux collections rejoignent le pilote sur la MÊME liste centrale");
     const unknown = LAZY_COLLECTIONS_API.filter((c) => EntityRegistry.COLLECTIONS.indexOf(c) === -1);
     ck.eq(unknown.join(","), "", "🎯 INVARIANT : chaque nom est une VRAIE collection — un nom fautif serait sans effet, en silence");
     ck(LAZY_COLLECTIONS_API.indexOf("vms") === -1, "`vms` reste EXCLUE du chantier (transverse : graphe, purge, certs, IPAM, bulle 3D)");
@@ -97,8 +100,8 @@ module.exports = async () => {
     }));
     const store = apiStore(adapter);
     await store.init();
-    ck.eq(adapter.calls.load[0].slice().sort().join(","), "applications,attachments,contacts",
-      "🎯 le chargement initial saute les TROIS collections lazy (c'est là que le coût du boot disparaît)");
+    ck.eq(adapter.calls.load[0].slice().sort().join(","), LAZY_COLLECTIONS_API.slice().sort().join(","),
+      "🎯 le chargement initial saute TOUTES les collections lazy (c'est là que le coût du boot disparaît)");
     ck.eq(store.hydration.levelOf("attachments"), "none", "attachments : déclarée lazy APRÈS `_hydrate` (contrat du lot 0)");
     ck.eq(store.hydration.levelOf("applications"), "none", "applications : idem");
     ck.eq(store.all("attachments").length + store.all("applications").length, 0, "… et rien des deux n'est en cache");
