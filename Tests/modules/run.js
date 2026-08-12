@@ -23,6 +23,7 @@ const DOMAINS = [
   "./test-float-placement.js",   // primitives UI : règle de PLACEMENT des surfaces flottantes ancrées (core/FloatPlacement — paramétrages SearchPop portail / Autocomplete / RowMenu + politique tooltip)
   "./test-sync.js",              // rechargement granulaire REST
   "./test-hydration.js",         // état d'HYDRATATION par collection + gardes G1-G3 (lot 0 lazy-load) : module pur core/HydrationState (niveaux/transitions/prédicats, état inerte alwaysFull, erreur nommée), câblage Store (G1 anti-snapshot, G2 hydrateAll, G3 reloadCollections + point d'accroche)
+  "./test-lazy-contacts.js",     // VAGUE 1 du lazy-load (contacts) : liste centrale core/LazyCollections, compteurs async core/CollectionCountCache (G6), boot qui saute contacts + re-déclaration après _hydrate, sémantique syncCatalogs → hydrater d'abord (G1), hydratation à la demande, pager SERVEUR réel (G4 : décision de régime + machinerie de page)
   "./test-shared-validation.js", // code partagé front/back
   "./test-spec-completude.js",   // spec COMPLÈTE (D3a migration DB) : verrou corpus démo ⇄ SPEC_FIELDS + FieldType json + défauts sensibles
   "./test-relational-schema.js", // générateur DDL relationnel (L1 migration DB) : golden CREATE TABLE/INDEX dérivés de la spec + INDEX_SPEC partagé

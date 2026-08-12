@@ -10,6 +10,7 @@ import { CableType } from "../models/CableType";
 import { Waypoint } from "../models/Waypoint";
 import { PortRoles } from "../registries/PortRoles";
 import { HydrationState } from "../core/HydrationState";
+import { CollectionCountCache } from "../core/CollectionCountCache";
 import { Id } from "../core/Id";
 import { Log } from "../core/Log";
 import { PatchDiff } from "../core/PatchDiff";
@@ -77,17 +78,29 @@ export class Store {
   data: Record<string, any[]>;
   meta: StoreMeta;
   restored?: boolean;
-  /** ÉTAT D'HYDRATATION par collection (lot 0 du chantier lazy-load — cf. docs/hydratation.md).
-      `data[c] = []` ne distingue pas « vide » de « non chargée » : cet état porte la vérité manquante,
-      et les gardes G1 (anti-snapshot), G2 (hydrateAll avant export) et G3 (SSE) la consomment.
+  /** ÉTAT D'HYDRATATION par collection (chantier lazy-load — cf. docs/hydratation.md).
+      `data[c] = []` ne distingue pas « vide » de « non chargée » : cet état porte la vérité manquante.
+      Le consomment : G1 (anti-snapshot), G2 (hydrateAll avant export), G3 (SSE), G4 (bascule du pager
+      serveur d'un listing, via `StoreListRowSource`) et G6 (compteurs, ci-dessous). C'est LUI qu'on
+      interroge, jamais une liste de noms « lazy » : une collection lazy peut être redevenue `full`.
       Injecté par l'hôte (main.ts) : état TRAÇANT en mode API ; null en mode fichier/visualiseur →
       état INERTE « tout full, par construction » (principe n°15, injection nulle). */
   readonly hydration: HydrationState;
-  /** Point d'ACCROCHE G3 (rempli au lot 1) : des collections NON hydratées ont été SAUTÉES par un
-      rechargement SSE (`reloadCollections`) — leurs enregistrements en cache peuvent être périmés et
-      leurs caches DÉRIVÉS (compteurs d'onglets, facettes…) sont à invalider ici. En lot 0 personne ne
-      s'y branche : aucune collection n'est lazy, donc rien n'est jamais sauté. */
+  /** Point d'ACCROCHE G3 : des collections NON hydratées ont été SAUTÉES par un rechargement SSE
+      (`reloadCollections`) — leurs enregistrements en cache peuvent être périmés. Le Store a déjà
+      invalidé SES dérivés (les compteurs G6) ; ce rappel laisse l'hôte rafraîchir les SIENS (main.ts y
+      redemande un rendu des pastilles d'onglet). */
   onLazyReloadDeferred: ((collections: string[]) => void) | null = null;
+  /** Collections à charger PARESSEUSEMENT (vague 1 du chantier : `contacts`) — injectées par l'hôte
+      (`main.ts`, cf. `core/LazyCollections`). Le Store les RE-DÉCLARE après chaque hydratation complète
+      (`init`), parce que `_hydrate` re-marque tout `full` : c'est le contrat du lot 0. Vide en mode
+      fichier/visualiseur PAR CONSTRUCTION (cf. constructeur). */
+  private readonly lazyCollections: readonly string[];
+  /** COMPTES de collection relevés en ASYNC et mémoïsés (garde G6) — cf. `countOf`/`countHint`. */
+  private readonly _counts: CollectionCountCache;
+  /** Notifié quand un COMPTE relevé en async vient d'arriver : l'hôte repeint ce qui l'affiche
+      (pastilles d'onglet). Sans lui, la valeur entrerait au cache sans que rien ne la peigne. */
+  onCountResolved: ((collection: string, count: number) => void) | null = null;
   private _idIndex: Record<string, Map<string, any>>;
   private _fk: Record<string, FieldIndex>;
   private _listeners: Array<() => void>;
@@ -100,11 +113,22 @@ export class Store {
       pas encore créé) N'est PAS mémoïsée — sinon elle polluerait chaque composante avec le réseau de l'autre. */
   private _netCache = new Map<string, { ids: string[]; primary: string | null; primaryPort: string | null }>();
 
-  constructor(adapter: DataAdapter, hydration: HydrationState | null = null) {
+  constructor(adapter: DataAdapter, hydration: HydrationState | null = null, lazyCollections: readonly string[] = []) {
     this.adapter = adapter;
     // Injection NULLE (forme du projet, cf. main.ts) : sans état injecté, l'état INERTE — mode fichier et
     // visualiseur restent « tout full » PAR CONSTRUCTION, aucun `if (mode)` ici ni ailleurs.
     this.hydration = hydration || HydrationState.alwaysFull();
+    // MÊME construction pour la liste lazy : sans état TRAÇANT injecté, AUCUNE collection n'est lazy —
+    // quoi que l'appelant passe. Le mode fichier/visualiseur ne peut donc pas sauter une collection au
+    // chargement, et l'hôte n'a qu'UN test de mode à écrire (celui de l'état), pas deux.
+    this.lazyCollections = hydration ? [...lazyCollections] : [];
+    this.hydration.declareLazy(this.lazyCollections);
+    // COMPTES async mémoïsés (G6) : le relevé est le `count` de l'adaptateur (un `list(pageSize:1).total`,
+    // donc un COUNT(*) côté serveur) ; l'arrivée d'une valeur remonte à l'hôte via `onCountResolved`.
+    this._counts = new CollectionCountCache(
+      (collection) => this.adapter.count(collection, null),
+      (collection, count) => this.onCountResolved?.(collection, count),
+    );
     this.data = {};
     COLLECTIONS.forEach((c) => { this.data[c] = []; });
     this.meta = { docName: "", theme: "dark", graphLayout: null, graphLayouts: [], activeLayoutId: null, graphFrames: [] };
@@ -115,6 +139,35 @@ export class Store {
 
   onChange(fn: () => void): void { this._listeners.push(fn); }
   private _emit(): void { this._netCache.clear(); this._listeners.forEach((fn) => { try { fn(); } catch (e) { console.warn(e); } }); }
+
+  /* ---- COMPTES de collection (garde G6, cf. docs/hydratation.md) ----
+     `store.all(c).length` MENT dès qu'une collection est chargée paresseusement : il ne compte que ce
+     qui a été absorbé. Les surfaces qui affichent un TOTAL (pastilles d'onglet) passent donc par ici. */
+
+  /** Compte EXACT d'une collection. Collection HYDRATÉE : le cache local fait foi — résolu sans le
+      moindre aller-retour (zéro régression pour les 20+ collections non lazy). Collection partielle :
+      `COUNT(*)` serveur, MÉMOÏSÉ (les demandes concurrentes partagent une seule requête) jusqu'à la
+      prochaine invalidation (écriture locale, rechargement, SSE sauté par G3). */
+  async countOf(collection: string): Promise<number> {
+    if (this.hydration.isHydrated(collection)) return this.data[collection] ? this.data[collection].length : 0;
+    return this._counts.request(collection);
+  }
+
+  /** Compte à AFFICHER MAINTENANT — SYNCHRONE, parce que les pastilles du Shell le sont. Collection
+      hydratée : la longueur locale, exacte. Collection partielle : la dernière valeur connue, ou 0 en
+      attendant — et le relevé serveur est DÉCLENCHÉ (au plus un en vol), son arrivée passant par
+      `onCountResolved` pour que l'hôte repeigne. C'est le patron du badge « Interventions », rendu
+      générique : une valeur asservie au réseau, servie sans faire attendre le rendu. */
+  countHint(collection: string): number {
+    if (this.hydration.isHydrated(collection)) return this.data[collection] ? this.data[collection].length : 0;
+    return this._counts.value(collection);
+  }
+
+  /** Invalide les compteurs de ces collections (le prochain accès les relèvera). Appelée en interne à
+      chaque mutation/rechargement ; publique pour l'hôte, qui la câble sur le point d'accroche G3
+      (`onLazyReloadDeferred` : une collection SAUTÉE peut avoir changé chez un autre client — son
+      compte est le SEUL dérivé qu'on puisse rafraîchir à bas coût). */
+  invalidateCounts(collections: readonly string[]): void { this._counts.invalidate(collections); }
 
   /* ---- (dé)sérialisation ---- */
   toJSON(): Snapshot {
@@ -137,9 +190,12 @@ export class Store {
     this._reindex();
     // Un _hydrate absorbe un instantané COMPLET du document (init, import/replaceAll, newDocument,
     // undo/redo) : quel qu'ait été l'état précédent, le cache reflète désormais TOUT le document → tout
-    // redevient full. ⚠ CONTRAT des vagues futures du lazy-load : une ouverture qui NE chargera PAS tout
-    // devra re-déclarer ses collections lazy APRÈS ce point (cf. docs/hydratation.md § Transitions).
+    // redevient full. ⚠ CONTRAT du lazy-load : une ouverture qui NE charge PAS tout doit re-déclarer ses
+    // collections lazy APRÈS ce point — c'est ce que fait `init()`, chemin UNIQUE de toute ouverture /
+    // rechargement complet en mode API (cf. docs/hydratation.md § Transitions). `replaceAll` (import) et
+    // `newDocument`, eux, ne re-déclarent RIEN : leur cache contient VRAIMENT tout le document.
     this.hydration.markAllFull();
+    this._counts.invalidateAll();   // remplacement total du cache : tout compte relevé est périmé
   }
   /** MIGRATION one-shot (EN MÉMOIRE) : profondeur d'équipement enum legacy (full/half/quarter) → mm.
       Référence = cage de SA baie s'il est racké, cage de la baie par défaut sinon (mêmes fractions que
@@ -229,15 +285,40 @@ export class Store {
 
   /* ---- init : charge depuis l'adapter. NE sème PAS si vide. ---- */
   async init(): Promise<this> {
-    const raw = await this.adapter.load();
+    // Les collections LAZY ne sont PAS tirées par le chargement initial (mode API) : l'adaptateur les
+    // saute, ce qui est tout le gain du chantier. La liste part d'ici — le Store est le seul à connaître
+    // sa politique d'hydratation, l'adaptateur ne fait qu'obéir (et l'adaptateur FICHIER l'ignore : il
+    // n'y a pas de « collection » à sauter dans un document qui EST un fichier).
+    const raw = await this.adapter.load({ skipCollections: this.lazyCollections });
     if (raw) {
-      this._hydrate(raw); this.restored = true;
+      this._hydrate(raw);
+      // 🚨 CONTRAT du lot 0 : `_hydrate` vient de re-marquer TOUT `full`. Comme le chargement a SAUTÉ
+      // les collections lazy, on les re-déclare ICI, immédiatement après — avant la moindre lecture.
+      // `init()` est le chemin UNIQUE de toute ouverture ou rechargement COMPLET (boot, ouverture d'un
+      // document serveur, rechargement total après un 409/400, changement de document) : centraliser la
+      // re-déclaration ici, plutôt que sur chacun de ces appelants, rend structurellement impossible
+      // d'en oublier un (cf. docs/hydratation.md § « Vague 1 — contacts »).
+      this.hydration.declareLazy(this.lazyCollections);
+      this.restored = true;
       // Réconcilie les catalogues (types de port/câble — le CODE est la source de vérité) sur le document CHARGÉ,
       // pas seulement sur un document neuf : sinon les entrées AJOUTÉES au code n'apparaissent jamais dans un
       // document existant (selects sans la nouveauté) et, en mode API, une référence à un type neuf échouerait
       // (`ref_missing` côté serveur, car il n'y serait pas persisté). Persiste UNIQUEMENT si quelque chose a changé
       // → écriture one-shot après une mise à jour du catalogue, no-op ensuite (upsert idempotent).
-      if (this.syncCatalogs()) await this._persistAll();
+      if (this.syncCatalogs()) {
+        // 🚨 SÉMANTIQUE RETENUE (vague 1) pour le chemin le plus sournois du chantier. Ce `_persistAll` est
+        // un `PUT /snapshot` : dérivé d'un cache où une collection lazy manque, il EFFACERAIT côté serveur
+        // ce qui n'est pas en mémoire — c'est exactement ce que G1 refuse (bruyamment). On HYDRATE donc
+        // d'abord, comme pour l'export (arbitrage n°3, même mécanique `hydrateAll`) plutôt que d'inventer
+        // une écriture partielle des catalogues : aucune logique nouvelle, aucune divergence possible avec
+        // ce que la cascade/le remap ont pu toucher. Le coût est RARE (la réconciliation n'écrit que
+        // lorsque le catalogue du CODE a bougé depuis la dernière ouverture de CE document) et non
+        // récurrent (l'upsert est idempotent : le boot suivant ne réécrit plus). CONSÉQUENCE ASSUMÉE : ce
+        // boot-là se termine avec un corpus intégralement hydraté — on ne re-déclare donc RIEN ensuite,
+        // l'état DIT la vérité (tout est en cache) et le lazy reprend au boot suivant.
+        await this.hydrateAll();
+        await this._persistAll();
+      }
     }
     else { this._hydrate(null); this.restored = false; }
     return this;
@@ -257,6 +338,11 @@ export class Store {
     const { refetch, deferred } = this.hydration.splitReload(targets);
     if (deferred.length) {
       Log.d("store", "reloadCollections : collections non hydratées SAUTÉES (G3)", deferred);
+      // Le SEUL dérivé qu'on puisse rafraîchir à bas coût sur une collection SAUTÉE : son COMPTE (G6).
+      // Un autre client a pu en créer ou en supprimer — la pastille d'onglet mentirait jusqu'à la
+      // prochaine écriture locale. Invalidé ICI (le Store possède ce cache) ; le point d'accroche, lui,
+      // reste offert à l'hôte pour SES dérivés (repeindre les pastilles, jeter une facette…).
+      this._counts.invalidate(deferred);
       this.onLazyReloadDeferred?.(deferred);
     }
     if (!refetch.length) return [];
@@ -280,20 +366,45 @@ export class Store {
       this._reindexCollection(c);      // index reconstruits pour les seules collections rechargées
       this.hydration.markFull(c);      // le cache contient désormais TOUTE la collection (vérité d'état)
     });
+    // La collection redevient hydratée : son compte redevient LOCAL et exact — le relevé serveur mémoïsé
+    // n'a plus lieu d'être (et serait périmé s'il datait d'avant ce re-tirage).
+    this._counts.invalidate(collections);
+  }
+
+  /** HYDRATATION À LA DEMANDE (vague 1) : recharge EN ENTIER les collections indiquées qui ne sont pas
+      déjà `full`. No-op sur les hydratées, et en mode fichier/visualiseur PAR CONSTRUCTION (tout y est
+      `full`) — l'appelant n'a donc aucun test de mode à écrire.
+
+      C'est le PATRON des surfaces qui ont besoin de la liste COMPLÈTE d'une collection lazy et ne
+      peuvent pas se contenter d'une page : un `<select>` de contacts, un formulaire qui résout des
+      libellés par identifiant. Le gain du chargement paresseux est au BOOT ; une surface qui a
+      RÉELLEMENT besoin du tout le charge à son ouverture, une fois, et retrouve alors le régime local
+      (l'état passe à `full` : listing, compteur et gardes suivent sans autre changement).
+
+      Renvoie les collections effectivement rechargées (trace / tests). Un échec réseau REJETTE : mieux
+      vaut une modale qui ne s'ouvre pas qu'un select silencieusement amputé. */
+  async hydrate(collections: readonly string[]): Promise<string[]> {
+    const missing = collections.filter((c, i, a) => COLLECTIONS.indexOf(c) !== -1 && a.indexOf(c) === i && !this.hydration.isHydrated(c));
+    if (!missing.length) return [];
+    Log.d("store", "hydrate : hydratation à la demande", missing);
+    await this._refetchWhole(missing);
+    return missing;
   }
 
   /** G2 — hydrate TOUT le corpus : recharge EN ENTIER les collections non `full` avant une opération qui
-      exige le document COMPLET (export JSON autonome, export visualiseur HTML — cf. FileDocuments).
-      Arbitrage acté (2026-08-12, n°3) : un export HYDRATE tout plutôt que d'être refusé ou silencieusement
-      amputé. No-op quand tout est déjà full (lot 0 : toujours, donc AUCUN coût nouveau) ; en corpus lazy,
-      c'est le prix assumé d'un export complet. Un échec réseau REJETTE (l'export n'a pas lieu — jamais un
-      fichier tronqué). Renvoie les collections rechargées (trace/tests). */
+      exige le document COMPLET. DEUX appelants : les exports (JSON autonome, visualiseur HTML — cf.
+      FileDocuments) et la RÉCONCILIATION DES CATALOGUES du boot (`init` : son snapshot serait sinon
+      amputé, cf. G1). Arbitrage acté (2026-08-12, n°3) : on HYDRATE plutôt que de refuser ou de tronquer
+      silencieusement. No-op quand tout est déjà full (mode fichier : TOUJOURS, aucun coût nouveau) ; en
+      corpus lazy, c'est le prix assumé d'un document complet. Un échec réseau REJETTE (l'opération n'a
+      pas lieu — jamais un fichier tronqué). Renvoie les collections rechargées (trace/tests). */
   async hydrateAll(): Promise<string[]> {
-    const missing = this.hydration.notFullCollections().filter((c) => COLLECTIONS.indexOf(c) !== -1);
+    const missing = this.hydration.notFullCollections();
     if (!missing.length) return [];
-    Log.d("store", "hydrateAll : hydratation complète avant export (G2)", missing);
-    await this._refetchWhole(missing);
-    return missing;
+    Log.d("store", "hydrateAll : hydratation complète (G2 export / réconciliation des catalogues)", missing);
+    // DÉLÉGUÉ à l'hydratation ciblée : « tout hydrater » n'est que « hydrater la liste des non-full »
+    // (principe n°3 — deux corps identiques auraient divergé au premier ajustement).
+    return this.hydrate(missing);
   }
 
   /* Recharge la MÉTA du document (nom, dispositions, thème…) depuis l'adapter, sans toucher aux entités.
@@ -464,7 +575,6 @@ export class Store {
     const rows = await this.adapter.findBy(collection, field, value);
     return rows.map((r) => this._absorbRecord(collection, r)).filter(Boolean);
   }
-  async countOf(collection: string, where: Record<string, any> | null = null): Promise<number> { return this.adapter.count(collection, where); }
 
   /* ---- VALIDATION PARTAGÉE (intégrité côté client — cf. shared/DataValidation, docs/validation.md) ----
      En mode FICHIER il n'y a pas de serveur → c'est le SEUL garde-fou. En mode API, ce contrôle donne un
@@ -506,6 +616,7 @@ export class Store {
     this.data[collection].push(obj);
     this._indexAdd(collection, obj);
     await this.adapter.createOne(collection, obj.toJSON());
+    this._counts.invalidate([collection]);   // G6 : le total de la collection a bougé (pastille d'onglet)
     this._emit();
     return obj;
   }
@@ -639,6 +750,7 @@ export class Store {
       deletes: deletes.map((d) => ({ collection: d.c, id: d.id })).concat(targets.map((t) => ({ collection: t.collection, id: t.id }))),
     };
     await this.adapter.transact(tx);
+    this._counts.invalidate(Object.keys(delByColl));   // G6 : les totaux des collections purgées ont bougé
     this._emit();
   }
 
@@ -699,6 +811,7 @@ export class Store {
         .concat(newAggs.map((a) => ({ collection: "aggregates", record: a.toJSON() })))
         .concat(newPorts.map((p) => ({ collection: "ports", record: p.toJSON() }))),
     });
+    this._counts.invalidate(["equipments", "aggregates", "ports"]);   // G6 : trois totaux ont bougé
     this._emit();
     return copy;
   }
@@ -716,6 +829,7 @@ export class Store {
     this.data[collection].push(copy);
     this._indexAdd(collection, copy);
     await this.adapter.createOne(collection, copy.toJSON());
+    this._counts.invalidate([collection]);   // G6 : le total de la collection a bougé
     this._emit();
     return copy;
   }

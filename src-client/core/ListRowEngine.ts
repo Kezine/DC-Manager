@@ -17,6 +17,16 @@
      quand il n'y en a pas (mode fichier, ou critère non exprimable en `where`) :
      on reste alors local, sans réseau.
 
+   TROISIÈME RÉGIME — PAGER SERVEUR RÉEL (garde G4 du chantier lazy-load, cf.
+   docs/hydratation.md) : la règle ci-dessus SUPPOSE le corpus hydraté. Pour une
+   collection chargée PARESSEUSEMENT, « requête inactive → local » afficherait le
+   vide. Le listing demande alors des PAGES au serveur (`page()`), avec le total
+   RÉEL (`COUNT(*)`) et la navigation page à page — c'est la pagination de l'app
+   enfin visible. La SOURCE tranche (`isServerPaged`) : le moteur ne connaît pas
+   plus l'état d'hydratation que le réseau. Les deux régimes ne se recouvrent
+   jamais — une recherche ACTIVE sur une collection lazy repasse par le chemin
+   historique `rows()` (jeu plafonné, tri et pagination client).
+
    CE QUE VOIT L'UTILISATEUR PENDANT LE VOL : les lignes LOCALES, filtrées avec
    la même assiette (`RecordSearchIndex`). Le listing ne « blanchit » donc jamais
    en tapant, et un serveur en échec ne casse rien — il dégrade vers le local,
@@ -25,11 +35,13 @@
    empêche la reprogrammation en boucle de la même requête, et la requête DÉJÀ
    en vol empêche un simple clic de tri de l'annuler pour la relancer à l'identique.
 
-   ⚠ LIMITE ASSUMÉE v1 : le TRI et la pagination restent CLIENT, sur les lignes
-   reçues (les accesseurs de tri d'un listing sont des fonctions arbitraires,
-   souvent dérivées — il n'y a pas de colonne SQL en face). Le jeu serveur est
-   donc PLAFONNÉ par la source ; au-delà, l'utilisateur affine sa recherche.
-   Cf. docs/recherche.md § « Listings serveur-pilotés ».
+   ⚠ LIMITE ASSUMÉE du régime `rows()` : le TRI et la pagination y restent CLIENT,
+   sur les lignes reçues (les accesseurs de tri d'un listing sont des fonctions
+   arbitraires, souvent dérivées — il n'y a pas de colonne SQL en face). Le jeu
+   serveur est donc PLAFONNÉ par la source ; au-delà, l'utilisateur affine sa
+   recherche. Le régime `page()`, lui, pagine POUR DE VRAI (il n'a pas le choix :
+   la collection n'est pas en cache) et hérite en échange de l'ordre du serveur.
+   Cf. docs/recherche.md § « Listings serveur-pilotés » et docs/hydratation.md.
    ============================================================================= */
 
 /** Cible d'un filtre « à recherche » (dimension CIBLE unifiée) : une famille + un identifiant. */
@@ -42,6 +54,15 @@ export interface ListRowRequest {
   target: ListRowTarget | null;
 }
 
+/** Ce qu'un listing demande d'une PAGE serveur (pager RÉEL des collections lazy). Le TRI n'y figure
+    pas : la route paginée ne sait ordonner que par date de création (écart documenté — cf.
+    docs/hydratation.md § « Vague 1 »), le critère choisi par l'utilisateur s'applique à la page reçue. */
+export interface ListRowPageRequest { page: number; pageSize: number; }
+
+/** Une PAGE servie par le serveur : ses lignes + les compteurs RÉELS (total = `COUNT(*)`), qui pilotent
+    directement le pager de la vue — plus aucune arithmétique cliente sur un jeu plafonné. */
+export interface ListRowPage { rows: any[]; total: number; page: number; pages: number; }
+
 /** Source de lignes — INJECTÉE (principe n°2). Deux chemins, une seule sémantique : les lignes qui
     satisfont la requête. `remote` rend `null` quand cette source n'a pas de serveur (mode fichier) ou
     quand la requête n'est pas serveur-pilotable ; le moteur reste alors sur `local`. */
@@ -50,6 +71,12 @@ export interface ListRowSource {
   local(request: ListRowRequest): any[];
   /** Lignes SERVEUR de la requête, ou `null` si aucun chemin serveur ne s'applique. */
   remote(request: ListRowRequest, signal: AbortSignal): Promise<any[]> | null;
+  /** Cette requête est-elle servie PAGE PAR PAGE par le serveur (collection NON hydratée, mode API) ?
+      Prédicat SYNCHRONE et sans effet de bord : il est consulté à CHAQUE rendu. Absent (sources
+      d'avant G4, sources de test) = jamais paginée serveur → comportement historique intégral. */
+  isServerPaged?(request: ListRowRequest): boolean;
+  /** Tire UNE page serveur. Appelée uniquement quand `isServerPaged` a répondu oui. */
+  fetchPage?(request: ListRowRequest, page: ListRowPageRequest, signal: AbortSignal): Promise<ListRowPage>;
 }
 
 export class ListRowEngine {
@@ -70,6 +97,13 @@ export class ListRowEngine {
     return request.collection + "\n" + request.query.trim() + "\n" + target;
   }
 
+  /** Identité d'une PAGE : la requête PLUS la découpe demandée — changer de page ou de taille de page
+      est une autre demande serveur, changer de critère de TRI n'en est pas une (le tri est appliqué à
+      la page reçue, cf. l'en-tête). */
+  static pageSignature(request: ListRowRequest, page: ListRowPageRequest): string {
+    return ListRowEngine.signature(request) + "\n" + Math.max(1, page.page | 0) + "\n" + Math.max(1, page.pageSize | 0);
+  }
+
   /** Lignes SERVEUR de la dernière réponse — null tant qu'aucune ne couvre une requête. */
   private remoteRows: any[] | null = null;
   /** Signature que `remoteRows` couvre. */
@@ -88,6 +122,20 @@ export class ListRowEngine {
   private generation = 0;
   /** Le dernier jeu rendu venait-il du serveur ? (diagnostic + tests — le jeu serveur est plafonné). */
   private servedRemote = false;
+
+  /* ---- état du PAGER SERVEUR (G4) : volontairement DISJOINT de l'état « recherche serveur » ci-dessus.
+     Les deux régimes ne s'appliquent jamais en même temps (une requête active désactive le pager), et
+     les mélanger ferait qu'une saisie effacerait la page en main — ou l'inverse. ---- */
+  /** Dernière page SERVEUR reçue — null tant qu'aucune n'a abouti. */
+  private pageResult: ListRowPage | null = null;
+  /** Signature de page que `pageResult` couvre. */
+  private pageFor = "";
+  /** Signature dont le tirage a ÉCHOUÉ : anti-boucle (sans elle, le rendu de repli le reprogrammerait
+      indéfiniment — même raison que `noRemoteFor` pour la recherche). */
+  private pageFailedFor = "";
+  /** Signature de page EN VOL — "" si aucune (un re-rendu ne relance pas la même page). */
+  private pagePendingFor = "";
+  private pageAbort: AbortController | null = null;
 
   /** `onRemoteRows` : le listing se REPEINT quand une réponse serveur arrive (le rendu, lui, reste
       synchrone). `debounceMs` est réglable pour les tests — jamais en production. */
@@ -120,12 +168,69 @@ export class ListRowEngine {
     return this.source.local(request);   // affichage pendant l'anti-rebond / le vol, et REPLI en cas d'échec
   }
 
+  /** PAGE SERVEUR à afficher MAINTENANT (garde G4), ou `null` si ce listing n'est PAS paginé par le
+      serveur pour cette requête — l'appelant retombe alors sur `rows()`, comportement historique intact.
+
+      Contrat : synchrone comme `rows()`. Si la page demandée n'est pas en main, on la programme (sans
+      anti-rebond : un clic de pager n'est pas une frappe) et on rend la DERNIÈRE page reçue — ses
+      lignes ET ses compteurs, donc un affichage toujours COHÉRENT (jamais « page 2/45 » avec le contenu
+      de la page 1). Faute de page en main, une page VIDE : le cache local ne contient pas la collection,
+      il n'y a rien d'autre à montrer (`pageLoading` distingue « en cours » de « réellement vide »). */
+  page(request: ListRowRequest, pageRequest: ListRowPageRequest): ListRowPage | null {
+    if (!this.source.isServerPaged || !this.source.isServerPaged(request) || !this.source.fetchPage) {
+      this.forgetPage();   // sortie du régime paginé (saisie, collection redevenue hydratée) : rien ne survit
+      return null;
+    }
+    const signature = ListRowEngine.pageSignature(request, pageRequest);
+    if (this.pageResult && this.pageFor === signature) return this.pageResult;
+    if (this.pageFailedFor !== signature && this.pagePendingFor !== signature) this.fetchPageNow(request, pageRequest, signature);
+    return this.pageResult || { rows: [], total: 0, page: Math.max(1, pageRequest.page | 0), pages: 1 };
+  }
+
+  /** Une page SERVEUR est-elle en vol sans qu'aucune ne soit encore en main ? (la vue affiche alors
+      « Chargement… » plutôt que son état vide — un listing vide et un listing pas encore arrivé ne
+      disent pas la même chose à l'utilisateur). */
+  get pageLoading(): boolean { return this.pagePendingFor !== "" && this.pageResult === null; }
+
+  /** OUBLIE la page en main et annule le tirage en cours : le prochain `page()` repartira du serveur.
+      Appelée à la sortie du régime paginé, et par la vue quand le document a MUTÉ (une création ou une
+      suppression change la page ET le total — les garder serait afficher un état faux). */
+  forgetPage(): void {
+    if (this.pageAbort) { this.pageAbort.abort(); this.pageAbort = null; }
+    this.pageResult = null; this.pageFor = ""; this.pageFailedFor = ""; this.pagePendingFor = "";
+  }
+
+  /** Tire la page demandée : ANNULE la précédente (le pager peut avancer plus vite que le réseau) et
+      n'applique la réponse que si elle est encore fraîche. Échec réel → page VIDE assumée + trace
+      console (parité `fetch` : jamais d'UI d'erreur), signature mémorisée pour ne pas boucler. */
+  private fetchPageNow(request: ListRowRequest, pageRequest: ListRowPageRequest, signature: string): void {
+    if (this.pageAbort) this.pageAbort.abort();
+    const abort = new AbortController();
+    this.pageAbort = abort;
+    const generation = this.generation;
+    this.pagePendingFor = signature;
+    this.source.fetchPage!(request, pageRequest, abort.signal).then((page) => {
+      if (generation !== this.generation || abort.signal.aborted) return;
+      this.pagePendingFor = ""; this.pageFailedFor = "";
+      this.pageResult = page; this.pageFor = signature;
+      this.onRemoteRows();
+    }).catch((error) => {
+      if (generation !== this.generation || abort.signal.aborted) return;
+      this.pagePendingFor = ""; this.pageFailedFor = signature;
+      // trace de diagnostic volontaire — contrairement à la recherche, il n'existe PAS de repli local
+      // ici (la collection n'est pas en cache) : la vue affichera son état vide.
+      console.warn("[listing] page serveur indisponible :", error);
+      this.onRemoteRows();
+    });
+  }
+
   /** Coupe toute activité serveur et oublie la réponse en main (changement d'onglet, destruction). */
   reset(): void {
     this.generation++;
     this.cancel();
     this.remoteRows = null; this.remoteFor = ""; this.noRemoteFor = "";
     this.servedRemote = false;
+    this.forgetPage();
   }
 
   /** (Re)programme l'interrogation serveur — une frappe annule la programmation précédente. */

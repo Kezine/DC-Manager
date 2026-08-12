@@ -119,6 +119,11 @@ pas `store.all()` : leurs lignes viennent d'un **moteur à source injectée**.
                              │  échec → repli LOCAL + console.warn, JAMAIS re-programmé
                              ▼
                      Store.list → entités absorbées → repeint
+
+   … sauf si la collection n'est PAS hydratée (chargement PARESSEUX, mode API) :
+     ListRowEngine.page(request, {page, pageSize})   ← la SOURCE tranche (isServerPaged)
+       └→ GET …/<collection>?page=N&pageSize=…       total = COUNT(*), pager RÉEL
+          (cf. docs/hydratation.md § « Vague 1 — contacts »)
 ```
 
 ### Les règles du moteur
@@ -138,6 +143,12 @@ pas `store.all()` : leurs lignes viennent d'un **moteur à source injectée**.
   vient du serveur (anti-rebond 200 ms — la même constante que la palette —, annulation de la requête
   devancée, **repli local silencieux** en cas d'échec). En mode FICHIER, aucun réseau n'existe :
   `remote()` rend `null` et le moteur reste local (principe n°15).
+  ⚠ **« Le document est hydraté » n'est plus universel** : une collection chargée PARESSEUSEMENT
+  (mode API — cf. `docs/hydratation.md`) n'a rien en cache, et une requête au repos y ouvrirait un
+  listing vide. La source propose alors un TROISIÈME régime, la **pagination serveur réelle**
+  (`isServerPaged`/`fetchPage` → `ListRowEngine.page`) : page par `pageSize`, total = `COUNT(*)`.
+  Les deux régimes ne se recouvrent jamais — une requête ACTIVE, même sur une collection lazy,
+  repasse par `remote()` et son plafond. Les collections hydratées, elles, ne changent en rien.
 - **Le listing ne blanchit jamais** : pendant l'anti-rebond et le vol, ce sont les lignes LOCALES,
   filtrées avec la même assiette, qui s'affichent.
 - **Anti-boucle** : un échec serveur est mémorisé POUR SA REQUÊTE. Sans ça, le rendu de repli
@@ -150,7 +161,10 @@ pas `store.all()` : leurs lignes viennent d'un **moteur à source injectée**.
   d'un équipement) — il n'y a pas de colonne SQL en face. Le jeu serveur est donc **plafonné**
   (`StoreListRowSource.REMOTE_LIMIT` = **500** lignes, même esprit que le cap par collection de la
   recherche transverse). Au-delà, l'utilisateur affine sa requête.
-- Aucune **pagination serveur** n'est exposée dans l'UI des listings en v1.
+- La **pagination serveur** n'est exposée dans l'UI que pour les collections chargées
+  PARESSEUSEMENT, qui n'ont pas le choix (cf. `docs/hydratation.md` § « Vague 1 »). Elle hérite en
+  échange de l'ordre du serveur : la route paginée n'ordonne que par `created_date ASC, id ASC` — le
+  critère de tri choisi par l'utilisateur s'applique alors à la PAGE affichée, pas à la découpe.
 
 ### Coût de la recherche locale et mémoïsation
 

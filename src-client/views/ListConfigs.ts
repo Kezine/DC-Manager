@@ -282,9 +282,17 @@ export class ListConfigs {
       téléphone · notes. */
   static contacts(store: Store): ListOptions {
     // Options de FILTRE « Organisation » : valeurs DISTINCTES et triées, calculées à la volée sur les
-    // contacts DU DOCUMENT (dynamiques — le mécanisme de filtres réévalue `options()` à chaque re-rendu,
+    // contacts DU CACHE (dynamiques — le mécanisme de filtres réévalue `options()` à chaque re-rendu,
     // cf. ListView._ensureToolbar). Même patron que le filtre « Hôte » du listing VMs (`static vms` ci-dessus) :
     // la correspondance porte sur la MÊME valeur que l'affichage, donc filtre et colonne ne peuvent pas se contredire.
+    //
+    // 🚨 GARDE G8 (chantier lazy-load, cf. docs/hydratation.md § « Vague 1 — contacts ») : en mode API,
+    // `contacts` est chargée PARESSEUSEMENT — le cache ne contient alors que les pages déjà parcourues,
+    // et cette facette ne propose donc QUE les organisations vues. C'est l'arbitrage n°4 assumé pour le
+    // pilote (calcul « sur-page » plutôt que `SELECT DISTINCT` serveur) : la collection est petite, et
+    // les valeurs s'ACCUMULENT au fil de la navigation — jamais de chip qui disparaîtrait en changeant
+    // de page. Les collections VOLUMINEUSES de la vague 3 (wifiClients) auront, elles, le distinct
+    // serveur. En mode fichier — et pour toute collection hydratée — c'est tout le document, inchangé.
     const organizationOptions = (): { id: string; label: string }[] => {
       const s = new Set<string>();
       store.all("contacts").forEach((c: any) => { if (c.organization) s.add(c.organization); });

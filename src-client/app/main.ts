@@ -35,6 +35,7 @@ import type { CertTargetResolver } from "../views/CertsAdminView";
 import type { CertificateListItem } from "../views/forms/CertsClient";
 import { Download } from "../core/Download";
 import { HydrationState } from "../core/HydrationState";   // état d'hydratation par collection (lot 0 lazy-load — injecté en mode API seulement)
+import { LAZY_COLLECTIONS_API } from "../core/LazyCollections";   // LA liste des collections chargées paresseusement (vague 1 : contacts)
 import { Prefs } from "../core/Prefs";
 import { SessionExpiry } from "../core/SessionExpiry";   // verrou idempotent « session expirée → retour au login » (mode API)
 import { Log } from "../core/Log";
@@ -75,12 +76,12 @@ const API_BASE_URL = (prefs.apiBaseUrl && prefs.apiBaseUrl.trim()) || INJECTED.a
 const adapter = REST_MODE
   ? new RestAdapter({ baseUrl: API_BASE_URL })
   : new BrowserStorageAdapter({ persistent: false, onUndoable: noteUndoable });
-// ÉTAT D'HYDRATATION par collection (lot 0 du chantier lazy-load — cf. docs/hydratation.md) : en mode API,
-// état TRAÇANT — les vagues 1-3 y déclareront leurs collections lazy à l'ouverture d'un document ; en mode
-// fichier/visualiseur, INJECTION NULLE → le Store fabrique l'état INERTE « tout full, par construction »
-// (« le document EST le fichier », principe n°15 — `declareLazy` y est sans effet). Au lot 0, personne ne
-// déclare rien : comportement STRICTEMENT inchangé, mais les gardes G1-G3 du Store sont réelles.
-const store = new Store(adapter, REST_MODE ? new HydrationState() : null);
+// ÉTAT D'HYDRATATION par collection (chantier lazy-load — cf. docs/hydratation.md) : en mode API, état
+// TRAÇANT + la liste des collections chargées PARESSEUSEMENT (vague 1 : `contacts`, cf.
+// `core/LazyCollections` — le SEUL endroit où cette liste s'écrit) ; en mode fichier/visualiseur,
+// INJECTION NULLE → le Store fabrique l'état INERTE « tout full, par construction » et IGNORE la liste
+// (« le document EST le fichier », principe n°15). D'où UN seul test de mode ici, aucun dans les modules.
+const store = new Store(adapter, REST_MODE ? new HydrationState() : null, LAZY_COLLECTIONS_API);
 // LECTEUR SERVEUR des listings (lot 3 « listings serveur-pilotés », cf. docs/recherche.md) — mode API
 // SEULEMENT. Injecté dans chaque `ListView` : une requête ACTIVE (recherche saisie, ou filtre de cible
 // traduisible en `where`) est alors servie par le SERVEUR (colonne `search` enrichie), avec anti-rebond,
@@ -90,6 +91,13 @@ const store = new Store(adapter, REST_MODE ? new HydrationState() : null);
 const listRemoteReader: RemoteListReader | null = REST_MODE ? {
   list: async (collection, { query, where, limit, signal }) =>
     (await store.list(collection, { query, where, pageSize: limit, signal })).rows,
+  // PAGE serveur d'une collection NON hydratée (garde G4, cf. docs/hydratation.md) : le MÊME `Store.list`,
+  // mais on remonte aussi les compteurs — `total` est un `COUNT(*)` SQL, c'est lui qui rend le pager RÉEL.
+  // Les lignes reçues sont absorbées au Store (`_absorbRecord`), donc l'état d'hydratation passe à `partial`.
+  page: async (collection, { page, pageSize, where, signal }) => {
+    const res = await store.list(collection, { page, pageSize, where, signal });
+    return { rows: res.rows, total: res.total, page: res.page, pages: res.pages };
+  },
 } : null;
 // LECTEUR SERVEUR des CANDIDATS d'entités (lot 4) — mode API SEULEMENT. La recherche transverse
 // `GET …/search` restreinte aux collections des familles → records par collection, en UN aller-retour.
@@ -378,6 +386,17 @@ async function boot(): Promise<void> {
     const what = op === "meta" ? I18n.t("app.main.persistMeta") : I18n.t("app.main.persistDoc");
     Notify.toast(I18n.t("app.main.persistError", { what, error: (e && e.message) || e }), "err");
   };
+  // G6 — un COMPTE relevé en async vient d'arriver (collection chargée paresseusement) : la pastille
+  // d'onglet qui l'affiche doit se repeindre. Le rendu du Shell est synchrone, donc ce rappel est le
+  // SEUL moment où la vraie valeur peut atteindre l'écran (patron du badge « Interventions »).
+  // ⚠ Fermeture sur `shell`, déclaré PLUS BAS : légal — l'appel est asynchrone, bien après le boot.
+  store.onCountResolved = () => shell.refreshCounts();
+  // G3 — des collections NON hydratées ont été SAUTÉES par un rechargement SSE (un autre client les a
+  // touchées). On ne les recharge PAS (ce serait annuler le lazy) : leurs COMPTEURS ont déjà été
+  // invalidés par le Store, il reste à les REDEMANDER à l'écran. C'est le seul dérivé qu'on rafraîchit
+  // ici ; la page de listing en main, elle, reste telle quelle jusqu'à la prochaine navigation —
+  // cohérent avec G3, qui refuse justement de re-tirer la collection (cf. docs/hydratation.md).
+  store.onLazyReloadDeferred = () => shell.refreshCounts();
 
   // NETTOYAGE des images de façade NON UTILISÉES (réglages → Maintenance) : purge de la bibliothèque après
   // confirmation. Mode FICHIER : élagage IndexedDB (keepOnly) → le prochain compagnon .nmfb n'embarque plus les
@@ -580,7 +599,12 @@ async function boot(): Promise<void> {
       name, label, title: opts.title, subtitle: opts.subtitle, kind: opts.kind || "primary", parent: opts.parent, links: opts.links,
       icon: opts.icon,   // icône d'onglet (barre desktop = icône seule ; menus = icône + libellé)
       extraActions: opts.extraActions,   // boutons secondaires d'en-tête (ex. « Réseaux virtuels… » sur l'onglet VMs)
-      count: () => store.all(cfg.collection).length,
+      // G6 — pastille de comptage : `store.all(c).length` MENT dès que la collection est chargée
+      // paresseusement (il ne compte que ce qui a été absorbé). `store.countHint` rend la longueur
+      // LOCALE pour une collection hydratée (zéro régression, zéro réseau) et, pour une collection
+      // partielle, la dernière valeur connue du COUNT serveur — en déclenchant son relevé si besoin.
+      // L'arrivée de la valeur repasse par `store.onCountResolved` → `shell.refreshCounts()`.
+      count: () => store.countHint(cfg.collection),
       addLabel: (VIEWER || opts.noAdd) ? undefined : opts.addLabel, onAdd: (VIEWER || opts.noAdd) ? undefined : (opts.onAdd || (formFn ? () => formFn(null, () => shell.refreshActive()) : undefined)),   // viewer / noAdd : pas de création
       onShow: () => {
         if (!view) {

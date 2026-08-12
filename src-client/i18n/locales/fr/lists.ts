@@ -27,6 +27,9 @@ export const lists = {
     removeFilter: "Retirer le filtre {{dim}} : {{value}}",
     actions: "Actions",
     empty: "Aucun élément.",
+    // État transitoire d'un listing PAGINÉ PAR LE SERVEUR (collections chargées paresseusement, cf.
+    // docs/hydratation.md) : tant que la page n'est pas arrivée, on ne dit PAS « aucun élément ».
+    loading: "Chargement…",
     count_one: "{{count}} élément · page {{page}}/{{pages}}",
     count_other: "{{count}} éléments · page {{page}}/{{pages}}",
     pageSize: "{{n}}/page",

@@ -23,9 +23,19 @@
    restent CLIENT, cf. l'en-tête du moteur). Même esprit que la page de 500 des
    interventions et que le cap par collection de la recherche transverse : au-delà,
    l'utilisateur affine sa requête.
+
+   PAGER SERVEUR RÉEL (garde G4, cf. docs/hydratation.md) : `local()` suppose la
+   collection HYDRATÉE — pour une collection chargée paresseusement, elle rendrait
+   le vide. Cette source consulte donc l'ÉTAT D'HYDRATATION du Store (jamais une
+   liste de noms « lazy » : une collection lazy peut être redevenue `full` en cours
+   de session — export, hydratation à la demande d'un formulaire) et propose alors
+   au moteur un chemin PAGE PAR PAGE. Articulation avec le plafond ci-dessus :
+   REMOTE_LIMIT reste la borne du mode « recherche ACTIVE » (inchangé, tous modes) ;
+   la pagination réelle, elle, ne s'applique qu'AU REPOS et page par `pageSize`.
    ============================================================================= */
 import type { Store } from "../store";
-import type { ListRowRequest, ListRowSource } from "./ListRowEngine";
+import { ListRowEngine } from "./ListRowEngine";
+import type { ListRowPage, ListRowPageRequest, ListRowRequest, ListRowSource } from "./ListRowEngine";
 import type { RecordSearchIndex } from "./RecordSearchIndex";
 
 /** Contrat DONNÉES d'une cible filtrable — le strict minimum dont la source a besoin (l'habillage UI
@@ -46,6 +56,15 @@ export interface RemoteListReader {
     limit: number;
     signal: AbortSignal;
   }): Promise<any[]>;
+  /** PAGE serveur d'une collection NON hydratée (pager RÉEL — garde G4) : les lignes de la page ET les
+      compteurs du serveur (`total` = `COUNT(*)`). Absent = cet hôte n'offre pas de pagination serveur
+      (mode fichier, lecteur d'avant G4) → la source ne proposera jamais le régime paginé. */
+  page?(collection: string, options: {
+    page: number;
+    pageSize: number;
+    where: Record<string, any> | null;
+    signal: AbortSignal;
+  }): Promise<ListRowPage>;
 }
 
 export class StoreListRowSource implements ListRowSource {
@@ -78,5 +97,29 @@ export class StoreListRowSource implements ListRowSource {
     return this.reader.list(request.collection, { query, where, limit: StoreListRowSource.REMOTE_LIMIT, signal })
       // Cible NON traduite en `where` (2 sauts) : la restriction reste cliente, sur les lignes reçues.
       .then((rows) => (target && this.target && !where) ? this.target.restrict(rows, target.kind, target.id) : rows);
+  }
+
+  /** G4 — ce listing est-il servi PAGE PAR PAGE par le serveur ? TROIS conditions, toutes nécessaires :
+      1. l'hôte offre un chemin paginé (mode API — `null`/absent en mode fichier, principe n°15) ;
+      2. la collection n'est PAS intégralement en cache (`store.hydration`) : c'est l'ÉTAT qui décide, pas
+         une liste de noms — une collection lazy REDEVENUE `full` (export G2, hydratation à la demande)
+         retrouve aussitôt le régime local, sans que rien d'autre ne change ;
+      3. la requête est AU REPOS : une recherche (ou une cible) active garde le chemin historique
+         `remote()`, plafonné à REMOTE_LIMIT, trié et paginé côté client — la bascule serait sinon
+         double, et deux découpes concurrentes se disputeraient le pager. */
+  isServerPaged(request: ListRowRequest): boolean {
+    if (!this.reader || !this.reader.page) return false;
+    if (this.store.hydration.isHydrated(request.collection)) return false;
+    return !ListRowEngine.isActive(request);
+  }
+
+  /** Tire UNE page serveur. `where` est TOUJOURS null ici : `isServerPaged` exige une requête au repos,
+      donc sans cible — la dimension CIBLE relève du régime `remote()`. Les lignes reçues sont ABSORBÉES
+      au Store par le lecteur (`Store.list` → `_absorbRecord`), donc rendues, triées et ouvertes comme
+      n'importe quelle entité : les colonnes du listing n'ont rien à savoir de leur provenance. */
+  fetchPage(request: ListRowRequest, pageRequest: ListRowPageRequest, signal: AbortSignal): Promise<ListRowPage> {
+    return this.reader!.page!(request.collection, {
+      page: pageRequest.page, pageSize: pageRequest.pageSize, where: null, signal,
+    });
   }
 }

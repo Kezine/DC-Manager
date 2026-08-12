@@ -21,6 +21,9 @@ export const lists = {
     removeFilter: "Remove filter {{dim}}: {{value}}",
     actions: "Actions",
     empty: "No items.",
+    // Transient state of a SERVER-PAGED listing (lazily loaded collections, cf. docs/hydratation.md):
+    // until the page has arrived, we do NOT claim "no items".
+    loading: "Loading…",
     count_one: "{{count}} item · page {{page}}/{{pages}}",
     count_other: "{{count}} items · page {{page}}/{{pages}}",
     pageSize: "{{n}}/page",

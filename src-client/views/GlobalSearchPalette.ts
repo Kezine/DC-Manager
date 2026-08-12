@@ -528,7 +528,17 @@ export class GlobalSearchPalette {
     if (external) { external.open(item.id); return; }
     // `detail` rend false pour une collection sans fiche — IMPOSSIBLE ici par construction
     // (invariant familles ≡ DETAIL_COLLECTIONS, testé), donc pas de repli à écrire.
-    Forms.detail(this.store, this.host, item.kind, item.id);
+    const open = (): void => { Forms.detail(this.store, this.host, item.kind, item.id); };
+    // ⚠ CHARGEMENT PARESSEUX (mode API, cf. docs/hydratation.md) : un résultat venu du SERVEUR peut
+    // désigner un enregistrement qui n'est PAS au cache — `dressRecords` habille les records reçus
+    // sans les absorber, et `Forms.detail` lit, lui, le cache (`store.get`). Sans cette absorption, le
+    // clic sur un contact trouvé par la recherche transverse ne donnerait qu'un toast « introuvable ».
+    // Lecture UNITAIRE (`fetchOne` absorbe et indexe), et seulement quand il le faut : le cas courant
+    // — et TOUJOURS le cas en mode fichier — est que l'enregistrement y soit déjà, aucun réseau alors.
+    // Un échec (réseau, enregistrement réellement supprimé) laisse `Forms.detail` dire « introuvable »,
+    // comportement historique inchangé.
+    if (this.store.get(item.kind, item.id)) { open(); return; }
+    void this.store.fetchOne(item.kind, item.id).catch(() => null).then(open);
   }
 
   private readRecents(): RecentEntry[] {

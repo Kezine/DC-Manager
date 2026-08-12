@@ -4,7 +4,7 @@ import { Text } from "../core/Text";
 import { Sort } from "../core/Sort";
 import { TargetSearch } from "../core/TargetSearch";
 import { RecordSearchIndex } from "../core/RecordSearchIndex";
-import { ListRowEngine, type ListRowTarget } from "../core/ListRowEngine";
+import { ListRowEngine, type ListRowRequest, type ListRowTarget } from "../core/ListRowEngine";
 import { StoreListRowSource, type RemoteListReader } from "../core/StoreListRowSource";
 import { EntityCandidateSource } from "../core/EntityCandidates";
 import { FormControls } from "../ui/FormControls";
@@ -90,6 +90,17 @@ export interface ListOptions {
      • en mode FICHIER, aucun réseau n'existe : le moteur reste local (n°15).
    Le TRI et la PAGINATION restent CLIENT (limite v1 documentée : le jeu serveur
    est plafonné, cf. `StoreListRowSource.REMOTE_LIMIT`).
+
+   EXCEPTION — PAGER SERVEUR RÉEL (garde G4 du chantier lazy-load, cf.
+   docs/hydratation.md) : quand la collection n'est PAS hydratée (chargement
+   PARESSEUX en mode API), il n'y a rien à paginer en mémoire. Le moteur sert
+   alors des PAGES SERVEUR (`page()`), avec le TOTAL réel (`COUNT(*)`) et une
+   navigation qui va chercher CHAQUE page. Ce que la vue en fait de moins :
+   aucune arithmétique de pagination (les compteurs viennent du serveur). Ce
+   qu'elle en fait de plus, à l'identique : filtres de colonne et tri — mais
+   appliqués à la PAGE reçue, la route paginée ne sachant ordonner que par date
+   de création (écart ASSUMÉ et documenté). Les listings des collections
+   hydratées ne changent PAS d'un pixel : `page()` y rend `null`.
    ============================================================================= */
 export class ListView {
   /** Clé de la dimension CIBLE dans l'état de filtres. Préfixe « __ » : impossible à confondre avec
@@ -153,7 +164,9 @@ export class ListView {
     );
     // Filet d'invalidation : une écriture qui ne repasse pas par ce listing (SSE, autre onglet) rendrait
     // l'index périmé — et un index périmé, c'est une recherche qui ment (cf. RecordSearchIndex).
-    store.onChange(() => this.searchIndex.invalidate());
+    // Même filet pour la PAGE serveur en main (G4) : une création ou une suppression déplace les lignes
+    // ET change le total — garder la page reçue, ce serait afficher un état que le serveur n'a plus.
+    store.onChange(() => { this.searchIndex.invalidate(); this.rowEngine?.forgetPage(); });
     this.emptyText = opts.emptyText || I18n.t("lists.chrome.empty");
     this.actions = opts.actions || { view: true, edit: true, clone: true, del: true };
     this.onAction = opts.onAction;
@@ -270,7 +283,29 @@ export class ListView {
       }
       return rows;
     }
-    return this.rowEngine.rows({ collection: this.collection, query: this.query, target: this._targetValue() });
+    return this.rowEngine.rows(this._rowRequest());
+  }
+
+  /** La requête du moteur pour l'état courant du listing (saisie + cible filtrée). */
+  private _rowRequest(): ListRowRequest {
+    return { collection: this.collection, query: this.query, target: this._targetValue() };
+  }
+
+  /** Applique les filtres de COLONNE actifs à un jeu de lignes. Extrait de `render()` : les deux
+      régimes (local et pagé serveur) doivent filtrer de la MÊME façon — un filtre qui se comporterait
+      autrement selon la provenance des lignes serait un piège. */
+  private _applyColumnFilters(rows: any[]): any[] {
+    let out = rows;
+    this.columns.filter((c) => c.filter).forEach((c) => {
+      const set = this.filterState[this._colKey(c)];
+      if (!set || !set.size) return;
+      out = out.filter((o) => {
+        const v = c.filter!.valueOf(o);
+        if (Array.isArray(v)) { const arr = v.length ? v : ["__none__"]; return arr.some((x) => set.has(String(x))); }
+        return set.has(String(v == null || v === "" ? "__none__" : v));
+      });
+    });
+    return out;
   }
 
   /** Repeint le listing. `typing` = ce rendu ne vient QUE d'une frappe (ou de l'arrivée d'une réponse
@@ -279,23 +314,30 @@ export class ListView {
       (tri, filtre, page, re-rendu externe après écriture) le jette : dans le doute, on recalcule. */
   render(options?: { typing?: boolean }): void {
     if (!options || !options.typing) this.searchIndex.invalidate();
-    let all = this._collectRows();
-    this.columns.filter((c) => c.filter).forEach((c) => {
-      const set = this.filterState[this._colKey(c)];
-      if (!set || !set.size) return;
-      all = all.filter((o) => {
-        const v = c.filter!.valueOf(o);
-        if (Array.isArray(v)) { const arr = v.length ? v : ["__none__"]; return arr.some((x) => set.has(String(x))); }
-        return set.has(String(v == null || v === "" ? "__none__" : v));
-      });
-    });
-    all = this._sortRows(all);
-    const total = all.length, pages = Math.max(1, Math.ceil(total / this.pageSize));
-    const page = Math.min(this.page, pages); this.page = page;
-    const rows = all.slice((page - 1) * this.pageSize, page * this.pageSize);
+    // G4 — la collection est-elle servie PAGE PAR PAGE par le serveur ? La SOURCE tranche (état
+    // d'hydratation + requête au repos) ; `null` = régime historique, intégralement préservé.
+    const serverPage = this.rowEngine
+      ? this.rowEngine.page(this._rowRequest(), { page: this.page, pageSize: this.pageSize })
+      : null;
+    let rows: any[], total: number, pages: number, page: number;
+    if (serverPage) {
+      // Les compteurs viennent du SERVEUR (total = COUNT(*)) : aucune arithmétique cliente, et le pager
+      // affiche la page RÉELLEMENT en main — jamais « page 2 » avec le contenu de la page 1.
+      rows = this._sortRows(this._applyColumnFilters(serverPage.rows));
+      total = serverPage.total; pages = serverPage.pages; page = serverPage.page;
+      this.page = page;
+    } else {
+      const all = this._sortRows(this._applyColumnFilters(this._collectRows()));
+      total = all.length; pages = Math.max(1, Math.ceil(total / this.pageSize));
+      page = Math.min(this.page, pages); this.page = page;
+      rows = all.slice((page - 1) * this.pageSize, page * this.pageSize);
+    }
     this._ensureScaffold();
     this._ensureToolbar();
-    this._paintBody(rows, total, pages, page);
+    // « Chargement… » plutôt que l'état vide tant qu'aucune page serveur n'est arrivée : un listing vide
+    // et un listing qui n'a pas encore répondu ne disent PAS la même chose à l'utilisateur.
+    this._paintBody(rows, total, pages, page,
+      (this.rowEngine && this.rowEngine.pageLoading) ? I18n.t("lists.chrome.loading") : this.emptyText);
     this._syncSortControls();   // reflète l'état de tri UNIQUE (this.sortKey/sortDir) sur le select + bouton de sens en barre
     this._saveState();
   }
@@ -483,7 +525,7 @@ export class ListView {
     RowMenu.open(trigger, items);
   }
 
-  private _paintBody(rows: any[], total: number, pages: number, page: number): void {
+  private _paintBody(rows: any[], total: number, pages: number, page: number, emptyText: string): void {
     this._bodyEl.classList.toggle("compact", this._compact);   // cellules plus denses en mode compact (CSS)
     const cols = this._visibleColumns();   // mode compact : sous-ensemble essentiel
     const head = cols.map((c) => {
@@ -496,7 +538,7 @@ export class ListView {
     }).join("") + `<th class="cell-actions">${I18n.t("lists.chrome.actions")}</th>`;
     let bodyHtml: string;
     if (rows.length === 0) {
-      bodyHtml = `<tr class="empty-row"><td colspan="${cols.length + 1}">${Html.escape(this.emptyText)}</td></tr>`;
+      bodyHtml = `<tr class="empty-row"><td colspan="${cols.length + 1}">${Html.escape(emptyText)}</td></tr>`;
     } else {
       bodyHtml = rows.map((o) => {
         // `data-label` = en-tête de la colonne : sert au repli en CARTES sous 560px (revue design lot D2) — le

@@ -1,4 +1,5 @@
 import { DataAdapter } from "./DataAdapter";
+import type { LoadOptions } from "./DataAdapter";
 import { PAGE_SIZE_DEFAULT, PAGE_SIZE_ALL } from "./config";
 import { RawRecord, Snapshot, Transaction, ListOptions, ListResult } from "./types";
 import { EntityRegistry } from "../models";
@@ -93,12 +94,17 @@ export class RestAdapter extends DataAdapter {
   private rows(res: any): RawRecord[] { return Array.isArray(res) ? res : (res && Array.isArray(res.rows) ? res.rows : []); }
 
   /* Boot : hydratation par collection (en parallèle). SANS document scopé (au boot, avant le choix d'un document),
-     renvoie un snapshot VIDE — le vrai chargement suit `setDocument()` (cf. restBootstrap). */
-  async load(): Promise<Snapshot> {
+     renvoie un snapshot VIDE — le vrai chargement suit `setDocument()` (cf. restBootstrap).
+     `skipCollections` (chantier LAZY-LOAD, cf. docs/hydratation.md) : ces collections ne sont PAS tirées —
+     c'est ICI que se paie (ou plutôt que ne se paie plus) le coût du boot. Leur clé reste ABSENTE du
+     snapshot, ce que `Store._hydrate` traite comme un tableau vide ; c'est le Store, et lui seul, qui sait
+     que « vide » signifie ici « pas encore chargée » (il les re-déclare `none` juste après). */
+  async load({ skipCollections = [] }: LoadOptions = {}): Promise<Snapshot> {
     if (!this.docId) return { meta: {} };
     const snap: Snapshot = { meta: {} };
+    const fetched = COLLECTIONS.filter((c) => skipCollections.indexOf(c) === -1);
     // pageSize très grand → la collection ENTIÈRE (le document complet) en une page.
-    await Promise.all(COLLECTIONS.map(async (c) => { snap[c] = this.rows(await this._send("GET", "/" + c + "?pageSize=" + PAGE_SIZE_ALL)); }));
+    await Promise.all(fetched.map(async (c) => { snap[c] = this.rows(await this._send("GET", "/" + c + "?pageSize=" + PAGE_SIZE_ALL)); }));
     try { snap.meta = (await this._send("GET", "/meta")) || {}; } catch (_) { snap.meta = {}; }
     return snap;
   }
@@ -106,6 +112,12 @@ export class RestAdapter extends DataAdapter {
 
   /* ---- lectures granulaires ---- */
   async list(collection: string, { page = 1, pageSize = PAGE_SIZE_DEFAULT, query = "", where = null, signal }: ListOptions = {}): Promise<ListResult> {
+    // PARITÉ DE GARDE avec load/loadMeta/maintenance/replaceAll : SANS document scopé, `dataBase`
+    // retombe sur `apiRoot` et l'URL viserait une route qui n'existe que scopée (404 en pleine face).
+    // Le cas est RÉEL depuis le lazy-load : le `store.init()` docless du boot déclare ses collections
+    // lazy, et la réconciliation des catalogues les fait aussitôt hydrater (cf. Store.init) — sans
+    // cette garde, chaque démarrage en mode API échouerait avant même le choix du document.
+    if (!this.docId) return { rows: [], total: 0, page: 1, pages: 1, pageSize };
     const qs = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
     if (query && query.trim()) qs.set("q", query.trim());
     if (where) Object.keys(where).forEach((f) => qs.set(f, where[f] === null || where[f] === undefined ? "null" : String(where[f])));

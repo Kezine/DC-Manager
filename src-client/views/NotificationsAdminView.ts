@@ -321,11 +321,25 @@ export class NotificationsAdminView {
      2) ABONNEMENTS (routage par type d'événement)
      -------------------------------------------------------------------------- */
 
+  /** HYDRATATION À LA DEMANDE du carnet de contacts (chantier lazy-load, cf. docs/hydratation.md).
+      Cette page a besoin de la liste COMPLÈTE des contacts, pas d'une page : elle RÉSOUT des libellés
+      par identifiant (tables des abonnements et de l'historique) et alimente un `<select>` où doit
+      figurer CHAQUE contact du document. Le gain du chargement paresseux est au BOOT ; une surface qui
+      a réellement besoin du tout le charge à son ouverture — une fois (l'état passe à `full`, les
+      appels suivants sont des no-op), et sans aucun test de mode : en mode fichier, tout est déjà
+      `full` par construction, `hydrate` ne fait rien. Parallélisée avec les appels du service : les
+      deux I/O sont indépendantes. */
+  private hydrateContacts(): Promise<string[]> { return this.store.hydrate(["contacts"]); }
+
   private async loadAbonnements(): Promise<void> {
     this.message(I18n.t("notify.abonnements.loading"));
     await this.guarded(async () => {
       // Les instances servent au sélecteur de canal ET à la résolution du libellé de canal en table.
-      const [subs, instances] = await Promise.all([this.client!.listSubscriptions(), this.client!.listInstances()]);
+      // Le carnet de contacts est hydraté EN MÊME TEMPS : sans lui, la table et le `<select>` de la
+      // modale d'abonnement seraient vides en mode API (collection chargée paresseusement).
+      const [subs, instances] = await Promise.all([
+        this.client!.listSubscriptions(), this.client!.listInstances(), this.hydrateContacts(),
+      ]);
       this.renderAbonnementsList(subs, instances);
     });
   }
@@ -564,7 +578,12 @@ export class NotificationsAdminView {
   private async loadHistorique(): Promise<void> {
     this.message(I18n.t("notify.historique.loading"));
     await this.guarded(async () => {
-      const page = await this.client!.listLog({ limit: NotificationsAdminView.LOG_LIMIT, offset: this.logOffset });
+      // Même hydratation à la demande que les abonnements : la colonne « Contact » résout un
+      // `contact_id` en NOM via le carnet du document (cf. hydrateContacts).
+      const [page] = await Promise.all([
+        this.client!.listLog({ limit: NotificationsAdminView.LOG_LIMIT, offset: this.logOffset }),
+        this.hydrateContacts(),
+      ]);
       this.renderHistorique(page);
     });
   }

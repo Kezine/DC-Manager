@@ -7,6 +7,12 @@ import {
   ListResult,
 } from "./types";
 
+/** Options du chargement initial. `skipCollections` = les collections que le Store charge
+    PARESSEUSEMENT (mode API, cf. docs/hydratation.md) : l'adaptateur ne les tire PAS, et le Store les
+    déclare aussitôt `none` dans son état d'hydratation. Un adaptateur dont le document est MONOLITHIQUE
+    (fichier local : « le document EST le fichier ») l'IGNORE — il n'y a rien à sauter dans un blob. */
+export interface LoadOptions { skipCollections?: readonly string[]; }
+
 /* =============================================================================
    Interface abstraite de la couche d'accès aux données — pattern Repository.
 
@@ -23,7 +29,7 @@ import {
    ============================================================================= */
 export abstract class DataAdapter {
   /* ---- bulk (boot / import) ---- */
-  async load(): Promise<Snapshot | null> { throw new Error("DataAdapter.load() non implémenté"); }
+  async load(_opts?: LoadOptions): Promise<Snapshot | null> { throw new Error("DataAdapter.load() non implémenté"); }
   async replaceAll(_state: Snapshot): Promise<unknown> { throw new Error("DataAdapter.replaceAll() non implémenté"); }
   async saveMeta(_meta: Record<string, any>): Promise<unknown> { throw new Error("DataAdapter.saveMeta() non implémenté"); }
   async loadMeta(): Promise<Record<string, any> | null> {
