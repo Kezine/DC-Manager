@@ -1,4 +1,5 @@
 import { Html } from "../core/Html";
+import { FloatPlacement } from "../core/FloatPlacement";
 import { Schema } from "../../src-shared/Schema";
 import { I18n } from "../i18n/I18n";
 
@@ -35,6 +36,11 @@ export interface AcController { destroy(): void; refresh(): void; close(): void;
 
    Inspiré du composant `attachAutocomplete` de l'app Compta (même app-suite),
    recodé en module TS testable et thémé (variables CSS de l'app).
+
+   La RÈGLE DE PLACEMENT (bascule à seuil, largeur `fill`, maxHeight, ancrage
+   par le bas + classe `flip-up`) vit dans le module pur `core/FloatPlacement`
+   (cadrage C §2.2) — doctrine au scroll : ancrée à un CHAMP, la liste SUIT
+   son ancre (repositionnée au scroll/resize), elle ne ferme pas.
    ============================================================================= */
 export class Autocomplete {
   /** Attache une liste d'autocomplétion à `input`. `getItems` fournit les candidats
@@ -51,16 +57,29 @@ export class Autocomplete {
     const limit = () => { const n = opts.getLimit ? opts.getLimit() | 0 : 10; return n > 0 ? n : 10; };
     const isOpen = () => list.classList.contains("open");
 
+    /* La RÈGLE DE PLACEMENT vit dans le module pur `core/FloatPlacement` (cadrage C §2.2) — ici,
+       seulement la mesure DOM et la pose des styles. Paramétrage historique de cette liste :
+       collée à l'input (gap 0, l'apparence « bordure commune » du CSS en dépend), LARGEUR calée
+       dessus (`fill`), bascule à SEUIL (moins de 220 px dessous et davantage dessus — la hauteur
+       de la liste VARIE à chaque frappe, un seuil fixe évite le battement), maxHeight comprimé
+       dans l'espace élu (plancher 120, retrait 12). `size.height: 0` est VOULU : basculée, la
+       liste s'ancre PAR LE BAS (`bottom` + classe `flip-up`) pour grandir vers le haut quand son
+       contenu change — la hauteur mesurée ne sert donc à rien, et l'omettre épargne un reflow
+       forcé (`offsetHeight`) à chaque frappe, comme le code historique. */
     const reposition = () => {
       const r = input.getBoundingClientRect();
-      const below = window.innerHeight - r.bottom, above = r.top;
-      const flip = below < 220 && above > below;   // pas de place en bas → ouvre vers le haut
-      list.style.left = r.left + "px";
-      list.style.width = r.width + "px";
-      list.style.maxHeight = Math.max(120, (flip ? above : below) - 12) + "px";
-      list.classList.toggle("flip-up", flip);
-      if (flip) { list.style.top = "auto"; list.style.bottom = (window.innerHeight - r.top) + "px"; }
-      else { list.style.bottom = "auto"; list.style.top = r.bottom + "px"; }
+      const placed = FloatPlacement.anchored(
+        r,
+        { width: r.width, height: 0 },
+        { width: window.innerWidth, height: window.innerHeight },
+        { gap: 0, align: "fill", flip: { minBelow: 220, above: "more" }, maxHeight: { floor: 120, inset: 12 } },
+      );
+      list.style.left = placed.left + "px";
+      list.style.width = placed.width + "px";
+      list.style.maxHeight = placed.maxHeight + "px";
+      list.classList.toggle("flip-up", placed.flipped);
+      if (placed.flipped) { list.style.top = "auto"; list.style.bottom = placed.bottom + "px"; }
+      else { list.style.bottom = "auto"; list.style.top = placed.top + "px"; }
     };
 
     const render = () => {

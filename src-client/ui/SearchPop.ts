@@ -2,6 +2,7 @@ import { StaleGate } from "./StaleGate";
 import { Icons } from "./Icons";
 import { OverlayA11y } from "./OverlayA11y";
 import { Fullscreen } from "./Fullscreen";
+import { FloatPlacement } from "../core/FloatPlacement";
 import { I18n } from "../i18n/I18n";
 
 /* =============================================================================
@@ -72,7 +73,9 @@ import { I18n } from "../i18n/I18n";
        (corps DÉFILANT d'une modale, liste à max-height, panneau 3D `.dc-side`) : un
        popover en position absolue y est coupé par l'overflow. Repositionné au scroll
        (capture — les défilements INTERNES de la modale comptent) et au resize,
-       re-parqué dans le champ à la fermeture (il meurt donc avec lui).
+       re-parqué dans le champ à la fermeture (il meurt donc avec lui). La RÈGLE DE
+       PLACEMENT vit dans le module pur `core/FloatPlacement` (doctrine au scroll
+       comprise : une surface ANCRÉE À UN CHAMP suit son ancre — c'est ce mode-ci).
    La navigation clavier SAUTE en-têtes, motifs et pied : seuls les items vivent
    dans `itemNodes`/`current`, le reste est `role="presentation"`.
 
@@ -507,22 +510,22 @@ export class SearchPop {
 
   /** POSITIONNEMENT PARTAGÉ d'un élément porté sur `<body>` (`.dc-pop-portal`) sous une ANCRE :
       sous elle, borné aux bords de l'écran, BASCULÉ au-dessus quand la place manque dessous et
-      qu'il y en a davantage dessus. Mesure APRÈS insertion dans le DOM (offsetHeight réel — la
-      hauteur dépend du contenu). STATIQUE et public : le PANNEAU du filtre cible (ui/FilterBar)
+      que le popover tient entier dessus. Mesure APRÈS insertion dans le DOM (offsetHeight réel —
+      la hauteur dépend du contenu). STATIQUE et public : le PANNEAU du filtre cible (ui/FilterBar)
       ancre sa coque `.tf-panel` au déclencheur avec la MÊME règle (maquette filtre-cible §5,
-      « aucun code de positionnement nouveau »). */
+      « aucun code de positionnement nouveau »).
+      La GÉOMÉTRIE vit dans le module pur `core/FloatPlacement` (cadrage C §2.2) — ici, seulement
+      la mesure DOM et la pose des styles. Paramétrage : les DÉFAUTS de la règle (gap 4, alignement
+      `start`, marge 8, bascule `fits`) SONT le comportement historique de ce popover — c'est lui
+      qui les a fixés. Seul l'ARRONDI reste un choix local (parité pixel avec l'historique). */
   static portalPlace(anchor: HTMLElement, portal: HTMLElement): void {
-    const rect = anchor.getBoundingClientRect();
-    const gap = 4;   // même écart que le popover absolu historique (top: calc(100% + 4px))
-    const portalHeight = portal.offsetHeight;
-    let top = rect.bottom + gap;
-    if (top + portalHeight > window.innerHeight && rect.top - gap - portalHeight >= 0) {
-      top = rect.top - gap - portalHeight;
-    }
-    const portalWidth = portal.offsetWidth;
-    const left = Math.max(8, Math.min(rect.left, window.innerWidth - portalWidth - 8));
-    portal.style.top = Math.round(top) + "px";
-    portal.style.left = Math.round(left) + "px";
+    const placed = FloatPlacement.anchored(
+      anchor.getBoundingClientRect(),
+      { width: portal.offsetWidth, height: portal.offsetHeight },
+      { width: window.innerWidth, height: window.innerHeight },
+    );
+    portal.style.top = Math.round(placed.top) + "px";
+    portal.style.left = Math.round(placed.left) + "px";
   }
 
   /** Coordonnées viewport du popover portail de CETTE instance (délègue à la règle partagée). */

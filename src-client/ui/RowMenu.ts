@@ -1,7 +1,12 @@
 /* Menu « plus d'actions » (overflow) ancré sous un bouton ⋮ d'une ligne de listing. Un seul menu ouvert à la
    fois ; fermeture au clic extérieur / Échap / scroll / resize. Inspiré du mécanisme `openRowMenu` de l'app Compta
    (listing des dépenses) — généralisé en items déclaratifs. Positionné en `position:fixed` (coordonnées viewport),
-   bascule au-dessus du trigger s'il manque de place en bas. */
+   bascule au-dessus du trigger s'il manque de place en bas.
+   La RÈGLE DE PLACEMENT vit dans le module pur `core/FloatPlacement` (cadrage C §2.2) — doctrine au scroll :
+   surface TRANSITOIRE, le menu FERME au scroll (son ancre a défilé, le contexte du geste est perdu) au lieu de
+   suivre comme les surfaces ancrées à un champ (SearchPop portail, autocomplétion). */
+import { FloatPlacement } from "../core/FloatPlacement";
+
 export interface RowMenuItem {
   label: string;
   icon?: string;        // HTML court (emoji ou <svg> inline)
@@ -46,11 +51,18 @@ export class RowMenu {
 
   private static mount(menu: HTMLElement, trigger: HTMLElement): void {
     document.body.appendChild(menu);
-    const rect = trigger.getBoundingClientRect();
-    const mw = menu.offsetWidth, mh = menu.offsetHeight, vpH = window.innerHeight, vpW = window.innerWidth;
-    let top = rect.bottom + 4; if (top + mh > vpH - 8) top = Math.max(8, rect.top - mh - 4);   // bascule au-dessus si déborde en bas
-    let left = rect.right - mw; if (left < 8) left = 8; if (left + mw > vpW - 8) left = vpW - mw - 8;
-    menu.style.top = top + "px"; menu.style.left = left + "px";
+    /* La GÉOMÉTRIE vit dans `core/FloatPlacement` (cadrage C §2.2) — ici, mesure + pose des styles.
+       Paramétrage historique de ce menu : aligné à la DROITE du déclencheur (`end` — le ⋮ vit en
+       bout de ligne, le menu se déploie vers la gauche), bascule au SIMPLE débordement bas
+       (`above: "always"` : un menu court trouve toujours sa place dessus, et `marginV: 8` borne le
+       haut basculé — c'est aussi la marge du test de débordement), recadrage horizontal marge 8. */
+    const placed = FloatPlacement.anchored(
+      trigger.getBoundingClientRect(),
+      { width: menu.offsetWidth, height: menu.offsetHeight },
+      { width: window.innerWidth, height: window.innerHeight },
+      { align: "end", marginV: 8, flip: { above: "always" } },
+    );
+    menu.style.top = placed.top + "px"; menu.style.left = placed.left + "px";
     trigger.setAttribute("aria-expanded", "true");
     this.el = menu; this.trigger = trigger;
     const onDoc = (e: Event) => { if (!menu.contains(e.target as Node) && e.target !== trigger) RowMenu.close(); };

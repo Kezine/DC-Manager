@@ -23,8 +23,14 @@
    court, seuls supports lus par les lecteurs d'écran et repli si JS/CSS tombe
    (le CSS pose `pointer-events:none` → le tooltip n'intercepte jamais un clic).
 
-   PLACEMENT : `place()` est une fonction PURE (aucun DOM) → testable headless.
+   PLACEMENT : la règle vit dans le module pur `core/FloatPlacement` (cadrage C
+   §2.2) — `place()` reste l'API publique (signature inchangée, testée) et
+   DÉLÈGUE à la politique `FloatPlacement.tooltip` (centré sous l'ancre, clamp
+   DUR au viewport — voir là-bas pourquoi cette politique est distincte de celle
+   des popovers interactifs). Doctrine au scroll : surface TRANSITOIRE, le
+   tooltip se MASQUE (un fixed ne suit pas son ancre — cf. `install`).
    ============================================================================= */
+import { FloatPlacement, FloatRect, FloatSize, FloatPoint } from "../core/FloatPlacement";
 
 /** Paire clé/valeur d'une section (rendue en `.tt-line`). */
 export interface TipLine { k: string; v: string; }
@@ -41,10 +47,12 @@ export interface TipContent {
   sections?: TipSection[];
 }
 
-/** Rectangle d'ancrage (sous-ensemble de DOMRect — types plats pour rester testable sans DOM). */
-export interface TipRect { left: number; top: number; right: number; bottom: number; width: number; height: number; }
-export interface TipSize { width: number; height: number; }
-export interface TipPoint { x: number; y: number; }
+/** Rectangle d'ancrage, taille, point : les types GÉOMÉTRIQUES vivent avec la règle dans
+    `core/FloatPlacement` — ré-exportés ici sous leurs noms historiques (API publique conservée,
+    consommée via `ui/index.ts`). */
+export type TipRect = FloatRect;
+export type TipSize = FloatSize;
+export type TipPoint = FloatPoint;
 
 export class RichTooltip {
   /** Attribut porteur de la CLÉ de contenu. */
@@ -70,22 +78,16 @@ export class RichTooltip {
 
   /* ---------------- Placement (PUR — testable headless) ---------------- */
 
-  /** Position du tooltip pour une ancre donnée. Règles :
+  /** Position du tooltip pour une ancre donnée. Règles (inchangées) :
       - par défaut SOUS l'ancre, centré horizontalement dessus ;
       - FLIP au-dessus si ça déborde en bas ET qu'il y a la place au-dessus
         (sinon on garde le bas et on laisse le clamp faire au mieux) ;
       - CLAMP dans le viewport (jamais de coordonnée négative ; si le tooltip est
-        plus grand que le viewport, on colle au bord 0 plutôt que de partir hors-champ). */
+        plus grand que le viewport, on colle au bord 0 plutôt que de partir hors-champ).
+      La géométrie vit dans `core/FloatPlacement.tooltip` (cadrage C §2.2) — cette
+      signature publique SURVIT et délègue. */
   static place(anchor: TipRect, tip: TipSize, vp: TipSize, gap: number = RichTooltip.GAP): TipPoint {
-    let y = anchor.bottom + gap;
-    const overflowsBottom = y + tip.height > vp.height;
-    const roomAbove = anchor.top - gap - tip.height >= 0;
-    if (overflowsBottom && roomAbove) y = anchor.top - gap - tip.height;
-    y = Math.max(0, Math.min(y, Math.max(0, vp.height - tip.height)));
-
-    let x = anchor.left + anchor.width / 2 - tip.width / 2;
-    x = Math.max(0, Math.min(x, Math.max(0, vp.width - tip.width)));
-    return { x, y };
+    return FloatPlacement.tooltip(anchor, tip, vp, gap);
   }
 
   /* ---------------- Rendu (DOM) ---------------- */

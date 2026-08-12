@@ -186,7 +186,8 @@ cibles est longue, croissante et à libellés composés → le contrôle est un 
   `core/TargetFilterDisplay` (testé) ; l'i18n et le DOM restent dans `FilterBar`.
 - **Le panneau** (`.tf-panel`, 320 px) s'ouvre en **PORTAIL** sur `<body>` (`.dc-pop-portal`), ancré au
   déclencheur par la règle **partagée** `SearchPop.portalPlace` (retournement haut/bas, recadrage
-  viewport, quasi-feuille mobile). Le portail est ce qui résout le conflit de largeurs : le popover de
+  viewport, quasi-feuille mobile) — dont la géométrie vit dans le module pur `core/FloatPlacement`
+  (règle UNIQUE des surfaces flottantes ancrées : SearchPop portail, autocomplétion, menu ⋮, tooltips). Le portail est ce qui résout le conflit de largeurs : le popover de
   résultats (~380 px) ne tient pas dans le menu « + Filtre » (200 px) — le menu ne bouge donc pas d'un
   pixel et le panneau déborde **volontairement et proprement**. Contenu, dans
   l'ordre : section « valeur courante » facultative (badge de famille + nom + ✕ — **le ✕ vide le filtre

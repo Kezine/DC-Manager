@@ -20,6 +20,7 @@ const DOMAINS = [
   "./test-ui-modalstack.js",     // primitives UI : politique de la PILE de modales (core/ModalStack)
   "./test-session-expiry.js",    // contrôle d'accès : verrou « session expirée (401) → retour au login » (core/SessionExpiry)
   "./test-ui-draglist.js",       // primitives UI : glisser-déposer de liste (ui/DragList — seule la décision de dépôt est pure)
+  "./test-float-placement.js",   // primitives UI : règle de PLACEMENT des surfaces flottantes ancrées (core/FloatPlacement — paramétrages SearchPop portail / Autocomplete / RowMenu + politique tooltip)
   "./test-sync.js",              // rechargement granulaire REST
   "./test-shared-validation.js", // code partagé front/back
   "./test-spec-completude.js",   // spec COMPLÈTE (D3a migration DB) : verrou corpus démo ⇄ SPEC_FIELDS + FieldType json + défauts sensibles

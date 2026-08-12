@@ -813,6 +813,9 @@ module.exports = async () => {
 
   await section("RichTooltip.place : placement PUR (sous l'ancre, flip, clamp)", async () => {
   {
+    /* Depuis le cadrage C §2.2, la géométrie vit dans `core/FloatPlacement.tooltip` (testée dans
+       test-float-placement.js) et `place` DÉLÈGUE. Ces cas historiques restent joués sur la façade
+       publique : ils verrouillent la NON-RÉGRESSION de la délégation (signature et pixels). */
     const VP = { width: 1000, height: 800 };
     const TIP = { width: 200, height: 100 };
     const rect = (left, top, w, h) => ({ left, top, right: left + w, bottom: top + h, width: w, height: h });
