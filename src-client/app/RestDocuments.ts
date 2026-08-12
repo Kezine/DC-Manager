@@ -225,7 +225,8 @@ export class RestDocumentController {
     } catch (e) { this.flog("SSE indisponible", e); }
   }
 
-  /** INSTRUMENTATION du boot (volet A du cadrage chargement-dynamique, décisions D1/D3 2026-08-02) :
+  /** INSTRUMENTATION du boot (volet A du cadrage chargement-dynamique, décisions D1/D3 2026-08-02 —
+      documentation pérenne : docs/hydratation.md § Instrumentation) :
       une ligne de relevé par hydratation complète — records/collection, taille approx., durée — via le
       `Log` maison (scope `boot`, visible avec la préférence « Logs de débogage »). Le DÉPASSEMENT des
       seuils D3 (payload > 5 Mo OU durée > 1 s), lui, sort en `console.warn` NON gaté : c'est l'alerte

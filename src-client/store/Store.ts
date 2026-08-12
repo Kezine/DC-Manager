@@ -9,7 +9,9 @@ import { PortType } from "../models/PortType";
 import { CableType } from "../models/CableType";
 import { Waypoint } from "../models/Waypoint";
 import { PortRoles } from "../registries/PortRoles";
+import { HydrationState } from "../core/HydrationState";
 import { Id } from "../core/Id";
+import { Log } from "../core/Log";
 import { PatchDiff } from "../core/PatchDiff";
 import { Text } from "../core/Text";
 import { Locatable } from "../core/Locatable";
@@ -75,6 +77,17 @@ export class Store {
   data: Record<string, any[]>;
   meta: StoreMeta;
   restored?: boolean;
+  /** ÉTAT D'HYDRATATION par collection (lot 0 du chantier lazy-load — cf. docs/hydratation.md).
+      `data[c] = []` ne distingue pas « vide » de « non chargée » : cet état porte la vérité manquante,
+      et les gardes G1 (anti-snapshot), G2 (hydrateAll avant export) et G3 (SSE) la consomment.
+      Injecté par l'hôte (main.ts) : état TRAÇANT en mode API ; null en mode fichier/visualiseur →
+      état INERTE « tout full, par construction » (principe n°15, injection nulle). */
+  readonly hydration: HydrationState;
+  /** Point d'ACCROCHE G3 (rempli au lot 1) : des collections NON hydratées ont été SAUTÉES par un
+      rechargement SSE (`reloadCollections`) — leurs enregistrements en cache peuvent être périmés et
+      leurs caches DÉRIVÉS (compteurs d'onglets, facettes…) sont à invalider ici. En lot 0 personne ne
+      s'y branche : aucune collection n'est lazy, donc rien n'est jamais sauté. */
+  onLazyReloadDeferred: ((collections: string[]) => void) | null = null;
   private _idIndex: Record<string, Map<string, any>>;
   private _fk: Record<string, FieldIndex>;
   private _listeners: Array<() => void>;
@@ -87,8 +100,11 @@ export class Store {
       pas encore créé) N'est PAS mémoïsée — sinon elle polluerait chaque composante avec le réseau de l'autre. */
   private _netCache = new Map<string, { ids: string[]; primary: string | null; primaryPort: string | null }>();
 
-  constructor(adapter: DataAdapter) {
+  constructor(adapter: DataAdapter, hydration: HydrationState | null = null) {
     this.adapter = adapter;
+    // Injection NULLE (forme du projet, cf. main.ts) : sans état injecté, l'état INERTE — mode fichier et
+    // visualiseur restent « tout full » PAR CONSTRUCTION, aucun `if (mode)` ici ni ailleurs.
+    this.hydration = hydration || HydrationState.alwaysFull();
     this.data = {};
     COLLECTIONS.forEach((c) => { this.data[c] = []; });
     this.meta = { docName: "", theme: "dark", graphLayout: null, graphLayouts: [], activeLayoutId: null, graphFrames: [] };
@@ -119,6 +135,11 @@ export class Store {
     this._ensureSites();
     this._migrateDepths();
     this._reindex();
+    // Un _hydrate absorbe un instantané COMPLET du document (init, import/replaceAll, newDocument,
+    // undo/redo) : quel qu'ait été l'état précédent, le cache reflète désormais TOUT le document → tout
+    // redevient full. ⚠ CONTRAT des vagues futures du lazy-load : une ouverture qui NE chargera PAS tout
+    // devra re-déclarer ses collections lazy APRÈS ce point (cf. docs/hydratation.md § Transitions).
+    this.hydration.markAllFull();
   }
   /** MIGRATION one-shot (EN MÉMOIRE) : profondeur d'équipement enum legacy (full/half/quarter) → mm.
       Référence = cage de SA baie s'il est racké, cage de la baie par défaut sinon (mêmes fractions que
@@ -229,17 +250,50 @@ export class Store {
      Pilotée par `ReloadPlanner.plan().refetchCollections`. */
   async reloadCollections(collections: string[]): Promise<string[]> {
     const targets = (collections || []).filter((c, i, a) => COLLECTIONS.indexOf(c) !== -1 && a.indexOf(c) === i);
-    if (!targets.length) return [];
-    // Chaque collection en UNE page (document complet de cette collection). En parallèle : I/O réseau indépendantes.
-    await Promise.all(targets.map(async (c) => {
+    // G3 (docs/hydratation.md) : ne re-tirer QUE les collections HYDRATÉES. Re-tirer EN ENTIER une
+    // collection lazy (`none`/`partial`) au premier événement SSE d'un autre client annulerait tout le
+    // bénéfice du chargement paresseux. Les collections sautées passent par le point d'accroche
+    // `onLazyReloadDeferred` (invalidation des caches dérivés — compteurs au lot 1) et sont tracées.
+    const { refetch, deferred } = this.hydration.splitReload(targets);
+    if (deferred.length) {
+      Log.d("store", "reloadCollections : collections non hydratées SAUTÉES (G3)", deferred);
+      this.onLazyReloadDeferred?.(deferred);
+    }
+    if (!refetch.length) return [];
+    await this._refetchWhole(refetch);
+    this.restored = true;
+    return refetch;
+  }
+
+  /** Re-tire de l'adapter le CONTENU COMPLET des collections indiquées (une page PAGE_SIZE_ALL chacune,
+      en parallèle : I/O réseau indépendantes), remplace leurs entités, ré-indexe et marque `full`.
+      Chemin UNIQUE du rechargement granulaire (`reloadCollections`) et de l'hydratation totale
+      (`hydrateAll`) — le corps était identique, le dupliquer les aurait laissés diverger (principe n°3). */
+  private async _refetchWhole(collections: string[]): Promise<void> {
+    await Promise.all(collections.map(async (c) => {
       const res = await this.adapter.list(c, { pageSize: PAGE_SIZE_ALL });
       const Cls = ENTITY_CLASSES[c];
       this.data[c] = (res.rows || []).map((o: RawRecord) => new Cls(o));
     }));
-    if (targets.includes("equipments")) this._migrateDepths();   // rechargement granulaire : re-migrer les profondeurs legacy
-    targets.forEach((c) => this._reindexCollection(c));   // index reconstruits pour les seules collections rechargées
-    this.restored = true;
-    return targets;
+    if (collections.includes("equipments")) this._migrateDepths();   // re-migrer les profondeurs legacy
+    collections.forEach((c) => {
+      this._reindexCollection(c);      // index reconstruits pour les seules collections rechargées
+      this.hydration.markFull(c);      // le cache contient désormais TOUTE la collection (vérité d'état)
+    });
+  }
+
+  /** G2 — hydrate TOUT le corpus : recharge EN ENTIER les collections non `full` avant une opération qui
+      exige le document COMPLET (export JSON autonome, export visualiseur HTML — cf. FileDocuments).
+      Arbitrage acté (2026-08-12, n°3) : un export HYDRATE tout plutôt que d'être refusé ou silencieusement
+      amputé. No-op quand tout est déjà full (lot 0 : toujours, donc AUCUN coût nouveau) ; en corpus lazy,
+      c'est le prix assumé d'un export complet. Un échec réseau REJETTE (l'export n'a pas lieu — jamais un
+      fichier tronqué). Renvoie les collections rechargées (trace/tests). */
+  async hydrateAll(): Promise<string[]> {
+    const missing = this.hydration.notFullCollections().filter((c) => COLLECTIONS.indexOf(c) !== -1);
+    if (!missing.length) return [];
+    Log.d("store", "hydrateAll : hydratation complète avant export (G2)", missing);
+    await this._refetchWhole(missing);
+    return missing;
   }
 
   /* Recharge la MÉTA du document (nom, dispositions, thème…) depuis l'adapter, sans toucher aux entités.
@@ -306,6 +360,17 @@ export class Store {
     catch (e) { console.warn("saveMeta a échoué", e); this.onPersistError?.("meta", e); }
   }
   private async _persistAll(): Promise<void> {
+    // 🚨 GARDE G1 — anti-snapshot partiel (docs/hydratation.md). `adapter.replaceAll(toJSON())` devient un
+    // `PUT /snapshot` en mode API, que le serveur applique en DELETE + réinsertion PAR COLLECTION : dérivé
+    // d'un cache où une collection n'est pas `full`, il EFFACERAIT côté serveur tout ce qui n'est pas en
+    // mémoire — PERTE DE DONNÉES. Le chemin le plus sournois est le boot : `init()` fait
+    // `if (syncCatalogs()) _persistAll()` — un boot futur à collections lazy déclencherait un snapshot
+    // amputé sans cette garde. Refus BRUYANT (HydrationError, AVANT le try) : ce n'est PAS un échec de
+    // persistance à router vers onPersistError (qui « avale » en toast), c'est un garde-fou structurel qui
+    // doit remonter à l'appelant. Les chemins légitimes passent PAR CONSTRUCTION : mode fichier/visualiseur
+    // (état inerte tout-full), import `replaceAll` et `newDocument` (remplacement TOTAL voulu : `_hydrate`
+    // vient de re-marquer tout full — le snapshot poussé EST le document complet).
+    this.hydration.assertFullyHydrated("persistAll (adapter.replaceAll / PUT /snapshot)");
     try { await this.adapter.replaceAll(this.toJSON()); }
     catch (e) { console.warn("replaceAll a échoué", e); this.onPersistError?.("all", e); }
   }
@@ -347,6 +412,10 @@ export class Store {
      déjà au cache ; normalisation + copie des tableaux via le constructeur). */
   private _absorbRecord(collection: string, r: RawRecord): any {
     if (!r || !r.id) return null;
+    // Transition d'hydratation : absorber un enregistrement d'une collection déclarée lazy (`none`) la
+    // rend `partial` — le cache en détient DÉSORMAIS une fraction, plus jamais « rien », pas encore
+    // « tout ». No-op sur une collection `full` (lot 0 : toujours). Cf. docs/hydratation.md.
+    this.hydration.noteAbsorption(collection);
     const Cls = ENTITY_CLASSES[collection];
     const fresh: any = new Cls(r);
     const cached = this.get(collection, r.id);
@@ -1209,7 +1278,12 @@ export class Store {
     });
   }
 
-  /* ---- import / remplacement complet (BULK légitime) ---- */
+  /* ---- import / remplacement complet (BULK légitime) ----
+     Vis-à-vis de la garde G1 (docs/hydratation.md) : ces deux chemins passent PAR CONSTRUCTION, même si le
+     corpus était partiel juste avant — `_hydrate` remplace le cache par un document COMPLET (l'import est
+     un format d'échange autosuffisant ; un document neuf est complet et vide) et re-marque tout `full`
+     AVANT `_persistAll`. Le remplacement TOTAL est ici l'INTENTION de l'appelant, pas un accident : le
+     danger que G1 ferme est le snapshot DÉRIVÉ d'un cache incomplet, jamais l'import délibéré. */
   async replaceAll(raw: Snapshot | null): Promise<void> {
     this._hydrate(raw);
     this.syncCatalogs();   // réconcilie le catalogue (code = source de vérité) AVANT de persister → les nouvelles entrées partent dans l'écriture

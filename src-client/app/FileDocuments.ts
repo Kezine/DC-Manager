@@ -148,6 +148,12 @@ export class FileDocumentController {
       visualiseur HTML (`exportStandalone`) : les pièces y sont LISTABLES mais pas téléchargeables — le
       lot B affichera l'avertissement UI au point d'export (cf. docs/attachments.md § Exports). */
   async snapshotWithImages(): Promise<string> {
+    // 🚨 GARDE G2 (docs/hydratation.md, arbitrage n°3 du 2026-08-12) : un EXPORT porte le document ENTIER —
+    // en corpus lazy (mode API, vagues futures), on HYDRATE TOUT avant de sérialiser, jamais un export
+    // silencieusement amputé ni refusé. Point UNIQUE des deux exports (JSON autonome `exportJsonDownload`
+    // et visualiseur HTML `exportStandalone`, qui passent tous deux ici). No-op tant que tout est full
+    // (lot 0 : toujours) ; un échec réseau REJETTE → pas d'export plutôt qu'un export tronqué.
+    await this.store.hydrateAll();
     const obj: any = this.store.toJSON();
     if (this.imageStore.count() > 0) obj.faceImages = await this.imageStore.toLegacyArray();
     return JSON.stringify(obj, null, 2);
@@ -175,6 +181,11 @@ export class FileDocumentController {
   }
   async writeToHandle(handle: any): Promise<void> {
     this.ensureFileId();
+    // Même garantie G2 que `snapshotWithImages` : le `.json` écrit sur disque porte le document ENTIER.
+    // En mode fichier c'est un no-op par construction (état d'hydratation inerte, tout full) — la ligne
+    // n'existe que pour la sûreté STRUCTURELLE : aucun chemin d'écriture de fichier, présent ou futur,
+    // ne peut sérialiser un cache partiel (cf. docs/hydratation.md § G2).
+    await this.store.hydrateAll();
     const w = await handle.createWritable(); await w.write(this.serializeJson()); await w.close();
     this.session.markSaved(); this.rememberHandle(handle, handle.name || this.name);
   }

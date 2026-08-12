@@ -1,7 +1,9 @@
 /* =============================================================================
    HydrationStats — INSTRUMENTATION du boot REST (volet A du cadrage
    `.notes/toDos/chargement-dynamique-document-cadrage-2026-08-02.md`, décision
-   D1/D3 du 2026-08-02).
+   D1/D3 du 2026-08-02). Documentation pérenne : docs/hydratation.md
+   § Instrumentation — le chantier « lazy-load des collections » (état
+   d'hydratation `core/HydrationState` + gardes) s'appuie sur ces mesures.
 
    POURQUOI : « actuellement on charge tout » est ACCEPTABLE tant que le document
    reste petit — mais cette affirmation doit être MESURÉE, pas supposée. À chaque

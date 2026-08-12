@@ -22,6 +22,7 @@ const DOMAINS = [
   "./test-ui-draglist.js",       // primitives UI : glisser-déposer de liste (ui/DragList — seule la décision de dépôt est pure)
   "./test-float-placement.js",   // primitives UI : règle de PLACEMENT des surfaces flottantes ancrées (core/FloatPlacement — paramétrages SearchPop portail / Autocomplete / RowMenu + politique tooltip)
   "./test-sync.js",              // rechargement granulaire REST
+  "./test-hydration.js",         // état d'HYDRATATION par collection + gardes G1-G3 (lot 0 lazy-load) : module pur core/HydrationState (niveaux/transitions/prédicats, état inerte alwaysFull, erreur nommée), câblage Store (G1 anti-snapshot, G2 hydrateAll, G3 reloadCollections + point d'accroche)
   "./test-shared-validation.js", // code partagé front/back
   "./test-spec-completude.js",   // spec COMPLÈTE (D3a migration DB) : verrou corpus démo ⇄ SPEC_FIELDS + FieldType json + défauts sensibles
   "./test-relational-schema.js", // générateur DDL relationnel (L1 migration DB) : golden CREATE TABLE/INDEX dérivés de la spec + INDEX_SPEC partagé

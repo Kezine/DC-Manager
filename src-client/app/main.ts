@@ -34,6 +34,7 @@ import type { CertFicheHooks, CertFicheMatch } from "../views/CertFicheHooks";
 import type { CertTargetResolver } from "../views/CertsAdminView";
 import type { CertificateListItem } from "../views/forms/CertsClient";
 import { Download } from "../core/Download";
+import { HydrationState } from "../core/HydrationState";   // état d'hydratation par collection (lot 0 lazy-load — injecté en mode API seulement)
 import { Prefs } from "../core/Prefs";
 import { SessionExpiry } from "../core/SessionExpiry";   // verrou idempotent « session expirée → retour au login » (mode API)
 import { Log } from "../core/Log";
@@ -74,7 +75,12 @@ const API_BASE_URL = (prefs.apiBaseUrl && prefs.apiBaseUrl.trim()) || INJECTED.a
 const adapter = REST_MODE
   ? new RestAdapter({ baseUrl: API_BASE_URL })
   : new BrowserStorageAdapter({ persistent: false, onUndoable: noteUndoable });
-const store = new Store(adapter);
+// ÉTAT D'HYDRATATION par collection (lot 0 du chantier lazy-load — cf. docs/hydratation.md) : en mode API,
+// état TRAÇANT — les vagues 1-3 y déclareront leurs collections lazy à l'ouverture d'un document ; en mode
+// fichier/visualiseur, INJECTION NULLE → le Store fabrique l'état INERTE « tout full, par construction »
+// (« le document EST le fichier », principe n°15 — `declareLazy` y est sans effet). Au lot 0, personne ne
+// déclare rien : comportement STRICTEMENT inchangé, mais les gardes G1-G3 du Store sont réelles.
+const store = new Store(adapter, REST_MODE ? new HydrationState() : null);
 // LECTEUR SERVEUR des listings (lot 3 « listings serveur-pilotés », cf. docs/recherche.md) — mode API
 // SEULEMENT. Injecté dans chaque `ListView` : une requête ACTIVE (recherche saisie, ou filtre de cible
 // traduisible en `where`) est alors servie par le SERVEUR (colonne `search` enrichie), avec anti-rebond,
