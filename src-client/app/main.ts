@@ -93,9 +93,11 @@ const listRemoteReader: RemoteListReader | null = REST_MODE ? {
     (await store.list(collection, { query, where, pageSize: limit, signal })).rows,
   // PAGE serveur d'une collection NON hydratée (garde G4, cf. docs/hydratation.md) : le MÊME `Store.list`,
   // mais on remonte aussi les compteurs — `total` est un `COUNT(*)` SQL, c'est lui qui rend le pager RÉEL.
+  // `sort` (pagination ORDONNÉE complète, lot 1b) : le critère de tri du listing, mappé en champ serveur
+  // par la vue (`core/ListServerSort`), part en `sort`/`dir` — l'ORDER BY ordonne le CORPUS entier.
   // Les lignes reçues sont absorbées au Store (`_absorbRecord`), donc l'état d'hydratation passe à `partial`.
-  page: async (collection, { page, pageSize, where, signal }) => {
-    const res = await store.list(collection, { page, pageSize, where, signal });
+  page: async (collection, { page, pageSize, where, sort, signal }) => {
+    const res = await store.list(collection, { page, pageSize, where, sort: sort ? sort.field : null, dir: sort ? sort.dir : null, signal });
     return { rows: res.rows, total: res.total, page: res.page, pages: res.pages };
   },
 } : null;

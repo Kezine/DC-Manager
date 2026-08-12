@@ -116,12 +116,16 @@ export const INDEX_SPEC: Record<string, string[]> = {
     SQL — `row` de `racks`, p. ex. — et le générateur ne connaît pas la liste des réservés). */
 export class RelationalSchema {
   /** Colonnes d'AUDIT posées par le serveur (AuditStamp) APRÈS validation — NON déclarées dans la spec
-      (passthrough assumé, cf. doctrine `CollectionSpec`), mais colonnes standard du schéma cible. Ordre FIXE. */
-  private static readonly AUDIT_COLUMNS: readonly string[] = ["created_by", "updated_by", "created_date", "updated_date"];
+      (passthrough assumé, cf. doctrine `CollectionSpec`), mais colonnes standard du schéma cible. Ordre FIXE.
+      PUBLIQUE : `ListOrder` (liste blanche des colonnes triables) en dérive les critères d'audit —
+      une seconde liste divergerait au premier ajout (principe n°3). */
+  static readonly AUDIT_COLUMNS: readonly string[] = ["created_by", "updated_by", "created_date", "updated_date"];
 
   /** Affinité SQLite d'un type de spec. `number`→NUMERIC (jamais REAL, pour préserver les entiers) ;
-      `boolean`→INTEGER (0/1) ; tout le reste (`string`, `string[]`, `json`)→TEXT (tableaux/structures = JSON). */
-  private static sqlType(type: FieldType): string {
+      `boolean`→INTEGER (0/1) ; tout le reste (`string`, `string[]`, `json`)→TEXT (tableaux/structures = JSON).
+      PUBLIQUE : `ListOrder` s'en sert pour décider `COLLATE NOCASE` (colonnes TEXT seulement) — la MÊME
+      source d'affinité que le DDL, jamais une table parallèle. */
+  static sqlType(type: FieldType): string {
     switch (type) {
       case "number":  return "NUMERIC";
       case "boolean": return "INTEGER";
@@ -129,8 +133,9 @@ export class RelationalSchema {
     }
   }
 
-  /** Identifiant SQL entre guillemets doubles. */
-  private static quote(identifier: string): string {
+  /** Identifiant SQL entre guillemets doubles. PUBLIQUE : `ListOrder` (fragment ORDER BY du tri
+      serveur) quote avec la MÊME convention — dupliquer un quoting SQL serait s'offrir une divergence. */
+  static quote(identifier: string): string {
     return '"' + identifier + '"';
   }
 

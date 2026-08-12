@@ -15,11 +15,15 @@
       serveur mémoïsé sinon, invalidé par les écritures et par le SSE sauté (G3) ;
    6. le PAGER SERVEUR RÉEL (garde G4) : décision de régime (`StoreListRowSource.isServerPaged`) et
       machinerie de page du moteur (`ListRowEngine.page` : compteurs serveur, anti-relance, annulation
-      d'une page devancée, échec sans boucle, oubli sur mutation).
+      d'une page devancée, échec sans boucle, oubli sur mutation) ;
+   7. le TRI SERVEUR du régime pagé (pagination ORDONNÉE complète — lot 1b) : le tri dans la signature
+      de page (changer de critère EST une nouvelle demande), sa transmission par la source, et le
+      mapping critère de vue → champ du modèle (`core/ListServerSort`, validé par la liste blanche
+      partagée `ListOrder`) — dont les `sortField` déclarés par le listing contacts pilote.
 
    Harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, D, Store, EntityRegistry, makeStore } = require("./harness.js");
+const { ck, section, D, SHARED, Store, EntityRegistry, makeStore } = require("./harness.js");
 const { LAZY_COLLECTIONS_API } = D("core/LazyCollections.js");
 const { CollectionCountCache } = D("core/CollectionCountCache.js");
 const { HydrationState } = D("core/HydrationState.js");
@@ -284,7 +288,13 @@ module.exports = async () => {
     ck.eq(seen[0].pageSize, 10, "fetchPage : la taille de page demandée part au serveur");
     ck.eq(seen[0].page, 2, "fetchPage : la page demandée aussi (c'est le serveur qui découpe)");
     ck.eq(seen[0].where, null, "fetchPage : `where` toujours null — le régime paginé exige une requête au repos");
+    ck.eq(seen[0].sort, null, "fetchPage : sans critère mappé, `sort` part null (ordre serveur par défaut)");
     ck.eq(page.total, 9, "fetchPage : le TOTAL serveur (COUNT(*)) remonte tel quel — c'est lui qui rend le pager réel");
+
+    // -- TRI serveur (pagination ORDONNÉE complète, lot 1b) : le critère mappé est TRANSMIS tel quel. --
+    await apiSource.fetchPage(req("contacts"), { page: 1, pageSize: 10, sort: { field: "name", dir: "desc" } }, new AbortController().signal);
+    ck.eq(JSON.stringify(seen[1].sort), JSON.stringify({ field: "name", dir: "desc" }),
+      "🎯 fetchPage : le tri du listing part au lecteur (champ + direction) — c'est le serveur qui ordonne, la source ne retrie rien");
   });
 
   await section("G4 : ListRowEngine.page — compteurs serveur, anti-relance, annulation, échec, oubli", async () => {
@@ -390,11 +400,63 @@ module.exports = async () => {
       } finally { console.warn = warn; }
     }
 
-    // -- Signature de page : la découpe en fait partie, le TRI non (il s'applique à la page reçue). --
-    const sig = (p, s) => ListRowEngine.pageSignature(req, { page: p, pageSize: s });
+    // -- Signature de page : découpe ET tri en font partie (pagination ORDONNÉE complète — l'ORDER BY
+    //    redécoupe le corpus : changer de critère ou de direction EST une nouvelle demande serveur). --
+    const sig = (p, s, sort) => ListRowEngine.pageSignature(req, { page: p, pageSize: s, sort: sort || null });
     ck(sig(1, 25) !== sig(2, 25), "pageSignature : changer de page est une AUTRE demande serveur");
     ck(sig(1, 25) !== sig(1, 50), "pageSignature : changer la taille de page aussi");
     ck.eq(sig(1, 25), sig(1, 25), "pageSignature : stable à état égal (sinon chaque rendu relancerait le réseau)");
+    ck(sig(1, 25) !== sig(1, 25, { field: "name", dir: "asc" }),
+      "🎯 pageSignature : poser un TRI serveur est une nouvelle demande (lot 1b — le pilote disait l'inverse, c'est levé)");
+    ck(sig(1, 25, { field: "name", dir: "asc" }) !== sig(1, 25, { field: "name", dir: "desc" }),
+      "pageSignature : changer la DIRECTION aussi (l'ORDER BY change)");
+    ck(sig(1, 25, { field: "name", dir: "asc" }) !== sig(1, 25, { field: "email", dir: "asc" }),
+      "pageSignature : changer le CHAMP aussi");
+    ck.eq(sig(1, 25, { field: "name", dir: "asc" }), sig(1, 25, { field: "name", dir: "asc" }),
+      "pageSignature : stable à tri égal");
+    ck.eq(sig(1, 25), sig(1, 25, null),
+      "pageSignature : sort absent (source d'avant le lot 1b) ≡ sort null — même identité, aucune relance");
+  });
+
+  await section("Lot 1b : ListServerSort — mapping critère de vue → champ serveur (+ sortField du pilote contacts)", async () => {
+    const { ListServerSort } = D("core/ListServerSort.js");
+    const columns = [
+      { key: "name", sortField: "name" },
+      { key: "org", sortField: "organization" },
+      { key: "col5" },                              // colonne triable SANS champ serveur (accesseur dérivé)
+      { key: "bad", sortField: "napas" },           // sortField FAUTIF (hors liste blanche)
+      { key: "oper", sortField: "search" },         // sortField FAUTIF (colonne opérationnelle)
+    ];
+
+    // -- Critères INTRINSÈQUES : toujours mappables (colonnes d'audit de la liste blanche). --
+    ck.eq(ListServerSort.fieldOf("contacts", "__created__", columns), "created_date",
+      "🎯 __created__ → created_date (le critère « Date de création » ordonne le corpus, lui aussi)");
+    ck.eq(ListServerSort.fieldOf("contacts", "__updated__", columns), "updated_date", "__updated__ → updated_date");
+
+    // -- Colonnes : sortField déclaré → champ ; sans déclaration → null (repli « trier la page reçue »). --
+    ck.eq(ListServerSort.fieldOf("contacts", "org", columns), "organization", "colonne à sortField → son champ du modèle");
+    ck.eq(ListServerSort.fieldOf("contacts", "col5", columns), null, "colonne SANS sortField → null (repli assumé du pilote, documenté)");
+    ck.eq(ListServerSort.fieldOf("contacts", "zzz", columns), null, "critère inconnu → null (état de session d'une autre version)");
+
+    // -- Garde-fou par la liste blanche PARTAGÉE : un sortField mal déclaré DÉGRADE au lieu de 400 en boucle. --
+    ck.eq(ListServerSort.fieldOf("contacts", "bad", columns), null,
+      "🎯 sortField hors liste blanche → null : jamais envoyé au serveur (dégradation propre, pas de 400 à chaque page)");
+    ck.eq(ListServerSort.fieldOf("contacts", "oper", columns), null, "sortField opérationnel (search) → refusé pareil");
+
+    // -- `of` : le tri COMPLET (champ + direction suivant l'état de la vue). --
+    ck.eq(JSON.stringify(ListServerSort.of("contacts", "name", "desc", columns)), JSON.stringify({ field: "name", dir: "desc" }),
+      "of : champ mappé + direction de la vue");
+    ck.eq(ListServerSort.of("contacts", "col5", "desc", columns), null, "of : critère non mappable → null");
+
+    // -- PILOTE contacts : chaque sortField déclaré par ListConfigs.contacts EST dans la liste blanche
+    //    (un nom fautif dégraderait SILENCIEUSEMENT vers le repli — c'est ce verrou qui le rend bruyant). --
+    const { ListConfigs } = D("views/ListConfigs.js");
+    const { ListOrder } = SHARED("src-shared/ListOrder.js");
+    const contactColumns = ListConfigs.contacts(await makeStore()).columns;
+    const declared = contactColumns.filter((c) => c.sortField).map((c) => c.sortField);
+    ck.eq(declared.join(","), "name,organization,position,email,notes",
+      "🎯 pilote : les colonnes triables du listing contacts déclarent TOUTES leur champ serveur (sauf Téléphone, non triable)");
+    for (const field of declared) ck(ListOrder.isSortable("contacts", field), "sortField contacts « " + field + " » ∈ liste blanche partagée");
   });
 
 };

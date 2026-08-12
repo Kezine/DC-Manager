@@ -12,9 +12,12 @@ Modules concernés : `src-client/core/HydrationState.ts` (état + prédicats, pu
 `src-client/core/CollectionCountCache.ts` (compteurs async, pur),
 `src-client/store/Store.ts` (câblage G1/G2/G3/G4/G6 + hydratation à la demande),
 `src-client/core/ListRowEngine.ts` + `src-client/core/StoreListRowSource.ts` + `views/ListView.ts`
-(pager serveur réel), `src-client/app/FileDocuments.ts` (branchement export),
-`src-client/core/HydrationStats.ts` (instrumentation). Tests :
-`Tests/modules/test-hydration.js` (lot 0) et `Tests/modules/test-lazy-contacts.js` (vague 1).
+(pager serveur réel), `src-client/core/ListServerSort.ts` + `src-shared/ListOrder.ts` (tri serveur
+du régime pagé — pagination ordonnée complète, lot 1b), `src-client/app/FileDocuments.ts`
+(branchement export), `src-client/core/HydrationStats.ts` (instrumentation). Tests :
+`Tests/modules/test-hydration.js` (lot 0) et `Tests/modules/test-lazy-contacts.js` (vague 1 + tri
+du lot 1b) ; côté serveur `Tests/modules/test-relational-schema.js` (liste blanche + ORDER BY) et
+`test-relational-repository.js` (tri SQL réel).
 
 ## Le modèle d'état
 
@@ -220,6 +223,15 @@ Ce que le pager réel apporte concrètement :
 - `total` = `COUNT(*)` SQL renvoyé par la route paginée (`RelationalRepository.list`), donc « 137
   éléments · page 3/6 » dit la vérité du serveur, pas la taille d'un jeu plafonné ;
 - chaque clic « ‹ › « » » **va chercher sa page** (`GET …/contacts?page=N&pageSize=…`) ;
+- **le critère de tri ordonne le CORPUS ENTIER** (pagination ORDONNÉE complète, lot 1b — arbitrage
+  utilisateur du 2026-08-12) : le critère actif de la vue est mappé en champ du modèle
+  (`core/ListServerSort` — critères de date intrinsèques `__created__`/`__updated__` + colonnes
+  déclarant leur `ListColumn.sortField`, validé contre la liste blanche PARTAGÉE
+  `src-shared/ListOrder`) et part en `sort`/`dir` sur la route paginée ; l'`ORDER BY` serveur découpe
+  alors les pages dans CET ordre, et la vue les affiche telles quelles. Changer de critère ou de
+  direction EST une nouvelle demande serveur (`pageSignature`) et repart page 1 — comme tout
+  changement de tri d'un listing. Détail serveur (liste blanche, collation, bris d'égalité, 400) :
+  `docs/recherche.md` § « Listings serveur-pilotés » ;
 - les lignes reçues sont **ABSORBÉES** au Store (`Store.list` → `_absorbRecord`, qui note l'état
   `partial`) : ce sont des entités ordinaires, donc colonnes, tris, fiches et actions de ligne
   fonctionnent à l'identique ;
@@ -228,15 +240,15 @@ Ce que le pager réel apporte concrètement :
 - une **écriture locale** (création, suppression) oublie la page en main (`ListRowEngine.forgetPage`
   branché sur `store.onChange`) : garder une page dont le total a bougé serait afficher un état faux.
 
-**Limites ASSUMÉES du pilote** (elles tiennent toutes à une même cause : la route paginée ne sait
-faire ni tri ni facette) :
+**Limites ASSUMÉES du pilote** (la route paginée ne sait pas faire de facette) :
 
-- **TRI.** La route ordonne exclusivement par `created_date ASC, id ASC` — il n'existe aucun
-  paramètre de tri. La **découpe en pages** suit donc l'ordre de création ; le critère choisi par
-  l'utilisateur (Nom, Organisation…) ordonne **les lignes de la page affichée**. Seul le tri « Date
-  de création, croissant » est globalement exact. Écart DOCUMENTÉ, pas contourné : le lever demande
-  un `ORDER BY` serveur (candidat pour la vague 3, où le volume le justifiera).
-- **Filtres de colonne** : appliqués à la page reçue, pas au corpus (mêmes raisons).
+- **TRI : écart LEVÉ** (lot 1b, « pagination ordonnée complète »). Le critère de tri ordonne le
+  corpus entier — cf. la liste ci-dessus. Limite RÉSIDUELLE : une colonne **sans `sortField`**
+  (accesseur dérivé, sans champ scalaire en face) garde le comportement du pilote — l'`ORDER BY`
+  retombe sur `created_date ASC, id ASC` et le critère n'ordonne que les lignes de la page affichée
+  (repli assumé, documenté dans `ListColumn.sortField`). Sur le listing contacts, TOUTES les
+  colonnes triables déclarent leur champ : aucune n'est concernée.
+- **Filtres de colonne** : appliqués à la page reçue, pas au corpus.
 - **Événement SSE d'un autre client** sur une collection lazy : G3 saute délibérément son
   rechargement, la page en main n'est donc PAS rafraîchie. Seul le COMPTEUR l'est (cf. G6). Cohérent
   avec G3 — refuser de re-tirer la collection ET la re-tirer pour repeindre serait contradictoire.

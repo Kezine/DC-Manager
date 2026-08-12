@@ -4,7 +4,8 @@ import { Text } from "../core/Text";
 import { Sort } from "../core/Sort";
 import { TargetSearch } from "../core/TargetSearch";
 import { RecordSearchIndex } from "../core/RecordSearchIndex";
-import { ListRowEngine, type ListRowRequest, type ListRowTarget } from "../core/ListRowEngine";
+import { ListRowEngine, type ListRowRequest, type ListRowServerSort, type ListRowTarget } from "../core/ListRowEngine";
+import { ListServerSort } from "../core/ListServerSort";
 import { StoreListRowSource, type RemoteListReader } from "../core/StoreListRowSource";
 import { EntityCandidateSource } from "../core/EntityCandidates";
 import { FormControls } from "../ui/FormControls";
@@ -24,6 +25,13 @@ export interface ListColumn {
   cls?: string;
   sort?: (o: any) => any;       // présent ⇒ colonne triable
   sortKey?: string;
+  /** Champ SERVEUR du critère de tri (OPT-IN — pagination ORDONNÉE complète, lot 1b lazy-load) : nom
+      d'un champ scalaire du modèle, à déclarer quand l'accesseur `sort` lit CE champ (jamais déduit :
+      beaucoup d'accesseurs sont dérivés — occupation, chemin — sans colonne SQL en face). En régime
+      pagé, le critère ordonne alors le CORPUS entier via l'ORDER BY serveur ; sans `sortField`, repli
+      assumé = tri de la page reçue (cf. `core/ListServerSort` et docs/hydratation.md § « Vague 1 »).
+      Sans effet hors régime pagé (collections hydratées, mode fichier : tri client local, inchangé). */
+  sortField?: string;
   filter?: { label?: string; options: () => FilterOption[]; valueOf: (o: any) => any };
   /** Colonne ESSENTIELLE : seule conservée en mode « Compact » (cf. ListView). À défaut de toute colonne
       essentielle pour une collection, le mode compact retombe sur les 3 premières colonnes. */
@@ -96,11 +104,19 @@ export interface ListOptions {
    PARESSEUX en mode API), il n'y a rien à paginer en mémoire. Le moteur sert
    alors des PAGES SERVEUR (`page()`), avec le TOTAL réel (`COUNT(*)`) et une
    navigation qui va chercher CHAQUE page. Ce que la vue en fait de moins :
-   aucune arithmétique de pagination (les compteurs viennent du serveur). Ce
-   qu'elle en fait de plus, à l'identique : filtres de colonne et tri — mais
-   appliqués à la PAGE reçue, la route paginée ne sachant ordonner que par date
-   de création (écart ASSUMÉ et documenté). Les listings des collections
-   hydratées ne changent PAS d'un pixel : `page()` y rend `null`.
+   aucune arithmétique de pagination (les compteurs viennent du serveur). Le
+   TRI y est SERVEUR depuis la PAGINATION ORDONNÉE COMPLÈTE (lot 1b) : le
+   critère actif est mappé en champ du modèle (`core/ListServerSort` — critères
+   de date intrinsèques + colonnes déclarant leur `sortField`) et l'ORDER BY
+   ordonne le CORPUS entier ; la vue affiche alors la page DANS L'ORDRE REÇU
+   (la retrier localement contredirait la découpe aux frontières de pages).
+   Critère NON mappable (colonne sans `sortField`) : repli assumé du pilote —
+   tri client de la page reçue, découpe à l'ordre serveur par défaut. Les
+   filtres de colonne, eux, restent appliqués à la PAGE reçue (limite
+   documentée). Changer de critère/direction repart page 1, comme tout
+   changement de tri (`this.page = 1` aux trois points d'entrée du tri). Les
+   listings des collections hydratées ne changent PAS d'un pixel : `page()` y
+   rend `null`.
    ============================================================================= */
 export class ListView {
   /** Clé de la dimension CIBLE dans l'état de filtres. Préfixe « __ » : impossible à confondre avec
@@ -291,6 +307,17 @@ export class ListView {
     return { collection: this.collection, query: this.query, target: this._targetValue() };
   }
 
+  /** TRI SERVEUR du critère ACTIF (pagination ordonnée complète — régime pagé seulement), ou null
+      (critère non mappable → repli « trier la page reçue »). La traduction sortKey → champ du modèle
+      est le module pur `core/ListServerSort` (critères de date intrinsèques + `sortField` déclarés),
+      validée contre la liste blanche PARTAGÉE — la même que le serveur. Sans moteur (source custom),
+      aucun régime pagé : null d'office. */
+  private _serverSort(): ListRowServerSort | null {
+    if (!this.rowEngine) return null;
+    return ListServerSort.of(this.collection, this.sortKey, this.sortDir,
+      this.columns.map((c) => ({ key: this._colKey(c), sortField: c.sortField })));
+  }
+
   /** Applique les filtres de COLONNE actifs à un jeu de lignes. Extrait de `render()` : les deux
       régimes (local et pagé serveur) doivent filtrer de la MÊME façon — un filtre qui se comporterait
       autrement selon la provenance des lignes serait un piège. */
@@ -316,14 +343,21 @@ export class ListView {
     if (!options || !options.typing) this.searchIndex.invalidate();
     // G4 — la collection est-elle servie PAGE PAR PAGE par le serveur ? La SOURCE tranche (état
     // d'hydratation + requête au repos) ; `null` = régime historique, intégralement préservé.
+    // `serverSort` (pagination ORDONNÉE complète) : le critère de tri ACTIF mappé en champ serveur —
+    // il fait partie de la signature de page, donc changer de tri EST une nouvelle demande serveur.
+    const serverSort = this._serverSort();
     const serverPage = this.rowEngine
-      ? this.rowEngine.page(this._rowRequest(), { page: this.page, pageSize: this.pageSize })
+      ? this.rowEngine.page(this._rowRequest(), { page: this.page, pageSize: this.pageSize, sort: serverSort })
       : null;
     let rows: any[], total: number, pages: number, page: number;
     if (serverPage) {
       // Les compteurs viennent du SERVEUR (total = COUNT(*)) : aucune arithmétique cliente, et le pager
       // affiche la page RÉELLEMENT en main — jamais « page 2 » avec le contenu de la page 1.
-      rows = this._sortRows(this._applyColumnFilters(serverPage.rows));
+      // Tri MAPPÉ serveur → la page s'affiche DANS L'ORDRE REÇU : c'est l'ORDER BY qui a découpé le
+      // corpus, la retrier localement (collation ≠) contredirait les frontières de pages. Critère NON
+      // mappable → repli du pilote : tri client de la page reçue (documenté, docs/hydratation.md).
+      const filtered = this._applyColumnFilters(serverPage.rows);
+      rows = serverSort ? filtered : this._sortRows(filtered);
       total = serverPage.total; pages = serverPage.pages; page = serverPage.page;
       this.page = page;
     } else {

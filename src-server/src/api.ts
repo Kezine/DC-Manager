@@ -12,6 +12,7 @@ import { LiveBus } from "./live.js";
 import type { DocumentChangeset } from "../../src-shared/DocumentChangeset.js";   // type PARTAGÉ front ⇄ back (source unique)
 import { DataValidator, type ValidationError, type EntityFetcher, type ChildFinder } from "../../src-shared/DataValidation.js";   // normalisation + validation PARTAGÉES
 import { Cascade } from "../../src-shared/Cascade.js";   // cascade de suppression PARTAGÉE (intégrité référentielle en DELETE)
+import { ListOrder } from "../../src-shared/ListOrder.js";   // liste blanche PARTAGÉE des colonnes triables (tri serveur de la route paginée)
 import { ApiRules } from "./ApiRules.js";             // règles PURES de la couche HTTP (verrou, changeset, lot) — testables sans Express
 import { AuditStamp } from "./AuditStamp.js";         // règles PURES d'estampillage « qui a écrit, quand » (created_by/updated_by + dates serveur)
 import { UserProfiles } from "./users/UserProfiles.js";   // logique PURE de l'annuaire (clé canonique, caviardage, parsing d'ids)
@@ -146,8 +147,11 @@ export class Api {
   /** Id CANONIQUE de l'auteur de l'écriture courante — estampillé en audit `created_by`/`updated_by`
       par `AuditStamp` (cf. RequestAuthor.identity). "" = pas d'identité résoluble (les `_by` restent non posés). */
   private authorId(req: Request): string { return RequestAuthor.identity(req).id; }
+  /** Traduit la query string de la route paginée en `ListOpts`. `sort`/`dir` sont EXTRAITS du reste
+      (sinon ils tomberaient dans `where` et deviendraient des filtres fantômes « aucune ligne ») ;
+      leur VALIDATION vit dans le handler `list` (400 explicite — parseList n'a pas accès à la réponse). */
   private parseList(q: Record<string, any>): ListOpts {
-    const { page, pageSize, q: query, ids, ...rest } = q;
+    const { page, pageSize, q: query, ids, sort, dir, ...rest } = q;
     const where: Rec = {};
     for (const [k, v] of Object.entries(rest)) where[k] = v;
     return {
@@ -156,6 +160,8 @@ export class Api {
       query: query || "",
       where: Object.keys(where).length ? where : null,
       ids: ids ? String(ids).split(",").filter(Boolean) : null,
+      sort: sort !== undefined ? String(sort) : null,
+      dir: dir !== undefined ? String(dir) : null,
     };
   }
 
@@ -534,9 +540,21 @@ export class Api {
   };
 
   /* -- CRUD générique par collection -- */
+  /** Liste paginée. `sort`/`dir` (tri SERVEUR — pagination ordonnée complète, cf. docs/recherche.md) :
+      validés contre la liste blanche PARTAGÉE `ListOrder` → **400 explicite** si invalides, JAMAIS
+      ignorés en silence — un tri demandé et non appliqué serait un mensonge d'UI (la page paraîtrait
+      triée alors que la découpe suivrait un autre ordre). Le dépôt re-refuse de toute façon (défense
+      en profondeur : ce 400 est le SEUL chemin utilisateur, le throw du dépôt garde les internes). */
   private list: RequestHandler = (req, res) => {
     if (!Schema.isCollection(req.params.collection)) { res.status(404).json({ error: "collection inconnue" }); return; }
-    res.json(this.repoOf(req).list(req.params.collection, this.parseList(req.query)));
+    const opts = this.parseList(req.query);
+    if (opts.sort != null && !ListOrder.isSortable(req.params.collection, opts.sort)) {
+      res.status(400).json({ error: "colonne de tri invalide : " + opts.sort }); return;
+    }
+    if (opts.dir != null && !ListOrder.isDirection(opts.dir)) {
+      res.status(400).json({ error: "direction de tri invalide (asc|desc attendu) : " + opts.dir }); return;
+    }
+    res.json(this.repoOf(req).list(req.params.collection, opts));
   };
   private getOne: RequestHandler = (req, res) => {
     if (!Schema.isCollection(req.params.collection)) { res.status(404).json({ error: "collection inconnue" }); return; }

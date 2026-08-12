@@ -45,7 +45,8 @@ enregistrement » pour toute l'application.
 | `src-client/core/EntityCandidates.ts` | SOURCE de candidats d'entités PARTAGÉE : `EntityCandidates` (pur — `local`/`fromRecords`, re-classés par `TargetSearch`) + `EntityCandidateSource` (orchestration DOUBLE MODE : annulation + repli ; anti-rebond/StaleGate portés par le SearchPop). |
 | `src-client/ui/FilterBar.ts` + `core/FilterChips.ts` + `core/TargetFilterDisplay.ts` | Dimension « à RECHERCHE » : déclencheur FERMÉ + panneau-portail à `SearchPop` HÉBERGÉ, chips à valeur LIBRE, badge/placeholder résolus par le module pur `TargetFilterDisplay`. |
 | `src-server/src/RelationalRepository.searchAll` | Recherche transverse : un LIKE sur la colonne `search` par collection, plafond par collection, troncature signalée. |
-| `src-server/src/RelationalRepository.list` | Listing d'UNE collection : LIKE sur `search` + `where` de colonnes + pagination — la route que consomment les listings serveur-pilotés. |
+| `src-server/src/RelationalRepository.list` | Listing d'UNE collection : LIKE sur `search` + `where` de colonnes + pagination + tri `sort`/`dir` (liste blanche partagée `ListOrder`, cf. § « Tri SERVEUR du régime pagé ») — la route que consomment les listings serveur-pilotés. |
+| `src-shared/ListOrder.ts` + `src-client/core/ListServerSort.ts` | Tri SERVEUR du régime pagé (pagination ordonnée complète) : liste blanche des colonnes triables DÉRIVÉE de la spec + fragment `ORDER BY` (partagé), et mapping critère de vue → champ du modèle (client, pur). |
 | `GET /api/documents/:docId/search` | La route transverse (api.ts) — même garde que toute lecture du document (session SSO + SUPER_ADMIN). |
 
 ## Exécution DOUBLE (principe n°15)
@@ -121,8 +122,10 @@ pas `store.all()` : leurs lignes viennent d'un **moteur à source injectée**.
                      Store.list → entités absorbées → repeint
 
    … sauf si la collection n'est PAS hydratée (chargement PARESSEUX, mode API) :
-     ListRowEngine.page(request, {page, pageSize})   ← la SOURCE tranche (isServerPaged)
-       └→ GET …/<collection>?page=N&pageSize=…       total = COUNT(*), pager RÉEL
+     ListRowEngine.page(request, {page, pageSize, sort})   ← la SOURCE tranche (isServerPaged)
+       └→ GET …/<collection>?page=N&pageSize=…&sort=<champ>&dir=asc|desc
+          total = COUNT(*), pager RÉEL ; ORDER BY = le critère de tri du listing
+          sur le CORPUS entier (pagination ordonnée complète, lot 1b)
           (cf. docs/hydratation.md § « Vague 1 — contacts »)
 ```
 
@@ -162,9 +165,40 @@ pas `store.all()` : leurs lignes viennent d'un **moteur à source injectée**.
   (`StoreListRowSource.REMOTE_LIMIT` = **500** lignes, même esprit que le cap par collection de la
   recherche transverse). Au-delà, l'utilisateur affine sa requête.
 - La **pagination serveur** n'est exposée dans l'UI que pour les collections chargées
-  PARESSEUSEMENT, qui n'ont pas le choix (cf. `docs/hydratation.md` § « Vague 1 »). Elle hérite en
-  échange de l'ordre du serveur : la route paginée n'ordonne que par `created_date ASC, id ASC` — le
-  critère de tri choisi par l'utilisateur s'applique alors à la PAGE affichée, pas à la découpe.
+  PARESSEUSEMENT, qui n'ont pas le choix (cf. `docs/hydratation.md` § « Vague 1 »). Depuis la
+  **pagination ORDONNÉE complète** (lot 1b), le critère de tri du listing y ordonne le **corpus
+  entier** — voir la section suivante ; seul reste au comportement du pilote un critère **sans champ
+  serveur** (colonne sans `sortField` : tri de la page reçue, découpe à l'ordre par défaut).
+
+### Tri SERVEUR du régime pagé (pagination ordonnée complète — lot 1b)
+
+La route paginée `GET …/<collection>` accepte `sort` (champ du modèle) et `dir` (`asc`/`desc`,
+défaut `asc`). Les règles, portées par le module PARTAGÉ **`src-shared/ListOrder`** (une seule
+source, client ET serveur — principe n°3) :
+
+- **Liste blanche DÉRIVÉE de la spec** (`COLLECTION_SPECS`, comme le schéma relationnel lui-même) :
+  champs scalaires `string`/`number`/`boolean` + les 4 colonnes d'audit (`created_date`/
+  `updated_date` portent les critères « Date de création / de modification » des listings). Exclus :
+  `string[]`/`json` (TEXT JSON — un ordre lexicographique n'aurait aucun sens), `search`/
+  `updated_rev` (opérationnelles), `id` (clé opaque, déjà le bris d'égalité). Le serveur
+  n'interpole JAMAIS un nom de colonne hors de cette liste : la route répond **400 explicite**
+  (`colonne de tri invalide`, `direction de tri invalide`) — jamais d'ignorance silencieuse, un tri
+  demandé et non appliqué serait un mensonge d'UI — et le dépôt (`RelationalRepository.list` →
+  `ListOrder.orderBySql`) REFUSE de son côté (throw) toute valeur non validée (défense en
+  profondeur, barrière anti-injection).
+- **Bris d'égalité `id ASC` SYSTÉMATIQUE** : sans ordre total déterministe, deux lignes égales au
+  critère peuvent permuter entre deux requêtes et la découpe en pages duplique/omet des lignes aux
+  frontières.
+- **Sémantique rapprochée du tri CLIENT** (`core/Sort.compare` : `localeCompare("fr", numeric,
+  sensitivity: "base")`) : vides (NULL/`''`) rejetés à l'extrémité « plus grand » (derniers en asc,
+  premiers en desc — comme la vue), `COLLATE NOCASE` sur les colonnes TEXT. **Écart résiduel
+  assumé** : NOCASE ne replie ni les accents ni la casse non-ASCII, et il n'y a pas d'ordre
+  numérique « naturel » (« item10 » < « item2 ») — une collation ICU serait hors de proportion.
+- **Sans `sort`** : l'ordre historique `created_date ASC, id ASC`, verbatim — tous les appelants
+  existants (boot, `findAll`, exports) sont inchangés.
+- Côté client, le critère actif est mappé en champ serveur par le module pur
+  **`core/ListServerSort`** (critères de date intrinsèques + colonnes déclarant leur
+  `ListColumn.sortField`, opt-in), validé contre la MÊME liste blanche avant d'être envoyé.
 
 ### Coût de la recherche locale et mémoïsation
 

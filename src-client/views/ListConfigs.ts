@@ -298,22 +298,25 @@ export class ListConfigs {
       store.all("contacts").forEach((c: any) => { if (c.organization) s.add(c.organization); });
       return [...s].sort().map((o) => ({ id: o, label: o }));
     };
+    // `sortField` (PILOTE de la pagination ORDONNÉE complète, lot 1b — cf. ListColumn.sortField) : chaque
+    // accesseur `sort` de ce listing lit UN champ scalaire du modèle → il le déclare, et en régime pagé
+    // le critère ordonne le CORPUS entier via l'ORDER BY serveur (plus seulement la page reçue).
     return {
       collection: "contacts",
       defaultSort: { key: "name", dir: "asc" },
       emptyText: I18n.t("lists.empty.contacts"),
       actions: { view: true, edit: true, clone: false, del: true },   // clone sans objet pour un destinataire unique
       columns: [
-        { head: I18n.t("lists.col.name"), essential: true, cls: "cell-name", sortKey: "name", sort: (c) => c.name, render: (c) => Html.escape(c.name || I18n.t("lists.ph.contact")) },
+        { head: I18n.t("lists.col.name"), essential: true, cls: "cell-name", sortKey: "name", sort: (c) => c.name, sortField: "name", render: (c) => Html.escape(c.name || I18n.t("lists.ph.contact")) },
         {
-          head: I18n.t("lists.col.organization"), sortKey: "organization", sort: (c) => c.organization || "",
+          head: I18n.t("lists.col.organization"), sortKey: "organization", sort: (c) => c.organization || "", sortField: "organization",
           render: (c) => (c.organization ? Html.escape(c.organization) : dim("—")),
           filter: { label: I18n.t("lists.col.organization"), options: organizationOptions, valueOf: (c) => c.organization || "" },
         },
-        { head: I18n.t("lists.col.position"), sortKey: "position", sort: (c) => c.position || "", render: (c) => (c.position ? Html.escape(c.position) : dim("—")) },
-        { head: I18n.t("lists.col.email"), sortKey: "email", sort: (c) => c.email || "", render: (c) => (c.email ? Html.mailtoLink(c.email) : dim("—")) },
+        { head: I18n.t("lists.col.position"), sortKey: "position", sort: (c) => c.position || "", sortField: "position", render: (c) => (c.position ? Html.escape(c.position) : dim("—")) },
+        { head: I18n.t("lists.col.email"), sortKey: "email", sort: (c) => c.email || "", sortField: "email", render: (c) => (c.email ? Html.mailtoLink(c.email) : dim("—")) },
         { head: I18n.t("lists.col.phone"), render: (c) => (c.phone ? Html.escape(c.phone) : dim("—")) },
-        { head: I18n.t("lists.col.notes"), cls: "cell-desc", sort: (c) => c.notes || "", render: (c) => (c.notes ? Html.escape(String(c.notes).slice(0, 80)) : dim("—")) },
+        { head: I18n.t("lists.col.notes"), cls: "cell-desc", sort: (c) => c.notes || "", sortField: "notes", render: (c) => (c.notes ? Html.escape(String(c.notes).slice(0, 80)) : dim("—")) },
       ],
     };
   }

@@ -194,6 +194,49 @@ module.exports = async () => {
   }
   });
 
+  await section("Serveur : RelationalRepository — list TRIÉE (sort/dir, pagination ORDONNÉE complète — lot 1b)", async () => {
+  {
+    if (!requireSqlite()) return;
+    const { RelationalRepository } = SERVER("RelationalRepository.js");
+    const repo = RelationalRepository.open(":memory:", SQLITE);
+    // Corpus contacts : casse mêlée (NOCASE), organisation VIDE (garde des vides), doublon de nom (bris
+    // d'égalité id), created_date à rebours de l'ordre alphabétique (prouve que le tri ne suit PAS le défaut).
+    repo.upsert("contacts", { id: "c1", name: "Zoé",    organization: "Beta",  created_date: "2026-01-01T00:00:00.000Z" }, 1);
+    repo.upsert("contacts", { id: "c2", name: "albert", organization: "",      created_date: "2026-01-02T00:00:00.000Z" }, 1);
+    repo.upsert("contacts", { id: "c3", name: "Bruno",  organization: "Alpha", created_date: "2026-01-03T00:00:00.000Z" }, 1);
+    repo.upsert("contacts", { id: "c5", name: "Bruno",  organization: "Alpha", created_date: "2026-01-04T00:00:00.000Z" }, 1);
+    repo.upsert("contacts", { id: "c4", name: "Alice",  organization: "Gamma", created_date: "2026-01-05T00:00:00.000Z" }, 1);
+
+    // -- Le CORPUS entier est ordonné, pas la page : la découpe SUIT le critère. --
+    ck.eq(repo.list("contacts", { sort: "name", dir: "asc" }).rows.map((x) => x.id).join(","), "c2,c4,c3,c5,c1",
+      "🎯 sort=name asc : albert < Alice < Bruno < Bruno < Zoé — NOCASE (« albert » ne trie pas après « Zoé »), doublon départagé par id");
+    ck.eq(repo.list("contacts", { sort: "name", dir: "desc" }).rows.map((x) => x.id).join(","), "c1,c3,c5,c4,c2",
+      "sort=name desc : ordre inverse, bris d'égalité id TOUJOURS ASC (c3 avant c5 — ordre total stable dans les deux sens)");
+    ck.eq(repo.list("contacts", { sort: "name", dir: "asc", page: 2, pageSize: 2 }).rows.map((x) => x.id).join(","), "c3,c5",
+      "🎯 pagination : la page 2 continue l'ordre du critère (découpe stable — ni doublon ni omission aux frontières)");
+
+    // -- Garde des VIDES : extrémité « plus grand », comme le tri client (derniers en asc, premiers en desc). --
+    ck.eq(repo.list("contacts", { sort: "organization", dir: "asc" }).rows.map((x) => x.id).join(","), "c3,c5,c1,c4,c2",
+      "sort=organization asc : Alpha,Alpha,Beta,Gamma puis la VIDE en DERNIER (parité core/Sort : nuls en dernier)");
+    ck.eq(repo.list("contacts", { sort: "organization", dir: "desc" }).rows.map((x) => x.id).join(","), "c2,c4,c1,c3,c5",
+      "sort=organization desc : la vide en PREMIER (le garde suit la direction — parité ListView, r*dir)");
+
+    // -- Défaut inchangé + audit triable + refus hors liste. --
+    ck.eq(repo.list("contacts", {}).rows.map((x) => x.id).join(","), "c1,c2,c3,c5,c4",
+      "🎯 SANS sort : created_date ASC, id ASC — le comportement historique, verbatim");
+    ck.eq(repo.list("contacts", { sort: "created_date", dir: "desc" }).rows.map((x) => x.id).join(","), "c4,c5,c3,c2,c1",
+      "sort=created_date desc : les colonnes d'AUDIT sont triables (critère « Date de création » des listings)");
+    const throws = (fn) => { try { fn(); return null; } catch (e) { return String(e.message || e); } };
+    ck(/colonne de tri invalide/.test(throws(() => repo.list("contacts", { sort: 'name"; DROP TABLE contacts;--' }))),
+      "🎯 injection : le dépôt REFUSE (throw) un sort hors liste blanche — la route, elle, pré-valide en 400");
+    ck(/direction de tri invalide/.test(throws(() => repo.list("contacts", { sort: "name", dir: "sideways" }))),
+      "direction inconnue : refusée aussi");
+    ck.eq(repo.list("contacts", { ids: ["c1", "c4"], sort: "name" }).total, 2,
+      "ids : court-circuit getMany AVANT le tri (aucun contrat d'ordre — inchangé)");
+    repo.close();
+  }
+  });
+
   await section("Serveur : RelationalRepository — findBy, verrou optimiste, transact ATOMIQUE, snapshot (Q7), meta, images", async () => {
   {
     if (!requireSqlite()) return;

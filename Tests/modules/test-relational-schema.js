@@ -7,7 +7,10 @@
    - assertions STRUCTURELLES sur TOUTES les collections (colonne par champ, NOT NULL ⇔ required, id PK,
      aucun REFERENCES/CHECK/DEFAULT hors search/updated_rev, déterminisme) ;
    - INDEX : liste exacte attendue (L0 §3.4 amendée), aucun index sur un champ string[]/json, et
-     anti-divergence du RÉ-EXPORT client (config.ts) ≡ liste shared.
+     anti-divergence du RÉ-EXPORT client (config.ts) ≡ liste shared ;
+   - LISTE BLANCHE de tri (src-shared/ListOrder, lot 1b lazy-load) : dérivation depuis la spec
+     (scalaires + audit, exclusions prouvées), golden ORDER BY (garde des vides, NOCASE, bris
+     d'égalité id) et barrière anti-injection (hors liste → throw).
    Harnais et assertions : harness.js. */
 "use strict";
 const { ck, section, SHARED, D, Validation, SharedSchema } = require("./harness.js");
@@ -265,6 +268,63 @@ module.exports = async () => {
     const clientConfig = D("data/config.js");
     ck.eq(JSON.stringify(clientConfig.INDEX_SPEC), JSON.stringify(INDEX_SPEC), "anti-divergence : config.ts INDEX_SPEC ≡ shared");
     ck(clientConfig.INDEX_SPEC === INDEX_SPEC, "anti-divergence : config.ts ré-exporte le MÊME objet (pas une copie)");
+  }
+  });
+
+  await section("shared : ListOrder — liste blanche des colonnes triables + ORDER BY (pagination ordonnée complète, lot 1b)", async () => {
+  {
+    const { ListOrder } = SHARED("src-shared/ListOrder.js");
+
+    // -- DÉRIVATION de la liste blanche : contacts = tous champs string + audit (attente EXPLICITE). --
+    ck.eq(ListOrder.sortableColumns("contacts").join(","),
+      "name,email,phone,organization,position,notes,description,created_by,updated_by,created_date,updated_date",
+      "🎯 contacts : champs de spec scalaires (ordre du schéma) + les 4 colonnes d'audit — liste EXACTE");
+
+    // -- EXCLUSIONS, chacune prouvée sur un cas réel de la spec. --
+    const racksSortable = ListOrder.sortableColumns("racks");
+    ck(racksSortable.includes("u_count"), "number (racks.u_count) : triable (colonne NUMERIC scalaire)");
+    ck(racksSortable.includes("has_caps"), "boolean (racks.has_caps) : triable (INTEGER 0/1 — regroupe oui/non)");
+    ck(!racksSortable.includes("roof_cells"), "string[] (racks.roof_cells) : EXCLU (TEXT JSON — ordre lexicographique sans sens)");
+    ck(!racksSortable.includes("door_front"), "json (racks.door_front) : EXCLU (même raison)");
+    ck(!racksSortable.includes("id"), "id : EXCLU (clé OPAQUE — déjà le bris d'égalité systématique)");
+    ck(!racksSortable.includes("search") && !racksSortable.includes("updated_rev"),
+      "search/updated_rev : EXCLUES (colonnes opérationnelles, jamais montrées)");
+    ck.eq(ListOrder.sortableColumns("inconnue").length, 0, "collection inconnue → liste vide (défensif : le nom vient d'une route)");
+
+    // -- isSortable : la MÊME réponse que la liste (c'est LA question du client et du serveur). --
+    ck(ListOrder.isSortable("contacts", "organization") && ListOrder.isSortable("contacts", "created_date"),
+      "isSortable : champ de spec et colonne d'audit répondent oui");
+    ck(!ListOrder.isSortable("contacts", "search") && !ListOrder.isSortable("contacts", "napas"),
+      "isSortable : colonne opérationnelle ou inconnue répondent non");
+    ck(ListOrder.isDirection("asc") && ListOrder.isDirection("desc") && !ListOrder.isDirection("ASC") && !ListOrder.isDirection(""),
+      "isDirection : asc/desc STRICTS (la casse vient d'une query string — on ne devine pas)");
+
+    // -- ORDER BY : chaînes EXACTES écrites en clair (recette golden — jamais dérivées du module). --
+    ck.eq(ListOrder.orderBySql("contacts"), 'ORDER BY "created_date" ASC, "id" ASC',
+      "🎯 sans sort : l'ordre HISTORIQUE verbatim (tous les appelants existants inchangés)");
+    ck.eq(ListOrder.orderBySql("contacts", "name", "asc"),
+      'ORDER BY ("name" IS NULL OR "name" = \'\') ASC, "name" COLLATE NOCASE ASC, "id" ASC',
+      "🎯 colonne TEXT asc : garde des vides (derniers) + NOCASE + bris d'égalité id");
+    ck.eq(ListOrder.orderBySql("contacts", "name", "desc"),
+      'ORDER BY ("name" IS NULL OR "name" = \'\') DESC, "name" COLLATE NOCASE DESC, "id" ASC',
+      "desc : le garde des vides SUIT la direction (premiers — parité ListView._sortRows, r*dir) ; id reste ASC");
+    ck.eq(ListOrder.orderBySql("racks", "u_count", "asc"),
+      'ORDER BY ("u_count" IS NULL OR "u_count" = \'\') ASC, "u_count" ASC, "id" ASC',
+      "colonne NUMERIC : PAS de COLLATE (l'ordre numérique natif est le bon)");
+    ck.eq(ListOrder.orderBySql("contacts", "created_date", "desc"),
+      'ORDER BY ("created_date" IS NULL OR "created_date" = \'\') DESC, "created_date" COLLATE NOCASE DESC, "id" ASC',
+      "colonne d'AUDIT : TEXT (dates ISO — l'ordre lexicographique EST l'ordre chronologique)");
+
+    // -- BARRIÈRE anti-injection : hors liste → THROW, jamais d'interpolation silencieuse. --
+    const throws = (fn) => { try { fn(); return null; } catch (e) { return String(e.message || e); } };
+    ck(/colonne de tri invalide/.test(throws(() => ListOrder.orderBySql("contacts", 'name"; DROP TABLE contacts;--', "asc"))),
+      "🎯 injection : un nom hors liste blanche est REFUSÉ (throw nommé), jamais interpolé");
+    ck(/colonne de tri invalide/.test(throws(() => ListOrder.orderBySql("contacts", "search", "asc"))),
+      "colonne opérationnelle : refusée aussi (la liste blanche est la SEULE porte)");
+    ck(/direction de tri invalide/.test(throws(() => ListOrder.orderBySql("contacts", "name", "asc; DROP"))),
+      "direction inconnue : refusée (asc|desc stricts)");
+    ck(/colonne de tri invalide/.test(throws(() => ListOrder.orderBySql("inconnue", "name", "asc"))),
+      "collection inconnue : rien n'y est triable → refus");
   }
   });
 };

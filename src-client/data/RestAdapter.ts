@@ -111,7 +111,7 @@ export class RestAdapter extends DataAdapter {
   async loadMeta(): Promise<Record<string, any>> { return this.docId ? ((await this._send("GET", "/meta")) || {}) : {}; }
 
   /* ---- lectures granulaires ---- */
-  async list(collection: string, { page = 1, pageSize = PAGE_SIZE_DEFAULT, query = "", where = null, signal }: ListOptions = {}): Promise<ListResult> {
+  async list(collection: string, { page = 1, pageSize = PAGE_SIZE_DEFAULT, query = "", where = null, sort = null, dir = null, signal }: ListOptions = {}): Promise<ListResult> {
     // PARITÉ DE GARDE avec load/loadMeta/maintenance/replaceAll : SANS document scopé, `dataBase`
     // retombe sur `apiRoot` et l'URL viserait une route qui n'existe que scopée (404 en pleine face).
     // Le cas est RÉEL depuis le lazy-load : le `store.init()` docless du boot déclare ses collections
@@ -120,6 +120,9 @@ export class RestAdapter extends DataAdapter {
     if (!this.docId) return { rows: [], total: 0, page: 1, pages: 1, pageSize };
     const qs = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
     if (query && query.trim()) qs.set("q", query.trim());
+    // TRI SERVEUR (pagination ordonnée complète) : `dir` ne part qu'AVEC `sort` — seul, il n'ordonne rien
+    // (le serveur validerait puis l'ignorerait ; ne pas l'envoyer dit la même chose plus simplement).
+    if (sort) { qs.set("sort", sort); qs.set("dir", dir === "desc" ? "desc" : "asc"); }
     if (where) Object.keys(where).forEach((f) => qs.set(f, where[f] === null || where[f] === undefined ? "null" : String(where[f])));
     // `signal` : listings serveur-pilotés — la frappe suivante ABANDONNE la requête en vol (cf. searchAll).
     const res = await this._send("GET", "/" + collection + "?" + qs.toString(), undefined, { signal });

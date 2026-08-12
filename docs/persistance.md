@@ -138,6 +138,14 @@ que du TYPE de contrat, jamais d'une classe concrète, de sorte que le choix d'i
     EXPRESSION, le planificateur n'utilise alors JAMAIS l'index (mesuré : SCAN au lieu de `SEARCH … USING INDEX`, la
     raison d'être du chantier s'évaporerait). Les colonnes NUMERIC/INTEGER (nombres, booléens — aucune indexée)
     GARDENT le CAST pour une comparaison stricte (booléen filtré `"1"`/`"0"`, `"42.0"` ne matche pas `42`).
+- **`list` : tri PARAMÉTRÉ sur liste blanche** (pagination ORDONNÉE complète, lot 1b lazy-load). Sans
+  `sort` : l'historique `created_date ASC, id ASC`, verbatim. Avec `sort`/`dir` : l'`ORDER BY` est produit par
+  le module PARTAGÉ `src-shared/ListOrder` — liste blanche des colonnes triables DÉRIVÉE de la spec (champs
+  scalaires + audit ; exclus : tableaux/`json`, `search`/`updated_rev`, `id`), la barrière anti-injection : une
+  valeur hors liste est REFUSÉE (throw), jamais interpolée — la route paginée pré-valide en 400. Bris d'égalité
+  `id ASC` systématique (découpe en pages stable), vides en extrémité « plus grand », `COLLATE NOCASE` sur les
+  colonnes TEXT (sémantique rapprochée du tri client — écarts résiduels : accents, ordre numérique naturel).
+  Détails : `docs/recherche.md` § « Tri SERVEUR du régime pagé ».
 - **`findBy` lean** : les `find` de la validation (V5b/V6) renvoient TOUTES les lignes correspondantes, SANS
   `COUNT(*)`, SANS `ORDER BY`, SANS pagination — le finder itère l'ensemble, il n'a besoin ni du total ni d'un tri.
   C'est le chemin CHAUD (un save de port déclenche plusieurs `find` V6/dependents ; un save d'équipement écrit P
@@ -152,9 +160,11 @@ verbatim, maintenance) sont couvertes par `test-relational-repository.js` (bette
 ### Le coût résiduel : COUNT et LIKE
 
 `getOne(collection, id)` (V2/V5) = lookup sur la CLÉ PRIMAIRE → rapide ; les `find` du chemin chaud tapent désormais
-un INDEX (le gain visé). Restent deux coûts assumés : la LISTE paginée fait un `COUNT(*)` sur le filtre (nécessaire au
-`total` de la pagination), et la recherche plein-texte est un `search LIKE '%…%'` — non sargeable, donc un scan, mais
-hors du chemin chaud de validation.
+un INDEX (le gain visé). Restent des coûts assumés : la LISTE paginée fait un `COUNT(*)` sur le filtre (nécessaire au
+`total` de la pagination), la recherche plein-texte est un `search LIKE '%…%'` — non sargeable, donc un scan, mais
+hors du chemin chaud de validation — et le tri paramétré (`sort`, lot 1b) est un tri SANS index (les colonnes de tri
+ne sont pas indexées, et la garde des vides est une expression) : un tri par requête de page, proportionné aux
+volumes des collections lazy.
 
 ## La colonne `search` ENRICHIE : termes dérivés partagés (`src-shared/SearchTerms`)
 

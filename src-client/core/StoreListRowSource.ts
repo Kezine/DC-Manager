@@ -35,7 +35,7 @@
    ============================================================================= */
 import type { Store } from "../store";
 import { ListRowEngine } from "./ListRowEngine";
-import type { ListRowPage, ListRowPageRequest, ListRowRequest, ListRowSource } from "./ListRowEngine";
+import type { ListRowPage, ListRowPageRequest, ListRowRequest, ListRowServerSort, ListRowSource } from "./ListRowEngine";
 import type { RecordSearchIndex } from "./RecordSearchIndex";
 
 /** Contrat DONNÉES d'une cible filtrable — le strict minimum dont la source a besoin (l'habillage UI
@@ -57,12 +57,15 @@ export interface RemoteListReader {
     signal: AbortSignal;
   }): Promise<any[]>;
   /** PAGE serveur d'une collection NON hydratée (pager RÉEL — garde G4) : les lignes de la page ET les
-      compteurs du serveur (`total` = `COUNT(*)`). Absent = cet hôte n'offre pas de pagination serveur
-      (mode fichier, lecteur d'avant G4) → la source ne proposera jamais le régime paginé. */
+      compteurs du serveur (`total` = `COUNT(*)`). `sort` (pagination ORDONNÉE complète, lot 1b) = le
+      critère de tri du listing traduit en champ serveur, ou null (ordre par défaut `created_date`).
+      Absent = cet hôte n'offre pas de pagination serveur (mode fichier, lecteur d'avant G4) → la
+      source ne proposera jamais le régime paginé. */
   page?(collection: string, options: {
     page: number;
     pageSize: number;
     where: Record<string, any> | null;
+    sort: ListRowServerSort | null;
     signal: AbortSignal;
   }): Promise<ListRowPage>;
 }
@@ -114,12 +117,14 @@ export class StoreListRowSource implements ListRowSource {
   }
 
   /** Tire UNE page serveur. `where` est TOUJOURS null ici : `isServerPaged` exige une requête au repos,
-      donc sans cible — la dimension CIBLE relève du régime `remote()`. Les lignes reçues sont ABSORBÉES
-      au Store par le lecteur (`Store.list` → `_absorbRecord`), donc rendues, triées et ouvertes comme
-      n'importe quelle entité : les colonnes du listing n'ont rien à savoir de leur provenance. */
+      donc sans cible — la dimension CIBLE relève du régime `remote()`. `sort` (pagination ordonnée
+      complète) est TRANSMIS tel quel : c'est le serveur qui ordonne le corpus, la source ne retrie rien.
+      Les lignes reçues sont ABSORBÉES au Store par le lecteur (`Store.list` → `_absorbRecord`), donc
+      rendues, triées et ouvertes comme n'importe quelle entité : les colonnes du listing n'ont rien à
+      savoir de leur provenance. */
   fetchPage(request: ListRowRequest, pageRequest: ListRowPageRequest, signal: AbortSignal): Promise<ListRowPage> {
     return this.reader!.page!(request.collection, {
-      page: pageRequest.page, pageSize: pageRequest.pageSize, where: null, signal,
+      page: pageRequest.page, pageSize: pageRequest.pageSize, where: null, sort: pageRequest.sort || null, signal,
     });
   }
 }

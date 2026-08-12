@@ -18,7 +18,13 @@ export interface Tx {
   deletes?: { collection: string; id: string }[];
   meta?: Rec;
 }
-export interface ListOpts { page?: number; pageSize?: number; query?: string; where?: Rec | null; ids?: string[] | null }
+/** Options de la liste paginée. `sort`/`dir` (pagination ORDONNÉE complète, lot 1b lazy-load) : colonne
+    de la LISTE BLANCHE partagée (`ListOrder`, dérivée de la spec) + direction `asc`/`desc` — l'ORDER BY
+    porte alors sur le CORPUS entier, bris d'égalité `id ASC` systématique (découpe en pages stable).
+    Types volontairement `string` : les valeurs traversent la frontière HTTP — l'AUTORITÉ de validation
+    est `ListOrder` (le dépôt REFUSE toute valeur hors liste, la route pré-valide en 400). Absents →
+    tri historique `created_date ASC, id ASC`, tous les appelants existants inchangés. */
+export interface ListOpts { page?: number; pageSize?: number; query?: string; where?: Rec | null; ids?: string[] | null; sort?: string | null; dir?: string | null }
 export interface ListResult { rows: Rec[]; total: number; page: number; pages: number; pageSize: number }
 /** Options de la recherche TRANSVERSE (`searchAll`) : restreindre aux `collections` données (null/vide = toutes),
     plafond par collection (défaut : `RelationalRepository.SEARCH_ALL_LIMIT`). */
@@ -64,7 +70,9 @@ export interface RepositoryContract {
   getMany(collection: string, ids: string[]): Rec[];
   /** Liste paginée : { rows, total, page, pages, pageSize }. `query` = plein-texte ; `where` = filtre par
       champ (égalité ; "null" = non rattaché ; champs tableaux = appartenance) ; `ids` court-circuite le
-      filtre ; tri sur `created_date`. */
+      filtre (et IGNORE le tri — getMany, aucun contrat d'ordre) ; tri par DÉFAUT sur `created_date`, ou
+      `sort`/`dir` = ORDER BY sur une colonne de la liste blanche partagée (`ListOrder` — valeur hors
+      liste REFUSÉE, cf. ListOpts). */
   list(collection: string, opts?: ListOpts): ListResult;
 
   /** Recherche LEAN par champ, pour les `find` de la validation (dépendance inverse V5b + portée V6). Renvoie

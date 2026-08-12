@@ -89,6 +89,7 @@
 
 import { Schema } from "./constants.js";
 import { RelationalSchema } from "../../src-shared/RelationalSchema.js";
+import { ListOrder } from "../../src-shared/ListOrder.js";
 import { COLLECTION_SPECS, type FieldSpec, type EntityFetcher, type ChildFinder } from "../../src-shared/DataValidation.js";
 import { SearchTerms, type DependentQuery } from "../../src-shared/SearchTerms.js";
 import type {
@@ -506,16 +507,22 @@ export class RelationalRepository implements RepositoryContract {
   }
 
   /** Liste paginée : { rows, total, page, pages, pageSize } — COUNT + LIKE sur `search` + whereClause +
-      tri `created_date ASC, id ASC` + pagination, et court-circuit `ids` → getMany : parité stricte blob. */
-  list(collection: string, { page = 1, pageSize = Schema.PAGE_SIZE_DEFAULT, query = "", where = null, ids = null }: ListOpts = {}): ListResult {
+      ORDER BY + pagination, et court-circuit `ids` → getMany : parité stricte blob.
+      TRI (pagination ORDONNÉE complète, lot 1b lazy-load — cf. docs/recherche.md § « Listings
+      serveur-pilotés ») : sans `sort`, l'historique `created_date ASC, id ASC` verbatim ; avec `sort`/
+      `dir`, l'ORDER BY est produit par le module PARTAGÉ `ListOrder` — liste blanche dérivée de la spec
+      (barrière anti-injection : valeur hors liste → throw, JAMAIS interpolée), vides en dernier (asc),
+      COLLATE NOCASE sur les colonnes TEXT, bris d'égalité `id ASC` (découpe en pages STABLE). */
+  list(collection: string, { page = 1, pageSize = Schema.PAGE_SIZE_DEFAULT, query = "", where = null, ids = null, sort = null, dir = null }: ListOpts = {}): ListResult {
     if (!Schema.isCollection(collection)) return { rows: [], total: 0, page: 1, pages: 1, pageSize };
     if (ids && ids.length) return { rows: this.getMany(collection, ids), total: ids.length, page: 1, pages: 1, pageSize };
+    const orderBy = ListOrder.orderBySql(collection, sort, dir || "asc");   // AVANT toute requête : un tri invalide refuse tout
     let clause = "WHERE 1=1"; const args: any[] = [];
     if (query && query.trim()) { clause += " AND search LIKE ?"; args.push("%" + Schema.normSearch(query.trim()) + "%"); }
     const w = this.whereClause(collection, where); clause += w.sql; args.push(...w.args);
     const total = this.db.prepare(`SELECT COUNT(*) n FROM ${RelationalRepository.quote(collection)} ${clause}`).get(...args).n as number;
     const ps = Math.max(1, pageSize | 0), pages = Math.max(1, Math.ceil(total / ps)), p = Math.min(Math.max(1, page | 0), pages);
-    const rows = this.db.prepare(`SELECT * FROM ${RelationalRepository.quote(collection)} ${clause} ORDER BY created_date ASC, id ASC LIMIT ? OFFSET ?`)
+    const rows = this.db.prepare(`SELECT * FROM ${RelationalRepository.quote(collection)} ${clause} ${orderBy} LIMIT ? OFFSET ?`)
       .all(...args, ps, (p - 1) * ps).map((row) => this.rebuild(collection, row));
     return { rows, total, page: p, pages, pageSize: ps };
   }

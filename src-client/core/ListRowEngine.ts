@@ -40,7 +40,11 @@
    arbitraires, souvent dérivées — il n'y a pas de colonne SQL en face). Le jeu
    serveur est donc PLAFONNÉ par la source ; au-delà, l'utilisateur affine sa
    recherche. Le régime `page()`, lui, pagine POUR DE VRAI (il n'a pas le choix :
-   la collection n'est pas en cache) et hérite en échange de l'ordre du serveur.
+   la collection n'est pas en cache) — et depuis la PAGINATION ORDONNÉE COMPLÈTE
+   (lot 1b), le critère de tri du listing y ordonne le CORPUS entier quand il se
+   mappe sur un champ serveur (`ListRowPageRequest.sort`, liste blanche partagée
+   `ListOrder`) ; sans mapping, l'ordre serveur par défaut demeure et la vue trie
+   la page reçue (repli documenté).
    Cf. docs/recherche.md § « Listings serveur-pilotés » et docs/hydratation.md.
    ============================================================================= */
 
@@ -54,10 +58,16 @@ export interface ListRowRequest {
   target: ListRowTarget | null;
 }
 
-/** Ce qu'un listing demande d'une PAGE serveur (pager RÉEL des collections lazy). Le TRI n'y figure
-    pas : la route paginée ne sait ordonner que par date de création (écart documenté — cf.
-    docs/hydratation.md § « Vague 1 »), le critère choisi par l'utilisateur s'applique à la page reçue. */
-export interface ListRowPageRequest { page: number; pageSize: number; }
+/** TRI SERVEUR d'une page (pagination ORDONNÉE complète — lot 1b) : un champ du MODÈLE (liste blanche
+    partagée `ListOrder`, mappé depuis le critère de la vue par `core/ListServerSort`) + la direction. */
+export interface ListRowServerSort { field: string; dir: "asc" | "desc"; }
+
+/** Ce qu'un listing demande d'une PAGE serveur (pager RÉEL des collections lazy). `sort` = le critère
+    de tri ACTIF traduit en champ serveur — l'ORDER BY porte alors sur le CORPUS entier, la découpe en
+    pages le suit (pagination ordonnée complète, cf. docs/hydratation.md § « Vague 1 »). `null` = aucun
+    critère mappable (colonne sans `sortField`) : ordre serveur par défaut (`created_date`), et la vue
+    assume le REPLI documenté « trier la page reçue ». */
+export interface ListRowPageRequest { page: number; pageSize: number; sort: ListRowServerSort | null; }
 
 /** Une PAGE servie par le serveur : ses lignes + les compteurs RÉELS (total = `COUNT(*)`), qui pilotent
     directement le pager de la vue — plus aucune arithmétique cliente sur un jeu plafonné. */
@@ -97,11 +107,14 @@ export class ListRowEngine {
     return request.collection + "\n" + request.query.trim() + "\n" + target;
   }
 
-  /** Identité d'une PAGE : la requête PLUS la découpe demandée — changer de page ou de taille de page
-      est une autre demande serveur, changer de critère de TRI n'en est pas une (le tri est appliqué à
-      la page reçue, cf. l'en-tête). */
+  /** Identité d'une PAGE : la requête PLUS la découpe demandée PLUS le tri serveur — changer de page,
+      de taille de page OU de critère/direction de tri EST une nouvelle demande serveur (pagination
+      ordonnée complète : l'ORDER BY redécoupe le corpus entier ; l'ancien « le tri n'en est pas une »
+      datait du pilote, où il ne s'appliquait qu'à la page reçue). `sort` absent/null (colonne sans
+      champ serveur, source d'avant le lot 1b) = même identité : l'ordre par défaut du serveur. */
   static pageSignature(request: ListRowRequest, page: ListRowPageRequest): string {
-    return ListRowEngine.signature(request) + "\n" + Math.max(1, page.page | 0) + "\n" + Math.max(1, page.pageSize | 0);
+    const sort = page.sort ? page.sort.field + " " + page.sort.dir : "";
+    return ListRowEngine.signature(request) + "\n" + Math.max(1, page.page | 0) + "\n" + Math.max(1, page.pageSize | 0) + "\n" + sort;
   }
 
   /** Lignes SERVEUR de la dernière réponse — null tant qu'aucune ne couvre une requête. */
