@@ -20,6 +20,7 @@ import { RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT } from "../../domain/constants";
 import { DC_SCOPE_ICONS } from "./shared";
 import { Icons } from "../../ui/Icons";
 import { IconButton } from "../../ui/IconButton";
+import { SearchPop, SearchPopResult } from "../../ui/SearchPop";
 import { I18n } from "../../i18n/I18n";
 import { DcViews2D } from "./DcViews2D";
 
@@ -80,37 +81,39 @@ export abstract class DcPanels extends DcViews2D {
     this.updateControls();
   }
 
-  /** Champ de recherche global de la toolbar : saisie → résultats (toutes catégories) ; clic → `locate` (mise en
-      évidence identique aux boutons « pin ») ; bouton ✕ → `clearHighlight`. Repeuplé depuis `searchTerm` à chaque build. */
+  /** Champ de recherche global de la toolbar : saisie → résultats (toutes catégories) ; clic sur un résultat
+      → `locate` (mise en évidence identique aux boutons « pin ») ; bouton ✕ À CÔTÉ → `clearHighlight` (efface
+      la mise en évidence 3D, distinct du ✕ interne du composant qui vide le champ). Repeuplé depuis `searchTerm`
+      à chaque build (la toolbar est reconstruite souvent).
+
+      C'est le composant PARTAGÉ `ui/SearchPop` (principe n°14) — plus de clone maison : on y gagne la navigation
+      ↑/↓, l'ARIA de combobox et un popover PORTALISÉ (la vue 3D passe en plein écran réel, `portal:true` accroche
+      le popover à `Fullscreen.host()`). Seule la SOURCE (`searchResults`, règle métier inchangée : synchrone,
+      toutes catégories localisables, plafond 6 par type) et l'EFFET du clic (`locate`) sont injectés. Les kinds
+      3D ("room"/"rack"/"equipment"/…) et les ids voyagent par `data` (et non encodés dans `id`) : ce ne sont pas
+      les clés de collection de `TargetSearch`. `debounceMs:0` car la source est locale ; `minChars:1` reproduit
+      « rien tant que le champ est vide » ; `value`/`onInput` sèment puis suivent `searchTerm`. */
   protected buildSearchBox(): HTMLElement {
-    const wrap = document.createElement("div"); wrap.style.cssText = "position:relative;display:flex;align-items:center;gap:4px";
-    const input = document.createElement("input");
-    input.type = "text"; input.className = "search-input"; input.placeholder = I18n.t("dc.panels.searchPlaceholder");
-    input.style.cssText = "min-width:220px;max-width:320px;padding:6px 10px;flex:none"; input.value = this.searchTerm;
+    const pop = new SearchPop({
+      placeholder: I18n.t("dc.panels.searchPlaceholder"),
+      portal: true,                                   // la vue 3D passe en plein écran réel (lot portail, `Fullscreen.host()`)
+      minChars: 1,                                    // rien tant que la saisie est vide (parité du clone)
+      debounceMs: 0,                                  // source SYNCHRONE locale (comme EntityPicker) : pas d'anti-rebond utile
+      value: this.searchTerm,                         // repeuplé à chaque reconstruction de la toolbar
+      onInput: (q) => { this.searchTerm = q; },       // SUIVI de saisie (≠ recherche) : garde l'état de la vue à jour
+      fetch: (query) => Promise.resolve(this.searchResults(query).map((r): SearchPopResult => ({
+        // `id` reste unique (composite kind:id) pour l'ARIA ; le TRANSPORT du couple {kind,id} passe par `data`.
+        id: r.kind + ":" + r.id, label: r.label, tag: r.tag, data: { kind: r.kind, id: r.id },
+      }))),
+      // `pick()` du composant FERME déjà le popover (via `hide()`) en CONSERVANT la saisie (seul `reset()` la
+      // viderait) : parité exacte avec le clone (saisie gardée, popover fermé). On n'a donc qu'à localiser.
+      onPick: (r) => { const t = r.data as { kind: string; id: string }; this.locate(t.kind as any, t.id); },
+    });
+    // ✕ de la TOOLBAR, distinct du ✕ interne du composant : efface la mise en évidence 3D (action de VUE),
+    // pas le champ. Rangé À CÔTÉ de l'élément du composant.
+    const wrap = document.createElement("div"); wrap.style.cssText = "display:flex;align-items:center;gap:4px";
     const clear = this.btn("", () => this.clearHighlight(), I18n.t("dc.panels.clearHighlight")); clear.innerHTML = Icons.CLOSE;
-    const pop = document.createElement("div"); pop.className = "dc-search-pop";
-    const hide = () => { pop.classList.remove("open"); pop.innerHTML = ""; };
-    const renderPop = () => {
-      const res = this.searchResults(input.value); pop.innerHTML = "";
-      if (!res.length) { hide(); return; }
-      res.forEach((r) => {
-        const it = document.createElement("div"); it.className = "dc-search-item";
-        const tag = document.createElement("span"); tag.className = "dc-search-tag"; tag.textContent = r.tag;
-        const lab = document.createElement("span"); lab.textContent = r.label; lab.style.cssText = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
-        it.append(tag, lab);
-        it.onmousedown = (e) => { e.preventDefault(); hide(); this.locate(r.kind as any, r.id); };   // mousedown : avant le blur
-        pop.appendChild(it);
-      });
-      pop.classList.add("open");
-    };
-    input.oninput = () => { this.searchTerm = input.value; renderPop(); };
-    input.onfocus = () => { if (input.value.trim()) renderPop(); };
-    input.onblur = () => { window.setTimeout(hide, 150); };
-    input.onkeydown = (e) => {
-      if (e.key === "Escape") { hide(); input.blur(); }
-      else if (e.key === "Enter") { const res = this.searchResults(input.value); if (res.length) { hide(); this.locate(res[0].kind as any, res[0].id); } }
-    };
-    wrap.append(input, clear, pop);
+    wrap.append(pop.element, clear);
     return wrap;
   }
 

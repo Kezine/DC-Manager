@@ -14,9 +14,11 @@ import { I18n } from "../i18n/I18n";
    et l'effet du clic (`onPick`) sont INJECTÉS — le composant ne connaît ni le réseau,
    ni la vue qui l'emploie (principe n°2 : couplage par paramètres, pas par import).
 
-   Piste de rangement (cadrage certs §4) : la vue Datacenter n'est PAS migrée sur ce
-   composant dans ce chantier (`DcPanels` reste tel quel) ; l'y migrer serait une
-   simplification future — le CSS est déjà partagé.
+   VUE DATACENTER (3D) : `DcPanels.buildSearchBox` EMPLOIE désormais ce composant (cadrage
+   C §2.3) — le clone maison qui avait inspiré ce balisage a été SUPPRIMÉ. Le CSS était
+   déjà partagé ; il ne restait qu'à brancher la source synchrone (`DcPanels.searchResults`,
+   règle métier inchangée) sur `fetch` et l'effet du clic (`locate`) sur `onPick`. La vue 3D
+   passant en PLEIN ÉCRAN réel, c'est en mode `portal` qu'elle l'emploie.
 
    FRAÎCHEUR DES RÉPONSES : les fetchs sont asynchrones et concurrents ; la réponse
    d'une saisie ANCIENNE ne doit pas écraser l'affichage d'une saisie récente. Un
@@ -36,6 +38,19 @@ import { I18n } from "../i18n/I18n";
    ⚠ `minChars: 0` était DÉJÀ praticable (`?? 2` ne se déclenche pas sur 0, et les
    gardes comparent `< minChars`) : rien n'a eu à changer pour ouvrir la liste
    complète au focus — vérifié avant de coder, pas supposé.
+
+   BARRE DE RECHERCHE D'UNE VUE RECONSTRUITE (cadrage C §2.3, migration de `DcPanels`) —
+   deux capacités ADDITIVES, NEUTRES pour tous les consommateurs existants (aucun ne les
+   emploie). Elles ne servent PAS le sélecteur d'entité mais l'usage « champ d'une vue
+   rebâtie souvent » (la toolbar 3D est reconstruite à chaque render) :
+     - `value` : valeur initiale SEMÉE dans le champ. Elle ne déclenche AUCUN fetch (simple
+       assignation de `.value`, qui ne lève pas `oninput`) — la vue REPEUPLE le champ depuis
+       son état (`searchTerm`) à chaque construction ; un focus rouvrira les résultats si
+       `minChars` est atteint, comme le clone historique le faisait ;
+     - `onInput` : rappel à CHAQUE frappe, AVANT l'anti-rebond. C'est le SUIVI DE SAISIE de
+       l'hôte (mémoriser le terme dans l'état de la vue), à NE PAS confondre avec la RECHERCHE
+       elle-même — le `fetch`, lui, est anti-rebondi et gardé en fraîcheur. Deux registres,
+       deux points d'entrée.
 
    EXTENSIONS DU LOT L3 « éditeur de route » (cadrage route-editor, décision D4) —
    toutes ADDITIVES et OPTIONNELLES, aucun consommateur existant ne change :
@@ -140,6 +155,12 @@ export interface SearchPopOptions {
   /** Nombre de caractères minimal avant de lancer une recherche — défaut 2. `0` ouvre la liste
       complète dès le focus (mode sélecteur : on doit pouvoir PARCOURIR sans taper). */
   minChars?: number;
+  /** Valeur initiale SEMÉE dans le champ (cf. en-tête « BARRE DE RECHERCHE D'UNE VUE RECONSTRUITE »).
+      Ne déclenche AUCUN fetch à la construction — la vue qui rebâtit sa toolbar y repose son terme. */
+  value?: string;
+  /** SUIVI DE SAISIE de l'hôte : rappelé à CHAQUE frappe, AVANT l'anti-rebond. À distinguer de `fetch`
+      (la RECHERCHE, elle, est anti-rebondie/gardée) — sert à mémoriser le terme dans l'état de la vue. */
+  onInput?: (query: string) => void;
   /** Mode « barre de listing » (revue design lot C) : le champ devient EXTENSIBLE (flex:1), à la HAUTEUR
       de contrôle unifiée, avec la loupe INTÉGRÉE (`Icons.SEARCH`) — même vocabulaire que la recherche des
       ListView. Défaut false : rendu compact d'origine (sélecteur d'entité en modale, etc.). */
@@ -195,6 +216,9 @@ export class SearchPop {
     this.input = document.createElement("input");
     this.input.type = "text";
     this.input.placeholder = opts.placeholder;
+    // Valeur SEMÉE (cf. en-tête) : assignation directe de `.value`, qui NE déclenche PAS `oninput` —
+    // donc aucun fetch au montage. La vue qui rebâtit sa toolbar y repose son terme (`searchTerm`).
+    if (opts.value) this.input.value = opts.value;
 
     if (this.host) {
       // -- MODE HÉBERGÉ : aucun wrap propre, aucun bouton ✕, aucun popover — champ et liste vivent
@@ -327,6 +351,10 @@ export class SearchPop {
   }
 
   private onInput(): void {
+    // SUIVI DE SAISIE de l'hôte AVANT toute décision de recherche : il doit voir CHAQUE frappe (y
+    // compris celles qui vident le champ ou n'atteignent pas `minChars`), sinon l'état de la vue
+    // divergerait du champ. C'est bien le rappel de l'option `onInput`, distinct de `fetch`.
+    if (this.opts.onInput) this.opts.onInput(this.input.value);
     if (this.input.value.trim().length < this.minChars) { this.hide(); return; }
     this.schedule();
   }
