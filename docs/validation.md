@@ -357,8 +357,9 @@ Cas particuliers à connaître :
 - **`applications.equipment_id` / `vm_id`** : deux FK nullables à **exclusivité souple** (invariant
   V3, copie d'`ipAddresses`) — un hôte OU l'autre, jamais les deux ; les deux vides restent permis.
 - **`attachments.mime`** est contraint par INVARIANT à la **liste blanche PARTAGÉE**
-  `Schema.ATTACHMENT_MIME_TYPES` (PDF, PNG/JPEG/WebP, ODT/ODS/DOCX/XLSX, TXT/CSV — **jamais
-  `text/html` ni `image/svg+xml`**, anti-XSS-stocké, même doctrine qu'`IMAGE_MIME_TYPES`). La règle
+  `Schema.ATTACHMENT_MIME_TYPES` (PDF, PNG/JPEG/WebP, ODT/ODS/DOCX/XLSX, TXT/CSV/MD — **jamais
+  `text/html` ni `image/svg+xml`**, anti-XSS-stocké, même doctrine qu'`IMAGE_MIME_TYPES` ; `text/markdown`
+  est du texte INERTE resservi tel quel, cf. `attachments.md` § Viewer). La règle
   est rejouée à TOUTE écriture — pas seulement à l'upload serveur : une édition de métadonnées ne
   peut pas requalifier un binaire en type interdit. Contrôlée seulement si renseignée (patron
   `contacts.email`) : l'absence relève de `required`. `attachments.equipment_id` /

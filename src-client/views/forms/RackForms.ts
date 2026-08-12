@@ -645,7 +645,13 @@ export class RackForms extends CableForms {
     // FICHIER : création = FilePicker (obligatoire) ; édition = ligne INFORMATIVE (binaire non remplaçable v1).
     let picker: FilePickerElement | null = null;
     if (!att) {
-      picker = FilePicker.build({ accept: Schema.ATTACHMENT_MIME_TYPES, maxBytes: ATTACHMENT_MAX_BYTES, isValidMime: (t) => Schema.isAttachmentMime(t) });
+      // Repli extension → MIME : `File.type` d'un `.md` est souvent VIDE (Windows/Firefox), et un `.csv` arrive
+      // parfois avec un type d'éditeur. Le picker résout par l'extension AVANT de valider (cf. D-B2/FilePicker),
+      // et EXPOSE le MIME résolu via `.mime` (consommé plus bas pour le meta, à la place de `file.type`).
+      picker = FilePicker.build({
+        accept: Schema.ATTACHMENT_MIME_TYPES, maxBytes: ATTACHMENT_MAX_BYTES, isValidMime: (t) => Schema.isAttachmentMime(t),
+        extensionMime: { ".md": "text/markdown", ".markdown": "text/markdown", ".txt": "text/plain", ".csv": "text/csv" },
+      });
       root.appendChild(FormControls.fieldRow(I18n.t("attachment.form.file"), picker, I18n.t("attachment.form.fileHint")));
     } else {
       const info = document.createElement("div");
@@ -707,8 +713,9 @@ export class RackForms extends CableForms {
         // CRÉATION : le fichier est OBLIGATOIRE.
         const file = picker && picker.file;
         if (!file) { Notify.toast(I18n.t("attachment.form.fileRequired"), "err"); return false; }
-        // `file_name`/`mime` viennent du File choisi ; `size` est écrasé par le serveur en mode API.
-        const meta = { name: nameI.value.trim(), description: descI.value.trim(), file_name: file.name, mime: file.type, size: file.size, equipment_id, sub_equipment_id };
+        // `file_name` vient du File choisi ; `mime` = le MIME RÉSOLU par le picker (repli extension → jamais
+        // `file.type` brut, vide pour un `.md`) ; `size` est écrasé par le serveur en mode API.
+        const meta = { name: nameI.value.trim(), description: descI.value.trim(), file_name: file.name, mime: (picker && picker.mime) || file.type, size: file.size, equipment_id, sub_equipment_id };
         if (live.check(meta).length) return false;   // nom requis + MIME liste blanche (surlignés)
 
         if (host.restMode) {

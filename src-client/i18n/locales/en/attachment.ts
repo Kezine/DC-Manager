@@ -27,6 +27,17 @@ export const attachment = {
   section: "Attachments ({{count}})",
   openDetail: "Open the attachment's detail sheet",
   binaryMissing: "This attachment's binary could not be found.",
+  // Built-in VIEWER (batch B): image/text/markdown/PDF rendering in the modal stack.
+  view: {
+    title: "Attachment",
+    truncated: "Display truncated — download for the full file.",
+    readError: "This attachment's content could not be read.",
+    notViewable: "This file type cannot be displayed — download it to open it.",
+    // Image policy D-B3: a markdown's external images are neutralized by default.
+    showExternalImages_one: "Show external image",
+    showExternalImages_other: "Show the {{count}} external images",
+    externalImageTitle: "External image neutralized — click to open its source in a new tab.",
+  },
   // Detail-sheet pill flagging that the target is a SUB-EQUIPMENT (vs equipment).
   targetSubEquipmentPill: "Sub-equipment",
 } as const;

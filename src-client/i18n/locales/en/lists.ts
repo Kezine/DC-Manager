@@ -25,6 +25,7 @@ export const lists = {
     count_other: "{{count}} items · page {{page}}/{{pages}}",
     pageSize: "{{n}}/page",
     rowView: "Details",
+    rowShow: "View",
     rowManage: "Contents (U mounting)",
     rowEdit: "Edit",
     rowDelete: "Delete",

@@ -31,11 +31,18 @@ export interface ListColumn {
 }
 export interface ListActions {
   view?: boolean; edit?: boolean; clone?: boolean; del?: boolean; locate?: boolean; download?: boolean; manage?: boolean;
+  /** « Afficher » (viewer intégré) : action du MENU de ligne, placée AVANT « Télécharger » (cadrage B, D-B4).
+      Réservée aux pièces jointes visualisables → raffinée PAR LIGNE via `canShow` (cf. `AttachmentViewKind`).
+      Déléguée à `onAction("show", id)` comme `download` (le viewer vit hors du Store — cf. TabOpts.onShow). */
+  show?: boolean;
   /** Raffinement PAR LIGNE de `locate` : le bouton « Localiser en 3D » n'est proposé que si ce prédicat accepte
       l'enregistrement (ex. équipement : localisable seulement s'il est rattaché à une salle — un équipement
       d'inventaire pur, posé sur plan d'étage ou dans une baie non placée n'aurait qu'un toast d'erreur). Absent
       → `locate` vaut pour toutes les lignes (comportement historique). */
   canLocate?: (id: string) => boolean;
+  /** Raffinement PAR LIGNE de `show` : « Afficher » n'apparaît que si ce prédicat accepte l'enregistrement
+      (type visualisable). Absent → `show` vaut pour toutes les lignes. */
+  canShow?: (id: string) => boolean;
 }
 export interface ListOptions {
   collection: string;
@@ -444,7 +451,7 @@ export class ListView {
     if (a.view) html += IconButton.html({ icon: Icons.INFO, label: I18n.t("lists.chrome.rowView"), act: "view" });
     if (a.manage) html += IconButton.html({ icon: Icons.RACK_CONTENT, label: I18n.t("lists.chrome.rowManage"), act: "manage" });   // éditeur de contenu de baie (inline, à côté de Détails)
     if (a.edit) html += IconButton.html({ icon: Icons.EDIT, label: I18n.t("lists.chrome.rowEdit"), act: "edit" });
-    if (this._rowCanLocate(id) || a.clone || a.del || a.download) {
+    if (this._rowCanShow(id) || this._rowCanLocate(id) || a.clone || a.del || a.download) {
       const moreLbl = I18n.t("lists.chrome.rowMore");
       html += `<button type="button" class="btn btn-ghost btn-sm icon-action row-overflow" data-act="__more__" title="${moreLbl}" aria-label="${moreLbl}" aria-haspopup="menu" aria-expanded="false">${Icons.MORE}</button>`;
     }
@@ -456,6 +463,11 @@ export class ListView {
     return !!this.actions.locate && (!this.actions.canLocate || this.actions.canLocate(id));
   }
 
+  /** `show` (« Afficher », viewer) effectif pour UNE ligne : action activée ET prédicat par ligne satisfait. */
+  private _rowCanShow(id: string): boolean {
+    return !!this.actions.show && (!this.actions.canShow || this.actions.canShow(id));
+  }
+
   /** Ouvre le menu « plus d'actions » (overflow) d'une ligne : actions secondaires actives, déléguées à onAction. */
   private _openRowMenu(trigger: HTMLElement, id: string): void {
     const a = this.actions;
@@ -463,6 +475,8 @@ export class ListView {
     // Icônes du registre PARTAGÉ : les emoji d'origine (📍 ⬇ ⧉) étaient des bitmaps COULEUR — ils
     // pixellisaient au zoom et ignoraient `currentColor`, donc la teinte « danger » du survol.
     if (this._rowCanLocate(id)) items.push({ label: I18n.t("lists.chrome.rowLocate"), icon: Icons.LOCATE, onClick: () => this.onAction && this.onAction("locate", id) });
+    // « Afficher » (viewer) AVANT « Télécharger » (cadrage B, D-B4) : consulter d'abord, télécharger ensuite.
+    if (this._rowCanShow(id)) items.push({ label: I18n.t("lists.chrome.rowShow"), icon: Icons.EYE, onClick: () => this.onAction && this.onAction("show", id) });
     if (a.download) items.push({ label: I18n.t("lists.chrome.rowDownload"), icon: Icons.EXPORT, onClick: () => this.onAction && this.onAction("download", id) });
     if (a.clone) items.push({ label: I18n.t("lists.chrome.rowClone"), icon: Icons.CLONE, onClick: () => this.onAction && this.onAction("clone", id) });
     if (a.del) items.push({ label: I18n.t("ui.action.delete"), icon: Icons.DELETE, danger: true, onClick: () => this.onAction && this.onAction("del", id) });

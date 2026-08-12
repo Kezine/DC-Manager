@@ -59,9 +59,12 @@ export class Schema {
       son Content-Type stocké, donc tout type que le navigateur peut EXÉCUTER est banni — JAMAIS `text/html`
       ni `image/svg+xml` (un SVG scripté est un document exécutable). La liste est une LISTE BLANCHE (jamais
       une liste noire, qui oublie toujours un type) : documents administratifs (PDF, ODT/ODS, DOCX/XLSX),
-      images sûres (mêmes trois que les façades) et texte inerte (TXT/CSV). Le front filtre à la sélection
-      de fichier ; le serveur REJETTE en 400 tout autre type à l'upload (et le download force
-      `Content-Disposition: attachment`, décision D6 — défense en profondeur, cf. docs/attachments.md). */
+      images sûres (mêmes trois que les façades) et texte inerte (TXT/CSV/MD). `text/markdown` est du texte
+      INERTE resservi tel quel (le viewer client le rend en défauts micromark sûrs — HTML brut échappé, images
+      externes neutralisées, cf. docs/attachments.md § Viewer) : il n'ouvre aucune surface d'exécution à
+      l'origine, contrairement à `text/html`. Le front filtre à la sélection de fichier ; le serveur REJETTE
+      en 400 tout autre type à l'upload (et le download force `Content-Disposition: attachment`, décision D6 —
+      défense en profondeur, cf. docs/attachments.md). */
   static readonly ATTACHMENT_MIME_TYPES: readonly string[] = [
     "application/pdf",
     "image/png", "image/jpeg", "image/webp",
@@ -69,7 +72,7 @@ export class Schema {
     "application/vnd.oasis.opendocument.spreadsheet",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "text/plain", "text/csv",
+    "text/plain", "text/csv", "text/markdown",
   ];
   static isAttachmentMime(type: unknown): boolean { return Schema.ATTACHMENT_MIME_TYPES.includes(String(type || "")); }
 

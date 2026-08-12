@@ -1520,6 +1520,41 @@
   .md-body > :last-child { margin-bottom: 0; }
   .md-body p, .md-body ul, .md-body ol, .md-body pre, .md-body blockquote, .md-body h1, .md-body h2, .md-body h3 { margin: 0.4em 0; }
   .md-body ul, .md-body ol { padding-left: 1.4em; }
+
+  /* VARIANTE PLEIN-CADRE du rendu markdown (viewer de pièces jointes, cf. AttachmentUi.view) : `.md-body` est
+     réglé pour une CELLULE de fiche (compact, marges neutralisées) — ici on rend un DOCUMENT markdown entier,
+     donc largeur de lecture bornée, blocs mieux espacés, titres hiérarchisés et éléments larges scrollables.
+     N'affecte pas `.md-body` seul : ces règles ne s'appliquent qu'en présence de `.md-body-full`. */
+  .md-body-full { max-width: 72ch; margin: 0 auto; line-height: 1.6; }
+  .md-body-full h1, .md-body-full h2, .md-body-full h3 { margin: 1.1em 0 0.5em; line-height: 1.25; }
+  .md-body-full h1 { font-size: 1.5em; }
+  .md-body-full h2 { font-size: 1.3em; }
+  .md-body-full h3 { font-size: 1.12em; }
+  .md-body-full p, .md-body-full ul, .md-body-full ol, .md-body-full blockquote { margin: 0.7em 0; }
+  .md-body-full pre { margin: 0.7em 0; padding: 10px 12px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 6px; overflow-x: auto; }
+  .md-body-full code { font-family: var(--mono); font-size: 0.92em; }
+  .md-body-full blockquote { padding-left: 12px; border-left: 3px solid var(--line-2); color: var(--fg-dim); }
+  .md-body-full img { max-width: 100%; height: auto; }
+  /* Tables larges : scroll horizontal DANS le bloc (le corps de la modale ne défile jamais latéralement). */
+  .md-body-full table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+  .md-body-full th, .md-body-full td { border: 1px solid var(--line); padding: 4px 8px; }
+  /* Image externe NEUTRALISÉE (politique D-B3) : lien sobre montrant l'URL, précédé de l'icône image. */
+  .md-ext-image { display: inline-flex; align-items: center; gap: 6px; padding: 2px 6px; border: 1px dashed var(--line-2); border-radius: 6px; color: var(--fg-dim); font-size: 0.9em; }
+  .md-ext-image .gi { width: 14px; height: 14px; flex: 0 0 auto; }
+
+  /* VIEWER de pièces jointes (AttachmentUi.view) — conteneur du contenu affiché dans la modale. */
+  .attachment-viewer { display: flex; flex-direction: column; gap: 10px; }
+  /* Image : centrée, bornée en hauteur, jamais débordante. */
+  .attachment-view-image { display: block; max-width: 100%; max-height: 70vh; margin: 0 auto; object-fit: contain; }
+  /* PDF : visionneuse native du navigateur (iframe sur blob local, cf. D-B1) — pleine largeur, ~75vh. */
+  .attachment-view-pdf { width: 100%; height: 75vh; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-2); }
+  /* Texte brut : monospace, retour à la ligne préservé, défilement vertical borné. */
+  .attachment-view-text { margin: 0; padding: 12px; max-height: 72vh; overflow: auto; background: var(--bg-2); border: 1px solid var(--line); border-radius: 6px; font-family: var(--mono); font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; color: var(--fg); }
+  /* Bandeau de troncature (texte/markdown > 1 Mo affiché) + note d'erreur/repli. */
+  .attachment-view-truncated { padding: 6px 10px; border-radius: 6px; background: var(--warn-bg, var(--bg-2)); border: 1px solid var(--warn); color: var(--warn); font-size: 11px; }
+  .attachment-view-note { margin: 0; padding: 12px; color: var(--fg-dim); }
+  /* Bouton « Afficher les images externes » : aligné à gauche, au-dessus du corps markdown. */
+  .attachment-view-extimg { align-self: flex-start; }
   /* Ligne d'audit DISCRÈTE des fiches (« Créé/Modifié par … le … », cf. AuditLine) : petite, estompée, en retrait. */
   .audit-line { margin-top: 14px; font-size: 10px; color: var(--fg-dimmer); letter-spacing: 0.03em; }
 

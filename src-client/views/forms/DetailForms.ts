@@ -32,7 +32,8 @@ import { WifiForms } from "./WifiForms";   // édition des champs LOCAUX (featur
 import { InterventionFicheRow } from "./InterventionFicheRow";   // intégration « fiches » de la feature interventions (AMOVIBLE)
 import { CertFicheRow } from "./CertFicheRow";   // intégration « fiches » du rapprochement certificat ↔ cible (AMOVIBLE)
 import { SubEquipmentForms } from "./SubEquipmentForms";   // fiche + formulaire des sous-équipements (hors chaîne d'héritage, cf. son en-tête)
-import { AttachmentUi } from "./AttachmentUi";   // téléchargement d'une pièce jointe (geste UNIQUE partagé avec les sections des fiches porteuses)
+import { AttachmentUi } from "./AttachmentUi";   // téléchargement + viewer d'une pièce jointe (gestes UNIQUES partagés avec les sections des fiches porteuses)
+import { AttachmentViewKind } from "../../core/AttachmentViewKind";   // « Afficher » conditionnel : présent seulement si le type est visualisable
 import { AuditLine } from "./AuditLine";   // ligne « Créé/Modifié par {auteur} le {date} » (résolue via l'annuaire, mode API)
 
 /* =============================================================================
@@ -636,11 +637,19 @@ export class DetailForms extends IpamForms {
     };
     AuditLine.attach(root, att, host.userDirectory);   // « Créé/Modifié par » (mode API)
 
-    // Pied : « Télécharger » (le geste central d'une pièce jointe) puis « Modifier » (métadonnées).
+    // Pied : « Afficher » (viewer intégré, SEULEMENT si le type est visualisable — D-B4), AVANT « Télécharger »
+    // (le geste central), puis « Modifier » (métadonnées). Le viewer s'empile sur CETTE fiche.
+    const footerActions: HTMLElement[] = [];
+    if (AttachmentViewKind.kindOf(att.mime, att.file_name) !== null) {
+      const viewBtn = document.createElement("button"); viewBtn.type = "button"; viewBtn.className = "btn btn-ghost";
+      viewBtn.innerHTML = `<span class="gi">${Icons.EYE}</span>${I18n.t("lists.chrome.rowShow")}`;
+      viewBtn.onclick = () => { void AttachmentUi.view(host, att); };
+      footerActions.push(viewBtn);
+    }
     const dlBtn = document.createElement("button"); dlBtn.type = "button"; dlBtn.className = "btn btn-ghost";
     dlBtn.innerHTML = `<span class="gi">${Icons.EXPORT}</span>${I18n.t("lists.chrome.rowDownload")}`;
     dlBtn.onclick = () => { void AttachmentUi.download(host, att); };
-    const footerActions = [dlBtn, ...this.footer(() => this.attachment(store, host, id, onChanged))];
+    footerActions.push(dlBtn, ...this.footer(() => this.attachment(store, host, id, onChanged)));
     host.openModal({ title: I18n.t("detail.attachment.title"), subtitle: Html.escape(att.name || ""), body: root, footerActions, stackKey: "detail:attachments/" + id, onResume: () => this.attachmentDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 

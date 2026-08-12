@@ -556,6 +556,10 @@ async function boot(): Promise<void> {
         ici plutôt que codée en dur comme view/edit/del : le download d'une pièce jointe passe par
         l'`attachmentStore` (binaire hors document), pas par le Store du modèle. Absent = pas de download. */
     onDownload?: (id: string) => void;
+    /** Action « Afficher » d'une ligne (viewer intégré ; le listing déclare `show: true` dans `cfg.actions`).
+        Même raison d'être que `onDownload` : le viewer lit le binaire via l'`attachmentStore` (hors Store du
+        modèle). Absent = pas de viewer. À ne pas confondre avec l'`onShow` du cycle de vue (build paresseux). */
+    onShow?: (id: string) => void;
   }
   /** Déclare un onglet de LISTE et rend un ACCESSEUR sur sa `ListView` — null tant que l'onglet n'a
       jamais été affiché (la vue est construite au premier `onShow`, à dessein : on ne paie pas le
@@ -611,6 +615,7 @@ async function boot(): Promise<void> {
                 return;
               }
               if (act === "download") { opts.onDownload?.(id); return; }   // binaire hors document (pièces jointes) — cf. onDownload
+              if (act === "show") { opts.onShow?.(id); return; }           // viewer intégré (binaire hors document) — cf. onShow
               if (act === "edit") { formFn?.(id, reRender); return; }
               if (act === "clone") {
                 const c = cfg.collection === "equipments" ? await store.cloneEquipment(id) : await store.cloneSimple(cfg.collection, id);
@@ -900,6 +905,7 @@ async function boot(): Promise<void> {
     kind: "secondary", parent: "equipements",
     form: (id, done) => Forms.attachment(store, formHost, id, done), addLabel: I18n.t("app.add.attachment"),
     onDownload: (id) => { void AttachmentUi.download(formHost, store.get("attachments", id)); },
+    onShow: (id) => { void AttachmentUi.view(formHost, store.get("attachments", id)); },   // viewer intégré (D-B4)
   });
   // Images de façade : bibliothèque hors modèle (ImageStore) → câblage dédié (CRUD via imageStore)
   {
