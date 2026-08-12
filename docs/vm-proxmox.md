@@ -99,7 +99,7 @@ par construction. Un test d'invariant vérifie la liste contre le modèle.
 | `core/VmHostTip.ts` | Bloc « VMs hébergées » de la **bulle de survol d'un équipement** en vue Datacenter (PUR : ni DOM, ni store). Reçoit les VMs de l'hôte, rend des LIGNES HTML **déjà échappées** — tri par nom, bornage `MAX_LISTED` ; la pastille de statut est **déléguée à `VmStatus`**. Cf. « VMs dans la bulle d'un équipement » plus bas. |
 | `core/VmLocate.ts` | « Localiser en 3D » une VM = localiser son **HÔTE** (PUR : store injecté par interface étroite). Rend l'**id de l'équipement à viser**, ou `null` si la localisation ne peut pas aboutir. Cf. « Localiser une VM » plus bas. |
 | `core/VmClusterFormat.ts` | Helpers PURS de la vue Clusters : rapprochement nœud→équipement — **MIROIR EXACT de la hiérarchie v3** du serveur (`VmSyncService`), à synchroniser des deux côtés : ① hostnames des IP rattachées (complet ou 1er label, casse/trim), ② nom exact insensible à la casse, ③ 1er label FQDN du nom ; à chaque niveau unique→résolu, plusieurs→null (sans descendre), zéro→suivant. Reçoit les `ipAddresses` en plus des équipements. Formatage uptime/CPU/Go. |
-| Branchements fins | `EntityRegistry` (collection), `ListConfigs.vms` + `addListTab` (onglet, dont `locate`/`locateTarget`), `DetailForms.detail` (case `vms`), `IpamForms`/`shared.ts` (sélecteur VM des adresses), `Store.ipAddressesOfVm`, `Store.vmsOfHost`, `DcInteract.equipmentTipHtml` (bloc « VMs hébergées »), `INDEX_SPEC`, `RenderImpact: "none"`. |
+| Branchements fins | `EntityRegistry` (collection), `ListConfigs.vms` + `addListTab` (onglet, dont `locate`/`locateTarget`), `DetailForms.detail` (case `vms`), `IpamForms`/`shared.ts` (branche VM du picker PORTEUR des adresses, `FormUi.vmOptions`), `Store.ipAddressesOfVm`, `Store.vmsOfHost`, `DcInteract.equipmentTipHtml` (bloc « VMs hébergées »), `INDEX_SPEC`, `RenderImpact: "none"`. |
 
 ## Frontière SOURCE / LOCAUX
 
@@ -618,7 +618,7 @@ confinée à l'adaptateur (le reste de l'application ne connaît que `VmRecord`)
    branchements fins : entrée `vms` d'`EntityRegistry`, `ListConfigs.vms` +
    l'onglet dans `main.ts` (dont son `locate`/`locateTarget` — l'option
    `TabOpts.locateTarget` elle-même n'a plus d'utilisateur et peut partir avec),
-   le `case "vms"` de `DetailForms`, le sélecteur VM
+   le `case "vms"` de `DetailForms`, la branche VM du picker PORTEUR
    d'`IpamForms`/`FormUi.vmOptions`, `Store.ipAddressesOfVm`, `Store.vmsOfHost`,
    le bloc « VMs hébergées » de `DcInteract.equipmentTipHtml` (+ les clés i18n
    `dc.interact.vmCount`/`vmMore`), le bouton « Localiser » de `DetailForms.vmDetail`

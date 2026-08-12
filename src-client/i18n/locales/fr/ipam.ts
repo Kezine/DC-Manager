@@ -47,12 +47,12 @@ export const ipam = {
     ipField: "Adresse IP",
     hostPlaceholder: "ex. srv-web-01.lan",
     hostname: "Hostname",
-    noneEquip: "— aucun —",
-    equipment: "Équipement",
-    equipmentHint: "Facultatif — exclusif avec la VM.",
-    noneVm: "— aucune —",
-    vm: "VM",
-    vmHint: "Facultatif — exclusif avec l'équipement.",
+    // PORTEUR : un SEUL picker multi-familles (équipement OU VM) — `familyEquipment`/`familyVm` préfixent
+    // les libellés des options composites, l'exclusivité est garantie par construction (un seul picker).
+    carrier: "Porteur",
+    carrierHint: "Facultatif — équipement OU VM auquel l'adresse est rattachée (au plus un — laisser vide si non attribuée).",
+    familyEquipment: "Équipement",
+    familyVm: "VM",
     titleEdit: "Modifier l'adresse IP",
     titleNew: "Nouvelle adresse IP",
     updated: "Adresse mise à jour",

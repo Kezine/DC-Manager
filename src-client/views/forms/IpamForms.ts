@@ -9,6 +9,7 @@ import type { FormHost } from "./shared";
 import { RackForms } from "./RackForms";
 import { LiveValidation } from "./LiveValidation";
 import { I18n } from "../../i18n/I18n";
+import { TargetSearch } from "../../core/TargetSearch";   // convention composite « <kind>:<id> » du picker PORTEUR (équipement/VM) des adresses — MÊME encodage que le picker d'hôte des applications
 
 export class IpamForms extends RackForms {
 
@@ -33,7 +34,10 @@ export class IpamForms extends RackForms {
     root.appendChild(FormControls.fieldRow(I18n.t("ipam.net.gateway"), gwI, I18n.t("ipam.net.gatewayHint")));
     const dnsI = FormControls.text(net && Array.isArray(net.dns_servers) ? net.dns_servers.join(", ") : "", I18n.t("ipam.net.dnsPlaceholder")); dnsI.style.fontFamily = "var(--mono)";
     root.appendChild(FormControls.fieldRow(I18n.t("ipam.net.dnsServers"), dnsI, I18n.t("ipam.net.dnsHint")));
-    const dhcpSel = FormControls.select(FormUi.eqOptions(store, I18n.t("ipam.common.noneDesignated")), net ? (net.dhcp_server_id || "") : "");
+    // Serveur DHCP = ENTITÉ (équipement, liste longue et croissante) → `entityPicker` (principe n°14).
+    // La règle qui construit les options (`FormUi.eqOptions`, « non désigné » en tête) ne bouge PAS : on
+    // remplace le contrôle, jamais la règle ; `.value` reste lu au save exactement comme un `<select>`.
+    const dhcpSel = FormControls.entityPicker(FormUi.eqOptions(store, I18n.t("ipam.common.noneDesignated")), net ? (net.dhcp_server_id || "") : "");
     root.appendChild(FormControls.fieldRow(I18n.t("ipam.common.dhcpServer"), dhcpSel, I18n.t("ipam.net.dhcpHint")));
     const descI = FormControls.textArea(net ? net.description : "");
     root.appendChild(FormControls.fieldRow(I18n.t("ipam.common.description"), descI));
@@ -66,12 +70,20 @@ export class IpamForms extends RackForms {
     setTimeout(() => labelI.focus(), 30);
   }
 
-  /** Adresse IP statique. */
+  /** Adresse IP statique. Le RÉSEAU et le PORTEUR sont des ENTITÉS (principe n°14) → `entityPicker`.
+      Le PORTEUR (équipement OU VM) est UN SEUL picker MULTI-FAMILLES calqué sur `Forms.application` :
+      options équipements PUIS VMs, values re-préfixées à la convention composite « <kind>:<id> »
+      (`TargetSearch.key`/`parse`) → l'exclusivité `equipment_id`/`vm_id` est garantie PAR CONSTRUCTION
+      (un seul picker, une seule valeur) — plus DEUX `<select>` exclusifs à synchro croisée (dette du
+      principe n°14 résorbée, cf. le commentaire de `Forms.application`). */
   static ipAddress(store: Store, host: FormHost, id: string | null, onSaved?: () => void): void {
     const addr: any = id ? store.get("ipAddresses", id) : null;
     if (!addr && !store.all("ipNetworks").length) { Notify.toast(I18n.t("ipam.common.needIpNetwork"), "err"); return; }
     const root = document.createElement("div");
-    const netSel = FormControls.select(FormUi.ipNetOptions(store), addr ? addr.network_id : "");
+    // Réseau IP = ENTITÉ (liste longue/croissante) → `entityPicker` ; règle d'options (`FormUi.ipNetOptions`)
+    // INCHANGÉE. `.value` et l'événement `change` restent ceux d'un `<select>` : le bouton « Proposer une IP
+    // libre » lit `netSel.value` et le hint de plage assignable s'abonne à `change` sans rien changer.
+    const netSel = FormControls.entityPicker(FormUi.ipNetOptions(store), addr ? addr.network_id : "");
     root.appendChild(FormControls.fieldRow(I18n.t("ipam.common.ipNetwork"), netSel));
     const ipWrap = document.createElement("div"); ipWrap.style.display = "flex"; ipWrap.style.gap = "8px";
     const ipI = FormControls.text(addr ? addr.address : "", I18n.t("ipam.addr.ipPlaceholder")); ipI.style.flex = "1"; ipI.style.fontFamily = "var(--mono)";
@@ -84,26 +96,30 @@ export class IpamForms extends RackForms {
     root.appendChild(FormControls.fieldRow(I18n.t("ipam.addr.ipField"), ipWrap)); root.appendChild(hint);
     const hostI = FormControls.text(addr ? addr.hostname : "", I18n.t("ipam.addr.hostPlaceholder")); hostI.style.fontFamily = "var(--mono)";
     root.appendChild(FormControls.fieldRow(I18n.t("ipam.addr.hostname"), hostI, I18n.t("ipam.common.optional")));
-    const eqSel = FormControls.select(FormUi.eqOptions(store, I18n.t("ipam.addr.noneEquip")), addr ? (addr.equipment_id || "") : "");
-    root.appendChild(FormControls.fieldRow(I18n.t("ipam.addr.equipment"), eqSel, I18n.t("ipam.addr.equipmentHint")));
-    // Sélecteur VM (rattachement à une VM, parité équipement) — feature AMOVIBLE : affiché SEULEMENT s'il existe des
-    // VMs (ou si l'adresse en cible déjà une), pour ne pas encombrer le formulaire en mode fichier / sans inventaire VM.
+    // PORTEUR de l'adresse — UN SEUL `entityPicker` MULTI-FAMILLES (équipement OU VM), calqué sur
+    // `Forms.application`. Options : les MÊMES listes métier que partout (`FormUi.eqOptions`/`vmOptions`,
+    // tri par nom), re-préfixées famille par famille — libellé « Équipement · SRV37 » / « VM · gitlab »
+    // pour que deux homonymes de familles différentes restent discernables dans un picker UNIQUE. L'option
+    // « aucun » de tête reste UNE seule (les deux vides = adresse non attribuée, état permis par la spec).
+    // TRANSPOSITION du « le sélecteur VM n'apparaît que s'il y a des VMs » : sans VM (et sans `vm_id` déjà
+    // posé), les options VM ne sont tout simplement PAS concaténées — le picker reste unique, seul
+    // l'encombrement d'une famille vide disparaît (parité mode fichier / sans inventaire VM).
     const hasVms = store.all("vms").length > 0 || !!(addr && addr.vm_id);
-    const vmSel = hasVms ? FormControls.select(FormUi.vmOptions(store, I18n.t("ipam.addr.noneVm")), addr ? (addr.vm_id || "") : "") : null;
-    if (vmSel) root.appendChild(FormControls.fieldRow(I18n.t("ipam.addr.vm"), vmSel, I18n.t("ipam.addr.vmHint")));
-    // EXCLUSIVITÉ VISIBLE (miroir de l'invariant de la spec) : choisir un équipement vide la VM, et inversement —
-    // l'utilisateur VOIT le champ opposé se remettre à « aucun », plutôt que de se faire refuser les deux à l'enregistrement.
-    if (vmSel) {
-      eqSel.addEventListener("change", () => { if (eqSel.value) vmSel.value = ""; });
-      vmSel.addEventListener("change", () => { if (vmSel.value) eqSel.value = ""; });
-    }
+    let carrierOptions = [{ value: "", label: I18n.t("forms.opt.none") }]
+      .concat(FormUi.eqOptions(store, "").slice(1).map((o) => ({ value: TargetSearch.key("equipment", o.value), label: I18n.t("ipam.addr.familyEquipment") + " · " + o.label })));
+    if (hasVms) carrierOptions = carrierOptions.concat(FormUi.vmOptions(store, "").slice(1).map((o) => ({ value: TargetSearch.key("vm", o.value), label: I18n.t("ipam.addr.familyVm") + " · " + o.label })));
+    const initialCarrier = addr && addr.equipment_id ? TargetSearch.key("equipment", addr.equipment_id)
+      : addr && addr.vm_id ? TargetSearch.key("vm", addr.vm_id) : "";
+    const carrierI = FormControls.entityPicker(carrierOptions, initialCarrier);
+    root.appendChild(FormControls.fieldRow(I18n.t("ipam.addr.carrier"), carrierI, I18n.t("ipam.addr.carrierHint")));
     const descI = FormControls.textArea(addr ? addr.description : "");
     root.appendChild(FormControls.fieldRow(I18n.t("ipam.common.description"), descI));
     // validation live : adresse (format) + IP ∈ CIDR du réseau (cross-entité) + adresse UNIQUE (portée V6)
-    // + exclusivité équipement/VM (invariant, surligné sur le champ VM quand il est présent).
-    const liveFields: Record<string, HTMLElement> = { address: ipI, network_id: netSel, equipment_id: eqSel };
-    if (vmSel) liveFields.vm_id = vmSel;
-    const live = new LiveValidation("ipAddresses", liveFields,
+    // + exclusivité équipement/VM (invariant rattaché à `vm_id` par la spec). `equipment_id` ET `vm_id`
+    // pointent tous deux sur le picker PORTEUR : le surlignage tombe au bon endroit quelle que soit la clé à
+    // laquelle la spec rattache l'erreur (ici `vm_id`), et le câblage reste complet si elle évolue.
+    const live = new LiveValidation("ipAddresses",
+      { address: ipI, network_id: netSel, equipment_id: carrierI, vm_id: carrierI },
       (coll, i) => store.get(coll, i) || null, (coll, f, v) => store.findByField(coll, f, v));
     live.clearOnInput();
 
@@ -116,10 +132,17 @@ export class IpamForms extends RackForms {
         const net = store.get("ipNetworks", networkId);
         if (!net) { Notify.toast(I18n.t("ipam.common.pickIpNetwork"), "err"); return false; }
         const address = ipI.value.trim();
+        // Décomposition de la valeur composite du picker PORTEUR vers les DEUX FK : l'une reçoit l'id, l'autre
+        // est explicitement remise à null (changer de famille — ou vider le porteur — VIDE l'ancienne FK).
+        // L'exclusivité equipment_id/vm_id est ainsi garantie PAR CONSTRUCTION (un seul picker, une valeur).
         // `id` inclus → la validation de PORTÉE exclut l'adresse en cours d'édition (« sauf moi-même »).
-        // vm_id : valeur du sélecteur si présent, sinon on PRÉSERVE l'existant (le sélecteur peut être masqué faute de VMs).
-        const vmId = vmSel ? (vmSel.value || null) : (addr ? (addr.vm_id || null) : null);
-        const payload = { id: addr ? addr.id : undefined, network_id: networkId, address, hostname: hostI.value.trim(), equipment_id: eqSel.value || null, vm_id: vmId, description: descI.value.trim() };
+        const parsedCarrier = carrierI.value ? TargetSearch.parse(carrierI.value) : null;
+        const payload = {
+          id: addr ? addr.id : undefined, network_id: networkId, address, hostname: hostI.value.trim(),
+          equipment_id: parsedCarrier && parsedCarrier.kind === "equipment" ? parsedCarrier.id : null,
+          vm_id: parsedCarrier && parsedCarrier.kind === "vm" ? parsedCarrier.id : null,
+          description: descI.value.trim(),
+        };
         // surlignés par la validation live : format + IP ∈ CIDR + unicité (V6a) + pas dans une plage DHCP (V6b).
         if (live.check(payload).length) return false;
         if (!await FormSave.record(store, "ipAddresses", addr && addr.id, payload)) return false;   // REFUSÉ par le Store (toast rouge nommant la règle) : ne rien annoncer, garder la saisie
@@ -134,7 +157,9 @@ export class IpamForms extends RackForms {
     const rng: any = id ? store.get("dhcpRanges", id) : null;
     if (!rng && !store.all("ipNetworks").length) { Notify.toast(I18n.t("ipam.common.needIpNetwork"), "err"); return; }
     const root = document.createElement("div");
-    const netSel = FormControls.select(FormUi.ipNetOptions(store), rng ? rng.network_id : "");
+    // Réseau IP = ENTITÉ → `entityPicker` (règle d'options `FormUi.ipNetOptions` INCHANGÉE) ; le hint des
+    // bornes s'abonne à `change` et le save lit `.value`, exactement comme l'ancien `<select>`.
+    const netSel = FormControls.entityPicker(FormUi.ipNetOptions(store), rng ? rng.network_id : "");
     root.appendChild(FormControls.fieldRow(I18n.t("ipam.common.ipNetwork"), netSel));
     const startI = FormControls.text(rng ? rng.start_ip : "", I18n.t("ipam.range.startPlaceholder")); startI.style.fontFamily = "var(--mono)";
     const endI = FormControls.text(rng ? rng.end_ip : "", I18n.t("ipam.range.endPlaceholder")); endI.style.fontFamily = "var(--mono)";
@@ -143,7 +168,8 @@ export class IpamForms extends RackForms {
     netSel.addEventListener("change", refresh); refresh();
     root.appendChild(FormControls.fieldRow(I18n.t("ipam.range.startField"), startI));
     root.appendChild(FormControls.fieldRow(I18n.t("ipam.range.endField"), endI)); root.appendChild(hint);
-    const srvSel = FormControls.select(FormUi.eqOptions(store, I18n.t("ipam.common.noneDesignated")), rng ? (rng.server_id || "") : "");
+    // Serveur DHCP = ENTITÉ (équipement) → `entityPicker` ; règle d'options (`FormUi.eqOptions`) INCHANGÉE.
+    const srvSel = FormControls.entityPicker(FormUi.eqOptions(store, I18n.t("ipam.common.noneDesignated")), rng ? (rng.server_id || "") : "");
     root.appendChild(FormControls.fieldRow(I18n.t("ipam.common.dhcpServer"), srvSel, I18n.t("ipam.common.optional")));
     const descI = FormControls.textArea(rng ? rng.description : "");
     root.appendChild(FormControls.fieldRow(I18n.t("ipam.common.description"), descI));

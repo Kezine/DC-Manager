@@ -568,8 +568,8 @@ export class RackForms extends CableForms {
       équipements PUIS VMs concaténés, values RE-PRÉFIXÉES à la convention composite EXISTANTE
       « <kind>:<id> » (`TargetSearch.key`/`parse` — le même encodage que les liens d'intervention et le
       filtre cible des listings, jamais un 2ᵉ). L'exclusivité equipment_id/vm_id est ainsi garantie PAR
-      CONSTRUCTION (un seul picker) — PAS deux `<select>` exclusifs à la `IpamForms` (dette identifiée
-      vs principe n°14, à ne pas propager). */
+      CONSTRUCTION (un seul picker) — PAS deux `<select>` exclusifs (patron désormais suivi aussi par le
+      picker PORTEUR d'`IpamForms.ipAddress`, dette du principe n°14 résorbée). */
   static application(store: Store, host: FormHost, id: string | null, onSaved?: () => void): void {
     const app: any = id ? store.get("applications", id) : null;
     const root = document.createElement("div");
