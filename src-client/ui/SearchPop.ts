@@ -1,6 +1,7 @@
 import { StaleGate } from "./StaleGate";
 import { Icons } from "./Icons";
 import { OverlayA11y } from "./OverlayA11y";
+import { Fullscreen } from "./Fullscreen";
 import { I18n } from "../i18n/I18n";
 
 /* =============================================================================
@@ -23,8 +24,8 @@ import { I18n } from "../i18n/I18n";
 
    SERT AUSSI DE SÉLECTEUR D'ENTITÉ (principe n°14) : `ui/EntityPicker` le compose
    pour remplacer les `<select>` d'équipement/de port. Trois capacités lui ont été
-   ajoutées pour ça, toutes NEUTRES pour les usages historiques (Certificats,
-   interventions) qui ne les emploient pas :
+   ajoutées pour ça, toutes NEUTRES pour l'usage historique (la sélection d'entité
+   des interventions) qui ne les emploie pas :
      - un résultat peut être `disabled` (visible, non sélectionnable — parité
        `<option disabled>` : un port occupé reste affiché avec le nom du câble qui
        l'occupe) ;
@@ -50,10 +51,11 @@ import { I18n } from "../i18n/I18n";
      - `footHint` : ligne d'aide ÉPINGLÉE au pied du popover (raccourcis clavier) ;
      - `onPick` reçoit les MODIFICATEURS du geste (`shift`) — support de
        « Maj+Entrée = ajouter et rouvrir » chez les consommateurs qui enchaînent ;
-     - mode PORTAIL (`portal`) : le popover s'accroche à <body> en position:fixed
-       le temps d'être ouvert. INDISPENSABLE quand le champ vit dans un conteneur
-       qui ROGNE (corps DÉFILANT d'une modale, liste à max-height) : un popover
-       en position absolue y est coupé par l'overflow. Repositionné au scroll
+     - mode PORTAIL (`portal`) : le popover s'accroche à l'HÔTE COURANT (<body>,
+       ou l'élément plein écran via `Fullscreen.host()`) en position:fixed le temps
+       d'être ouvert. INDISPENSABLE quand le champ vit dans un conteneur qui ROGNE
+       (corps DÉFILANT d'une modale, liste à max-height, panneau 3D `.dc-side`) : un
+       popover en position absolue y est coupé par l'overflow. Repositionné au scroll
        (capture — les défilements INTERNES de la modale comptent) et au resize,
        re-parqué dans le champ à la fermeture (il meurt donc avec lui).
    La navigation clavier SAUTE en-têtes, motifs et pied : seuls les items vivent
@@ -221,9 +223,9 @@ export class SearchPop {
       clear.onclick = () => this.reset();
 
       this.pop = document.createElement("div"); this.pop.className = "dc-search-pop";
-      // La classe portail porte position:fixed + z-index AU-DESSUS de l'overlay de modale (le popover
-      // sera un enfant direct de <body> le temps d'être ouvert) ; les coordonnées, elles, sont posées
-      // en ligne par `portalPosition` à chaque ouverture/défilement.
+      // La classe portail porte position:fixed + z-index AU-DESSUS des dialogues (le popover sera un
+      // enfant direct de l'hôte courant — body ou élément plein écran — le temps d'être ouvert) ; les
+      // coordonnées, elles, sont posées en ligne par `portalPosition` à chaque ouverture/défilement.
       if (this.portal) this.pop.classList.add("dc-pop-portal");
 
       // Loupe INTÉGRÉE en tête (mode barre de listing) — repère visuel, non focusable (aria-hidden).
@@ -292,10 +294,12 @@ export class SearchPop {
   private hide(): void {
     this.gate.bump();
     if (this.timer != null) { window.clearTimeout(this.timer); this.timer = null; }
-    // Mode portail : re-parquer le popover DANS le champ. S'il restait sur <body>, un champ détruit
+    // Mode portail : re-parquer le popover DANS le champ. S'il restait sur son hôte, un champ détruit
     // (repeint de formulaire, fermeture de modale) laisserait un nœud orphelin dans la page ; parqué
     // dans son wrap, il disparaît AVEC lui. Les écouteurs de suivi n'ont plus lieu d'être fermés.
-    if (this.portal && this.pop.parentElement === document.body) {
+    // On compare à l'hôte COURANT (body OU élément plein écran) — c'est là que `openPortal` l'a posé
+    // et que `Fullscreen.rehomeAll` le maintient au fil des `fullscreenchange`.
+    if (this.portal && this.pop.parentElement === Fullscreen.host()) {
       window.removeEventListener("scroll", this.portalFollow, true);
       window.removeEventListener("resize", this.portalFollow);
       this.pop.style.top = ""; this.pop.style.left = "";
@@ -446,13 +450,20 @@ export class SearchPop {
 
   /* ------------------------------------------------------------ mode portail -- */
 
-  /** Accroche le popover ouvert à `<body>` et démarre le SUIVI de son champ. Le scroll est écouté en
-      CAPTURE : les défilements qui déplacent le champ sont ceux de conteneurs INTERNES (corps de la
-      modale, liste d'étapes), dont les événements ne remontent pas jusqu'à `window` en bouillonnant. */
+  /** Accroche le popover ouvert à l'HÔTE COURANT (`<body>` hors plein écran, sinon l'élément plein
+      écran) et démarre le SUIVI de son champ. On ne l'accroche PAS en dur à `<body>` : un `.dc-side`
+      qui porte un entityPicker peut être en plein écran, et un enfant de `<body>` y serait masqué par
+      le « top layer ». `position:fixed` reste écran-relatif dans un élément plein écran, donc
+      `portalPlace` (coordonnées viewport) reste valable. ⚠ JAMAIS `.modal-overlay` : son
+      `backdrop-filter` et l'animation `slideUp` de `.modal` créent des blocs conteneurs pour `fixed`.
+      Le scroll est écouté en CAPTURE : les défilements qui déplacent le champ sont ceux de conteneurs
+      INTERNES (corps de la modale, liste d'étapes), dont les événements ne remontent pas jusqu'à
+      `window` en bouillonnant. */
   private openPortal(): void {
     if (!this.wrap.isConnected) { this.hide(); return; }
-    if (this.pop.parentElement !== document.body) {
-      document.body.appendChild(this.pop);
+    const host = Fullscreen.host();
+    if (this.pop.parentElement !== host) {
+      host.appendChild(this.pop);
       window.addEventListener("scroll", this.portalFollow, true);
       window.addEventListener("resize", this.portalFollow);
     }

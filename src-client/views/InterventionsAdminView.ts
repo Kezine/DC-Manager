@@ -693,6 +693,9 @@ export class InterventionsAdminView {
     const pop = new SearchPop({
       placeholder: I18n.t("interventions.modal.linksSearchPlaceholder"),
       minChars: 1,
+      // PORTAIL : ce champ vit dans le corps DÉFILANT (`.modal-body`, overflow-y:auto) de la modale
+      // d'édition d'intervention — un popover absolu y serait rogné. Porté en position:fixed, il fuit.
+      portal: true,
       debounceMs: EntityCandidateSource.DEBOUNCE_MS,   // même tempo que la palette / les listings serveur-pilotés
       fetch: (query) => {
         // La dédup est calculée à CHAQUE frappe sur l'état COURANT de `links`, puis les candidats

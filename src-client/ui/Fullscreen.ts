@@ -7,7 +7,15 @@
    l'élément plein écran courant (à la création ET à chaque `fullscreenchange`) ; retour au
    <body> hors plein écran. (position:fixed reste relatif à l'écran dans un élément fullscreen.)
    ============================================================================= */
-const FLOATING_SELECTOR = ".modal-overlay, .dialog-overlay, #toast-container, .graph-ctx, .busy-overlay";
+// `.dc-pop-portal.open` (popover de SearchPop porté sur l'hôte) et `.ac-list` (liste d'autocomplétion
+// flottante) sont AJOUTÉS : restés ouverts au moment d'un requestFullscreen, ils sont accrochés au
+// <body> — donc HORS du sous-arbre plein écran, donc INVISIBLES sous le « top layer ». Les re-parenter
+// dans l'élément plein écran les rend de nouveau visibles (leur position:fixed reste écran-relative).
+// ⚠ Le qualificatif `.open` est ESSENTIEL : la classe `dc-pop-portal` reste posée sur un popover
+// FERMÉ, re-parqué DANS son champ (il doit mourir avec lui — cf. `SearchPop.hide`) ; sans `.open`,
+// chaque bascule plein écran ARRACHERAIT ces popovers parqués de leur champ (nœuds orphelins).
+// `.ac-list`, elle, est un enfant PERMANENT de <body> (comme #toast-container) : pas de qualificatif.
+const FLOATING_SELECTOR = ".modal-overlay, .dialog-overlay, #toast-container, .graph-ctx, .busy-overlay, .dc-pop-portal.open, .ac-list";
 
 export class Fullscreen {
   private static installed = false;

@@ -1979,10 +1979,29 @@
   .tf-skel i.n { flex: 1; }
   @keyframes tfSk { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 
-  /* mode PORTAIL : le popover ouvert est un enfant de <body> en position:fixed (coordonnees posees
-     en ligne par SearchPop.portalPosition) — il echappe ainsi aux conteneurs qui ROGNENT (corps
-     defilant d'une modale, liste a max-height). z-index au-dessus de l'overlay de modale (200). */
-  .dc-pop-portal { position: fixed; z-index: 300; }
+  /* ============================================================================================
+     ÉCHELLE DE Z-INDEX DE L'APP (documentation de l'existant — du BAS vers le HAUT). Poser un
+     nouvel overlay = choisir sa marche ICI plutot que d'inventer une valeur au hasard. Les couches
+     mesurees, de la plus basse a la plus haute :
+       0     grille de fond (`body::before`)            1     contenu `main`
+       100   barre d'en-tete (header)
+       200   `.modal-overlay`, `.row-menu`, panneaux ancres aux barres (menus de champ)
+       300   `.dialog-overlay` (dialogues, s'empilent PAR-DESSUS une modale)
+       400   `.dc-pop-portal` (popover d'un SearchPop porte) — DOIT passer devant un dialogue
+             (il est ANCRE a un champ d'une modale/dialogue), JAMAIS devant un toast
+       1900  `.app-tooltip` (menu contextuel / infobulle riche)
+       2000  `#toast-container` (toasts)                2500  `.busy-overlay` (traitement bloquant)
+       4000  `.ac-list` (autocompletion flottante portee sur l'hote) — au sommet a dessein :
+             une saisie assistee doit rester lisible meme au-dessus d'un toast.
+     Regle tenue par ce lot : `.dc-pop-portal` etait a 300, EGAL a `.dialog-overlay` — l'ordre DOM
+     tranchait, au petit bonheur. 400 le place franchement AU-DESSUS des dialogues et SOUS les toasts.
+     ============================================================================================ */
+
+  /* mode PORTAIL : le popover ouvert est un enfant de l'hote courant (body, ou l'element plein ecran
+     via Fullscreen.host()) en position:fixed (coordonnees posees en ligne par SearchPop.portalPosition)
+     — il echappe ainsi aux conteneurs qui ROGNENT (corps defilant d'une modale, liste a max-height,
+     panneau 3D .dc-side). z-index 400 : au-dessus des dialogues (300), sous les toasts (cf. echelle). */
+  .dc-pop-portal { position: fixed; z-index: 400; }
   /* sous 560px, le popover portail s'etale en QUASI-FEUILLE : pleine largeur, liste plus haute
      (maquette route §07). Limite assumee : le CHAMP de recherche reste dans le formulaire — une
      vraie feuille plein ecran a recherche integree demanderait de deplacer l'input, hors de portee

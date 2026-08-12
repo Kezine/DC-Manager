@@ -49,6 +49,10 @@ import { I18n } from "../i18n/I18n";
    équipement d'abord », « Aucun port compatible »), le champ de recherche cède la
    place à ce libellé — un champ de recherche sans rien à chercher serait un
    mensonge, là où le `<select>` affichait justement ce texte.
+
+   POPOVER EN PORTAIL (toujours) : tout entityPicker vit dans un conteneur qui rogne (corps
+   défilant de modale, panneau 3D `.dc-side`) ; le `SearchPop` est donc monté en `portal: true`
+   pour que sa liste échappe à l'overflow de l'ancêtre au lieu d'y être coupée.
    ============================================================================= */
 
 export interface EntityPickerOptions {
@@ -108,6 +112,12 @@ export class EntityPicker {
       // `<select>`, qu'on pouvait dérouler sans rien taper.
       minChars: 0,
       grow: true,
+      // PORTAIL obligatoire : les 9 surfaces qui montent un entityPicker vivent TOUTES dans un
+      // conteneur qui ROGNE — formulaires de câbles ×4, de faisceaux ×2, d'application, de pièce
+      // jointe (corps `.modal-body`, `overflow-y:auto`) et panneau 3D `.dc-side` (lui aussi clippé).
+      // Un popover en position absolue y serait coupé par l'overflow de l'ancêtre ; porté sur l'hôte
+      // (body ou élément plein écran) en position:fixed, il échappe à tout conteneur.
+      portal: true,
       fetch: (query) => {
         const outcome = OptionSearch.filter(options, query, { normalize: Schema.normSearch, limit });
         const results: SearchPopResult[] = outcome.shown.map((option) => ({

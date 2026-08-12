@@ -1031,8 +1031,8 @@ jamais ; côté client tout vit dans les fichiers dédiés ci-dessous).
    fichier `certs.db` s'il existe.
 2. **Client** : supprimer `src-client/certs/` (crypto pure), `views/CertsAdminView.ts`,
    `views/forms/CertsClient.ts`, `core/CertsFormat.ts`, `core/CertsSearch.ts`,
-   `core/CertDeployGuide.ts` (les primitives GÉNÉRIQUES `ui/SearchPop.ts`, `ui/StaleGate.ts`
-   ET `ui/Clipboard.ts` RESTENT — réutilisables, non spécifiques aux certificats) ; retirer de
+   `core/CertDeployGuide.ts` (la primitive GÉNÉRIQUE `ui/Clipboard.ts` — seule primitive `ui/` non
+   triviale que le code certs importe encore — RESTE, réutilisable et non spécifique aux certificats) ; retirer de
    `main.ts` l'enregistrement de l'**onglet principal** « Certificats » (`shell.addView` +
    `new CertsAdminView(...)` + le `certsClient`), et les exports dans `views/index.ts`. Le
    groupe `parametres` ne référence plus « certificats » (l'onglet est désormais primaire) —
