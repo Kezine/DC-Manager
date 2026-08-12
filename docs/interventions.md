@@ -244,7 +244,7 @@ le cœur (notif live) et ce module (principe n°3 — aucune duplication de la r
 | `views/forms/InterventionsClient.ts` | **Client REST** du module + `InterventionsError` (code HTTP + `detail`). DTOs = **MIROIRS** commentés des formes serveur (duplication assumée, principe n°3 — préserve l'amovibilité). `listPage`/`meta`/`counts`/`getOne`/`save`/`remove` ; `buildQuery` PURE (filtres `kind`/`status`/`priority` **répétables**). ⚠ Routes **SCOPÉES PAR DOCUMENT** (`<dataBase>/interventions/…`, comme `CertsClient`). |
 | `core/InterventionsFormat.ts` | Logique **PURE** (aucun DOM, aucune dépendance i18n — testée en isolation) : `kindLabelKey`/`statusLabelKey`/`priorityLabelKey`/`targetKindLabelKey` renvoient des **CLÉS** i18n (la vue appelle `I18n.t` dessus, le module reste pur) ; `priorityRank`/`priorityClass`/`statusClass` (rang & couleur de badge) ; `jiraUrl` (référence Jira → lien, jointures de `/`) ; `formatWindow` ; `shortId`. Porte les slugs MIROIRS des énumérations serveur. |
 | `core/TargetSearch.ts` | Logique **PURE** de la SÉLECTION unifiée des cibles liables (équipements + VMs + spares CONFONDUS) : `rank(items, query, opts)` filtre/classe/borne les candidats — **préfixe avant simple inclusion**, plafond (déf. 12), **dédup des cibles déjà liées** (`excluded`), normalisation **INJECTÉE** (le cœur passe `Schema.normSearch` — insensibilité casse/accents). Testé en isolation (`test-interventions.js`). |
-| `views/InterventionsAdminView.ts` | **Page « Interventions »** (onglet PRINCIPAL), classe DÉDIÉE et AUTONOME (ne dérive PAS de `Forms`, pattern `CertsAdminView`/`NotificationsAdminView`) : listing paginé serveur, modales de création/édition/**détail**, éditeur de liens **via SearchPop**, transitions rapides, actions par ligne en **boutons-icône** (principe n°14). Déclare l'interface hôte `InterventionTargetSource` (`labelOf`/`search`/`openTargetDetail` — cibles injectées, la vue ne touche JAMAIS le Store) ; `openCreateFor(kind, id)` ouvre une création PRÉ-LIÉE et `openListFor(kind, id)` pose le filtre par CIBLE (même état que la dimension « Cible » de la barre, cf. plus bas) — tous deux appelés par navigation depuis une fiche ; `openDetailById(id)` EMPILE la fiche de détail par-dessus la modale courante SANS changer de vue (mini-listing des fiches — l'intervention est RELUE du serveur, et l'`onResume` du niveau REFETCHE par id : `this.items` peut être vide/périmé quand la vue n'est pas active). Les formulaires s'ouvrent dans LA modale de l'app (principe n°11). |
+| `views/InterventionsAdminView.ts` | **Page « Interventions »** (onglet PRINCIPAL), classe DÉDIÉE et AUTONOME (ne dérive PAS de `Forms`, pattern `CertsAdminView`/`NotificationsAdminView`) : listing paginé serveur, modales de création/édition/**détail**, éditeur de liens **via le composant partagé `ui/EntityLinkList`**, transitions rapides, actions par ligne en **boutons-icône** (principe n°14). Déclare l'interface hôte `InterventionTargetSource` (`labelOf`/`search`/`openTargetDetail` — cibles injectées, la vue ne touche JAMAIS le Store) ; `openCreateFor(kind, id)` ouvre une création PRÉ-LIÉE et `openListFor(kind, id)` pose le filtre par CIBLE (même état que la dimension « Cible » de la barre, cf. plus bas) — tous deux appelés par navigation depuis une fiche ; `openDetailById(id)` EMPILE la fiche de détail par-dessus la modale courante SANS changer de vue (mini-listing des fiches — l'intervention est RELUE du serveur, et l'`onResume` du niveau REFETCHE par id : `this.items` peut être vide/périmé quand la vue n'est pas active). Les formulaires s'ouvrent dans LA modale de l'app (principe n°11). |
 | `views/InterventionFicheHooks.ts` | **Contrat d'intégration « fiches »** `InterventionFicheHooks { countOpen; latestFor; openDetail; declareFor; openListFor }` + type LOCAL `InterventionFicheItem` (injecté via `FormHost.interventionHooks`, implémenté dans `main.ts`) — permet aux fiches détail d'afficher le badge, le mini-listing « 3 dernières » (lignes CLIQUABLES : `openDetail` EMPILE la fiche de détail, seul hook SANS navigation) et de déclarer/ouvrir la vue FILTRÉE sur la cible SANS importer la vue ni le client (découplage principe n°2). |
 | `views/forms/InterventionFicheRow.ts` | Helper DOM PARTAGÉ (une seule implémentation pour les 4 fiches) : rangée « Interventions » (badge async + « Déclarer » + mini-listing « 3 dernières » async à lignes CLIQUABLES — `role="button"`, Entrée/Espace — + « Afficher plus »). No-op si `hooks` null. Ne connaît que le contrat ; réutilise `Format`/`InterventionsFormat` pour dates/badges. |
 
@@ -297,14 +297,19 @@ interventions sont propres au document).
   `planned_end` (**`FormControls.date` en mode `date-time`** — plus de `<input datetime-local>` brut,
   principe n°14 ; valeur manipulée en **UTC** via `isoToInput`/`inputToIso` pour rester cohérente avec le
   stockage et le veilleur), `jira_ref`, et l'**éditeur de LIENS**.
-- **Éditeur de liens — sélection UNIFIÉE via `SearchPop`** (interface hôte `InterventionTargetSource`
-  injectée) : un seul champ de recherche-popover balaye **TOUTES les familles à la fois** (équipements + VMs
-  + spares confondus, via `targets.search(query, excluded)` → `TargetSearch` + `Schema.normSearch`) ; chaque
-  résultat porte son **badge de famille**, le **CLIC** LIE l'élément (ajout à la liste ordonnée). Les cibles
-  déjà liées sont **exclues** des résultats (dédup) ; un doublon résiduel est ignoré avec un toast discret.
-  La liste des liens affiche **icône de famille + libellé** et un **bouton-icône de retrait** (`CLOSE`).
-  **Politique orphelins côté UI** : une cible disparue (`labelOf` → null) s'affiche « (introuvable) »
-  **grisée** — le lien est conservé (aucune FK côté serveur, cf. « Liens sans FK »).
+- **Éditeur de liens — composant partagé `ui/EntityLinkList`** (le pendant MULTI-valeur d'`EntityPicker`,
+  interface hôte `InterventionTargetSource` injectée) : un seul champ de recherche-popover **en portail**
+  balaye **TOUTES les familles à la fois** (équipements + VMs + spares confondus, via
+  `targets.search(query, excludedKeys)` → `TargetSearch` + `Schema.normSearch`) ; chaque résultat porte son
+  **badge de famille**, le **CLIC** LIE l'élément (ajout à la liste ordonnée). Les cibles déjà liées sont
+  **exclues** des résultats (dédup calculée à chaque frappe sur l'état courant, clés `TargetSearch.key`) ;
+  un doublon résiduel est ignoré avec un toast discret. La liste des liens affiche **icône de famille +
+  libellé** et un **bouton-icône de retrait** (`CLOSE`). Le composant est GÉNÉRIQUE (principe n°2) : source,
+  résolution de libellé, libellé/icône de famille et textes sont **injectés** — il ignore le Store et les
+  interventions ; **la LISTE est la valeur** (l'ordre = position), notifiée par `onChange` et recopiée dans
+  `links` (que `onSave` remplace intégralement à l'enregistrement). **Politique orphelins côté UI** : une
+  cible disparue (`labelOf` → null) s'affiche « (introuvable) » **grisée** — le lien est conservé (aucune FK
+  côté serveur, cf. « Liens sans FK »).
 - **Modale de DÉTAIL (consultation)** — ouverte par l'action « Détails » ou le clic sur le titre : badges
   (nature/priorité/statut), fenêtre planifiée, référence Jira, **description rendue en MARKDOWN** (`core/
   Markdown`/micromark, défauts sûrs), audit (créé/modifié par-le), et la **liste des objets liés** (icône de

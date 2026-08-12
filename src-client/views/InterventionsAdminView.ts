@@ -9,7 +9,8 @@ import { FormControls, type SelectOption } from "../ui/FormControls";
 import { type MultiItem } from "../ui/MultiSelect";
 import { FilterBar } from "../ui/FilterBar";
 import { CardTable } from "../ui/CardTable";
-import { SearchPop, type SearchPopResult } from "../ui/SearchPop";
+import { type SearchPopResult } from "../ui/SearchPop";
+import { EntityLinkList } from "../ui/EntityLinkList";
 import { Icons } from "../ui/Icons";
 import { IconButton } from "../ui/IconButton";
 import { PAGE_SIZE_DEFAULT, PAGE_SIZE_OPTIONS } from "../data/config";
@@ -656,66 +657,39 @@ export class InterventionsAdminView {
     setTimeout(() => titleInput.focus(), 30);
   }
 
-  /** Éditeur de liens : SÉLECTION unifiée via SearchPop (recherche sur équipements + VMs + spares CONFONDUS,
-      le CLIC lie l'élément) + la liste ordonnée avec retrait par bouton-ICÔNE (principe n°14). `links` est
-      mutée en place (l'ordre = position ; le serveur remplace intégralement à l'enregistrement). */
+  /** Éditeur de liens : le composant partagé `ui/EntityLinkList` (champ de recherche portail unifié +
+      liste ordonnée à retrait par bouton-ICÔNE). SEULE surface MULTI-valeur de liaison d'entité de l'app,
+      elle applique désormais l'idiome éprouvé du mono-valeur (`EntityPicker`) au lieu de câbler `SearchPop`
+      + liste de rangées à la main dans la vue. La règle MÉTIER (cibles liables, libellés, familles) est
+      INJECTÉE via `this.targets` ; le composant ignore le Store et les interventions.
+      `links` reste la référence détenue par la modale (lue par `onSave`) : le composant travaille sur SA
+      copie et notifie par `onChange`, qu'on RECOPIE dans `links` par splice — l'ordre = position, le
+      serveur remplace intégralement à l'enregistrement. */
   private buildLinksEditor(links: InterventionLink[]): HTMLElement {
     const field = document.createElement("div"); field.className = "form-field";
     const label = document.createElement("label"); label.textContent = I18n.t("interventions.modal.links");
     const hint = document.createElement("div"); hint.className = "form-hint"; hint.textContent = I18n.t("interventions.modal.linksHint");
     field.append(label, hint);
 
-    const listEl = document.createElement("div"); listEl.style.marginTop = "8px";
-    const renderLinks = (): void => {
-      listEl.innerHTML = "";
-      if (!links.length) {
-        const empty = document.createElement("div"); empty.className = "form-hint"; empty.style.fontStyle = "italic";
-        empty.textContent = I18n.t("interventions.modal.linksEmpty"); listEl.appendChild(empty); return;
-      }
-      links.forEach((l, index) => {
-        const row = document.createElement("div"); row.style.cssText = "display:flex;align-items:center;gap:8px;padding:2px 0";
-        const resolved = this.targets.labelOf(l.target_kind, l.target_id);
-        const icon = document.createElement("span"); icon.className = "gi"; icon.setAttribute("aria-hidden", "true"); icon.innerHTML = InterventionsAdminView.familyIcon(l.target_kind);
-        const text = document.createElement("span");
-        text.textContent = I18n.t(InterventionsFormat.targetKindLabelKey(l.target_kind)) + " · " + (resolved !== null ? resolved : I18n.t("interventions.target.unknown"));
-        if (resolved === null) text.style.color = "var(--fg-dimmer)";   // cible disparue (orphelin) → grisée
-        const del = this.iconAction(Icons.CLOSE, I18n.t("interventions.modal.linksRemove"), () => { links.splice(index, 1); renderLinks(); });
-        del.style.marginLeft = "auto";
-        row.append(icon, text, del); listEl.appendChild(row);
-      });
-    };
-    renderLinks();
-
-    // SÉLECTION unifiée (SearchPop) : la recherche traverse TOUTES les familles à la fois ; chaque résultat
-    // porte son badge de famille (`tag`) ; le CLIC lie l'élément. Les cibles DÉJÀ liées sont exclues des
-    // résultats (dédup calculée à chaque frappe sur l'état COURANT de `links`), un doublon résiduel étant
-    // ignoré avec un toast discret. La source (recherche sur le Store) est injectée via `this.targets`.
-    const pop = new SearchPop({
-      placeholder: I18n.t("interventions.modal.linksSearchPlaceholder"),
+    field.appendChild(EntityLinkList.build({
+      value: links.map((l) => ({ kind: l.target_kind, id: l.target_id })),
+      // On RECOPIE la nouvelle valeur dans `links` en place (splice) : la référence détenue par la modale
+      // reste la MÊME, `onSave` lit donc toujours l'état à jour via `links.slice()`.
+      onChange: (next) => { links.splice(0, links.length, ...next.map((v) => ({ target_kind: v.kind, target_id: v.id }))); },
+      search: (query, excludedKeys) => this.targets.search(query, excludedKeys),
+      labelOf: (kind, id) => this.targets.labelOf(kind, id),
+      kindLabel: (kind) => I18n.t(InterventionsFormat.targetKindLabelKey(kind)),
+      kindIcon: (kind) => InterventionsAdminView.familyIcon(kind),
       minChars: 1,
-      // PORTAIL : ce champ vit dans le corps DÉFILANT (`.modal-body`, overflow-y:auto) de la modale
-      // d'édition d'intervention — un popover absolu y serait rogné. Porté en position:fixed, il fuit.
-      portal: true,
       debounceMs: EntityCandidateSource.DEBOUNCE_MS,   // même tempo que la palette / les listings serveur-pilotés
-      fetch: (query) => {
-        // La dédup est calculée à CHAQUE frappe sur l'état COURANT de `links`, puis les candidats
-        // (serveur en mode API, locaux en mode fichier) sont habillés à l'arrivée.
-        const excluded = new Set(links.map((l) => l.target_kind + ":" + l.target_id));
-        return this.targets.search(query, excluded).then((results) => results.map((r): SearchPopResult => ({
-          id: r.kind + ":" + r.id, label: r.label,
-          tag: I18n.t(InterventionsFormat.targetKindLabelKey(r.kind)), data: r,
-        })));
+      labels: {
+        searchPlaceholder: I18n.t("interventions.modal.linksSearchPlaceholder"),
+        empty: I18n.t("interventions.modal.linksEmpty"),
+        remove: I18n.t("interventions.modal.linksRemove"),
+        unknown: I18n.t("interventions.target.unknown"),
+        duplicate: I18n.t("interventions.toast.linkExists"),
       },
-      onPick: (result) => {
-        const t = result.data as { kind: string; id: string; label: string };
-        if (links.some((l) => l.target_kind === t.kind && l.target_id === t.id)) { Notify.toast(I18n.t("interventions.toast.linkExists"), "info"); return; }
-        links.push({ target_kind: t.kind, target_id: t.id });
-        renderLinks();
-      },
-    });
-    const searchWrap = document.createElement("div"); searchWrap.style.marginTop = "6px"; searchWrap.appendChild(pop.element);
-
-    field.append(searchWrap, listEl);
+    }));
     return field;
   }
 
