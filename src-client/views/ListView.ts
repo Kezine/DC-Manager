@@ -409,7 +409,15 @@ export class ListView {
       const filtered = this._applyColumnFilters(serverPage.rows);
       rows = serverSort ? filtered : this._sortRows(filtered);
       total = serverPage.total; pages = serverPage.pages; page = serverPage.page;
-      this.page = page;
+      // 🚨 `this.page` reste la page DEMANDÉE — on n'y recopie JAMAIS la page en main. Le moteur rend
+      // par contrat la DERNIÈRE page reçue pendant que la demandée est en vol : recopier son numéro
+      // re-demandait l'ANCIENNE page à l'arrivée de la nouvelle → ping-pong infini page 2 ⇄ page 1
+      // (bug mesuré sur le listing wifi, 2026-08-13 — seule collection assez grosse pour paginer).
+      // La variable locale `page`, elle, reste la page AFFICHÉE (jamais « page 2 » avec le contenu de
+      // la page 1). On borne seulement la demande aux pages EXISTANTES : un corpus qui rétrécit
+      // (suppression, synchro) ne doit pas laisser une demande au-delà de la dernière page — le
+      // serveur borne sa réponse pareil, donc les deux états convergent en un rendu.
+      this.page = Math.min(this.page, pages);
     } else {
       const all = this._sortRows(this._applyColumnFilters(this._collectRows()));
       total = all.length; pages = Math.max(1, Math.ceil(total / this.pageSize));
@@ -659,8 +667,12 @@ export class ListView {
     this._bodyEl.querySelectorAll(".page-btn").forEach((b) => {
       (b as HTMLElement).onclick = () => {
         const act = (b as any).dataset.pg;
-        if (act === "first") this.page = 1; else if (act === "prev") this.page = Math.max(1, page - 1);
-        else if (act === "next") this.page = Math.min(pages, page + 1); else if (act === "last") this.page = pages;
+        // Base de navigation = la page DEMANDÉE (`this.page`), pas la page AFFICHÉE (`page`) : en régime
+        // pagé serveur, l'affichée peut être l'ANCIENNE page le temps du vol — naviguer depuis elle
+        // ramènerait vers des pages déjà dépassées. En régime local les deux sont égales (clamp du
+        // render), le comportement historique ne change pas d'un clic.
+        if (act === "first") this.page = 1; else if (act === "prev") this.page = Math.max(1, this.page - 1);
+        else if (act === "next") this.page = Math.min(pages, this.page + 1); else if (act === "last") this.page = pages;
         this.render();
       };
     });
