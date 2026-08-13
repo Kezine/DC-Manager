@@ -507,7 +507,7 @@ export class RouteChainEditor {
       placeholder: I18n.t("cable.route.searchPlaceholder"),
       minChars: 0,           // le contrôle doit se PARCOURIR sans taper (parité `entityPicker`)
       debounceMs: 0,         // source en mémoire : l'anti-rebond n'a rien à protéger
-      portal: true,
+      // (portail = défaut de SearchPop depuis l'arbitrage 2026-08-13 — ce popover en fut le pionnier.)
       footHint: I18n.t("cable.route.popFootHint"),
       fetch: (query) => Promise.resolve(this.results(query, at)),
       onPick: (result, modifiers) => {

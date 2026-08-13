@@ -96,7 +96,8 @@ export abstract class DcPanels extends DcViews2D {
   protected buildSearchBox(): HTMLElement {
     const pop = new SearchPop({
       placeholder: I18n.t("dc.panels.searchPlaceholder"),
-      portal: true,                                   // la vue 3D passe en plein écran réel (lot portail, `Fullscreen.host()`)
+      // (portail = défaut de SearchPop depuis l'arbitrage 2026-08-13 — indispensable ici : la vue 3D
+      // passe en plein écran réel, le popover s'accroche à `Fullscreen.host()`.)
       minChars: 1,                                    // rien tant que la saisie est vide (parité du clone)
       debounceMs: 0,                                  // source SYNCHRONE locale (comme EntityPicker) : pas d'anti-rebond utile
       value: this.searchTerm,                         // repeuplé à chaque reconstruction de la toolbar

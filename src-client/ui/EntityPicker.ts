@@ -112,12 +112,9 @@ export class EntityPicker {
       // `<select>`, qu'on pouvait dérouler sans rien taper.
       minChars: 0,
       grow: true,
-      // PORTAIL obligatoire : les 9 surfaces qui montent un entityPicker vivent TOUTES dans un
-      // conteneur qui ROGNE — formulaires de câbles ×4, de faisceaux ×2, d'application, de pièce
-      // jointe (corps `.modal-body`, `overflow-y:auto`) et panneau 3D `.dc-side` (lui aussi clippé).
-      // Un popover en position absolue y serait coupé par l'overflow de l'ancêtre ; porté sur l'hôte
-      // (body ou élément plein écran) en position:fixed, il échappe à tout conteneur.
-      portal: true,
+      // PORTAIL : c'est le DÉFAUT de SearchPop (arbitrage 2026-08-13) — rien à déclarer. Les surfaces
+      // entityPicker vivent toutes dans un conteneur qui ROGNE (corps `.modal-body` des formulaires,
+      // panneau 3D `.dc-side`) : c'est précisément ce cas qui a motivé le défaut.
       fetch: (query) => {
         const outcome = OptionSearch.filter(options, query, { normalize: Schema.normSearch, limit });
         const results: SearchPopResult[] = outcome.shown.map((option) => ({

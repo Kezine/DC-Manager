@@ -67,7 +67,8 @@ import { I18n } from "../i18n/I18n";
      - `footHint` : ligne d'aide ÉPINGLÉE au pied du popover (raccourcis clavier) ;
      - `onPick` reçoit les MODIFICATEURS du geste (`shift`) — support de
        « Maj+Entrée = ajouter et rouvrir » chez les consommateurs qui enchaînent ;
-     - mode PORTAIL (`portal`) : le popover s'accroche à l'HÔTE COURANT (<body>,
+     - mode PORTAIL (`portal` — le DÉFAUT depuis l'arbitrage du 2026-08-13, `portal: false`
+       pour s'en retirer) : le popover s'accroche à l'HÔTE COURANT (<body>,
        ou l'élément plein écran via `Fullscreen.host()`) en position:fixed le temps
        d'être ouvert. INDISPENSABLE quand le champ vit dans un conteneur qui ROGNE
        (corps DÉFILANT d'une modale, liste à max-height, panneau 3D `.dc-side`) : un
@@ -170,10 +171,13 @@ export interface SearchPopOptions {
   grow?: boolean;
   /** Ligne d'AIDE épinglée au pied du popover (raccourcis clavier…). Absente par défaut. */
   footHint?: string;
-  /** Mode PORTAIL : le popover, ouvert, est accroché à `<body>` en position:fixed (classe
-      `.dc-pop-portal`) et suit son champ au scroll/resize — il ÉCHAPPE ainsi à tout conteneur qui
-      rogne (corps défilant d'une modale, liste à max-height). Défaut false : popover absolu dans le
-      champ, comportement historique. */
+  /** Mode PORTAIL : le popover, ouvert, est accroché à l'hôte courant (body / élément plein écran)
+      en position:fixed (classe `.dc-pop-portal`) et suit son champ au scroll/resize — il ÉCHAPPE
+      ainsi à tout conteneur qui rogne (corps défilant d'une modale, liste à max-height).
+      ⚠ DÉFAUT TRUE (arbitrage utilisateur 2026-08-13, cadrage liaison-entités § lot 1) : aucun
+      consommateur mesuré ne bénéficiait du mode absolu — tous vivaient dans (ou pouvaient finir
+      dans) un conteneur qui rogne. `portal: false` reste l'OPTION DE RETRAIT d'un futur consommateur
+      qui voudrait le popover absolu dans le champ ; sans objet en mode hébergé (`host` prime). */
   portal?: boolean;
   /** Mode HÉBERGÉ : champ et liste rendus DANS les conteneurs de l'hôte (cf. `SearchPopHost` et le
       bloc d'en-tête). Exclusif de `portal` : le conteneur hôte (panneau du filtre cible) est
@@ -212,8 +216,9 @@ export class SearchPop {
     this.debounceMs = opts.debounceMs ?? 180;
     this.minChars = opts.minChars ?? 2;
     this.host = opts.host ?? null;
-    // Portail et mode hébergé s'EXCLUENT (cf. SearchPopOptions.host) : l'hôte prime.
-    this.portal = opts.portal === true && !this.host;
+    // Portail PAR DÉFAUT (opt-out `portal: false` — cf. SearchPopOptions.portal) ; le mode hébergé
+    // s'en EXCLUT (cf. SearchPopOptions.host) : l'hôte prime, son conteneur est lui-même un portail.
+    this.portal = opts.portal !== false && !this.host;
     this.domId = OverlayA11y.nextId("searchpop");
 
     this.input = document.createElement("input");

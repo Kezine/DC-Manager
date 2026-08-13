@@ -144,8 +144,8 @@ export class EntityLinkList {
     const pop = new SearchPop({
       placeholder: opts.labels.searchPlaceholder,
       minChars,
-      // PORTAIL : le champ vit dans le corps DÉFILANT d'une modale — un popover absolu y serait rogné.
-      portal: true,
+      // PORTAIL : le DÉFAUT de SearchPop (arbitrage 2026-08-13) — le champ vit dans le corps DÉFILANT
+      // d'une modale, exactement le cas qui a motivé ce défaut. Rien à déclarer.
       debounceMs: opts.debounceMs,
       fetch: (query) => {
         // Dédup calculée à CHAQUE frappe sur l'état COURANT de la liste (encodage via TargetSearch.key,
