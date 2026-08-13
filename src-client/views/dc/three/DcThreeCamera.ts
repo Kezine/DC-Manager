@@ -14,7 +14,9 @@ import { U_MM } from "../../../domain/constants";
    et une teinte claire, centrée sur l'ambre statique de `setFocusHi` (HI 0xf5a623 / HIC 0xffce8a).
    Période ALIGNÉE sur l'animation CSS `dc-locate-pulse` des plans 2D (dc-manager.css) : une seule
    respiration visuelle, quel que soit le moteur. */
-const FOCUS_PULSE_PERIOD_MS = 1200;
+/** Période PARTAGÉE de la respiration (exportée : le bouton « Réinitialiser la localisation » de la
+    toolbar — DcPanels — cale la PHASE de son pulse CSS sur la même horloge, cf. updateResetLocate). */
+export const FOCUS_PULSE_PERIOD_MS = 1200;
 const FOCUS_PULSE_EMISSIVE_DIM = new THREE.Color(0xb87a15), FOCUS_PULSE_EMISSIVE_BRIGHT = new THREE.Color(0xffd27f);
 const FOCUS_PULSE_BASIC_DIM = new THREE.Color(0xd2a35f), FOCUS_PULSE_BASIC_BRIGHT = new THREE.Color(0xffefc9);
 

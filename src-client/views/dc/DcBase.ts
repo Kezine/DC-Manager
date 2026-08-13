@@ -102,6 +102,20 @@ export abstract class DcBase {
   selCables = new Set<string>();         // câbles explicitement affichés quand showAllCables = false
   focusEqId: string | null = null;       // équipement ciblé (surligné + caméra recentrée)
   focusPortId: string | null = null;     // port ciblé (surligné comme l'équipement) lors d'une localisation de port
+
+  /** Une MISE EN ÉVIDENCE est-elle active ? — EXACTEMENT ce que `clearHighlight` effacerait (surbrillance
+      de localisation, sélection de baie, isolement de câbles/baies). Pilote la présence du bouton
+      « Réinitialiser la localisation » de la toolbar (cf. `updateResetLocate`) : un bouton d'effacement
+      sans rien à effacer serait un mensonge d'UI. */
+  protected hasHighlight(): boolean {
+    return !!(this.focusEqId || this.selRackId || this.selCables.size || this.hidden3dRacks.size);
+  }
+
+  /** Recale la VISIBILITÉ (et le pulse) du bouton « Réinitialiser la localisation » sur `hasHighlight()`.
+      No-op ici : implémenté par la couche qui possède la toolbar (DcPanels). Appelé par `render()` — le
+      point de passage de TOUT changement d'état de vue (une sélection au clic ne reconstruit pas la
+      toolbar, seule cette recale la tient à jour). */
+  protected updateResetLocate(): void { /* surchargé par DcPanels */ }
   // contrôles présents mais INERTES tant que la fonctionnalité n'est pas portée (cf. panneau « à venir »).
   showFaceImages = true; showDoors = true; showRoomDoors = true; showDoorSwing = false; showFloorGrid = true; cablePortNormal = false;
   powerBoltSpacingMm = 300;             // espacement (mm) des éclairs ⚡ le long des câbles power
@@ -486,6 +500,7 @@ export abstract class DcBase {
     if (this._webglHost) this._webglHost.style.display = WebglHostVisibility.visible(this.view, this.useWebGL, !!dc) ? "" : "none";
     const showControls = (on: boolean) => { if (this.controlsEl) this.controlsEl.style.display = on ? "flex" : "none"; };
     this.updateControls();
+    this.updateResetLocate();   // le bouton « Réinitialiser la localisation » suit l'état à CHAQUE rendu (cf. hasHighlight)
     if (this.floorRail && this.view !== "floor") this.floorRail.style.display = "none";   // rail d'étages : vue Étage uniquement
     // VUE ÉTAGE : pilotée par un étage cible (indépendante d'une salle active)
     if (this.view === "floor") {

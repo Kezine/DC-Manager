@@ -21,6 +21,7 @@ import { DC_SCOPE_ICONS } from "./shared";
 import { Icons } from "../../ui/Icons";
 import { IconButton } from "../../ui/IconButton";
 import { I18n } from "../../i18n/I18n";
+import { FOCUS_PULSE_PERIOD_MS } from "./three/DcThreeCamera";   // période partagée du pulse de localisation (phase du bouton de réinit)
 import { DcViews2D } from "./DcViews2D";
 
 export abstract class DcPanels extends DcViews2D {
@@ -52,15 +53,23 @@ export abstract class DcPanels extends DcViews2D {
     }
 
     // « RÉINITIALISER LA LOCALISATION » : éteint toute mise en évidence laissée par un « Localiser »
-    // (surbrillance ambre 3D, sélections, isolement de baie — cf. clearHighlight) — d'autant plus utile que
-    // cette mise en évidence PULSE tant qu'elle est active (arbitrage 2026-08-13). Bouton-ICÔNE (principe
+    // (surbrillance ambre 3D, sélections, isolement de baie — cf. clearHighlight). Bouton-ICÔNE (principe
     // n°14 : aria-label + tooltip) posé À GAUCHE du sélecteur de vues, dans TOUTES les vues : la sélection
     // à effacer se voit aussi bien en plan de salle / plan d'étage qu'en 3D.
+    // PRÉSENT SEULEMENT quand une mise en évidence est ACTIVE (demande utilisateur 2026-08-13) — un bouton
+    // d'effacement sans rien à effacer serait un mensonge d'UI — et il PULSE à la MÊME cadence qu'elle
+    // (classe `dc-reset-locate`, période partagée 1,2 s). Une sélection au CLIC ne reconstruisant pas la
+    // toolbar, c'est `updateResetLocate()` (appelée à chaque render) qui tient la visibilité à jour ;
+    // ici on ne fait que POSER les nœuds tagués, dans le bon état initial.
     const reset = this.btn("", () => this.clearHighlight(), I18n.t("dc.panels.resetLocate"));
     reset.innerHTML = Icons.LOCATE_OFF;
     reset.setAttribute("aria-label", I18n.t("dc.panels.resetLocate"));   // bouton-icône : sans nom accessible sinon
+    reset.classList.add("dc-reset-locate");
+    reset.setAttribute("data-reset-locate", "");
+    const resetSep = this.vsep(); resetSep.setAttribute("data-reset-sep", "");   // le séparateur suit le bouton (pas de barre orpheline)
     this.toolbarEl.appendChild(reset);
-    this.toolbarEl.appendChild(this.vsep());   // séparateur : action de vue | modes de vue
+    this.toolbarEl.appendChild(resetSep);
+    this.updateResetLocate();
 
     // mode de vue : 3D ⟷ Dessus (2D) ⟷ Étage (plan bâtiment 2D) — CHOIX 1 parmi N → contrôle SEGMENTÉ
     // (.rm-toggle : un seul conteneur bordé, segment actif teinté), pas une rangée de boutons d'action.
@@ -86,6 +95,24 @@ export abstract class DcPanels extends DcViews2D {
       this.toolbarEl.appendChild(ms);
     }
     this.updateControls();
+  }
+
+  /** Recale le bouton « Réinitialiser la localisation » sur l'état réel (cf. DcBase.hasHighlight —
+      appelée à CHAQUE render, car une sélection au clic ne reconstruit pas la toolbar). À l'APPARITION,
+      la PHASE du pulse CSS est alignée sur l'horloge ABSOLUE du moteur 3D (délai NÉGATIF calé sur
+      `performance.now() % FOCUS_PULSE_PERIOD_MS`) : bouton et surbrillance respirent ENSEMBLE — deux
+      pulsations visibles à des rythmes décalés se liraient comme deux informations différentes. */
+  protected updateResetLocate(): void {
+    if (!this.toolbarEl) return;
+    const on = this.hasHighlight();
+    const btn = this.toolbarEl.querySelector("[data-reset-locate]") as HTMLElement | null;
+    const sep = this.toolbarEl.querySelector("[data-reset-sep]") as HTMLElement | null;
+    if (btn) {
+      const shown = btn.style.display !== "none";
+      if (on && !shown) btn.style.animationDelay = "-" + Math.round(performance.now() % FOCUS_PULSE_PERIOD_MS) + "ms";
+      btn.style.display = on ? "" : "none";
+    }
+    if (sep) sep.style.display = on ? "" : "none";
   }
 
   /** N'affiche que la baie `id` (masque les autres salles affichées), la cible et la sélectionne. */

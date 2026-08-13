@@ -1230,13 +1230,20 @@
   .dc-floor-equip.sel .dc-floor-equip-body, .dc-floor-oob.sel .dc-floor-oob-body {
     animation: dc-locate-pulse 1.2s ease-in-out infinite;
   }
+  /* Bouton « Réinitialiser la localisation » (toolbar) : présent SEULEMENT quand une mise en évidence est
+     active (cf. DcPanels.updateResetLocate), il RESPIRE avec elle — même période 1,2 s ; l'opacité de tout
+     le bouton (l'icône est un trait currentColor, stroke-opacity n'y suffirait pas), même creux à 0.45.
+     La PHASE est calée par un animation-delay négatif posé en ligne à l'apparition (horloge du moteur 3D). */
+  @keyframes dc-reset-locate-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+  .dc-reset-locate { animation: dc-reset-locate-pulse 1.2s ease-in-out infinite; }
   /* prefers-reduced-motion : surbrillance STATIQUE — le pulse est un confort, jamais l'information seule
      (parité avec la garde matchMedia du moteur 3D). */
   @media (prefers-reduced-motion: reduce) {
     .dc-rack.sel .dc-rack-body, .dc-equip.sel .dc-equip-body,
     .dc-cable.sel, .dc-trunk.sel,
     .dc-wp.sel .dc-wp-body, .dc-wp.sel .dc-wp-rail,
-    .dc-floor-equip.sel .dc-floor-equip-body, .dc-floor-oob.sel .dc-floor-oob-body { animation: none; }
+    .dc-floor-equip.sel .dc-floor-equip-body, .dc-floor-oob.sel .dc-floor-oob-body,
+    .dc-reset-locate { animation: none; }
   }
   .dc-port { fill: var(--bg-3); stroke: var(--fg-dim); stroke-width: 1px; vector-effect: non-scaling-stroke; pointer-events: none; }
   .dc-port.on { fill: var(--accent); fill-opacity: 0.85; stroke: var(--accent); }
