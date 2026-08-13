@@ -20,7 +20,6 @@ import { RACK_WIDTH_DEFAULT, RACK_DEPTH_DEFAULT } from "../../domain/constants";
 import { DC_SCOPE_ICONS } from "./shared";
 import { Icons } from "../../ui/Icons";
 import { IconButton } from "../../ui/IconButton";
-import { SearchPop, SearchPopResult } from "../../ui/SearchPop";
 import { I18n } from "../../i18n/I18n";
 import { DcViews2D } from "./DcViews2D";
 
@@ -31,12 +30,9 @@ export abstract class DcPanels extends DcViews2D {
   buildToolbar(): void {
     if (!this.toolbarEl) return;
     this.toolbarEl.innerHTML = "";
-    // Champ de recherche global (équipement / baie / câble / salle / waypoint) — À GAUCHE, UNIQUEMENT en vue 3D :
-    // tout résultat cliqué NAVIGUE vers la 3D (locate → focus3DAt/locateRoom forcent la vue 3D), la recherche n'a
-    // donc pas de sens en plan de salle / plan d'étage. Hors 3D on efface aussi le terme, sinon un surlignage « hit »
-    // résiduel des câbles subsisterait en plan de salle (cf. cableHit dans DcViews2D) sans bouton ✕ pour l'effacer.
-    if (this.view === "3d") this.toolbarEl.appendChild(this.buildSearchBox());
-    else this.searchTerm = "";
+    // (La toolbar n'a PAS de champ de recherche propre : la recherche GLOBALE Ctrl+K couvre la localisation
+    // d'un objet — son clic appelle `locate`, exactement ce que faisait l'ancien champ local. Ne reste ici
+    // que l'action de VUE « réinitialiser la localisation », cf. plus bas.)
     // contrôles alignés à DROITE (la sélection de salle se fait au panneau latéral / au clic, pas ici).
     const spacer = document.createElement("div"); spacer.style.flex = "1 1 auto"; this.toolbarEl.appendChild(spacer);
 
@@ -54,6 +50,17 @@ export abstract class DcPanels extends DcViews2D {
       edits.append(bFree, bEdit, bBlock); this.toolbarEl.appendChild(edits);
       this.toolbarEl.appendChild(this.vsep());   // séparateur : déplacement/exclusion | contrôles de visualisation
     }
+
+    // « RÉINITIALISER LA LOCALISATION » : éteint toute mise en évidence laissée par un « Localiser »
+    // (surbrillance ambre 3D, sélections, isolement de baie — cf. clearHighlight) — d'autant plus utile que
+    // cette mise en évidence PULSE tant qu'elle est active (arbitrage 2026-08-13). Bouton-ICÔNE (principe
+    // n°14 : aria-label + tooltip) posé À GAUCHE du sélecteur de vues, dans TOUTES les vues : la sélection
+    // à effacer se voit aussi bien en plan de salle / plan d'étage qu'en 3D.
+    const reset = this.btn("", () => this.clearHighlight(), I18n.t("dc.panels.resetLocate"));
+    reset.innerHTML = Icons.LOCATE_OFF;
+    reset.setAttribute("aria-label", I18n.t("dc.panels.resetLocate"));   // bouton-icône : sans nom accessible sinon
+    this.toolbarEl.appendChild(reset);
+    this.toolbarEl.appendChild(this.vsep());   // séparateur : action de vue | modes de vue
 
     // mode de vue : 3D ⟷ Dessus (2D) ⟷ Étage (plan bâtiment 2D) — CHOIX 1 parmi N → contrôle SEGMENTÉ
     // (.rm-toggle : un seul conteneur bordé, segment actif teinté), pas une rangée de boutons d'action.
@@ -79,61 +86,6 @@ export abstract class DcPanels extends DcViews2D {
       this.toolbarEl.appendChild(ms);
     }
     this.updateControls();
-  }
-
-  /** Champ de recherche global de la toolbar : saisie → résultats (toutes catégories) ; clic sur un résultat
-      → `locate` (mise en évidence identique aux boutons « pin ») ; bouton ✕ À CÔTÉ → `clearHighlight` (efface
-      la mise en évidence 3D, distinct du ✕ interne du composant qui vide le champ). Repeuplé depuis `searchTerm`
-      à chaque build (la toolbar est reconstruite souvent).
-
-      C'est le composant PARTAGÉ `ui/SearchPop` (principe n°14) — plus de clone maison : on y gagne la navigation
-      ↑/↓, l'ARIA de combobox et un popover PORTALISÉ (la vue 3D passe en plein écran réel, `portal:true` accroche
-      le popover à `Fullscreen.host()`). Seule la SOURCE (`searchResults`, règle métier inchangée : synchrone,
-      toutes catégories localisables, plafond 6 par type) et l'EFFET du clic (`locate`) sont injectés. Les kinds
-      3D ("room"/"rack"/"equipment"/…) et les ids voyagent par `data` (et non encodés dans `id`) : ce ne sont pas
-      les clés de collection de `TargetSearch`. `debounceMs:0` car la source est locale ; `minChars:1` reproduit
-      « rien tant que le champ est vide » ; `value`/`onInput` sèment puis suivent `searchTerm`. */
-  protected buildSearchBox(): HTMLElement {
-    const pop = new SearchPop({
-      placeholder: I18n.t("dc.panels.searchPlaceholder"),
-      // (portail = défaut de SearchPop depuis l'arbitrage 2026-08-13 — indispensable ici : la vue 3D
-      // passe en plein écran réel, le popover s'accroche à `Fullscreen.host()`.)
-      minChars: 1,                                    // rien tant que la saisie est vide (parité du clone)
-      debounceMs: 0,                                  // source SYNCHRONE locale (comme EntityPicker) : pas d'anti-rebond utile
-      value: this.searchTerm,                         // repeuplé à chaque reconstruction de la toolbar
-      onInput: (q) => { this.searchTerm = q; },       // SUIVI de saisie (≠ recherche) : garde l'état de la vue à jour
-      fetch: (query) => Promise.resolve(this.searchResults(query).map((r): SearchPopResult => ({
-        // `id` reste unique (composite kind:id) pour l'ARIA ; le TRANSPORT du couple {kind,id} passe par `data`.
-        id: r.kind + ":" + r.id, label: r.label, tag: r.tag, data: { kind: r.kind, id: r.id },
-      }))),
-      // `pick()` du composant FERME déjà le popover (via `hide()`) en CONSERVANT la saisie (seul `reset()` la
-      // viderait) : parité exacte avec le clone (saisie gardée, popover fermé). On n'a donc qu'à localiser.
-      onPick: (r) => { const t = r.data as { kind: string; id: string }; this.locate(t.kind as any, t.id); },
-    });
-    // ✕ de la TOOLBAR, distinct du ✕ interne du composant : efface la mise en évidence 3D (action de VUE),
-    // pas le champ. Rangé À CÔTÉ de l'élément du composant.
-    const wrap = document.createElement("div"); wrap.style.cssText = "display:flex;align-items:center;gap:4px";
-    const clear = this.btn("", () => this.clearHighlight(), I18n.t("dc.panels.clearHighlight")); clear.innerHTML = Icons.CLOSE;
-    wrap.append(pop.element, clear);
-    return wrap;
-  }
-
-  /** Résultats de recherche, toutes catégories confondues (objets LOCALISABLES uniquement), plafonnés par type. */
-  protected searchResults(q: string): Array<{ kind: string; id: string; label: string; tag: string }> {
-    const nq = Text.normSearch(q); if (!nq) return [];
-    const m = (...vals: any[]) => vals.some((v) => v != null && Text.normSearch(v).includes(nq));
-    const out: Array<{ kind: string; id: string; label: string; tag: string }> = [];
-    const CAP = 6;
-    let n = 0; for (const d of this.store.all("datacenters")) { if (n >= CAP) break; if (m(d.name, d.location)) { out.push({ kind: "room", id: d.id, label: d.name || I18n.t("lists.ph.room"), tag: I18n.t("lists.filter.room") }); n++; } }
-    n = 0; for (const r of this.store.all("racks")) { if (n >= CAP) break; if (!r.datacenter_id) continue; if (m(r.name)) { out.push({ kind: "rack", id: r.id, label: r.name || I18n.t("lists.ph.rack"), tag: I18n.t("dc.panels.tagRack") }); n++; } }
-    // ÉQUIPEMENTS : prédicat PARTAGÉ (`core/Locatable`) — la recherche ne propose que ce que « Localiser »
-    // sait atteindre, y compris désormais un posé d'ÉTAGE (doctrine §6.27 puis §6.28).
-    n = 0; for (const e of this.store.all("equipments")) { if (n >= CAP) break; if (!this.store.equipmentLocatable(e.id)) continue; if (m(e.name, e.type, e.brand, e.model)) { out.push({ kind: "equipment", id: e.id, label: e.name || I18n.t("lists.ph.equipment"), tag: I18n.t("dc.panels.tagEquip") }); n++; } }
-    // CÂBLES : prédicat PARTAGÉ (`core/Locatable`) — la recherche ne propose que ce que « Localiser » sait
-    // atteindre, extrémité posée sur un ÉTAGE comprise (doctrine §6.32).
-    n = 0; for (const c of this.store.all("cables")) { if (n >= CAP) break; const lab = this.cableLabelShort(c); if (m(c.name, lab) && this.store.cableLocatable(c)) { out.push({ kind: "cable", id: c.id, label: lab, tag: I18n.t("dc.panels.tagCable") }); n++; } }
-    n = 0; for (const w of this.store.all("waypoints")) { if (n >= CAP) break; if (!w.datacenter_id || !this.store.waypointIsPlaced(w)) continue; if (m(w.name)) { out.push({ kind: "waypoint", id: w.id, label: Waypoint.glyph(w) + " " + (w.name || I18n.t("dc.common.waypoint")), tag: I18n.t("dc.panels.tagWaypoint") }); n++; } }
-    return out;
   }
 
   /** N'affiche que la baie `id` (masque les autres salles affichées), la cible et la sélectionne. */

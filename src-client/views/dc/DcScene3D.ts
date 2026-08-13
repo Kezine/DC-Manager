@@ -1,4 +1,3 @@
-import { Text } from "../../core/Text";
 import { CableSpline } from "../../geometry/CableSpline";
 import type { Vec3 } from "./shared";
 import { DcCamera } from "./DcCamera";
@@ -42,11 +41,7 @@ export abstract class DcScene3D extends DcCamera {
   }
 
 
-  /* ---- recherche / visibilité câbles ---- */
-  protected matchSearch(text: any): boolean { const q = this.searchTerm.trim(); return !!q && Text.normSearch(text).includes(Text.normSearch(q)); }
-
-  protected cableHit(c: any): boolean { return this.matchSearch(c.name); }
-
+  /* ---- visibilité câbles ---- */
   protected cableShown(rc: { cable: any }): boolean { return this.showAllCables || this.selCables.has(rc.cable.id); }
 
   /** Visibilité d'un FAISCEAU — MÊME modèle que les câbles (« Tout afficher » + sélection partagée `selCables`,

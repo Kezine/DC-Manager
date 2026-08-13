@@ -100,7 +100,6 @@ export abstract class DcBase {
   siteScaleLog = false;                        // compression LOGARITHMIQUE — rapproche des sites très éloignés
   showAllCables = true;                 // false → seuls les câbles sélectionnés (selCables) sont tracés
   selCables = new Set<string>();         // câbles explicitement affichés quand showAllCables = false
-  searchTerm = "";                       // surlignage + filtrage des listes (équipements / câbles)
   focusEqId: string | null = null;       // équipement ciblé (surligné + caméra recentrée)
   focusPortId: string | null = null;     // port ciblé (surligné comme l'équipement) lors d'une localisation de port
   // contrôles présents mais INERTES tant que la fonctionnalité n'est pas portée (cf. panneau « à venir »).
@@ -826,7 +825,7 @@ export abstract class DcBase {
     this.siteScaleKm = SITE_SCALE_DEFAULT_M_PER_KM; this.siteScaleLog = false;
     this.multiDc = false; this.visibleDcIds = new Set(); this.visibleSites = new Set();
     this.floorTarget = null; this.selRoomId = null; this.selFloorEquip = null; this.routeTool.state = null; this.measureTool.state = null;
-    this.selCables = new Set(); this.searchTerm = ""; this.focusEqId = null; this.focusPortId = null;
+    this.selCables = new Set(); this.focusEqId = null; this.focusPortId = null;
     this.view = (o.view === "top" || o.view === "floor") ? o.view : "3d";
     // toggles persistés
     DcBase.TOGGLE_KEYS.forEach((k) => { if (typeof o[k] === "boolean") (this as any)[k] = o[k]; });

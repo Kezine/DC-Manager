@@ -22,9 +22,9 @@ Aucune dépendance externe (Node pur).
 Sortie type :
 
 ```
-  Icônes         : 49 (source : require(dist-test/…/Icons.js))
-  Tokens         : 21 (:root) / 15 ([data-theme=light])
-  Previews       : 9 carte(s) régénérée(s)
+  Icônes         : 70 (source : require(dist-test/…/Icons.js))
+  Tokens         : 28 (:root) / 22 ([data-theme=light])
+  Previews       : 24 carte(s) régénérée(s)
   Lint classes   : OK (toutes les classes non-`ds-` existent dans dc-manager.css)
 ```
 

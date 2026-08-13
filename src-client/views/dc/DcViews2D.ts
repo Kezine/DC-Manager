@@ -562,7 +562,7 @@ export abstract class DcViews2D extends DcScene3D {
     const ends = rc.pts.map((p) => ({ h: p.x, v: p.y }));        // pastilles sur points ORIGINAUX
     const col = this.cableColor(rc.cable), d = this.cablePath(line2, rc.straight, rc.stubAt);
     const g = Dom.svg("g", { class: "dc-cable-g" });
-    const line = Dom.svg("path", { class: "dc-cable status-" + (rc.cable.status || "cable") + (this.cableHit(rc.cable) ? " hit" : "") + (this.selCables.has(rc.cable.id) ? " sel" : ""), d, "data-cable": rc.cable.id }); if (col) (line as any).style.stroke = col;
+    const line = Dom.svg("path", { class: "dc-cable status-" + (rc.cable.status || "cable") + (this.selCables.has(rc.cable.id) ? " sel" : ""), d, "data-cable": rc.cable.id }); if (col) (line as any).style.stroke = col;
     const hit = Dom.svg("path", { class: "dc-cable-hit", d, "data-cable": rc.cable.id });
     this.wireTip(hit, () => this.cableTipHtml(rc.cable));
     this.wireClick(hit, () => { this.hideTip(); this.host.openCableForm?.(rc.cable.id); }); hit.addEventListener("contextmenu", (e: any) => { this.hideTip(); this.ctxMenu(e, this.cableCtx(rc.cable)); });
@@ -607,7 +607,7 @@ export abstract class DcViews2D extends DcScene3D {
     const ends = rt.pts.map((p) => ({ h: p.x, v: p.y }));        // pastilles sur points ORIGINAUX
     const d = this.cablePath(line2, rt.straight, rt.stubAt);
     const g = Dom.svg("g", { class: "dc-cable-g" });
-    const line = Dom.svg("path", { class: "dc-trunk" + (this.cableHit(rt.bundle) ? " hit" : "") + (this.selCables.has(rt.bundle.id) ? " sel" : ""), d, "data-trunk": rt.bundle.id });
+    const line = Dom.svg("path", { class: "dc-trunk" + (this.selCables.has(rt.bundle.id) ? " sel" : ""), d, "data-trunk": rt.bundle.id });
     const hit = Dom.svg("path", { class: "dc-cable-hit", d, "data-trunk": rt.bundle.id });
     this.wireTip(hit, () => this.bundleTipHtml(rt.bundle));
     this.wireClick(hit, () => { this.hideTip(); this.host.openCableBundleForm?.(rt.bundle.id); }); hit.addEventListener("contextmenu", (e: any) => { this.hideTip(); this.ctxMenu(e, this.bundleCtx(rt.bundle)); });

@@ -140,6 +140,18 @@
   une seconde dalle légèrement BLEUTÉE (couleur de sol du thème mixée vers l'accent) est posée `underfloor_mm` mm
   sous le faux-plancher, matérialisant le vide technique. Même idiome que le sol de salle (plan horizontal dans
   `gDecor`, non interactif, toujours visible) ; la donnée voyage via `RoomDesc.underfloorMm`.
+- **PULSE de la mise en évidence « Localiser » — EXCEPTION ASSUMÉE au rendu à la demande** (arbitrage utilisateur
+  2026-08-13). Le moteur reste à la demande partout AILLEURS ; mais tant qu'un focus « Localiser » est actif
+  (`_focusObjs` non vide), une boucle RAF dédiée (`DcThreeCamera.startFocusPulse`/`focusPulseFrame`) fait RESPIRER
+  la surbrillance ambre — sinusoïde sur l'horloge absolue (période `FOCUS_PULSE_PERIOD_MS` = 1,2 s ≈ 1 Hz), entre
+  une teinte éteinte et une teinte claire centrées sur l'ambre statique de `setFocusHi` — et demande une frame par
+  tick (`request()`). Bornes STRICTES, aucune boucle orpheline : start à l'application du focus (`setFocusEquip`,
+  réappliqué à chaque rendu par `applyFocus3D`), stop à son extinction (`setFocusEquip(null)` — bouton
+  « réinitialiser la localisation », changement de cible), à chaque reconstruction (`disposeContent`) et au
+  `dispose` du moteur ; onglet caché, le RAF est throttlé par le navigateur (rien à gérer). `prefers-reduced-motion:
+  reduce` (lu par `matchMedia` au DÉMARRAGE de la boucle) désactive le pulse — surbrillance statique, l'information
+  ne dépend jamais de l'animation. Le pendant 2D est une animation CSS (`@keyframes dc-locate-pulse`,
+  `dc-manager.css`) sur les classes `.sel` des plans, même période, même garde reduced-motion.
 
 ## ⏳ À faire (consigné, NON implémenté)
 

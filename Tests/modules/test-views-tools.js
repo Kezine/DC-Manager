@@ -396,8 +396,8 @@ module.exports = async () => {
     ck.eq(occD.get("20:front").depth_mm, 100, "brosse : depth_mm exposé à la grille U (« 100 mm », plus « Full-depth »)");
     ck.eq(JSON.stringify(dv.rackHalfExtents({ width_mm: 600, depth: 1000, orientation: 0 })), JSON.stringify({ hx: 300, hy: 500 }), "rackHalfExtents 0° → (w/2, d/2)");
     ck.eq(JSON.stringify(dv.rackHalfExtents({ width_mm: 600, depth: 1000, orientation: 90 })), JSON.stringify({ hx: 500, hy: 300 }), "rackHalfExtents 90° → (d/2, w/2)");
-    // recherche + visibilité câble (panneaux de contrôle)
-    dv.searchTerm = "core"; ck(dv.matchSearch("Core-SW") === true && dv.matchSearch("srv-01") === false, "matchSearch (insensible casse)"); dv.searchTerm = "";
+    // visibilité câble (panneaux de contrôle). NB : `matchSearch`/`searchTerm` ont été RETIRÉS avec le
+    // champ de recherche de la toolbar (2026-08-13) — la localisation passe par la recherche GLOBALE Ctrl+K.
     dv.showAllCables = true; ck(dv.cableShown({ cable: { id: "x" } }) === true, "cableShown : tout affiché → vrai");
     dv.showAllCables = false; ck(dv.cableShown({ cable: { id: "x" } }) === false, "cableShown : non sélectionné → faux");
     dv.selCables = new Set(["x"]); ck(dv.cableShown({ cable: { id: "x" } }) === true, "cableShown : sélectionné → vrai");
@@ -2252,13 +2252,15 @@ module.exports = async () => {
     ck.eq(listeDe(multiTout, dcA), "C-AB,C-FF", "Vue étage : le câble entre deux posés d'étage est listé par la carte qui prétend le piloter");
     ck(cAB && cFF, "fixtures câbles créées");
 
-    // ---- PANNEAU DE RECHERCHE 3D : il ne propose que ce que « Localiser » sait atteindre ----
+    // ---- PRÉDICAT « LOCALISABLE » : on ne propose que ce que « Localiser » sait atteindre ----
+    // (Le panneau de recherche 3D qui consommait ce prédicat via `searchResults` a été RETIRÉ — la
+    //  localisation passe par la recherche GLOBALE Ctrl+K. La RÈGLE, elle, demeure dans `core/Locatable`
+    //  exposé par `Store.cableLocatable` : c'est ELLE que ces assertions verrouillent, à l'identique.)
     const eqNu = await s.create("equipments", { name: "inventaire", dim_mode: "free", free_w_mm: 200, free_l_mm: 300, free_h_mm: 150 });
     const cNu = await s.create("cables", { name: "C-NULLE-PART", from_port_id: await p(eqNu), to_port_id: null });
-    const trouve = (q) => multiTout.searchResults(q).filter((r) => r.kind === "cable").map((r) => r.label).join(",");
-    ck.eq(trouve("C-AB"), "C-AB", "recherche 3D : un câble de SALLE reste proposé (parité)");
-    ck.eq(trouve("C-FF"), "C-FF", "recherche 3D : un câble entre deux posés d'ÉTAGE est désormais proposé — l'ancien `cableDcId` le déclarait « non placé »");
-    ck.eq(trouve("C-NULLE-PART"), "", "recherche 3D : un câble dont aucune extrémité n'est atteignable reste ÉCARTÉ (pas de bouton mort)");
+    ck.eq(s.cableLocatable(cAB), true, "localisable : un câble de SALLE est proposé (parité)");
+    ck.eq(s.cableLocatable(cFF), true, "localisable : un câble entre deux posés d'ÉTAGE est proposé — l'ancien `cableDcId` le déclarait « non placé »");
+    ck.eq(s.cableLocatable(cNu), false, "localisable : un câble dont aucune extrémité n'est atteignable reste ÉCARTÉ (pas de bouton mort)");
     ck(cNu, "fixture câble non plaçable créée");
   }
   });

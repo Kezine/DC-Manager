@@ -321,6 +321,7 @@ export abstract class DcThreeBase {
   protected disposeContent(): void {
     this.hovered = null; this._hoverObjs = []; this.cablesGroup = null; this.gRacks = null; this.gFree = null; this.gWaypoints = null; this.gDecor = null; this.gExtra = null; this.gFloorDecor = null;
     this._focusObjs = []; this._screenObjs = [];   // références vers des meshes qu'on va disposer → sinon GC retardé jusqu'au prochain collectScreenObjs/setFocusEquip
+    this.stopFocusPulse();   // les meshes sous pulse partent avec le contenu — la boucle s'arrête AVEC eux (reconstruction comme dispose final) ; un focus encore actif la relancera au setFocusEquip du prochain rendu
     this._warm.clear();   // les groupes de salle vivent sous `content` (détruit ici) → cache chaud réinitialisé
     if (this.content && this.scene) this.scene.remove(this.content);
     // NB : on ne libère PAS les textures (`material.map`) ici — elles sont détenues par `texCache` et
@@ -360,7 +361,12 @@ export abstract class DcThreeBase {
 
   /* ---- rendu À LA DEMANDE ----
      Pas de boucle RAF perpétuelle : une frame n'est calculée que sur un vrai changement (caméra, survol,
-     options, resize). Hors interaction → zéro travail GPU/CPU. Une seule RAF en attente à la fois. */
+     options, resize). Hors interaction → zéro travail GPU/CPU. Une seule RAF en attente à la fois.
+     ⚠ UNE exception ASSUMÉE (arbitrage utilisateur 2026-08-13, cf. docs/perf-3d.md) : tant qu'une mise en
+     évidence « Localiser » est active, la boucle de PULSE (`DcThreeCamera.startFocusPulse`) fait respirer
+     la surbrillance ambre et demande une frame par tick. Elle est STRICTEMENT bornée par le focus — start
+     à son application (`setFocusEquip`), stop à son extinction, à chaque reconstruction (`disposeContent`)
+     et au dispose — et s'efface devant `prefers-reduced-motion`. */
   protected request(): void {
     if (this.raf || !this.renderer) return;
     this.raf = requestAnimationFrame(this.renderFrame);
@@ -622,6 +628,7 @@ export abstract class DcThreeBase {
   protected abstract updateCamera(): void;
   protected abstract worldPerPixel(): number;
   protected abstract applyPendingFocus(): void;
+  protected abstract stopFocusPulse(): void;   // borne « reconstruction / destruction » de la boucle de pulse (cf. disposeContent)
   protected abstract onMove: (e: MouseEvent) => void;
   protected abstract onUp: (e: MouseEvent) => void;
   // Définis dans DcThreeScene :

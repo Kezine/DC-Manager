@@ -1,28 +1,22 @@
-<!-- @dsCard group="Panneaux 2D/3D" name="Barres d'outils" subtitle="barre de vue (recherche SearchPop, bascules 3D/Dessus/Étage, filtre Sites) + bandeau de contrôles 3D (zoom · points de vue · outils)" -->
-<!-- DÉRIVÉ de src-client/views/dc/DcPanels.ts (buildToolbar / buildSearchBox : .dc-toolbar, champ .search-input +
-     popover .dc-search-pop/.dc-search-item/.dc-search-tag, bascules d'édition .dc-subviews, contrôle segmenté
-     .rm-toggle 3D/Dessus/Étage, filtre .multi-pop/.multi-trigger via ui/MultiSelect) et de DcCamera.ts (buildControls
-     / updateControls : bandeau .dc-control-bar = .graph-zoom-controls repositionné). Les icônes du bandeau 3D sont des
+<!-- @dsCard group="Panneaux 2D/3D" name="Barres d'outils" subtitle="barre de vue (réinitialiser la localisation, bascules 3D/Dessus/Étage, filtre Sites) + bandeau de contrôles 3D (zoom · points de vue · outils)" -->
+<!-- DÉRIVÉ de src-client/views/dc/DcPanels.ts (buildToolbar : .dc-toolbar, bouton-icône « réinitialiser la
+     localisation » (Icons.LOCATE_OFF), bascules d'édition .dc-subviews, contrôle segmenté .rm-toggle
+     3D/Dessus/Étage, filtre .multi-pop/.multi-trigger via ui/MultiSelect) et de DcCamera.ts (buildControls
+     / updateControls : bandeau .dc-control-bar = .graph-zoom-controls repositionné). La toolbar n'a PAS de champ
+     de recherche propre : la localisation passe par la recherche GLOBALE Ctrl+K (le balisage SearchPop reste
+     illustré par la carte « Filtre cible »). Les icônes du bandeau 3D sont des
      constantes LOCALES de DcCamera (ICON_RULER/ICON_POSITION/ICON_ORTHO/ICON_GEAR + cubeIcon des points de vue) —
      reproduites verbatim (hors registre ui/Icons). Textes FR = catalogue i18n dc.panels.* / dc.camera.* + ui.*.
-     APERÇUS STATIQUES : la popover de recherche (normalement position:absolute) et le bandeau 3D (position:absolute
-     dans le stage) sont SORTIS de leur ancrage (position:static) pour l'aperçu en flux ; états contextuels FIGÉS + annotés. -->
+     APERÇUS STATIQUES : le bandeau 3D (position:absolute dans le stage) est SORTI de son ancrage
+     (position:static) pour l'aperçu en flux ; états contextuels FIGÉS + annotés. -->
 <section class="ds-section">
   <h2>Barre d'outils de la vue — 3D</h2>
-  <p class="ds-note">En vue 3D, la barre porte à GAUCHE le champ de recherche GLOBAL (tout résultat cliqué navigue vers la 3D), à DROITE le contrôle segmenté de mode de vue et le filtre Sites. La popover de résultats est montrée OUVERTE, sortie de son ancrage <code>position:absolute</code>.</p>
+  <p class="ds-note">En vue 3D, tous les contrôles sont alignés à DROITE : le bouton-icône « Réinitialiser la localisation » (épingle barrée <code>Icons.LOCATE_OFF</code> — éteint la mise en évidence pulsante laissée par un « Localiser »), le contrôle segmenté de mode de vue, puis le filtre Sites. La recherche d'objets passe par la palette GLOBALE (Ctrl+K).</p>
   <div class="ds-demo">
     <div class="dc-toolbar">
-      <div style="position:relative;display:flex;align-items:center;gap:4px">
-        <input type="text" class="search-input" placeholder="Rechercher (équipement, baie, câble, salle, waypoint…)" style="min-width:220px;max-width:320px;padding:6px 10px;flex:none" value="core">
-        <button type="button" class="btn btn-ghost btn-sm" title="Effacer la mise en évidence">{{ICON:CLOSE}}</button>
-        <div class="dc-search-pop open" style="position:static;top:auto;left:auto;margin-top:4px;min-width:0;max-width:340px">
-          <div class="dc-search-item"><span class="dc-search-tag">Équip.</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">core-sw-01</span></div>
-          <div class="dc-search-item"><span class="dc-search-tag">Baie</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">RACK-CORE-A</span></div>
-          <div class="dc-search-item"><span class="dc-search-tag">Câble</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">core-sw-01 : Gi0/1 → dist-sw-02 : Gi0/24</span></div>
-          <div class="dc-search-item"><span class="dc-search-tag">Salle</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Salle A — Core</span></div>
-        </div>
-      </div>
       <div style="flex:1 1 auto"></div>
+      <button type="button" class="btn btn-ghost btn-sm" title="Réinitialiser la localisation" aria-label="Réinitialiser la localisation">{{ICON:LOCATE_OFF}}</button>
+      <div style="align-self:stretch;width:1px;min-height:22px;margin:0 4px;background:var(--line)"></div>
       <div class="rm-toggle">
         <button type="button" class="on" aria-pressed="true">3D</button>
         <button type="button" aria-pressed="false">Plan de salle</button>
@@ -39,7 +33,7 @@
 
 <section class="ds-section">
   <h2>Barre d'outils de la vue — Plan de salle (2D)</h2>
-  <p class="ds-note">En vue 2D (Dessus / Étage), le champ de recherche disparaît (les résultats forcent la 3D). Apparaissent alors à GAUCHE les bascules d'édition contextuelles (<code>.dc-subviews</code>), à DROITE le segmenté et le filtre Sites.</p>
+  <p class="ds-note">En vue 2D (Dessus / Étage) apparaissent en plus, à GAUCHE du bouton de réinitialisation, les bascules d'édition contextuelles (<code>.dc-subviews</code>) ; suivent le segmenté et le filtre Sites. Le bouton « Réinitialiser la localisation » est présent dans TOUTES les vues : la sélection à effacer se voit aussi en plan.</p>
   <div class="ds-demo">
     <div class="dc-toolbar">
       <div style="flex:1 1 auto"></div>
@@ -48,6 +42,8 @@
         <button type="button" class="btn btn-ghost btn-sm" title="Modifier la salle courante">Éditer la salle</button>
         <button type="button" class="btn btn-ghost btn-sm active" aria-pressed="true" title="Glissez une sélection sur la grille pour marquer / démarquer les cases (in)accessibles">Cases inaccessibles</button>
       </div>
+      <div style="align-self:stretch;width:1px;min-height:22px;margin:0 4px;background:var(--line)"></div>
+      <button type="button" class="btn btn-ghost btn-sm" title="Réinitialiser la localisation" aria-label="Réinitialiser la localisation">{{ICON:LOCATE_OFF}}</button>
       <div style="align-self:stretch;width:1px;min-height:22px;margin:0 4px;background:var(--line)"></div>
       <div class="rm-toggle">
         <button type="button" aria-pressed="false">3D</button>

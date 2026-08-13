@@ -68,6 +68,11 @@ export class Icons {
   /** Localiser dans les vues 2D/3D (remplace l'emoji `📍`) : épingle. */
   static readonly LOCATE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg>';
 
+  /** Réinitialiser la localisation (éteindre la mise en évidence laissée par « Localiser ») : l'épingle
+      de LOCATE barrée d'un trait diagonal — même grammaire que REVOKE (« ne vaut plus »), intention
+      distincte de CLOSE (on n'annule pas une saisie, on éteint un état de vue). */
+  static readonly LOCATE_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/><line x1="4.5" y1="3.5" x2="19.5" y2="18.5"/></svg>';
+
   /** Plus d'actions (remplace `⋮`) : points verticaux — ouvre le menu overflow. */
   static readonly MORE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/></svg>';
 

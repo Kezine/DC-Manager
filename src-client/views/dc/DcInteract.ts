@@ -979,9 +979,10 @@ export abstract class DcInteract extends DcPanels {
   protected goBack(): void { const fn = this._returnAction; this._returnAction = null; this.updateBackBtn(); if (fn) fn(); }
 
   /** « Localiser » : affiche la vue 3D centrée sur l'objet (équipement / baie / câble / port / salle). API publique
-      (shell + champ de recherche). Peuple le champ de recherche avec le libellé de l'objet (cohérence boutons « pin »). */
+      (shell / boutons « pin » des listings et fiches / recherche globale Ctrl+K). La mise en évidence posée ici
+      PULSE tant qu'elle est active (2D comme 3D) ; elle s'éteint par le bouton « réinitialiser la localisation »
+      de la toolbar (`clearHighlight`). */
   locate(kind: "equipment" | "rack" | "cable" | "port" | "room" | "waypoint", id: string): void {
-    const label = this.locateLabel(kind, id); if (label) this.searchTerm = label;
     this.focusPortId = null;   // réinitialisé ; seul locatePort le repositionne
 
     if (kind === "equipment") this.locateEquipment(id);
@@ -990,17 +991,6 @@ export abstract class DcInteract extends DcPanels {
     else if (kind === "port") this.locatePort(id);
     else if (kind === "room") this.locateRoom(id);
     else if (kind === "waypoint") this.locateWaypoint(id);
-  }
-
-  /** Libellé d'affichage d'un objet localisable (pour peupler le champ de recherche). */
-  protected locateLabel(kind: string, id: string): string {
-    if (kind === "equipment") { const e: any = this.store.get("equipments", id); return e ? (e.name || I18n.t("lists.ph.equipment")) : ""; }
-    if (kind === "rack") { const r: any = this.store.get("racks", id); return r ? (r.name || I18n.t("lists.ph.rack")) : ""; }
-    if (kind === "room") { const d: any = this.store.get("datacenters", id); return d ? (d.name || I18n.t("lists.ph.room")) : ""; }
-    if (kind === "cable") { const c: any = this.store.get("cables", id); return c ? this.cableLabelShort(c) : ""; }
-    if (kind === "port") { const p: any = this.store.get("ports", id); const e: any = p ? this.store.get("equipments", p.equipment_id) : null; return p ? ((e && e.name ? e.name + " · " : "") + (p.name || I18n.t("dc.common.port"))) : ""; }
-    if (kind === "waypoint") { const w: any = this.store.get("waypoints", id); return w ? (Waypoint.glyph(w) + " " + (w.name || I18n.t("dc.common.waypoint"))) : ""; }
-    return "";
   }
 
   /** Localise une SALLE : bascule en 3D mode simple DC sur cette salle, sans isolement de baie ni cible précise. */
@@ -1012,9 +1002,11 @@ export abstract class DcInteract extends DcPanels {
     this.buildToolbar(); this.render();
   }
 
-  /** Bouton « ✕ » du champ de recherche : efface toute mise en évidence (surbrillance, sélection, isolement de baie). */
+  /** Bouton « réinitialiser la localisation » de la toolbar : efface toute mise en évidence laissée par un
+      « Localiser » (surbrillance ambre, sélection, isolement de baie) — et, ce faisant, ARRÊTE le pulse qui
+      la fait respirer (2D : plus de classe `.sel` animée ; 3D : `setFocusEquip(null)` coupe la boucle). */
   clearHighlight(): void {
-    this.searchTerm = ""; this.focusEqId = null; this.selRackId = null;
+    this.focusEqId = null; this.selRackId = null;
     this.selCables = new Set(); this.hidden3dRacks = new Set();
     this.buildToolbar(); this.render();
   }

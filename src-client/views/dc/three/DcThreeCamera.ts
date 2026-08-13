@@ -9,6 +9,15 @@ import { CameraFraming } from "../../../geometry/CameraFraming";   // règle de 
 import { Haptics } from "../../../core/Haptics";
 import { U_MM } from "../../../domain/constants";
 
+/* ---- PULSE de la mise en évidence « Localiser » (arbitrage utilisateur 2026-08-13) ----
+   Tant qu'un focus est actif, la surbrillance ambre RESPIRE : sinusoïde ~1 Hz entre une teinte éteinte
+   et une teinte claire, centrée sur l'ambre statique de `setFocusHi` (HI 0xf5a623 / HIC 0xffce8a).
+   Période ALIGNÉE sur l'animation CSS `dc-locate-pulse` des plans 2D (dc-manager.css) : une seule
+   respiration visuelle, quel que soit le moteur. */
+const FOCUS_PULSE_PERIOD_MS = 1200;
+const FOCUS_PULSE_EMISSIVE_DIM = new THREE.Color(0xb87a15), FOCUS_PULSE_EMISSIVE_BRIGHT = new THREE.Color(0xffd27f);
+const FOCUS_PULSE_BASIC_DIM = new THREE.Color(0xd2a35f), FOCUS_PULSE_BASIC_BRIGHT = new THREE.Color(0xffefc9);
+
 export abstract class DcThreeCamera extends DcThreeBase {
   /** Dernière position (clientX, clientY) du geste TACTILE — sert de point de picking au `touchend` (qui ne
       porte pas de coordonnées de doigt actif), et de centroïde mémorisé entre deux `touchmove`. */
@@ -133,7 +142,59 @@ export abstract class DcThreeCamera extends DcThreeBase {
       this._focusObjs.forEach((o) => this.setFocusHi(o, true));
     }
     if (had || this._focusObjs.length) this.request();
+    // PULSE CONTINU tant que la localisation est active — exception ASSUMÉE au rendu à la demande
+    // (cf. le bloc « rendu À LA DEMANDE » de DcThreeBase). `setFocusEquip` étant réappliqué à CHAQUE
+    // rendu (applyFocus3D), c'est LE point unique où le focus apparaît et disparaît : start/stop y
+    // suffisent — la reconstruction et la destruction passent, elles, par disposeContent/dispose.
+    if (this._focusObjs.length) this.startFocusPulse(); else this.stopFocusPulse();
   }
+
+  /* ---- boucle de PULSE du focus « Localiser » (cf. constantes FOCUS_PULSE_* en tête de fichier) ---- */
+
+  /** RAF de la boucle de pulse en attente (0 = boucle arrêtée). Distincte de `raf` (rendu à la demande) :
+      chaque tick MODULE les matériaux puis DEMANDE une frame — le rendu reste l'affaire de `request()`. */
+  protected _pulseRaf = 0;
+  /** Couleur de travail du tick (réutilisée : aucune allocation par frame). */
+  private readonly _pulseColor = new THREE.Color();
+
+  /** Démarre la respiration si un focus est actif — idempotente (au plus une boucle). `prefers-reduced-motion`
+      est lu ICI, au démarrage (pas à la construction du moteur) : la surbrillance reste alors STATIQUE —
+      le pulse est un confort, jamais l'information elle-même. */
+  protected startFocusPulse(): void {
+    if (this._pulseRaf || !this._focusObjs.length) return;
+    if (typeof window !== "undefined" && window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    this._pulseRaf = requestAnimationFrame(this.focusPulseFrame);
+  }
+
+  /** Arrête la boucle. Les matériaux ne sont PAS retouchés ici : soit `setFocusHi(…, false)` vient de
+      restaurer leurs couleurs d'origine (focus levé), soit ils partent au dispose (reconstruction). */
+  protected stopFocusPulse(): void {
+    if (this._pulseRaf) { cancelAnimationFrame(this._pulseRaf); this._pulseRaf = 0; }
+  }
+
+  /** Tick de pulse : garde-fou (moteur détruit / focus levé → la boucle meurt d'elle-même, aucune boucle
+      orpheline), modulation des matériaux sous focus, demande de frame, re-programmation. Onglet caché :
+      le navigateur throttle naturellement les RAF — rien à gérer. */
+  protected readonly focusPulseFrame = (): void => {
+    this._pulseRaf = 0;
+    if (!this.renderer || !this._focusObjs.length) return;
+    // Phase sur l'horloge ABSOLUE (pas un compteur de frames) : cadence stable quel que soit le framerate,
+    // et même respiration que l'animation CSS 2D (période partagée FOCUS_PULSE_PERIOD_MS).
+    const phase = (performance.now() % FOCUS_PULSE_PERIOD_MS) / FOCUS_PULSE_PERIOD_MS;
+    const k = 0.5 - 0.5 * Math.cos(phase * 2 * Math.PI);   // 0 → 1 → 0, départ doux côté éteint
+    // MÊME règle d'application que `setFocusHi` : émissive quand le matériau en a une (MeshStandard),
+    // sinon teinte de base (MeshBasic — plans d'image, faces texturées). Les couleurs d'ORIGINE restent
+    // en sécurité dans `userData` (`_focEmi`/`_focArr`…) : la restauration au clearHighlight ne dépend
+    // jamais de la valeur pulsée du moment.
+    const emissiveHex = this._pulseColor.lerpColors(FOCUS_PULSE_EMISSIVE_DIM, FOCUS_PULSE_EMISSIVE_BRIGHT, k).getHex();
+    const basicHex = this._pulseColor.lerpColors(FOCUS_PULSE_BASIC_DIM, FOCUS_PULSE_BASIC_BRIGHT, k).getHex();
+    this._focusObjs.forEach((o) => {
+      const m = this.highlightMaterials(o); if (!m) return;
+      (Array.isArray(m) ? m : [m]).forEach((x: any) => { if (!x) return; if (x.emissive) x.emissive.setHex(emissiveHex); else if (x.color) x.color.setHex(basicHex); });
+    });
+    this.request();
+    this._pulseRaf = requestAnimationFrame(this.focusPulseFrame);
+  };
 
   /** Émissive ambre persistante sur un mesh occupant (mono- ou multi-matériau), sans collision avec le survol. */
   protected setFocusHi(mesh: THREE.Object3D | null, on: boolean): void {

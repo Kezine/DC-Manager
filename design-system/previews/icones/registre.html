@@ -1225,8 +1225,27 @@
   .dc-trunk { stroke: var(--fg-dim); stroke-width: 3px; opacity: 0.6; fill: none; vector-effect: non-scaling-stroke; pointer-events: none; }
   .dc-cable-g:hover .dc-trunk { opacity: 0.95; }
   .dc-trunk.sel { stroke: var(--accent); stroke-width: 4.5px; opacity: 1; }
-  .dc-trunk.hit { stroke: #ffe14d !important; stroke-width: 5px; opacity: 1; }
   .dc-trunk-end { fill: var(--fg-dim); }
+  /* PULSE « Localiser » (arbitrage utilisateur 2026-08-13) : la mise en évidence `.sel` des plans 2D
+     RESPIRE en continu tant qu'elle est active — même période (1,2 s ≈ 1 Hz) que le pulse de la
+     surbrillance ambre du moteur 3D (DcThreeCamera, FOCUS_PULSE_PERIOD_MS) : une seule respiration
+     visuelle, quel que soit le moteur. Seul le TRAIT pulse (stroke-opacity) : les remplissages et la
+     géométrie restent stables — lisible sans être stroboscopique. */
+  @keyframes dc-locate-pulse { 0%, 100% { stroke-opacity: 1; } 50% { stroke-opacity: 0.45; } }
+  .dc-rack.sel .dc-rack-body, .dc-equip.sel .dc-equip-body,
+  .dc-cable.sel, .dc-trunk.sel,
+  .dc-wp.sel .dc-wp-body, .dc-wp.sel .dc-wp-rail,
+  .dc-floor-equip.sel .dc-floor-equip-body, .dc-floor-oob.sel .dc-floor-oob-body {
+    animation: dc-locate-pulse 1.2s ease-in-out infinite;
+  }
+  /* prefers-reduced-motion : surbrillance STATIQUE — le pulse est un confort, jamais l'information seule
+     (parité avec la garde matchMedia du moteur 3D). */
+  @media (prefers-reduced-motion: reduce) {
+    .dc-rack.sel .dc-rack-body, .dc-equip.sel .dc-equip-body,
+    .dc-cable.sel, .dc-trunk.sel,
+    .dc-wp.sel .dc-wp-body, .dc-wp.sel .dc-wp-rail,
+    .dc-floor-equip.sel .dc-floor-equip-body, .dc-floor-oob.sel .dc-floor-oob-body { animation: none; }
+  }
   .dc-port { fill: var(--bg-3); stroke: var(--fg-dim); stroke-width: 1px; vector-effect: non-scaling-stroke; pointer-events: none; }
   .dc-port.on { fill: var(--accent); fill-opacity: 0.85; stroke: var(--accent); }
   /* v119 â€” survol d'un port : mise en Ã©vidence (comme Ã©quipements/cÃ¢bles) */
@@ -1347,7 +1366,6 @@
   }
   .dc-eq3d.focus-pulse, .dc-equip3d.focus-pulse { animation: focusPulse 1.15s ease-in-out infinite; }
   .btn-ghost.active { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 13%, transparent); }   /* bascule active (ex. estomper â€” v50) */
-  .dc-cable.hit { stroke: #ffe14d !important; stroke-width: 3px; opacity: 1; }
   .dc-eq3d-name { fill: var(--bg); font-family: var(--mono); font-weight: 700; pointer-events: none; paint-order: stroke; stroke: rgba(255,255,255,0.55); stroke-width: 2px; }
   .dc-port { pointer-events: none; }
   /* v101 â€” tooltip 3D / vue Ã‰tage : mÃªme habillage que .app-tooltip (bandeau d'en-tÃªte + liserÃ© d'accent) */
@@ -1528,6 +1546,41 @@
   .md-body > :last-child { margin-bottom: 0; }
   .md-body p, .md-body ul, .md-body ol, .md-body pre, .md-body blockquote, .md-body h1, .md-body h2, .md-body h3 { margin: 0.4em 0; }
   .md-body ul, .md-body ol { padding-left: 1.4em; }
+
+  /* VARIANTE PLEIN-CADRE du rendu markdown (viewer de pièces jointes, cf. AttachmentUi.view) : `.md-body` est
+     réglé pour une CELLULE de fiche (compact, marges neutralisées) — ici on rend un DOCUMENT markdown entier,
+     donc largeur de lecture bornée, blocs mieux espacés, titres hiérarchisés et éléments larges scrollables.
+     N'affecte pas `.md-body` seul : ces règles ne s'appliquent qu'en présence de `.md-body-full`. */
+  .md-body-full { max-width: 72ch; margin: 0 auto; line-height: 1.6; }
+  .md-body-full h1, .md-body-full h2, .md-body-full h3 { margin: 1.1em 0 0.5em; line-height: 1.25; }
+  .md-body-full h1 { font-size: 1.5em; }
+  .md-body-full h2 { font-size: 1.3em; }
+  .md-body-full h3 { font-size: 1.12em; }
+  .md-body-full p, .md-body-full ul, .md-body-full ol, .md-body-full blockquote { margin: 0.7em 0; }
+  .md-body-full pre { margin: 0.7em 0; padding: 10px 12px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 6px; overflow-x: auto; }
+  .md-body-full code { font-family: var(--mono); font-size: 0.92em; }
+  .md-body-full blockquote { padding-left: 12px; border-left: 3px solid var(--line-2); color: var(--fg-dim); }
+  .md-body-full img { max-width: 100%; height: auto; }
+  /* Tables larges : scroll horizontal DANS le bloc (le corps de la modale ne défile jamais latéralement). */
+  .md-body-full table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+  .md-body-full th, .md-body-full td { border: 1px solid var(--line); padding: 4px 8px; }
+  /* Image externe NEUTRALISÉE (politique D-B3) : lien sobre montrant l'URL, précédé de l'icône image. */
+  .md-ext-image { display: inline-flex; align-items: center; gap: 6px; padding: 2px 6px; border: 1px dashed var(--line-2); border-radius: 6px; color: var(--fg-dim); font-size: 0.9em; }
+  .md-ext-image .gi { width: 14px; height: 14px; flex: 0 0 auto; }
+
+  /* VIEWER de pièces jointes (AttachmentUi.view) — conteneur du contenu affiché dans la modale. */
+  .attachment-viewer { display: flex; flex-direction: column; gap: 10px; }
+  /* Image : centrée, bornée en hauteur, jamais débordante. */
+  .attachment-view-image { display: block; max-width: 100%; max-height: 70vh; margin: 0 auto; object-fit: contain; }
+  /* PDF : visionneuse native du navigateur (iframe sur blob local, cf. D-B1) — pleine largeur, ~75vh. */
+  .attachment-view-pdf { width: 100%; height: 75vh; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-2); }
+  /* Texte brut : monospace, retour à la ligne préservé, défilement vertical borné. */
+  .attachment-view-text { margin: 0; padding: 12px; max-height: 72vh; overflow: auto; background: var(--bg-2); border: 1px solid var(--line); border-radius: 6px; font-family: var(--mono); font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; color: var(--fg); }
+  /* Bandeau de troncature (texte/markdown > 1 Mo affiché) + note d'erreur/repli. */
+  .attachment-view-truncated { padding: 6px 10px; border-radius: 6px; background: var(--warn-bg, var(--bg-2)); border: 1px solid var(--warn); color: var(--warn); font-size: 11px; }
+  .attachment-view-note { margin: 0; padding: 12px; color: var(--fg-dim); }
+  /* Bouton « Afficher les images externes » : aligné à gauche, au-dessus du corps markdown. */
+  .attachment-view-extimg { align-self: flex-start; }
   /* Ligne d'audit DISCRÈTE des fiches (« Créé/Modifié par … le … », cf. AuditLine) : petite, estompée, en retrait. */
   .audit-line { margin-top: 14px; font-size: 10px; color: var(--fg-dimmer); letter-spacing: 0.03em; }
 
@@ -1952,10 +2005,29 @@
   .tf-skel i.n { flex: 1; }
   @keyframes tfSk { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 
-  /* mode PORTAIL : le popover ouvert est un enfant de <body> en position:fixed (coordonnees posees
-     en ligne par SearchPop.portalPosition) — il echappe ainsi aux conteneurs qui ROGNENT (corps
-     defilant d'une modale, liste a max-height). z-index au-dessus de l'overlay de modale (200). */
-  .dc-pop-portal { position: fixed; z-index: 300; }
+  /* ============================================================================================
+     ÉCHELLE DE Z-INDEX DE L'APP (documentation de l'existant — du BAS vers le HAUT). Poser un
+     nouvel overlay = choisir sa marche ICI plutot que d'inventer une valeur au hasard. Les couches
+     mesurees, de la plus basse a la plus haute :
+       0     grille de fond (`body::before`)            1     contenu `main`
+       100   barre d'en-tete (header)
+       200   `.modal-overlay`, `.row-menu`, panneaux ancres aux barres (menus de champ)
+       300   `.dialog-overlay` (dialogues, s'empilent PAR-DESSUS une modale)
+       400   `.dc-pop-portal` (popover d'un SearchPop porte) — DOIT passer devant un dialogue
+             (il est ANCRE a un champ d'une modale/dialogue), JAMAIS devant un toast
+       1900  `.app-tooltip` (menu contextuel / infobulle riche)
+       2000  `#toast-container` (toasts)                2500  `.busy-overlay` (traitement bloquant)
+       4000  `.ac-list` (autocompletion flottante portee sur l'hote) — au sommet a dessein :
+             une saisie assistee doit rester lisible meme au-dessus d'un toast.
+     Regle tenue par ce lot : `.dc-pop-portal` etait a 300, EGAL a `.dialog-overlay` — l'ordre DOM
+     tranchait, au petit bonheur. 400 le place franchement AU-DESSUS des dialogues et SOUS les toasts.
+     ============================================================================================ */
+
+  /* mode PORTAIL : le popover ouvert est un enfant de l'hote courant (body, ou l'element plein ecran
+     via Fullscreen.host()) en position:fixed (coordonnees posees en ligne par SearchPop.portalPosition)
+     — il echappe ainsi aux conteneurs qui ROGNENT (corps defilant d'une modale, liste a max-height,
+     panneau 3D .dc-side). z-index 400 : au-dessus des dialogues (300), sous les toasts (cf. echelle). */
+  .dc-pop-portal { position: fixed; z-index: 400; }
   /* sous 560px, le popover portail s'etale en QUASI-FEUILLE : pleine largeur, liste plus haute
      (maquette route §07). Limite assumee : le CHAMP de recherche reste dans le formulaire — une
      vraie feuille plein ecran a recherche integree demanderait de deplacer l'input, hors de portee
@@ -3264,6 +3336,15 @@
           <span class="ds-ico ds-ico-24" title="24 px courant"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg></span>
           <span class="ds-ico ds-ico-24 ds-accent" title="24 px accent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg></span>
           <span class="ds-ico ds-ico-24 ds-danger" title="24 px danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg></span>
+        </div>
+      </div>
+      <div class="ds-ico-cell">
+        <div class="ds-ico-name">LOCATE_OFF</div>
+        <div class="ds-ico-renders">
+          <span class="ds-ico ds-ico-16" title="16 px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/><line x1="4.5" y1="3.5" x2="19.5" y2="18.5"/></svg></span>
+          <span class="ds-ico ds-ico-24" title="24 px courant"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/><line x1="4.5" y1="3.5" x2="19.5" y2="18.5"/></svg></span>
+          <span class="ds-ico ds-ico-24 ds-accent" title="24 px accent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/><line x1="4.5" y1="3.5" x2="19.5" y2="18.5"/></svg></span>
+          <span class="ds-ico ds-ico-24 ds-danger" title="24 px danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/><line x1="4.5" y1="3.5" x2="19.5" y2="18.5"/></svg></span>
         </div>
       </div>
       <div class="ds-ico-cell">

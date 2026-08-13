@@ -1217,8 +1217,27 @@
   .dc-trunk { stroke: var(--fg-dim); stroke-width: 3px; opacity: 0.6; fill: none; vector-effect: non-scaling-stroke; pointer-events: none; }
   .dc-cable-g:hover .dc-trunk { opacity: 0.95; }
   .dc-trunk.sel { stroke: var(--accent); stroke-width: 4.5px; opacity: 1; }
-  .dc-trunk.hit { stroke: #ffe14d !important; stroke-width: 5px; opacity: 1; }
   .dc-trunk-end { fill: var(--fg-dim); }
+  /* PULSE « Localiser » (arbitrage utilisateur 2026-08-13) : la mise en évidence `.sel` des plans 2D
+     RESPIRE en continu tant qu'elle est active — même période (1,2 s ≈ 1 Hz) que le pulse de la
+     surbrillance ambre du moteur 3D (DcThreeCamera, FOCUS_PULSE_PERIOD_MS) : une seule respiration
+     visuelle, quel que soit le moteur. Seul le TRAIT pulse (stroke-opacity) : les remplissages et la
+     géométrie restent stables — lisible sans être stroboscopique. */
+  @keyframes dc-locate-pulse { 0%, 100% { stroke-opacity: 1; } 50% { stroke-opacity: 0.45; } }
+  .dc-rack.sel .dc-rack-body, .dc-equip.sel .dc-equip-body,
+  .dc-cable.sel, .dc-trunk.sel,
+  .dc-wp.sel .dc-wp-body, .dc-wp.sel .dc-wp-rail,
+  .dc-floor-equip.sel .dc-floor-equip-body, .dc-floor-oob.sel .dc-floor-oob-body {
+    animation: dc-locate-pulse 1.2s ease-in-out infinite;
+  }
+  /* prefers-reduced-motion : surbrillance STATIQUE — le pulse est un confort, jamais l'information seule
+     (parité avec la garde matchMedia du moteur 3D). */
+  @media (prefers-reduced-motion: reduce) {
+    .dc-rack.sel .dc-rack-body, .dc-equip.sel .dc-equip-body,
+    .dc-cable.sel, .dc-trunk.sel,
+    .dc-wp.sel .dc-wp-body, .dc-wp.sel .dc-wp-rail,
+    .dc-floor-equip.sel .dc-floor-equip-body, .dc-floor-oob.sel .dc-floor-oob-body { animation: none; }
+  }
   .dc-port { fill: var(--bg-3); stroke: var(--fg-dim); stroke-width: 1px; vector-effect: non-scaling-stroke; pointer-events: none; }
   .dc-port.on { fill: var(--accent); fill-opacity: 0.85; stroke: var(--accent); }
   /* v119 â€” survol d'un port : mise en Ã©vidence (comme Ã©quipements/cÃ¢bles) */
@@ -1339,7 +1358,6 @@
   }
   .dc-eq3d.focus-pulse, .dc-equip3d.focus-pulse { animation: focusPulse 1.15s ease-in-out infinite; }
   .btn-ghost.active { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 13%, transparent); }   /* bascule active (ex. estomper â€” v50) */
-  .dc-cable.hit { stroke: #ffe14d !important; stroke-width: 3px; opacity: 1; }
   .dc-eq3d-name { fill: var(--bg); font-family: var(--mono); font-weight: 700; pointer-events: none; paint-order: stroke; stroke: rgba(255,255,255,0.55); stroke-width: 2px; }
   .dc-port { pointer-events: none; }
   /* v101 â€” tooltip 3D / vue Ã‰tage : mÃªme habillage que .app-tooltip (bandeau d'en-tÃªte + liserÃ© d'accent) */
