@@ -485,7 +485,9 @@ export class EquipmentForms extends FormBase {
     const eqOpts = [{ value: "", label: I18n.t("equipment.spare.freeUnspecified") }].concat(
       store.all("equipments").slice().sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")).map((e: any) => ({ value: e.id, label: e.name || I18n.t("forms.ph.equipment") })),
     );
-    const eqI = FormControls.select(eqOpts, sp ? (sp.assigned_equipment_id || "") : "");
+    // Équipement d'accueil du spare = ENTITÉ à liste longue → sélecteur à recherche (principe n°14) ;
+    // la règle d'options (`eqOpts`, — libre — en tête + équipements triés par nom) ne bouge pas d'une ligne.
+    const eqI = FormControls.entityPicker(eqOpts, sp ? (sp.assigned_equipment_id || "") : "");
     const freeI = FormControls.text(sp ? sp.assigned_free : "", I18n.t("equipment.spare.freePlaceholder"));
     assignBlock.appendChild(FormUi.row2(FormControls.fieldRow(I18n.t("equipment.spare.assignedEquip"), eqI, I18n.t("equipment.spare.assignedHint")), FormControls.fieldRow(I18n.t("equipment.spare.freeAssign"), freeI)));
     const assignDateI: any = FormControls.date(sp ? sp.assigned_date : "");

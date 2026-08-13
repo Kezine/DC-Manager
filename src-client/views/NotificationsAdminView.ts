@@ -398,11 +398,16 @@ export class NotificationsAdminView {
     const contacts = this.store.all("contacts") as Array<{ id: string; name?: string }>;
     const contactOpts = [{ value: "", label: I18n.t("notify.abonnements.contactChoose") }].concat(
       contacts.slice().sort((a, b) => (a.name || "").localeCompare(b.name || "")).map((c) => ({ value: c.id, label: c.name || I18n.t("lists.ph.noName") })));
-    const contactSel = FormControls.select(contactOpts, existing ? existing.contact_id : "");
-    // Un contact d'un AUTRE document (édition d'un abonnement global) n'est pas dans la liste : on l'ajoute pour ne pas le perdre.
+    // Un contact d'un AUTRE document (édition d'un abonnement global) n'est pas dans le carnet courant : on
+    // l'ajoute À LA LISTE passée au picker (même valeur, même libellé) pour ne jamais perdre la valeur en
+    // place — esprit `keepId`. Fait AVANT la construction du contrôle, l'`<option>` posée à la main sur un
+    // `<select>` n'ayant pas d'équivalent sur un entityPicker.
     if (existing && existing.contact_id && !contacts.some((c) => c.id === existing.contact_id)) {
-      const opt = document.createElement("option"); opt.value = existing.contact_id; opt.textContent = I18n.t("notify.abonnements.contactOther"); contactSel.appendChild(opt); contactSel.value = existing.contact_id;
+      contactOpts.push({ value: existing.contact_id, label: I18n.t("notify.abonnements.contactOther") });
     }
+    // Contact = ENTITÉ à liste longue (carnet lazy, HYDRATÉ par `loadAbonnements` avant l'ouverture de cette
+    // modale) → sélecteur à recherche (principe n°14) ; la règle d'options ci-dessus ne change pas.
+    const contactSel = FormControls.entityPicker(contactOpts, existing ? existing.contact_id : "");
     root.appendChild(FormControls.fieldRow(I18n.t("notify.admin.colContact"), contactSel, I18n.t("notify.abonnements.contactHint")));
     if (!contacts.length) this.appendNote(I18n.t("notify.abonnements.noContact"), root);
 

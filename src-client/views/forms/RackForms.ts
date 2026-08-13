@@ -1,6 +1,7 @@
 import type { Store } from "../../store";
 import { Icons } from "../../ui/Icons";
 import { FormControls } from "../../ui/FormControls";
+import type { SelectOption } from "../../ui/FormControls";   // type des options des sélecteurs (helper `freeEquipOptions`)
 import { Notify } from "../../ui/Notify";
 import { Dialog } from "../../ui/Dialog";
 import { Html } from "../../core/Html";
@@ -458,7 +459,8 @@ export class RackForms extends CableForms {
       const eqFree = store.unrackedEquipments().sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
       if (!eqFree.length) { Notify.toast(I18n.t("rack.rackContent.noFreeEquip"), "err"); return; }
       const body = document.createElement("div");
-      const eqI = FormControls.select([{ value: "", label: I18n.t("rack.common.choose") }].concat(eqFree.map((e: any) => ({ value: e.id, label: e.name || I18n.t("lists.ph.noName") }))), "");
+      // montage libre : aucun filtre, aucun suffixe/blocage propre — decorate vide, option de tête « Choisir ».
+      const eqI = FormControls.entityPicker(this.freeEquipOptions(eqFree, () => ({}), I18n.t("rack.common.choose")), "");
       body.appendChild(FormControls.fieldRow(I18n.t("rack.common.equipField"), eqI, I18n.t("rack.rackContent.freeEquipHint")));
       const res = await Dialog.custom({ title: I18n.t("rack.rackContent.freeDialogTitle"), confirmLabel: I18n.t("rack.rackContent.assign"), build: (r: HTMLElement) => { r.appendChild(body); return { validate: () => eqI.value ? true as const : I18n.t("rack.common.chooseEquip"), collect: () => eqI.value }; } });
       if (!res) return;
@@ -997,6 +999,28 @@ export class RackForms extends CableForms {
     });
   }
 
+  /** Options d'un sélecteur d'équipement LIBRE à assigner — FACTEUR COMMUN des cinq dialogues de baie
+      (montage libre, emplacement U, étagère, latéral, mural). Ce qui NE VARIE PAS et vit donc ici : la
+      BASE du libellé (`nom` ou « sans nom »), la forme `{ value: id, label, disabled }` et le motif
+      « option de tête + équipements ». Ce qui VARIE reste chez l'appelant, injecté — on factorise le
+      CONTRÔLE, jamais la RÈGLE (principes n°3 et n°14) :
+      - `eqFree` est la liste DÉJÀ construite/triée dehors : son FILTRE diffère par emplacement
+        (aucun ; `dim_mode !== "free"` + `u_height === span` pour l'U ; `dim_mode === "free"` pour
+        l'étagère) et la liste est RÉUTILISÉE au point d'appel (gardes « aucun équipement », valeur par
+        défaut du dialogue étagère) — la construire ici la rendrait inaccessible à ces usages ;
+      - `decorate` fournit, par équipement, le SUFFIXE de libellé (hauteur U + profondeur, dimensions
+        libres, largeur, motif de blocage) et l'état `disabled` (placement bloqué, trop large) — ce sont
+        les seules vraies différences entre les cinq selects ;
+      - `head` est le libellé de l'option de tête (valeur ""), ou `null` quand le dialogue n'en veut PAS
+        et présélectionne le 1er équipement (étagère). */
+  private static freeEquipOptions(eqFree: any[], decorate: (e: any) => { suffix?: string; disabled?: boolean }, head: string | null): SelectOption[] {
+    const opts: SelectOption[] = eqFree.map((e: any) => {
+      const d = decorate(e);
+      return { value: e.id, label: (e.name || I18n.t("lists.ph.noName")) + (d.suffix || ""), disabled: !!d.disabled };
+    });
+    return head != null ? [{ value: "", label: head }, ...opts] : opts;
+  }
+
   /** Assigner un emplacement U libre : équipement non placé, pseudo-élément, ou brosse de brassage. */
   static async assignSlot(store: Store, host: FormHost, rackId: string, u: number, side: string, height: number, onDone?: () => void): Promise<void> {
     const rack = store.get("racks", rackId); if (!rack) { Notify.toast(I18n.t("rack.nf.rack"), "err"); return; }
@@ -1017,10 +1041,11 @@ export class RackForms extends CableForms {
     body.appendChild(FormControls.fieldRow(I18n.t("rack.assign.element"), kindI));
     const targetDc = rack.datacenter_id || null;
     const blockedWhy = (eid: string) => targetDc ? store.equipmentPlacementBlockedReason(eid, targetDc) : null;
-    const eqI = FormControls.select([{ value: "", label: noEqLabel }].concat(eqFree.map((e: any) => {
+    // emplacement U : suffixe hauteur U + profondeur de montage, blocage de placement (⚠ raison) → disabled.
+    const eqI = FormControls.entityPicker(this.freeEquipOptions(eqFree, (e: any) => {
       const why = blockedWhy(e.id);
-      return { value: e.id, label: (e.name || I18n.t("lists.ph.noName")) + " · " + (e.u_height || 1) + "U " + this.mountDepthLabel(e) + (why ? " — ⚠ " + why : ""), disabled: !!why };
-    })), "");
+      return { suffix: " · " + (e.u_height || 1) + "U " + this.mountDepthLabel(e) + (why ? " — ⚠ " + why : ""), disabled: !!why };
+    }, noEqLabel), "");
     const eqHint = span > 1 ? I18n.t("rack.assign.eqHintSpan", { n: span }) : I18n.t("rack.assign.eqHint");
     const eqRow = FormControls.fieldRow(I18n.t("rack.common.equipField"), eqI, eqHint); body.appendChild(eqRow);
     const labelI = FormControls.text("", I18n.t("rack.assign.labelPlaceholder")); const labelRow = FormControls.fieldRow(I18n.t("rack.common.label"), labelI); body.appendChild(labelRow);
@@ -1182,7 +1207,8 @@ export class RackForms extends CableForms {
     const posHint = document.createElement("div"); posHint.className = "form-hint";
     posHint.textContent = I18n.t("rack.tray.posHint", { w: plankW, l: plankL, h: availH, rack: rack.name || I18n.t("rack.common.rackWord"), u: tray.u });
     body.appendChild(posHint);
-    const eqI = FormControls.select(eqFree.map((e: any) => ({ value: e.id, label: (e.name || I18n.t("lists.ph.noName")) + " · " + (e.free_w_mm || "?") + " × " + (e.free_l_mm || "?") + " × " + (e.free_h_mm || "?") + " mm" })), eqFree[0].id);
+    // étagère : suffixe dimensions libres (l×L×h) ; PAS d'option de tête (head=null) — le 1er équipement est présélectionné.
+    const eqI = FormControls.entityPicker(this.freeEquipOptions(eqFree, (e: any) => ({ suffix: " · " + (e.free_w_mm || "?") + " × " + (e.free_l_mm || "?") + " × " + (e.free_h_mm || "?") + " mm" }), null), eqFree[0].id);
     body.appendChild(FormControls.fieldRow(I18n.t("rack.common.equipField"), eqI, I18n.t("rack.tray.eqHint")));
     const orientI = FormControls.select(ORIENT_OPTS, "0");
     body.appendChild(FormControls.fieldRow(I18n.t("rack.common.orientation"), orientI, I18n.t("rack.tray.orientHint")));
@@ -1249,10 +1275,11 @@ export class RackForms extends CableForms {
     const tooWide = (e: any) => (e.free_w_mm != null) && e.free_w_mm > colW + 0.5;
     const kindI = FormControls.select([{ value: "equipment", label: I18n.t("rack.common.equipField") }, { value: "pin", label: I18n.t("rack.side.pinOpt") }], "equipment");
     body.appendChild(FormControls.fieldRow(I18n.t("rack.assign.element"), kindI));
-    const eqI = FormControls.select([{ value: "", label: eqFree.length ? I18n.t("rack.common.choose") : I18n.t("rack.assign.noFreeEquip") }].concat(eqFree.map((e: any) => {
+    // latéral : suffixe largeur libre + « trop large » si dépasse la colonne, disabled si blocage OU trop large.
+    const eqI = FormControls.entityPicker(this.freeEquipOptions(eqFree, (e: any) => {
       const why = blockedWhy(e.id), wide = tooWide(e);
-      return { value: e.id, label: (e.name || I18n.t("lists.ph.noName")) + (e.free_w_mm != null ? I18n.t("rack.side.mmWide", { w: e.free_w_mm }) : "") + (wide ? I18n.t("rack.side.tooWide") : "") + (why ? " — ⚠ " + why : ""), disabled: !!why || wide };
-    })), "");
+      return { suffix: (e.free_w_mm != null ? I18n.t("rack.side.mmWide", { w: e.free_w_mm }) : "") + (wide ? I18n.t("rack.side.tooWide") : "") + (why ? " — ⚠ " + why : ""), disabled: !!why || wide };
+    }, eqFree.length ? I18n.t("rack.common.choose") : I18n.t("rack.assign.noFreeEquip")), "");
     const eqRow = FormControls.fieldRow(I18n.t("rack.common.equipField"), eqI, I18n.t("rack.side.eqHint")); body.appendChild(eqRow);
     let snap = "post";
     const snapT = FormControls.toggle(I18n.t("rack.side.snapToggle"), false, (v) => { snap = v ? "wall" : "post"; }, { block: true });
@@ -1304,10 +1331,11 @@ export class RackForms extends CableForms {
     const targetDc = rack.datacenter_id || null;
     const blockedWhy = (eid: string) => targetDc ? store.equipmentPlacementBlockedReason(eid, targetDc) : null;
     const eqFree = store.unrackedEquipments().sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
-    const eqI = FormControls.select([{ value: "", label: eqFree.length ? I18n.t("rack.common.choose") : I18n.t("rack.assign.noFreeEquip") }].concat(eqFree.map((e: any) => {
+    // mural : pas de suffixe dimensionnel propre, seul le motif de blocage (⚠ raison) apparaît et rend disabled.
+    const eqI = FormControls.entityPicker(this.freeEquipOptions(eqFree, (e: any) => {
       const why = blockedWhy(e.id);
-      return { value: e.id, label: (e.name || I18n.t("lists.ph.noName")) + (why ? " — ⚠ " + why : ""), disabled: !!why };
-    })), "");
+      return { suffix: (why ? " — ⚠ " + why : ""), disabled: !!why };
+    }, eqFree.length ? I18n.t("rack.common.choose") : I18n.t("rack.assign.noFreeEquip")), "");
     body.appendChild(FormControls.fieldRow(I18n.t("rack.common.equipField"), eqI, I18n.t("rack.wall.eqHint")));
     const orientI = FormControls.select([{ value: "center", label: I18n.t("rack.wall.orientCenter") }, { value: "facade", label: I18n.t("rack.wall.orientFacade") }], "center");
     body.appendChild(FormControls.fieldRow(I18n.t("rack.wall.orientField"), orientI));
