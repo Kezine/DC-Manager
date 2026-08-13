@@ -6,8 +6,8 @@
 ## ✅ Fait
 
 - **TOUS les toggles d'affichage/masquage = bascule de visibilité** (aucune reconstruction). Chaque mesh basculable
-  est tagué `userData.layer` (`port`/`name`/`door`/`doorswing`/`slot`/`faceImage`/`conduit`/`marker`/`rail`/
-  `floorgrid`/`orient`/`rackshell`/`racklabel`), `userData.eqSide` (`front`/`rear`) et/ou `userData.rackId` (masquage de baie).
+  est tagué `userData.layer` (`port`/`name`/`door`/`doorswing`/`roomdoor`/`roomdoorswing`/`slot`/`faceImage`/`conduit`/
+  `marker`/`rail`/`floorgrid`/`orient`/`rackshell`/`racklabel`), `userData.eqSide` (`front`/`rear`) et/ou `userData.rackId` (masquage de baie).
   `applyLayerVisibility()` parcourt `gRacks`/`gFree`/`gWaypoints`/`gFloorDecor` et fixe `.visible` via
   `layerVisible(userData)`. Le picking (`rayHits`) ignore les meshes masqués (three ne le fait pas tout seul). Tout
   est **construit en permanence** → toggle instantané. **Aucun toggle d'affichage ne reconstruit quoi que ce soit.**
@@ -23,6 +23,13 @@
     quand la baie est masquée individuellement.
   - **`hidden3dRacks`** (masquage de baie) : couche `rackId` — le groupe de baie (et ses ports, hors groupe) bascule
     en visibilité. Le moteur WebGL construit TOUTES les baies (le filtrage est en visibilité, pas au build).
+  - **`showRoomDoors`** (portes de SALLE, `datacenters.doors`) : TOUTE la géométrie d'une porte (vantaux, arêtes, listel
+    pointillé) porte la couche `roomdoor` → un seul toggle la masque ; le vantail masqué (`.visible=false`) n'est plus
+    cliquable (le picking élague les objets invisibles). Le débattement des portes de salle est sur une couche PROPRE
+    `roomdoorswing`, masquée avec la porte ET par `showDoorSwing` (`roomdoorswing = showRoomDoors && showDoorSwing`) —
+    distincte de `doorswing`, restée au débattement des portes de BAIE. Le toggle s'applique aussi au rendu 2D (Dessus/
+    Étage), où `DoorTool.node2D` n'est appelé que si `showRoomDoors`. Un item de menu contextuel « Masquer les portes de
+    salle » bascule ce même toggle (service `DoorHost.toggleRoomDoors`).
   - **`showFaceImages`** : DEUX mécanismes selon le chemin de rendu, même geste instantané. Montés en U : images =
     PLANS séparés (couche `faceImage`) → visibilité classique. Boîtes 6 faces (`buildEquipBox` — libre en salle,
     étage, étagère, marge, paroi) : l'image est un **MATÉRIAU** de la BoxGeometry, rien à masquer — chaque boîte à

@@ -92,6 +92,7 @@ export interface DcThreeOptions {
   showRackNames: boolean; // nom de baie posé à plat sur les flancs (±X) et le toit (+Z) — sauf baie sans capots
   showPorts: boolean;     // connecteurs de ports posés à plat sur les faces
   showDoors: boolean;     // portes des baies (panneaux en saillie + charnière)
+  showRoomDoors: boolean; // portes de SALLE (value-objects `datacenters.doors`) : vantaux + listel + débattement — rendues en 2D ET 3D
   showDoorSwing: boolean; // projection 2D au sol du débattement (rayon d'ouverture) des portes
   showPlaceholders: boolean;  // emplacements U libres (cibles d'assignation cliquables)
   showFloorGrid: boolean; // grilles des plans d'étage (multi-salles)
@@ -177,7 +178,7 @@ export abstract class DcThreeBase {
   protected frameArgs: [number, number, number, number, number, number] | null = null;   // derniers args de cadrage
 
   // options d'affichage (poussées par DcBase ; défauts = tout visible)
-  protected opts: DcThreeOptions = { hideFrontEq: false, hideRearEq: false, colorMode: "face", showAllCables: true, selCables: new Set(), hiddenRacks: new Set(), hiddenEquips: new Set(), showFigure: false, figure: null, showWaypoints: true, showConduits: true, cableSplineK: 1 / 6, cableCurveStyle: "fillet", cablePortNormal: false, showEqNames: true, showRackSides: false, showRackNames: true, showPorts: true, showDoors: true, showDoorSwing: false, showPlaceholders: true, showFloorGrid: true, showOrientMarks: true, showPivot: false, markerScale: 1, markerRealSize: false, cablesOnTop: true, showFaceImages: true, powerBoltSpacingMm: 300 };
+  protected opts: DcThreeOptions = { hideFrontEq: false, hideRearEq: false, colorMode: "face", showAllCables: true, selCables: new Set(), hiddenRacks: new Set(), hiddenEquips: new Set(), showFigure: false, figure: null, showWaypoints: true, showConduits: true, cableSplineK: 1 / 6, cableCurveStyle: "fillet", cablePortNormal: false, showEqNames: true, showRackSides: false, showRackNames: true, showPorts: true, showDoors: true, showRoomDoors: true, showDoorSwing: false, showPlaceholders: true, showFloorGrid: true, showOrientMarks: true, showPivot: false, markerScale: 1, markerRealSize: false, cablesOnTop: true, showFaceImages: true, powerBoltSpacingMm: 300 };
   protected _pivot: THREE.Sprite | null = null;   // marqueur du centre de rotation (sprite billboard, taille écran constante)
   // FOCUS « Localiser » : cible caméra demandée par la vue (centre + emprise). Appliquée juste avant le rendu,
   // donc APRÈS le cadrage par défaut d'un éventuel (re)build → le focus prime. En attente tant que la scène n'est pas prête.

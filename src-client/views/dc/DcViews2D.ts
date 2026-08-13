@@ -35,7 +35,7 @@ export abstract class DcViews2D extends DcScene3D {
     gRoot.appendChild(room);
     gRoot.appendChild(this.gridNode(W, D, cell, dc.blocked_cells, (cx0, cy0, cx1, cy1) => this.toggleCellsRange("datacenters", dc.id, cx0, cy0, cx1, cy1)));
     if (this.showOrientMarks) { const th = Math.max(40, Math.min(W, D) * 0.012); gRoot.appendChild(Dom.svg("rect", { class: "dc-floor-room-front", x: 0, y: 0, width: W, height: th })); }   // liseré FRONT
-    (dc.doors || []).forEach((d: any) => gRoot.appendChild(this.doorTool.node2D(dc, d, { w: W, h: D })));   // portes collées aux murs (ouverture + passage libre + débattement)
+    if (this.showRoomDoors) (dc.doors || []).forEach((d: any) => gRoot.appendChild(this.doorTool.node2D(dc, d, { w: W, h: D })));   // portes collées aux murs (ouverture + passage libre + débattement) — masquables (showRoomDoors)
     if (this.showDoorSwing) this.racks(dc.id).forEach((r) => { if (!this.hidden3dRacks.has(r.id)) { const sw = this.doorSwingNode(r); if (sw) gRoot.appendChild(sw); } });   // débattement des portes (sous les baies)
     this.racks(dc.id).forEach((r) => { if (!this.hidden3dRacks.has(r.id)) gRoot.appendChild(this.rackNode(r)); });
     this.store.freeEquipsOfDc(dc.id).forEach((e: any) => { if (e.dc_x != null && e.dc_y != null && !this.hidden3dEquips.has(e.id)) gRoot.appendChild(this.equipNode(e)); });
@@ -266,7 +266,7 @@ export abstract class DcViews2D extends DcScene3D {
     const inner = Dom.svg("g", { transform: `translate(${fp.w / 2} ${fp.h / 2}) rotate(${o}) translate(${-w / 2} ${-h / 2})` });
     inner.appendChild(Dom.svg("rect", { class: "dc-floor-room-body", x: 0, y: 0, width: w, height: h }));
     if (this.showOrientMarks) inner.appendChild(Dom.svg("rect", { class: "dc-floor-room-front", x: 0, y: 0, width: w, height: Math.max(40, h * 0.022) }));
-    (d.doors || []).forEach((door: any) => inner.appendChild(this.doorTool.node2D(d, door, { w, h }, false)));   // portes (affichage seul en étage ; placement en Plan de salle)
+    if (this.showRoomDoors) (d.doors || []).forEach((door: any) => inner.appendChild(this.doorTool.node2D(d, door, { w, h }, false)));   // portes (affichage seul en étage ; placement en Plan de salle) — masquables (showRoomDoors)
     g.appendChild(inner);
     const label = Dom.svg("text", { class: "dc-floor-room-label", x: fp.w / 2, y: fp.h / 2, "text-anchor": "middle", "dominant-baseline": "central", "font-size": Math.max(200, Math.min(fp.w, fp.h) * 0.12) });
     label.textContent = (d.name || I18n.t("lists.ph.room")) + (d.room ? " · " + d.room : ""); g.appendChild(label);

@@ -478,7 +478,7 @@ module.exports = async () => {
   await section("DoorTool : contrôleur des portes (CRUD + menu, via hôte injecté — testable en isolation)", async () => {
   {
     let saved = null;
-    const host = { persistDoors: async (dcId, doors) => { saved = { dcId, doors }; }, openDoorForm: () => {} };
+    const host = { persistDoors: async (dcId, doors) => { saved = { dcId, doors }; }, openDoorForm: () => {}, toggleRoomDoors: () => {} };
     const tool = new DoorTool(host);
     // add : porte par défaut centrée, persistée sur la salle
     const dc = { id: "DC1", width_mm: 6000, depth_mm: 4000, doors: [] };
@@ -498,12 +498,14 @@ module.exports = async () => {
     // remove
     await tool.remove(dc2, "d1");
     ck(saved.doors.length === 1 && saved.doors[0].id === "d2", "DoorTool.remove : porte retirée");
-    // ctx : menu (passage libre dans l'en-tête + 5 actions en simple, 4 en double — charnière masquée)
+    // ctx : menu (passage libre dans l'en-tête + 6 actions en simple, 5 en double — charnière masquée)
+    // 6 = modifier / vantaux / charnière / ouverture / masquer portes de salle / supprimer.
     const sections = tool.ctx(dc2, { id: "d2", width_mm: 900, frame_mm: 40, hinge: "left", opening: "interior" });
     ck(sections[0].head.indexOf("820") >= 0, "DoorTool.ctx : en-tête montre le passage libre (820 mm)");
-    ck.eq(sections[0].items.length, 5, "DoorTool.ctx : 5 actions (modifier/vantaux/charnière/ouverture/supprimer)");
+    ck.eq(sections[0].items.length, 6, "DoorTool.ctx : 6 actions (modifier/vantaux/charnière/ouverture/masquer/supprimer)");
+    ck(sections[0].items.some((it) => it.label.indexOf("Masquer les portes de salle") >= 0), "DoorTool.ctx : item « Masquer les portes de salle »");
     const sectionsDbl = tool.ctx(dc2, { id: "d2", width_mm: 900, frame_mm: 40, hinge: "left", leaves: 2, opening: "interior" });
-    ck.eq(sectionsDbl[0].items.length, 4, "DoorTool.ctx double battant : charnière masquée (4 actions)");
+    ck.eq(sectionsDbl[0].items.length, 5, "DoorTool.ctx double battant : charnière masquée (5 actions)");
     ck(sectionsDbl[0].head.indexOf("double battant") >= 0, "DoorTool.ctx double battant : signalé dans l'en-tête");
     ck(sectionsDbl[0].items.some((it) => it.label.indexOf("simple") >= 0), "DoorTool.ctx double : bascule → simple proposée");
     // posEntries : entités déplaçables contraintes à leur mur (emprise le long = w/2, ⟂ fine ; commit = offset seul)

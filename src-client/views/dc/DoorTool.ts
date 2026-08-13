@@ -29,6 +29,8 @@ export interface DoorHost {
   /* -- rendu 2D + drag -- */
   /** Toggle d'affichage du débattement des portes (option de vue partagée 2D/3D). */
   doorShowSwing(): boolean;
+  /** Bascule GLOBALE afficher/masquer les portes de salle (item de menu contextuel — re-rend + panneau + persistance). */
+  toggleRoomDoors(): void;
   /** Échelle mm→px courante (jamais 0). */
   doorScale(): number;
   /** Écran → monde (mm) dans la vue courante. */
@@ -76,6 +78,9 @@ export class DoorTool {
     if (!dbl) items.push({ label: I18n.t("dc.door.hingeLabel") + (door.hinge === "left" ? I18n.t("dc.door.toRight") : I18n.t("dc.door.toLeft")), action: () => this.update(dc, door.id, { hinge: Doors.toggleHinge(door.hinge) }) });
     items.push(
       { label: I18n.t("dc.door.openingLabel") + (door.opening === "interior" ? I18n.t("dc.door.toExterior") : I18n.t("dc.door.toInterior")), action: () => this.update(dc, door.id, { opening: Doors.toggleOpening(door.opening) }) },
+      // bascule GLOBALE de la couche (pas cette porte seule) : depuis un clic droit sur une porte VISIBLE, l'action utile
+      // est de toutes les masquer — le ré-affichage se fait par le toggle « Portes de salle » du panneau de contrôles.
+      { label: I18n.t("dc.door.hideRoomDoors"), action: () => this.host.toggleRoomDoors() },
       { label: I18n.t("dc.door.delete"), danger: true, action: () => this.remove(dc, door.id) },
     );
     return [{ head: I18n.t("dc.door.ctxHead", { suffix: dbl ? I18n.t("dc.door.doubleSuffix") : "", mm: Math.round(Doors.freeWidth(door)) }), items }];

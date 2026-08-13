@@ -846,6 +846,9 @@ export abstract class DcPanels extends DcViews2D {
       sides: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v18M19 3v18"/><rect x="9" y="6" width="6" height="12" rx="1"/></svg>',
       rackNames: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 3H5a2 2 0 0 0-2 2v6.5a2 2 0 0 0 .6 1.4l7.5 7.5a2 2 0 0 0 2.8 0l6.1-6.1a2 2 0 0 0 0-2.8L12.9 3.6A2 2 0 0 0 11.5 3z"/><circle cx="7.5" cy="7.5" r="1.4" fill="currentColor" stroke="none"/></svg>',
       door: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 21V4a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v17"/><path d="M4 21h16"/><circle cx="13.5" cy="12" r="0.9" fill="currentColor" stroke="none"/></svg>',
+      // PORTE DE SALLE : plan (vue du dessus) — mur avec une ouverture + vantail + arc de débattement ; distincte de
+      // l'icône `door` (élévation) pour discerner les deux toggles au premier coup d'œil, pas seulement au libellé.
+      roomDoor: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h5M15 4h5v16H4V9"/><path d="M9 4v6"/><path d="M9 10a6 6 0 0 0 6-6"/></svg>',
       doorSwing: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V5"/><path d="M5 5a16 16 0 0 1 16 16"/><path d="M5 21h16" stroke-dasharray="2.5 2.5"/></svg>',
       slot: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="8" rx="1" stroke-dasharray="3 2.5"/></svg>',
       grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>',
@@ -880,7 +883,9 @@ export abstract class DcPanels extends DcViews2D {
     section(I18n.t("lists.col.racks"));
     tgi(D3, I.sides, I18n.t("dc.panels.tSides"), () => this.showRackSides, (v) => { this.showRackSides = v; r3(); });
     tgi(D3, I.rackNames, I18n.t("dc.panels.tRackNames"), () => this.showRackNames, (v) => { this.showRackNames = v; r3(); });
-    tgi(D3, I.door, I18n.t("dc.panels.tDoors"), () => this.showDoors, (v) => { this.showDoors = v; r3(); });
+    tgi(D3, I.door, I18n.t("dc.panels.tDoors"), () => this.showDoors, (v) => { this.showDoors = v; r3(); });   // portes des BAIES (3D)
+    // portes de SALLE (datacenters.doors) : rendues en 2D (Dessus/Étage) ET 3D → toggle applicable à toutes les vues.
+    tgi(ALL, I.roomDoor, I18n.t("dc.panels.tRoomDoors"), () => this.showRoomDoors, (v) => { this.showRoomDoors = v; redraw(); });
     tgi(["3d", "top"], I.doorSwing, I18n.t("dc.panels.tDoorSwing"), () => this.showDoorSwing, (v) => { this.showDoorSwing = v; r3(); });
     tgi(D3, I.slot, I18n.t("dc.panels.tSlots"), () => this.showPlaceholders, (v) => { this.showPlaceholders = v; r3(); });
     section(I18n.t("lists.col.cables"));

@@ -259,8 +259,11 @@ export class DcThreeScene extends DcThreeCamera {
 
   /** Portes de salle en 3D : porte FERMÉE (vantail plein sur le PASSAGE LIBRE, debout dans le plan du mur) + LISTEL
       dessiné EN POINTILLÉ (le listel est « à l'intérieur » de l'ouverture : largeur = width, listel de chaque côté,
-      passage libre = width − 2·listel au milieu). Le DÉBATTEMENT (rayon) est projeté au SOL sur la couche `doorswing`,
-      pilotée par le MÊME toggle que les portes de baie (showDoorSwing). Cliquable (clic droit → édition). */
+      passage libre = width − 2·listel au milieu). TOUTE la géométrie porte la couche `roomdoor` (toggle showRoomDoors) :
+      vantaux/arêtes/listel se masquent d'un bloc — un vantail masqué (`.visible=false`) n'est PLUS cliquable (le picking
+      élague les objets invisibles, cf. DcThreeCamera.rayHits). Le DÉBATTEMENT (rayon) est projeté au SOL sur la couche
+      `roomdoorswing`, PROPRE aux portes de salle (masquée avec la porte ET par showDoorSwing), distincte de `doorswing`
+      qui reste au débattement des portes de BAIE. Cliquable (clic droit → édition). */
   protected buildDoors(dc: any, group: THREE.Group): void {
     const doors = dc.doors || []; if (!doors.length) return;
     const room = { w: dc.width_mm || 4000, h: dc.depth_mm || 3000 };
@@ -268,6 +271,7 @@ export class DcThreeScene extends DcThreeCamera {
     doors.forEach((door: any) => {
       const g = DoorGeometry.geom(door, room), H = Math.max(100, door.height_mm || 2100), sw = g.swing, fr = door.frame_mm || 0;
       const pick = { type: "door", dcId: dc.id, id: door.id };
+      const layer = "roomdoor";   // couche commune à toute la géométrie de la porte → un seul toggle (showRoomDoors) la masque
       // --- PORTE FERMÉE : vantail/vantaux à la PLEINE TAILLE du formulaire (largeur `a→b` × hauteur `H`), fins
       //     selon `swing`. DOUBLE BATTANT : la surface est SCINDÉE en deux boîtes a→milieu / milieu→b (le jeu
       //     visuel vient des arêtes). Semi-transparent SANS écrire la profondeur (depthWrite:false) → laisse voir
@@ -281,9 +285,9 @@ export class DcThreeScene extends DcThreeCamera {
         const x0 = Math.min(...lx), x1 = Math.max(...lx), y0 = Math.min(...ly), y1 = Math.max(...ly);
         const leafGeo = new THREE.BoxGeometry(Math.max(1, x1 - x0), Math.max(1, y1 - y0), H);
         const leaf = new THREE.Mesh(leafGeo, new THREE.MeshStandardMaterial({ color: leafCol, roughness: 0.6, metalness: 0.15, transparent: true, opacity: 0.5, depthWrite: false }));
-        leaf.position.set((x0 + x1) / 2, (y0 + y1) / 2, H / 2); leaf.renderOrder = 2; leaf.userData = { pick }; group.add(leaf);
+        leaf.position.set((x0 + x1) / 2, (y0 + y1) / 2, H / 2); leaf.renderOrder = 2; leaf.userData = { pick, layer }; group.add(leaf);
         const leafEdges = new THREE.LineSegments(new THREE.EdgesGeometry(leafGeo), new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3 }));
-        leafEdges.position.copy(leaf.position); group.add(leafEdges);
+        leafEdges.position.copy(leaf.position); leafEdges.userData = { layer }; group.add(leafEdges);   // arêtes taguées → masquées avec le vantail
       });
       // --- LISTEL en POINTILLÉ = RÉSERVATION du passage À L'INTÉRIEUR de la surface de la porte : contour ⊓ aux bords
       //     du passage (clearHinge / clearLatch, ex. X5 et X25 pour 30 de large × listel 5), du SOL jusqu'à H − listel ;
@@ -291,38 +295,40 @@ export class DcThreeScene extends DcThreeCamera {
       //     la géométrie de la pièce (depthTest normal), visible seulement au travers du vantail (depthWrite:false). ---
       if (fr > 0) {
         const zTop = Math.max(0, H - fr);
-        this.dashedPath(group, [[g.clearHinge, 0], [g.clearHinge, zTop], [g.clearLatch, zTop], [g.clearLatch, 0]], pick);
+        this.dashedPath(group, [[g.clearHinge, 0], [g.clearHinge, zTop], [g.clearLatch, zTop], [g.clearLatch, 0]], pick, layer);
       }
-      // --- DÉBATTEMENT (rayon) projeté au SOL, un secteur PAR VANTAIL — couche "doorswing" (même toggle que les baies). ---
+      // --- DÉBATTEMENT (rayon) projeté au SOL, un secteur PAR VANTAIL — couche "roomdoorswing" (propre aux portes de salle). ---
       DoorGeometry.leaves(g, door).forEach((lf) => this.buildRoomDoorSwing(group, lf));
     });
   }
 
   /** Polyligne OUVERTE en POINTILLÉ (⊓, pas de fermeture) dans le plan du mur, à partir de points 2D salle + hauteur z.
       Test de profondeur NORMAL (occulté par les murs/baies) mais dessiné APRÈS le vantail (renderOrder) qui n'écrit pas
-      la profondeur → visible seulement AU TRAVERS de la porte, pas à travers toute la pièce. `pick` pour l'édition. */
-  protected dashedPath(group: THREE.Group, pts: [DoorPt, number][], pick: any): void {
+      la profondeur → visible seulement AU TRAVERS de la porte, pas à travers toute la pièce. `pick` pour l'édition ;
+      `layer` (optionnel) tague le trait pour qu'il se masque avec le reste de la porte (showRoomDoors). */
+  protected dashedPath(group: THREE.Group, pts: [DoorPt, number][], pick: any, layer?: string): void {
     const flat: number[] = [];
     pts.forEach(([p, z]) => flat.push(p.x, p.y, z));
     const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.Float32BufferAttribute(flat, 3));
     const line = new THREE.Line(geo, new THREE.LineDashedMaterial({ color: 0x9aa2ab, dashSize: 70, gapSize: 45, transparent: true, opacity: 0.95 }));
-    line.computeLineDistances(); line.renderOrder = 3; line.userData = { pick }; group.add(line);
+    line.computeLineDistances(); line.renderOrder = 3; line.userData = layer ? { pick, layer } : { pick }; group.add(line);
   }
 
   /** Débattement 3D d'UN VANTAIL de porte de SALLE : secteur rempli (quart de disque) projeté au sol (z≈1), centré
-      sur sa charnière, rayon = largeur du vantail. Couche "doorswing" (non interactive) → basculée par showDoorSwing,
-      comme le débattement des portes de baie (buildDoorSwing). Même style visuel (remplissage translucide + contour). */
+      sur sa charnière, rayon = largeur du vantail. Couche "roomdoorswing" (non interactive) PROPRE aux portes de salle :
+      basculée par showRoomDoors ET showDoorSwing (une porte masquée n'affiche pas son débattement) — distincte de
+      "doorswing" (portes de baie). Même style visuel (remplissage translucide + contour). */
   protected buildRoomDoorSwing(group: THREE.Group, lf: { hinge: DoorPt; latch: DoorPt; open: DoorPt }): void {
     const Z = 1, arc = DoorGeometry.leafArc(lf, 20), cx = lf.hinge.x, cy = lf.hinge.y;
     const fill: number[] = [];
     for (let i = 0; i < arc.length - 1; i++) fill.push(cx, cy, Z, arc[i].x, arc[i].y, Z, arc[i + 1].x, arc[i + 1].y, Z);
     const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.Float32BufferAttribute(fill, 3)); geo.computeVertexNormals();
     const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: this.theme.front, transparent: true, opacity: 0.16, emissive: 0x16314e, side: THREE.DoubleSide, depthWrite: false }));
-    mesh.userData = { layer: "doorswing" }; group.add(mesh);
+    mesh.userData = { layer: "roomdoorswing" }; group.add(mesh);
     const pts: number[] = [cx, cy, Z]; arc.forEach((p) => pts.push(p.x, p.y, Z));
     const bg = new THREE.BufferGeometry(); bg.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
     const loop = new THREE.LineLoop(bg, new THREE.LineBasicMaterial({ color: this.theme.front, transparent: true, opacity: 0.6 }));
-    loop.userData = { layer: "doorswing" }; group.add(loop);
+    loop.userData = { layer: "roomdoorswing" }; group.add(loop);
   }
 
   /** Remplit le groupe des baies d'une salle ; renvoie la hauteur max (cadrage). */
@@ -405,7 +411,7 @@ export class DcThreeScene extends DcThreeCamera {
     if (!u) return true;
     const o = this.opts;
     if (u.rackId && o.hiddenRacks && o.hiddenRacks.has(u.rackId)) return false;   // baie masquée → tout son contenu (groupe + ports)
-    const on: Record<string, boolean> = { port: !!o.showPorts, name: !!o.showEqNames, door: !!o.showDoors, doorswing: !!o.showDoorSwing, slot: !!o.showPlaceholders, faceImage: !!o.showFaceImages, conduit: !!o.showConduits, marker: !!o.showWaypoints, rail: !!(o.showWaypoints || o.showConduits), floorgrid: !!o.showFloorGrid, orient: !!o.showOrientMarks, rackshell: !!o.showRackSides, racklabel: !!o.showRackNames,
+    const on: Record<string, boolean> = { port: !!o.showPorts, name: !!o.showEqNames, door: !!o.showDoors, doorswing: !!o.showDoorSwing, roomdoor: !!o.showRoomDoors, roomdoorswing: !!(o.showRoomDoors && o.showDoorSwing), slot: !!o.showPlaceholders, faceImage: !!o.showFaceImages, conduit: !!o.showConduits, marker: !!o.showWaypoints, rail: !!(o.showWaypoints || o.showConduits), floorgrid: !!o.showFloorGrid, orient: !!o.showOrientMarks, rackshell: !!o.showRackSides, racklabel: !!o.showRackNames,
       // numéro d'U sur les emplacements LIBRES : visible seulement si les emplacements libres ET les noms d'équipement sont affichés.
       slotlabel: !!o.showPlaceholders && !!o.showEqNames };
     let v = true;
@@ -486,7 +492,7 @@ export class DcThreeScene extends DcThreeCamera {
     // ports, noms, portes, débattement, emplacements, images, masquage av/ar, conduits, waypoints, grilles, repères,
     // capots/parois (rackshell) et masquage de baies (hidden3dRacks). Cas particulier des IMAGES sur les boîtes
     // 6 faces : matériaux (pas des plans) → applyLayerVisibility ÉCHANGE le jeu actif (faceImageSwap), même coût.
-    const eqVis = old.showPorts !== opts.showPorts || old.showEqNames !== opts.showEqNames || old.showDoors !== opts.showDoors || old.showDoorSwing !== opts.showDoorSwing || old.hideFrontEq !== opts.hideFrontEq || old.hideRearEq !== opts.hideRearEq || old.showPlaceholders !== opts.showPlaceholders || old.showFaceImages !== opts.showFaceImages || old.showConduits !== opts.showConduits || old.showWaypoints !== opts.showWaypoints || old.showFloorGrid !== opts.showFloorGrid || old.showOrientMarks !== opts.showOrientMarks || old.showRackSides !== opts.showRackSides || old.showRackNames !== opts.showRackNames || !this.sameSet(old.hiddenRacks, opts.hiddenRacks);
+    const eqVis = old.showPorts !== opts.showPorts || old.showEqNames !== opts.showEqNames || old.showDoors !== opts.showDoors || old.showRoomDoors !== opts.showRoomDoors || old.showDoorSwing !== opts.showDoorSwing || old.hideFrontEq !== opts.hideFrontEq || old.hideRearEq !== opts.hideRearEq || old.showPlaceholders !== opts.showPlaceholders || old.showFaceImages !== opts.showFaceImages || old.showConduits !== opts.showConduits || old.showWaypoints !== opts.showWaypoints || old.showFloorGrid !== opts.showFloorGrid || old.showOrientMarks !== opts.showOrientMarks || old.showRackSides !== opts.showRackSides || old.showRackNames !== opts.showRackNames || !this.sameSet(old.hiddenRacks, opts.hiddenRacks);
     // baies — RECOLORATION en place (mode couleur) : aucun rebuild.
     const eqColor = old.colorMode !== opts.colorMode;
     const cb = old.showAllCables !== opts.showAllCables || old.cableSplineK !== opts.cableSplineK || old.cableCurveStyle !== opts.cableCurveStyle || old.cablePortNormal !== opts.cablePortNormal || !this.sameSet(old.selCables, opts.selCables);   // cablesOnTop NON inclus : géré en place par setCablesOnTop (pas de reconstruction)

@@ -104,7 +104,7 @@ export abstract class DcBase {
   focusEqId: string | null = null;       // équipement ciblé (surligné + caméra recentrée)
   focusPortId: string | null = null;     // port ciblé (surligné comme l'équipement) lors d'une localisation de port
   // contrôles présents mais INERTES tant que la fonctionnalité n'est pas portée (cf. panneau « à venir »).
-  showFaceImages = true; showDoors = true; showDoorSwing = false; showFloorGrid = true; cablePortNormal = false;
+  showFaceImages = true; showDoors = true; showRoomDoors = true; showDoorSwing = false; showFloorGrid = true; cablePortNormal = false;
   powerBoltSpacingMm = 300;             // espacement (mm) des éclairs ⚡ le long des câbles power
 
   useWebGL = true;                               // moteur 3D = WebGL (Three.js) — unique moteur 3D (le SVG legacy a été retiré)
@@ -306,6 +306,10 @@ export abstract class DcBase {
   openDoorForm(dcId: string, doorId: string): void { this.host.openDoorForm?.(dcId, doorId); }
   /** Toggle d'affichage du débattement (option de vue partagée 2D/3D). */
   doorShowSwing(): boolean { return this.showDoorSwing; }
+  /** Bascule GLOBALE afficher/masquer les portes de salle (item de menu contextuel). Reflow : re-rend la vue
+      (2D gate `node2D` / 3D visibilité de la couche `roomdoor`), rebâtit le panneau de contrôles (le toggle reflète
+      l'état) et persiste l'état de vue — même chemin qu'une bascule du panneau. */
+  toggleRoomDoors(): void { this.showRoomDoors = !this.showRoomDoors; this.reflow(); }
   /** Échelle mm→px courante (1 par défaut). */
   doorScale(): number { return this.scale || 1; }
   /** Positionnement assisté actif ici ? / délégation du glisser aimanté (contraint au mur par le commit `posScene`). */
@@ -527,7 +531,7 @@ export abstract class DcBase {
   /** Options d'affichage poussées au moteur WebGL (sous-ensemble implémenté ; le reste est sans effet). */
   protected webglOptions(): any {
     // COPIE de selCables : applyOptionsDiff compare old vs new ; une même référence (mutée) masquerait le changement.
-    return { hideFrontEq: this.hideFrontEq, hideRearEq: this.hideRearEq, colorMode: this.colorMode, showAllCables: this.showAllCables, selCables: new Set(this.selCables), hiddenRacks: new Set(this.hidden3dRacks), hiddenEquips: new Set(this.hidden3dEquips), showWaypoints: this.showWaypoints, showConduits: this.showConduits, cableSplineK: this.cableSplineK, cableCurveStyle: this.cableCurveStyle, cablePortNormal: this.cablePortNormal, showEqNames: this.showEqNames, showRackSides: this.showRackSides, showRackNames: this.showRackNames, showPorts: this.showPorts, showDoors: this.showDoors, showPlaceholders: this.showPlaceholders, showFloorGrid: this.showFloorGrid, showOrientMarks: this.showOrientMarks, showPivot: this.showPivot, markerScale: this.markerScale, markerRealSize: this.markerRealSize, cablesOnTop: this.cablesOnTop, showFaceImages: this.showFaceImages, showDoorSwing: this.showDoorSwing, powerBoltSpacingMm: this.powerBoltSpacingMm, showFigure: this.showFigure, figure: this.figure ? { ...this.figure } : null };
+    return { hideFrontEq: this.hideFrontEq, hideRearEq: this.hideRearEq, colorMode: this.colorMode, showAllCables: this.showAllCables, selCables: new Set(this.selCables), hiddenRacks: new Set(this.hidden3dRacks), hiddenEquips: new Set(this.hidden3dEquips), showWaypoints: this.showWaypoints, showConduits: this.showConduits, cableSplineK: this.cableSplineK, cableCurveStyle: this.cableCurveStyle, cablePortNormal: this.cablePortNormal, showEqNames: this.showEqNames, showRackSides: this.showRackSides, showRackNames: this.showRackNames, showPorts: this.showPorts, showDoors: this.showDoors, showRoomDoors: this.showRoomDoors, showPlaceholders: this.showPlaceholders, showFloorGrid: this.showFloorGrid, showOrientMarks: this.showOrientMarks, showPivot: this.showPivot, markerScale: this.markerScale, markerRealSize: this.markerRealSize, cablesOnTop: this.cablesOnTop, showFaceImages: this.showFaceImages, showDoorSwing: this.showDoorSwing, powerBoltSpacingMm: this.powerBoltSpacingMm, showFigure: this.showFigure, figure: this.figure ? { ...this.figure } : null };
   }
 
   /** Personnage d'échelle : garantit une position (centre de la salle courante / de l'étage) au 1er affichage. */
@@ -779,7 +783,7 @@ export abstract class DcBase {
 
   /* ---- persistance de l'état de vue (par fichier, localStorage) ---- */
   protected viewStateKey(): string { return "dcmanager.view3d." + ((this.store.meta && this.store.meta.fileId) ? this.store.meta.fileId : "__nofile"); }
-  protected static readonly TOGGLE_KEYS = ["hideFrontEq", "hideRearEq", "showPlaceholders", "showRackSides", "showRackNames", "showPorts", "showEqNames", "showAllCables", "showWaypoints", "showConduits", "showOrientMarks", "showPivot", "showFloorAnchor", "showFaceImages", "showDoors", "showDoorSwing", "showFloorGrid", "cablePortNormal", "webglPerspective", "cablesOnTop", "showFigure", "markerRealSize"];
+  protected static readonly TOGGLE_KEYS = ["hideFrontEq", "hideRearEq", "showPlaceholders", "showRackSides", "showRackNames", "showPorts", "showEqNames", "showAllCables", "showWaypoints", "showConduits", "showOrientMarks", "showPivot", "showFloorAnchor", "showFaceImages", "showDoors", "showRoomDoors", "showDoorSwing", "showFloorGrid", "cablePortNormal", "webglPerspective", "cablesOnTop", "showFigure", "markerRealSize"];
 
   /** Écrit l'état (débouncé 300 ms) — évite une écriture par frame de pan/zoom. Un FLUSH synchrone
       (`flushViewState`) est déclenché à la fermeture/masquage de page pour ne pas perdre la dernière bascule. */
@@ -816,7 +820,7 @@ export abstract class DcBase {
     // défauts (état propre par fichier)
     this.az = CAM_PRESETS.iso[0]; this.el = CAM_PRESETS.iso[1]; this.scale = null; this.tx = 0; this.ty = 0; this.camTarget = null;
     this.hideFrontEq = false; this.hideRearEq = false; this.showPlaceholders = true; this.showRackSides = true; this.showRackNames = true; this.showPorts = true; this.showEqNames = true; this.showAllCables = true; this.showWaypoints = true; this.showConduits = true;
-    this.showOrientMarks = true; this.showPivot = false; this.showFloorAnchor = true; this.showFaceImages = true; this.showDoors = true; this.showDoorSwing = false; this.showFloorGrid = true; this.cablePortNormal = false;
+    this.showOrientMarks = true; this.showPivot = false; this.showFloorAnchor = true; this.showFaceImages = true; this.showDoors = true; this.showRoomDoors = true; this.showDoorSwing = false; this.showFloorGrid = true; this.cablePortNormal = false;
     this.useWebGL = true; this.webglPerspective = false; this.cablesOnTop = true;   // WebGL = unique moteur 3D ; projection/cables-on-top restaurés depuis TOGGLE_KEYS
     this.colorMode = "face"; this.cableSplineK = CABLE_SPLINE_K; this.cableCurveStyle = CABLE_CURVE_STYLE_DEFAULT; this.markerScale = 1; this.markerRealSize = false;
     this.siteScaleKm = SITE_SCALE_DEFAULT_M_PER_KM; this.siteScaleLog = false;
@@ -875,6 +879,7 @@ export abstract class DcBase {
   abstract renderFloor(ft: { location: string; floor: string }): void;
   abstract renderSide(dc: any): void;
   abstract buildToolbar(): void;
+  protected abstract reflow(): void;   // re-rend la vue COURANTE (2D/3D) + panneau + persistance (défini dans DcPanels)
   // Définis dans DcInteract — tooltips + cotes :
   protected abstract showTip(html: string, ev: MouseEvent): void;
   protected abstract moveTip(ev: MouseEvent): void;
