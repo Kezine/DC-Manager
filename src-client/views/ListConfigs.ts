@@ -523,6 +523,22 @@ export class ListConfigs {
       if (o.assigned_equipment_id) { const e: any = store.get("equipments", o.assigned_equipment_id); return e ? (e.name || I18n.t("lists.ph.equipment")) : I18n.t("lists.ph.equipDeleted"); }
       return o.assigned_free || "";
     };
+    // RÉGIME PAGÉ (vague 4 lazy-load, cf. docs/hydratation.md § « Vague 4 ») — `sortField` déclaré sur la
+    // SEULE colonne dont l'accesseur `sort` lit un champ SCALAIRE du modèle : « Achat » (`purchase_date`).
+    // Les autres colonnes triables sont DÉRIVÉES, chacune pour une raison mesurée (repli assumé de
+    // `ListColumn.sortField` : découpe à l'ordre serveur par défaut, tri de la page affichée) :
+    // - « Désignation » trie `displayName()` = nom SINON marque/modèle/résumé technique — le cas NOMINAL
+    //   d'un spare sans nom (même verdict que « Nom » du listing wifi : trier `name` seul groupetait tous
+    //   les sans-nom à l'extrémité alors que la colonne affiche autre chose). ⚠ C'est le critère par
+    //   DÉFAUT du listing : au repos, la page 1 suit l'ordre serveur par défaut — limite résiduelle
+    //   documentée, la même que le listing wifi ;
+    // - « Type » et « Statut » trient le LIBELLÉ LOCALISÉ de l'énumération, pas le slug stocké — un
+    //   ORDER BY sur la colonne (`hdd` < `other` < `ssd`) contredirait l'ordre affiché (« Autre » < « HDD ») ;
+    // - « Attribué à » trie un nom d'ÉQUIPEMENT résolu par jointure cliente (même repli que « Hébergée
+    //   sur » / « Attachée à », vague 2).
+    // G8 SANS OBJET : les deux filtres (Type, Statut) proposent des ÉNUMÉRATIONS FERMÉES (SpareTypes/
+    // SpareStatuses), exactes par construction quel que soit le cache — aucun `filter.field` à déclarer,
+    // aucun DISTINCT serveur à payer. Le filtre s'applique à la PAGE reçue (limite documentée du régime).
     return {
       collection: "spares",
       defaultSort: { key: "name", dir: "asc" },
@@ -540,7 +556,7 @@ export class ListConfigs {
         },
         { head: I18n.t("lists.col.assignedTo"), sort: (o) => assignedTo(o), render: (o) => { const t = assignedTo(o); return t ? Html.escape(t) : dim("—"); } },
         { head: I18n.t("lists.col.storage"), render: (o) => (o.storage_location ? Html.escape(o.storage_location) : dim("—")) },
-        { head: I18n.t("lists.col.purchase"), cls: "cell-num", sortKey: "purchase", sort: (o) => o.purchase_date || "", render: (o) => (o.purchase_date ? Html.escape(o.purchase_date) : dim("—")) },
+        { head: I18n.t("lists.col.purchase"), cls: "cell-num", sortKey: "purchase", sortField: "purchase_date", sort: (o) => o.purchase_date || "", render: (o) => (o.purchase_date ? Html.escape(o.purchase_date) : dim("—")) },
       ],
     };
   }

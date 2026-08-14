@@ -36,6 +36,7 @@ import type { CertificateListItem } from "../views/forms/CertsClient";
 import { Download } from "../core/Download";
 import { HydrationState } from "../core/HydrationState";   // état d'hydratation par collection (lot 0 lazy-load — injecté en mode API seulement)
 import { LAZY_COLLECTIONS_API } from "../core/LazyCollections";   // LA liste des collections chargées paresseusement (vague 1 : contacts)
+import { TargetLabelResolution } from "../core/TargetLabelResolution";   // résolution GROUPÉE des libellés de cibles d'intervention (vague 4)
 import { Prefs } from "../core/Prefs";
 import { SessionExpiry } from "../core/SessionExpiry";   // verrou idempotent « session expirée → retour au login » (mode API)
 import { Log } from "../core/Log";
@@ -1124,17 +1125,28 @@ async function boot(): Promise<void> {
     .map(([kind, family]) => ({ kind, collection: family.collection, label: (r: any) => targetLabel(kind, r) }));
   const interventionCandidates = new EntityCandidateSource(store, interventionCandidateFamilies, entitySearchReader);
   const interventionTargets: InterventionTargetSource = {
-    // G10 (chantier lazy-load, cf. docs/hydratation.md § Vague 2) : `labelOf` est SYNCHRONE — la vue
-    // résout un libellé par id au moment du rendu, elle ne peut pas attendre. Or `applications` est
-    // désormais chargée PARESSEUSEMENT en mode API : une intervention liée à une application non
-    // absorbée s'afficherait « (introuvable) », comme si la cible avait été supprimée. Ce préalable
-    // charge donc, UNE fois, ce que la résolution exige — patron `NotificationsAdminView`
-    // (hydratation à la demande d'une surface qui a besoin de la liste COMPLÈTE). Les quatre autres
-    // familles (équipements, VMs, spares, sous-équipements) sont hydratées, `hydrate` les ignore ; en
-    // mode fichier c'est un no-op PAR CONSTRUCTION — aucun test de mode ici.
+    // G10 (chantier lazy-load, cf. docs/hydratation.md § Vague 4) : `labelOf` est SYNCHRONE — la vue
+    // résout un libellé par id au moment du rendu, elle ne peut pas attendre. Or deux familles de
+    // cibles vivent dans des collections chargées PARESSEUSEMENT en mode API (`applications` vague 2,
+    // `spares` vague 4) : une cible non absorbée s'afficherait « (introuvable) », comme supprimée.
+    // Ce préalable résout, GROUPÉ PAR COLLECTION, les seuls ids RÉFÉRENCÉS par ce que la vue va
+    // afficher (doctrine 2026-08-13 « hydraté = ce que le 3D consomme » — il REMPLACE l'hydratation
+    // en masse de `applications` posée en vague 2) : collecte des ids absents du cache (module pur
+    // `core/TargetLabelResolution`), un `fetchMany` par collection (absorption + indexation), et le
+    // rendu synchrone trouve tout. Mode fichier : tout est en cache → partition VIDE → AUCUN appel
+    // adaptateur, no-op PAR CONSTRUCTION (principe n°15, aucun test de mode ici). Les familles
+    // hydratées (équipements, VMs, sous-équipements) ne coûtent rien pour la même raison.
     // Un ÉCHEC réseau est AVALÉ : mieux vaut un listing d'interventions complet avec un libellé en
     // moins qu'une page qui refuse de s'afficher (même doctrine que `ensureTrackerProviders`).
-    prepareLabels: () => store.hydrate(["applications"]).then(() => undefined).catch(() => undefined),
+    prepareLabels: (links) => {
+      const missing = TargetLabelResolution.missingByCollection(
+        links,
+        (kind) => TARGET_FAMILIES[kind]?.collection,
+        (collection, id) => !!store.get(collection, id),
+      );
+      return Promise.all(Object.entries(missing).map(([collection, ids]) => store.fetchMany(collection, ids)))
+        .then(() => undefined).catch(() => undefined);
+    },
     labelOf: (kind, id) => { const r: any = store.get(targetCollection(kind), id); return r ? targetLabel(kind, r) : null; },
     search: (query, excluded) => interventionCandidates.fetch(query, excluded),
     // Ouvre la FICHE DE DÉTAIL existante de la cible (equipment/vm/spare) via la machinerie des fiches. Le

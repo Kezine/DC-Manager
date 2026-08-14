@@ -72,14 +72,18 @@ import type { TrackerSyncClient, TrackerProviderSummary } from "./forms/TrackerS
     orphelin toléré) ; `search` alimente la SÉLECTION unifiée (SearchPop) de l'éditeur de liens ;
     `openTargetDetail` ouvre la fiche de la cible PAR-DESSUS le détail d'intervention (pile de modales). */
 export interface InterventionTargetSource {
-  /** PRÉALABLE de résolution : charge ce dont `labelOf` (synchrone) a besoin pour ne pas mentir.
-      Attendu AVANT tout rendu qui résout des libellés — le listing (`reload`) et l'ouverture d'un
-      détail PAR ID depuis une fiche (`openDetailById`, où la page n'a peut-être jamais été affichée).
+  /** PRÉALABLE de résolution : charge ce dont `labelOf` (synchrone) a besoin pour ne pas mentir —
+      les cibles `links` QU'ON VA AFFICHER (résolution GROUPÉE des ids absents du cache côté hôte,
+      vague 4 du lazy-load : elle remplace l'hydratation en masse de la collection, cf.
+      docs/hydratation.md § « Vague 4 »). Attendu AVANT tout rendu qui résout des libellés — la page
+      du listing (`loadPage`), l'ouverture d'un détail PAR ID depuis une fiche (`openDetailById`), le
+      détail reçu de la palette (`openDetail`) et chaque refetch de fiche.
       Motif : une famille de cibles peut vivre dans une collection chargée PARESSEUSEMENT côté hôte
-      (cf. docs/hydratation.md § Vague 2) ; sans ce préalable, ses cibles s'afficheraient « introuvable ».
-      IDEMPOTENT et bon marché après le premier appel ; NE REJETTE JAMAIS (l'hôte avale ses échecs : un
-      libellé manquant ne doit pas empêcher la page de s'afficher). Rien à charger → promesse résolue. */
-  prepareLabels(): Promise<void>;
+      (`applications` depuis la vague 2, `spares` depuis la vague 4) ; sans ce préalable, ses cibles
+      s'afficheraient « introuvable ». Ids déjà résolus / liste vide → promesse résolue SANS réseau
+      (le mode fichier ne part jamais en réseau, par construction) ; NE REJETTE JAMAIS (l'hôte avale
+      ses échecs : un libellé manquant ne doit pas empêcher la page de s'afficher). */
+  prepareLabels(links: ReadonlyArray<{ kind: string; id: string }>): Promise<void>;
   /** Libellé d'une cible précise, ou null si elle n'existe plus dans le document (orphelin). */
   labelOf(kind: string, id: string): string | null;
   /** Recherche UNIFIÉE sur TOUTES les familles liables (équipements + VMs + spares CONFONDUS) : renvoie des
@@ -171,10 +175,10 @@ export class InterventionsAdminView {
 
   private async reload(): Promise<void> {
     await this.guarded(async () => {
-      // Préalable de résolution des LIBELLÉS de cible (une famille peut vivre dans une collection
-      // chargée paresseusement côté hôte) : mené EN PARALLÈLE de la page — les deux I/O sont
-      // indépendantes, et `render()` a besoin des deux. Le contrat garantit qu'il ne rejette pas.
-      await Promise.all([this.ensureMeta().then(() => this.loadPage()), this.targets.prepareLabels()]);
+      // La résolution des LIBELLÉS de cible vit DANS `loadPage` (elle dépend des liens de la page
+      // reçue — plus rien à mener en parallèle depuis que l'hydratation en masse a disparu, vague 4).
+      await this.ensureMeta();
+      await this.loadPage();
       this.render();
     });
   }
@@ -205,7 +209,26 @@ export class InterventionsAdminView {
     this.items = res.interventions;
     this.pageMeta = { total: res.total, page: res.page, pages: res.pages, pageSize: res.pageSize };
     this.state.page = res.page;
+    // Libellés de cible AVANT le rendu : les liens de la page reçue + la cible du filtre actif (sa
+    // chip résout le même `labelOf`). ATTENDU (contrairement aux auteurs ci-dessous, repeints après
+    // coup) : le contrat ne rejette jamais, et sans lui la colonne « Liens » et la chip mentiraient
+    // « introuvable » le temps d'un aller-retour. C'est LE point commun de `reload` et `refreshBody` —
+    // toute page affichée passe ici, aucun appelant ne peut oublier la résolution.
+    await this.targets.prepareLabels(this.pageLinkRefs());
     this.ensureAuthors();   // résout les auteurs (created_by/updated_by = IDS) de la page → repeint quand prêts
+  }
+
+  /** Les cibles que la PAGE COURANTE va afficher : liens de chaque intervention + cible du filtre
+      actif (dimension « à recherche » — sa chip aussi passe par `labelOf`). Doublons tolérés (l'hôte
+      dédoublonne) ; clés de filtre malformées ignorées (`TargetSearch.parse` → null). */
+  private pageLinkRefs(): Array<{ kind: string; id: string }> {
+    const refs: Array<{ kind: string; id: string }> = [];
+    for (const item of this.items) for (const l of item.links) refs.push({ kind: l.target_kind, id: l.target_id });
+    for (const key of this.state.targets) {
+      const target = TargetSearch.parse(key);
+      if (target) refs.push({ kind: target.kind, id: target.id });
+    }
+    return refs;
   }
 
   /** Annuaire utilisateurs injecté (mode API) — résout les IDS d'auteur en « Prénom Nom »/login. null en
@@ -709,8 +732,18 @@ export class InterventionsAdminView {
 
   /** Ouvre la modale de DÉTAIL d'une intervention DEPUIS L'EXTÉRIEUR de la vue (recherche globale) —
       l'appelant fournit l'enregistrement qu'il a déjà chargé (le listing de la palette). Indépendant de
-      l'état de la page : `detailModal` ne lit que l'enregistrement reçu et les hooks injectés. */
-  openDetail(item: InterventionRecord): void { this.detailModal(item); }
+      l'état de la page : `detailModal` ne lit que l'enregistrement reçu et les hooks injectés.
+      Ses LIBELLÉS de cible sont résolus AVANT l'ouverture (la page du listing n'a peut-être jamais été
+      affichée — les cibles d'une collection lazy ne sont alors pas en cache) ; le contrat ne rejette
+      jamais, et sans lien à résoudre l'ouverture reste immédiate (promesse résolue). */
+  openDetail(item: InterventionRecord): void {
+    void this.targets.prepareLabels(InterventionsAdminView.linkRefsOf(item)).then(() => this.detailModal(item));
+  }
+
+  /** Les cibles qu'une FICHE de détail va afficher (liste « Objets liés »). */
+  private static linkRefsOf(item: InterventionRecord): Array<{ kind: string; id: string }> {
+    return item.links.map((l) => ({ kind: l.target_kind, id: l.target_id }));
+  }
 
   /** Ouvre la modale de DÉTAIL d'une intervention PAR SON ID (mini-listing « Interventions » des fiches,
       hook `openDetail` du contrat) : elle s'EMPILE sur la modale courante — aucun changement de vue, le
@@ -724,8 +757,11 @@ export class InterventionsAdminView {
     void (async () => {
       try {
         await this.ensureMeta();   // base Jira : le détail rend son lien même si la page n'a jamais été affichée
-        await this.targets.prepareLabels();   // … et ses LIBELLÉS de cible se résolvent pour la même raison (cf. le contrat)
-        this.detailModalById(await this.client!.getOne(id));
+        const record = await this.client!.getOne(id);
+        // … et ses LIBELLÉS de cible se résolvent pour la même raison (cf. le contrat) — sur les liens
+        // de CE record, désormais connus : la résolution groupée a remplacé l'hydratation en masse.
+        await this.targets.prepareLabels(InterventionsAdminView.linkRefsOf(record));
+        this.detailModalById(record);
       } catch (e) {
         if (e instanceof InterventionsError && e.status === 404) Notify.toast(I18n.t("interventions.toast.notFound"), "info");
         else Notify.toast(InterventionsAdminView.errText(e), "err");
@@ -773,6 +809,9 @@ export class InterventionsAdminView {
       try {
         const fresh = await this.client!.getOne(current.id);
         if (JSON.stringify(fresh) === JSON.stringify(current)) return;   // point fixe : rien de neuf, rien à repeindre
+        // Un autre client a pu LIER une cible entre-temps : ses libellés se résolvent avant le repeint
+        // (no-op sans nouveauté — les liens déjà résolus sont en cache, le contrat ne rejette jamais).
+        await this.targets.prepareLabels(InterventionsAdminView.linkRefsOf(fresh));
         const titleChanged = fresh.title !== current.title;
         current = fresh;
         shell.replaceChildren(this.detailBody(fresh));
@@ -883,7 +922,13 @@ export class InterventionsAdminView {
       la fiche garde son contenu (périmé mais lisible) plutôt que de se vider — l'action, elle, a déjà été
       confirmée par son propre message. */
   private async refreshTicket(id: string, repaint: (rec: InterventionRecord) => void): Promise<void> {
-    try { repaint(await this.client!.getOne(id)); } catch (_) { /* la fiche reste telle quelle */ }
+    try {
+      const fresh = await this.client!.getOne(id);
+      // Parité avec les autres repeints de fiche : les libellés des liens se résolvent avant (no-op
+      // dans le cas nominal — une action tracker ne change pas les liens, tous déjà en cache).
+      await this.targets.prepareLabels(InterventionsAdminView.linkRefsOf(fresh));
+      repaint(fresh);
+    } catch (_) { /* la fiche reste telle quelle */ }
     if (this.bodyEl) await this.refreshBody();
   }
 

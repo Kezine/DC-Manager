@@ -177,6 +177,11 @@ export class Cascade {
         { coll: "applications", fk: "equipment_id" }],
       // Les CÂBLES branchés sur les ports de l'équipement ne sont PLUS listés ici : la suppression des ports
       // (règle `delete` ci-dessus) rejoue la règle `ports`, qui les emporte — y compris ceux des lanes.
+      // ⚠ `spares` est chargée PARESSEUSEMENT en mode API (vague 4 du lazy-load) : côté CLIENT, `find`
+      // ne voit que les spares ABSORBÉS — le plan local peut donc manquer des détachements. C'est prévu :
+      // le SERVEUR rejoue cette même règle sur SON état (cascade résiduelle d'un /transact) et le client
+      // RAFRAÎCHIT au cache les enregistrements rapportés par `residual.updates` (M4b,
+      // `Store._refreshResidualUpdates` — cf. docs/hydratation.md § « Vague 4 »).
       custom: (find, fetch, id, _deletes, detaches) => {
         const eq = fetch("equipments", id);
         const name = (eq && eq.name) ? eq.name : "(équipement supprimé)";   // spares : on préserve l'attribution en texte libre

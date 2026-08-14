@@ -852,6 +852,12 @@ export class Store {
     // collection lazy garderait un COUNT périmé (notre invalidation ne couvre que le plan local). On
     // applique donc le résidu que la réponse rapporte. En mode fichier : aucun résidu (pas de serveur).
     this._applyResidualDeletes(result);
+    // M4b (vague 4) : même autorité serveur pour les MISES À JOUR résiduelles — des enregistrements
+    // DÉTACHÉS par la cascade serveur que notre plan local ne portait pas (jamais absorbés, ou copie
+    // périmée parce que G3 a sauté leur rechargement SSE). Refetch GROUPÉ, en ARRIÈRE-PLAN : l'écriture
+    // est FAITE, on ne la fait pas attendre un aller-retour de plus (patron des caches async G6/G8 —
+    // la valeur arrive, le rendu se rattrape).
+    void this._refreshResidualUpdates(result);
     this._emit();
   }
 
@@ -879,6 +885,51 @@ export class Store {
       Log.d("store", "cascade résiduelle du serveur appliquée au cache (M4)", [...touched]);
       this._counts.invalidate([...touched]);
       this._facets.invalidate([...touched]);   // G8 : le résidu a retiré des lignes — leurs valeurs aussi
+    }
+  }
+
+  /** M4b (vague 4) — RAFRAÎCHIT au cache les enregistrements que la cascade RÉSIDUELLE du serveur a
+      MIS À JOUR en plus de notre plan (`POST /transact` → `{ residual: { updates: [{collection,id}] } }`).
+      Cas concret, et RAISON D'ÊTRE de M4b : supprimer un équipement DÉTACHE ses spares côté serveur
+      (règle `custom` de `Cascade.SPEC` : `assigned_free` ← nom, `assigned_equipment_id` ← null) — un
+      spare EN CACHE dont le détachement n'était pas dans notre plan local resterait sinon affiché
+      rattaché à un équipement disparu, jusqu'au prochain chargement de la collection.
+
+      DÉCISIONS (documentées dans docs/hydratation.md § « Vague 4 ») :
+      - on refetch TOUS les ids rapportés : un enregistrement d'une collection HYDRATÉE doit
+        impérativement être rafraîchi (son cache serait faux) ; un enregistrement pas encore en cache
+        d'une collection lazy est simplement absorbé (`partial`) — aucun mal, et il devient résoluble ;
+      - refetch GROUPÉ par collection (`fetchMany` → `GET ?ids=…`, absorption + ré-indexation) — le
+        volume est borné par la largeur de la cascade, jamais la collection ;
+      - les COMPTEURS ne bougent pas (une mise à jour ne change aucun total) ; les FACETTES si (une
+        valeur de colonne a changé) — même invalidation que les écritures locales (cf. `update`) ;
+      - un ÉCHEC réseau ne casse JAMAIS l'écriture (elle est faite) : trace, et les caches se
+        rattraperont (prochain chargement de page, SSE d'un autre client, F5).
+      Tolérant par construction : sans `residual.updates` (adaptateur fichier, serveur antérieur),
+      c'est un no-op strict — aucun aller-retour. */
+  private async _refreshResidualUpdates(result: unknown): Promise<void> {
+    const residual = (result as any)?.residual;
+    const updates: Array<{ collection?: string; id?: string }> = Array.isArray(residual?.updates) ? residual.updates : [];
+    if (!updates.length) return;
+    const idsByCollection = new Map<string, Set<string>>();
+    for (const u of updates) {
+      const c = u && u.collection, id = u && u.id;
+      if (!c || !id || !this.data[c]) continue;   // collection inconnue du client : rien à rafraîchir
+      (idsByCollection.get(c) || idsByCollection.set(c, new Set()).get(c)!).add(id);
+    }
+    if (!idsByCollection.size) return;
+    const collections = [...idsByCollection.keys()];
+    // G8 AVANT le refetch : les valeurs distinctes ont changé CÔTÉ SERVEUR quoi qu'il arrive du
+    // refetch local — le relevé `SELECT DISTINCT` du prochain rendu doit repartir de zéro.
+    this._facets.invalidate(collections);
+    try {
+      await Promise.all(collections.map((c) => this.fetchMany(c, [...idsByCollection.get(c)!])));
+      Log.d("store", "mises à jour résiduelles du serveur rafraîchies au cache (M4b)", collections);
+      this._emit();   // les enregistrements rafraîchis atteignent l'écran (fiches/listings ouverts)
+    } catch (e) {
+      // L'écriture est FAITE et son plan local appliqué : on ne remonte rien. Le cache concerné se
+      // rattrapera par les chemins ordinaires (page redemandée, SSE, hydratation à la demande).
+      Log.d("store", "M4b : refetch du résidu impossible (cache rattrapé plus tard)", e);
     }
   }
 
@@ -973,8 +1024,11 @@ export class Store {
   subEquipmentsOf(equipmentId: string): any[] {
     return this._byFk("subEquipments", "equipment_id", equipmentId).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
   }
-  /** Spares (pièces de rechange) attribués à un équipement. */
-  sparesOfEquipment(equipmentId: string): any[] { return this._byFk("spares", "assigned_equipment_id", equipmentId); }
+  /** Spares (pièces de rechange) attribués à un équipement. Triés par NOM depuis la vague 4 (parité
+      STRICTE avec le jumeau async `sparesOfEquipmentAsync` — même contenu, même ordre, cf. G7) :
+      l'ordre historique était celui de l'index FK (insertion), qui n'aurait pas survécu au régime
+      lazy — les lignes servies par `fetchBy` arrivent dans l'ordre du serveur. */
+  sparesOfEquipment(equipmentId: string): any[] { return this._byFk("spares", "assigned_equipment_id", equipmentId).sort(Store.BY_NAME); }
   breakoutLanes(parentPortId: string): any[] { return this._byFk("ports", "parent_port_id", parentPortId).sort((a, b) => (a.lane || 0) - (b.lane || 0)); }
   isBreakoutParent(port: any): boolean { const id = port && port.id ? port.id : port; return !!id && this._byFk("ports", "parent_port_id", id).length > 0; }
   cablesOfPort(portId: string): any[] {
@@ -1112,6 +1166,10 @@ export class Store {
   applicationsOfEquipmentAsync(equipmentId: string): Promise<any[]> { return this._sectionRows("applications", "equipment_id", equipmentId); }
   /** Applications hébergées sur une VM — jumeau ASYNC de `applicationsOfVm` (G7). */
   applicationsOfVmAsync(vmId: string): Promise<any[]> { return this._sectionRows("applications", "vm_id", vmId); }
+  /** Spares attribués à un équipement — jumeau ASYNC de `sparesOfEquipment` (G7, vague 4 : `spares`
+      est chargée paresseusement en mode API ; la FK `assigned_equipment_id` est indexée des deux
+      côtés, cf. INDEX_SPEC). Consommé par la section « Spares affectés » de la fiche équipement. */
+  sparesOfEquipmentAsync(equipmentId: string): Promise<any[]> { return this._sectionRows("spares", "assigned_equipment_id", equipmentId); }
 
   /** Corps UNIQUE des jumeaux async (principe n°3) : cache si la collection est INTÉGRALEMENT en
       mémoire, lecture serveur par FK indexée sinon (`fetchBy`, qui ABSORBE les lignes — la fiche

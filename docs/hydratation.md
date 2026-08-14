@@ -11,8 +11,10 @@ Modules concernés : `src-client/core/HydrationState.ts` (état + prédicats, pu
 `src-client/core/LazyCollections.ts` (LA liste des collections paresseuses),
 `src-client/core/CollectionCountCache.ts` (compteurs async, pur),
 `src-client/core/CollectionFacetCache.ts` (valeurs de facette async, pur — vague 3),
+`src-client/core/TargetLabelResolution.ts` (partition pure de la résolution GROUPÉE des libellés de
+cibles, vague 4),
 `src-client/store/Store.ts` (câblage G1/G2/G3/G4/G6/G8 + hydratation à la demande + jumeaux async des
-sections G7 + aperçu de cascade G5 + purge du résidu M4),
+sections G7 + aperçu de cascade G5 + purge du résidu M4 + rafraîchissement du résidu M4b),
 `src-client/core/ListRowEngine.ts` + `src-client/core/StoreListRowSource.ts` + `views/ListView.ts`
 (pager serveur réel + facettes serveur), `src-client/core/ListServerSort.ts` + `src-shared/ListOrder.ts`
 (tri serveur du régime pagé — pagination ordonnée complète, lot 1b), `src-shared/ListFacets.ts`
@@ -22,7 +24,8 @@ sections G7 + aperçu de cascade G5 + purge du résidu M4),
 `src-client/app/FileDocuments.ts` (branchement export), `src-client/core/HydrationStats.ts`
 (instrumentation). Tests : `Tests/modules/test-hydration.js` (lot 0),
 `Tests/modules/test-lazy-contacts.js` (vague 1 + tri du lot 1b),
-`Tests/modules/test-lazy-vague2.js` (vague 2) et `Tests/modules/test-lazy-vague3.js` (vague 3) ;
+`Tests/modules/test-lazy-vague2.js` (vague 2), `Tests/modules/test-lazy-vague3.js` (vague 3) et
+`Tests/modules/test-lazy-vague4.js` (vague 4 — M4b, résolution groupée, spares) ;
 côté serveur `Tests/modules/test-relational-schema.js` (liste blanche + ORDER BY) et
 `test-relational-repository.js` (tri SQL réel + `SELECT DISTINCT` réel).
 
@@ -131,8 +134,8 @@ redemande une page, exactement comme un clic sur « ‹ › ».
 ## Vague 1 — `contacts` chargée paresseusement (mode API)
 
 `contacts` est la collection PILOTE : 0 FK entrante ou sortante, 0 cascade, 0 index dérivé — le coût
-de la vague est quasi nul, elle sert à VALIDER le patron complet que les vagues 2-3 rejoueront
-(`attachments` + `applications`, puis `wifiClients` ; `vms` reste EXCLUE du chantier).
+de la vague est quasi nul, elle sert à VALIDER le patron complet que les vagues suivantes rejoueront
+(`attachments` + `applications`, `wifiClients`, puis `spares` ; `vms` reste EXCLUE du chantier).
 
 ### La liste, et le seul endroit où elle s'écrit
 
@@ -495,10 +498,10 @@ POST /transact  → 200 { residual: { deletes: [{ collection, id }], updates: [{
 
 `Store._applyResidualDeletes` en retire du cache les enregistrements supprimés (données + index id +
 index FK) et **invalide leurs compteurs**. Tolérant par construction : sans `residual.deletes`
-(adaptateur fichier, serveur antérieur), c'est un no-op strict. `residual.updates` est rapporté pour
-l'exhaustivité du compte rendu ; le Store ne l'exploite pas — un enregistrement lazy DÉTACHÉ côté
-serveur garde sa FK périmée en cache jusqu'au prochain chargement de la collection (limite résiduelle
-de G3, de la même famille que « la page en main n'est pas rafraîchie »).
+(adaptateur fichier, serveur antérieur), c'est un no-op strict. `residual.updates` est lui aussi
+**consommé** depuis la vague 4 (**M4b**, `Store._refreshResidualUpdates` — la limite « rapporté mais
+non exploité » de cette vague est LEVÉE) : cf. § « Vague 4 » pour le refetch groupé, ses
+invalidations et sa tolérance aux échecs.
 
 ### G10 — les consommateurs synchrones, un par un
 
@@ -510,7 +513,7 @@ Relevé EXHAUSTIF des lectures synchrones des deux collections, et statut de cha
 | Bloc « Applications hébergées » des fiches équipement / VM | **ASYNC** (G7) |
 | Pastilles d'onglet « Applications » / « Pièces jointes » | déjà générique — `store.countHint` (G6) |
 | `warnAttachmentsExcluded` (avertissement D8 avant un export sans binaires, `main.ts`) | **corrigé** : `await store.countOf("attachments")` — le chemin était déjà async (`Dialog.confirm`) |
-| `labelOf` des cibles d'intervention (`applications` est une famille de cibles) | **corrigé** : préalable `InterventionTargetSource.prepareLabels()` (voir ci-dessous) |
+| `labelOf` des cibles d'intervention (`applications` est une famille de cibles) | **corrigé** : préalable `InterventionTargetSource.prepareLabels(links)` — résolution GROUPÉE des ids référencés (voir ci-dessous et § « Vague 4 ») |
 | `VmPurgeForm` : critère d'enrichissement + aperçu | **corrigé** : hydratation ciblée + `cascadePreviewAsync` (G5) |
 | Listing : `onDownload` / `onShow` / `canShow` (`store.get("attachments", id)`) | **rien à faire** : la ligne vient d'être servie par le listing, donc ABSORBÉE au cache |
 | `AttachmentUi.section` (bouton Télécharger → `store.get`) | **rien à faire** : même raison, les lignes affichées sont absorbées |
@@ -520,25 +523,22 @@ Relevé EXHAUSTIF des lectures synchrones des deux collections, et statut de cha
 | `keepOnly` (purge des binaires orphelins) | **rien à faire, prouvé** : `main.ts` l'appelle dans la branche `else` d'`if (REST_MODE)` (mode fichier strict) et `FileDocuments.loadCompanionAttachmentsOnOpen` sur le chemin d'ouverture d'un `.json` (corpus complet par construction) |
 | Palette de recherche globale (corpus local, « récents ») | **dégradation ACTÉE** — cf. G9 ci-dessous |
 
-#### `applications`, cible d'intervention : le préalable de résolution
+#### Cibles d'intervention : le préalable de résolution des libellés
 
 `InterventionTargetSource.labelOf` est SYNCHRONE — la vue « Interventions » résout un libellé de cible
 par id au moment du rendu (colonne « Liens », liste de la fiche, chip de filtre, éditeur de liens) et
-ne peut pas attendre. Une intervention liée à une application non absorbée s'afficherait
-« introuvable », comme si la cible avait été supprimée.
+ne peut pas attendre. Une intervention liée à une cible non absorbée d'une collection lazy
+s'afficherait « introuvable », comme si la cible avait été supprimée.
 
-Le contrat gagne donc **`prepareLabels(): Promise<void>`** : un préalable IDEMPOTENT, attendu par la
-vue avant tout rendu qui résout des libellés — `reload()` (en parallèle du chargement de la page, les
-deux I/O étant indépendantes) et `openDetailById()` (l'entrée depuis une fiche, où la page n'a
-peut-être jamais été affichée — exactement le motif de l'`ensureMeta` voisin). L'hôte (`main.ts`)
-l'implémente en `store.hydrate(["applications"])` : no-op en mode fichier PAR CONSTRUCTION, no-op
-après le premier appel, et **échec AVALÉ** — mieux vaut un listing complet avec un libellé en moins
-qu'une page qui refuse de s'afficher (même doctrine que `ensureTrackerProviders`). Les quatre autres
-familles de cibles (équipements, VMs, spares, sous-équipements) sont hydratées : `hydrate` les ignore.
-
-C'est le patron `NotificationsAdminView` de la vague 1 (une surface qui a besoin de la liste COMPLÈTE
-la charge à son ouverture, une fois), posé cette fois sur le SEAM déjà prévu par la feature — la vue
-interventions ne touche toujours pas le Store.
+Le contrat porte donc **`prepareLabels(links): Promise<void>`** : un préalable attendu par la vue
+avant tout rendu qui résout des libellés, auquel elle passe les cibles QU'ELLE VA AFFICHER. La forme
+actuelle (résolution GROUPÉE des seuls ids référencés, appelants, mode fichier) est décrite au
+§ « Vague 4 » — elle a REMPLACÉ l'hydratation en masse d'`applications` que cette vague avait posée
+(le patron `NotificationsAdminView` restait celui d'une surface qui a besoin de la liste COMPLÈTE,
+ce que la résolution de quelques libellés n'est pas). Le SEAM, lui, n'a pas bougé : la vue
+interventions ne touche toujours pas le Store, et un **échec est AVALÉ** par l'hôte — mieux vaut un
+listing complet avec un libellé en moins qu'une page qui refuse de s'afficher (même doctrine que
+`ensureTrackerProviders`).
 
 ### G9 — les dégradations de la palette s'étendent, telles quelles
 
@@ -747,7 +747,7 @@ demandait une correction — aucune** : tous les chemins partent d'un enregistre
 | Bouton « Localiser » de la FICHE (`DetailForms.wifiClientDetail`) | **rien à faire** : la fiche a déjà l'enregistrement en main (elle vient de le lire) |
 | Fiche `wifiClientDetail` (`store.get`) | **rien à faire** : atteinte depuis le listing (absorbé) ou depuis la palette — couverte par la lecture unitaire `fetchOne` de `GlobalSearchPalette.activate` (correctif générique du lot 1) |
 | `WifiForms.edit` (`store.get`, édition des champs LOCAUX) | **rien à faire** : ouverte depuis la fiche, donc sur une ligne absorbée |
-| Cascade : supprimer un ÉQUIPEMENT **détache** `wifiClients.ap_equipment_id` | **rien à faire, prouvé** : l'EXÉCUTION est sûre (le serveur recalcule le plan résiduel), la modale de suppression générique n'affiche AUCUN effet, et l'aperçu de `VmPurgeForm` — seul aperçu de l'app — passe déjà par `cascadePreviewAsync` (G5), qui bascule sur le serveur dès que le corpus est partiel. ⚠ Limite héritée de G3 : un client wifi absorbé garde sa FK périmée en cache jusqu'au prochain chargement (`residual.updates` est rapporté, non appliqué) — sans conséquence visible ici, la colonne « Point d'accès » retombant sur `ap_name` quand l'équipement a disparu, et la page en main étant de toute façon oubliée par l'écriture locale |
+| Cascade : supprimer un ÉQUIPEMENT **détache** `wifiClients.ap_equipment_id` | **rien à faire, prouvé** : l'EXÉCUTION est sûre (le serveur recalcule le plan résiduel), la modale de suppression générique n'affiche AUCUN effet, et l'aperçu de `VmPurgeForm` — seul aperçu de l'app — passe déjà par `cascadePreviewAsync` (G5), qui bascule sur le serveur dès que le corpus est partiel. La FK d'un client wifi absorbé est en outre RAFRAÎCHIE par M4b depuis la vague 4 (`residual.updates` est désormais consommé) |
 | Synchro / providers (`WifiForms.sync`, `WifiProvidersForm`, `WifiSyncClient`) | **rien à faire, vérifié** : ces surfaces parlent aux routes `…/wifi/*` du module serveur ; elles ne lisent JAMAIS la collection |
 | Script de suppression de la feature (`docs/wifi-unifi.md`) | **doc mise à jour** : retirer `"wifiClients"` de `core/LazyCollections` fait désormais partie de la procédure |
 | Palette de recherche globale (corpus local, « récents ») | **dégradation ACTÉE** — G9, à l'identique des vagues 1-2 |
@@ -759,15 +759,114 @@ réconciliation, le rapprochement de l'AP, la cascade, l'undo, la validation, le
 (aucun ne déclare de `filter.field` : `contacts` GARDE son calcul sur-page de la vague 1, `vms` reste
 exclue du chantier), le mode fichier et le visualiseur.
 
-## Gardes à venir (hors vagues 1-3)
+## Vague 4 — `spares` chargée paresseusement (mode API), M4b et la résolution groupée des libellés
 
-Le cadrage `.notes/toDos/lazy-load-collections-cadrage-2026-08-11.md` § 3 ne laisse qu'une candidate
-non instruite : **`spares`** (vague 4, ⚖ à arbitrer — cascade `custom` qui LIT le nom, `labelOf`
-synchrone des cibles d'intervention), et **`vms`** reste EXCLUE (transverse : graphe, purge, certs,
-IPAM, bulle 3D). Tout l'outillage est désormais livré sous une forme réutilisable : endpoint d'aperçu
-de cascade générique (G5), jumeaux async au Store + `AsyncSection` (G7), préalable `prepareLabels`
-pour toute famille de cibles hébergée dans une collection lazy (G10), et facettes serveur génériques
-(G8 — n'importe quelle collection, n'importe quelle colonne `string`).
+La DERNIÈRE candidate du cadrage (`vms` reste EXCLUE — transverse : graphe, purge, certs, IPAM,
+bulle 3D), instruite sous la **doctrine utilisateur du 2026-08-13** : « async par COHÉRENCE —
+hydraté = ce que le 3D consomme ». Ses deux points durs (cascade `custom` qui LIT le nom, `labelOf`
+synchrone des cibles d'intervention) ne se contournent plus par des hydratations en masse : la vague
+livre les deux chaînons qui les résolvent PROPREMENT — **M4b** et la **résolution groupée** — puis
+rejoue le patron des vagues 1-3.
+
+### Ce qui est acquis sans rien écrire
+
+Ajouter `"spares"` à `LAZY_COLLECTIONS_API` suffit à obtenir le boot qui ne la tire plus
+(`skipCollections`), la re-déclaration après `_hydrate`, G1/G2/G3, le **pager serveur réel** G4 avec
+son tri (lot 1b), les **compteurs** G6 de la pastille d'onglet, l'oubli de la page en main sur
+événement SSE, l'aperçu de cascade serveur G5 et les dégradations G9 de la palette (étendues telles
+quelles : « récents » non résolus hors cache, repli local incomplet de `/search`, mode fichier
+inchangé — l'ouverture d'un résultat reste couverte par le `fetchOne` du lot 1).
+
+### 🚨 M4b — consommer `residual.updates` (la raison d'être de la vague)
+
+La cascade `custom` d'`equipments` **DÉTACHE** les spares du serveur supprimé (`assigned_free` ← nom
+de l'équipement, `assigned_equipment_id` ← null — cf. `src-shared/Cascade.ts`). Côté client, le plan
+LOCAL ne voit que les spares ABSORBÉS : sans M4b, un spare en cache détaché par la cascade SERVEUR
+resterait affiché rattaché à un équipement disparu — c'est la limite « `residual.updates` rapporté
+mais non exploité » que M4 avait documentée, désormais **LEVÉE**.
+
+`Store._refreshResidualUpdates` (branché au MÊME endroit que M4 : `_removeTargets`, après
+`_applyResidualDeletes` — TOUTES les suppressions du client passent par là ; les autres `transact`
+du Store, `updateBatch` et le clonage, ne portent aucun delete → résidu vide par construction) :
+
+- **tous les ids rapportés** sont refetchés — un enregistrement d'une collection HYDRATÉE doit
+  impérativement l'être (son cache serait faux), un enregistrement pas encore en cache d'une
+  collection lazy est simplement ABSORBÉ (`partial`, aucun mal — il devient résoluble) ;
+- **refetch GROUPÉ par collection** (`fetchMany` → `GET ?ids=…`, absorption + ré-indexation), volume
+  borné par la largeur de la cascade ;
+- **en ARRIÈRE-PLAN** : l'écriture ne l'attend pas (patron des caches async G6/G8 — la valeur
+  arrive, `_emit` repeint) ; un **échec réseau ne casse jamais l'écriture** (elle est faite) — trace
+  `Log.d`, et les caches se rattrapent par les chemins ordinaires (page redemandée, SSE, F5) ;
+- invalidations : les **facettes** des collections touchées (une valeur de colonne a changé — même
+  règle que les écritures locales), jamais les compteurs (une mise à jour ne change aucun total).
+
+### La résolution GROUPÉE des libellés de cibles (remplace « prepareLabels = hydrater tout »)
+
+`InterventionTargetSource.prepareLabels` devient **`prepareLabels(links)`** : la vue passe les
+cibles QU'ELLE VA AFFICHER, et l'hôte (`main.ts`) résout les seuls ids ABSENTS du cache — partition
+par collection dans le module pur `core/TargetLabelResolution` (dédoublonnage, famille inconnue
+ignorée, cache consulté), puis UN `fetchMany` par collection (absorption) ; le rendu synchrone
+(`labelOf`) trouve alors tout. L'hydratation en masse d'`applications` posée en vague 2 **disparaît**
+(aucune autre surface n'en dépendait — vérifié : `VmPurgeForm` porte SA propre hydratation ciblée).
+
+Appelants, tous adaptés à passer leurs liens :
+
+| Appelant | Liens passés |
+|---|---|
+| `loadPage()` (le point commun de `reload` et `refreshBody` — toute page affichée passe là) | liens de la page reçue + cible du filtre actif (sa chip résout le même `labelOf`) |
+| `openDetailById()` (entrée depuis une fiche) | liens du record relu |
+| `openDetail()` (entrée depuis la palette — trou d'AVANT la vague, corrigé au passage) | liens du record reçu |
+| `refetch` de `detailModalById` + `refreshTicket` | liens du record rafraîchi (no-op nominal : tout est déjà en cache) |
+
+Mode fichier : tout est en cache → partition VIDE → **aucun appel adaptateur**, no-op PAR
+CONSTRUCTION (principe n°15). Lien ORPHELIN (cible réellement supprimée) : son id reste demandé à
+chaque affichage qui le référence (une lecture groupée, jamais une erreur) et s'affiche
+« introuvable » — le comportement voulu. Cas couvert au passage dans `ui/EntityLinkList` : un
+candidat fraîchement choisi vient de la recherche SERVEUR (non absorbée) — le composant garde son
+libellé de candidat comme REPLI de `labelOf` (jamais comme premier choix), sinon la rangée qu'on
+vient d'ajouter s'afficherait « introuvable ».
+
+### Listing : un seul `sortField`, et pas de facette à traiter
+
+`ListConfigs.spares` déclare `sortField` sur la SEULE colonne dont l'accesseur lit un champ
+SCALAIRE : **« Achat »** (`purchase_date`). Les autres sont DÉRIVÉES (repli assumé de
+`ListColumn.sortField`) : « Désignation » trie `displayName()` (nom SINON marque/modèle — même
+verdict que « Nom » wifi, et c'est le critère par DÉFAUT du listing → au repos, page 1 à l'ordre
+serveur par défaut, la même limite résiduelle que la vague 3), « Type »/« Statut » trient le
+LIBELLÉ localisé et non le slug stocké, « Attribué à » un nom d'équipement résolu par jointure
+cliente. **G8 est SANS OBJET** : les deux filtres (Type, Statut) proposent des ÉNUMÉRATIONS FERMÉES
+(`SpareTypes`/`SpareStatuses`), exactes par construction quel que soit le cache.
+
+### G7 — la section « Spares affectés » de la fiche équipement
+
+Jumeau async `Store.sparesOfEquipmentAsync` (corps commun `_sectionRows`, FK indexée
+`assigned_equipment_id`) + `AsyncSection` (place réservée, pas de flash, masquée si vide). Le rendu
+reste INLINE dans `EquipmentForms` : une seule fiche affiche des spares — rien à factoriser tant
+qu'une deuxième surface n'existe pas. Le helper SYNCHRONE `sparesOfEquipment` trie désormais par nom
+lui aussi (parité STRICTE des jumeaux — l'ordre historique d'insertion de l'index FK n'aurait pas
+survécu au régime lazy).
+
+### G10 — les consommateurs synchrones, un par un
+
+| Consommateur | Statut |
+|---|---|
+| Listing « Spares » (colonnes, tri, filtres) | **régime pagé** (G4) ; filtres = énumérations fermées (G8 sans objet) |
+| Pastille d'onglet « Spares » | déjà générique — `store.countHint` (G6) |
+| Section « Spares affectés » de la fiche équipement | **ASYNC** (G7, ci-dessus) |
+| Fiche `spareDetail` (`store.get`) | **rien à faire** : atteinte depuis le listing (absorbé), la section de fiche (absorbée par `fetchBy`), la palette (`fetchOne` du lot 1) ou un lien d'intervention (absorbé par la résolution groupée) |
+| Formulaire `EquipmentForms.spare` (`store.get`) | **rien à faire** : ouvert depuis le listing ou la fiche — ligne déjà absorbée. Son picker « équipement d'accueil » liste des EQUIPMENTS (hydratés) |
+| `labelOf` des cibles d'intervention (`spare` est une famille de cibles) | **corrigé** : la résolution GROUPÉE (ci-dessus) |
+| Candidats d'intervention (`EntityCandidateSource`) | **rien à faire** : mode API = recherche transverse SERVEUR (au-delà du cache) ; le repli LOCAL sur échec réseau est incomplet — dégradation de la famille G9, actée |
+| Cascade : supprimer un ÉQUIPEMENT détache ses spares (règle `custom`) | **couvert** : l'EXÉCUTION est serveur-sûre, l'aperçu passe par G5 dès corpus partiel, et le cache est rafraîchi par **M4b** — c'est SA raison d'être |
+| Palette de recherche globale (corpus local, « récents ») | **dégradation ACTÉE** — G9, à l'identique des vagues 1-3 |
+
+### Ce que la vague 4 ne change PAS
+
+La cascade elle-même (le moteur partagé est inchangé — seul un commentaire y pointe M4b), l'undo, la
+validation, le serveur (le compte rendu `residual` existait depuis la vague 2 — aucune route ne
+bouge), les 20+ autres listings, le mode fichier et le visualiseur. Le chantier n'a plus de candidate :
+`vms` reste exclue, et tout l'outillage est générique (G5, G7 + `AsyncSection`, G8, M4/M4b,
+`TargetLabelResolution`).
 
 ## Arbitrages actés (utilisateur, 2026-08-12)
 
@@ -776,6 +875,10 @@ pour toute famille de cibles hébergée dans une collection lazy (G10), et facet
 3. **G2** : export = **hydrater tout** avant d'exporter — jamais de refus, jamais d'export amputé.
 4. **G8** : **facettes serveur** (distinct SQL) pour les collections volumineuses.
 5. **Pager serveur réel** pour les collections lazy ; plafond client conservé pour les hydratées.
+
+S'y ajoute la **doctrine du 2026-08-13** (utilisateur), qui a débloqué la vague 4 : « async par
+COHÉRENCE — hydraté = ce que le 3D consomme ». Concrètement : plus d'hydratation en masse posée pour
+contourner un point dur (le `prepareLabels` de la vague 2) — on résout ce qu'on va AFFICHER, groupé.
 
 ## Instrumentation (`core/HydrationStats`)
 
@@ -821,7 +924,7 @@ machinerie de page du moteur (compteurs serveur, anti-relance, cohérence lignes
 le vol, annulation d'une page devancée, échec sans boucle, oubli sur mutation).
 
 `Tests/modules/test-lazy-vague3.js` (vague 3) : liste centrale étendue à `wifiClients` + boot qui saute
-les QUATRE ; **G8 partagé** — dérivation de la liste blanche `ListFacets` depuis la spec, exclusions
+TOUTES les collections lazy ; **G8 partagé** — dérivation de la liste blanche `ListFacets` depuis la spec, exclusions
 prouvées une par une (number/boolean/tableau/json/audit/id/search), invariant « facettable ⊂ triable »
 sur TOUTES les collections (inclusion stricte), `SELECT DISTINCT` golden et barrière anti-injection ;
 **G8 pur** — `CollectionFacetCache` (normalisation identique aux options locales, valeur async servie
@@ -845,3 +948,16 @@ d'aperçu, mode fichier toujours local) ; **M4** — une suppression dont le ser
 purge le cache et invalide le compteur, et l'absence de résidu est un no-op strict ; enfin les
 `sortField` des deux listings, confrontés à la liste blanche PARTAGÉE (un nom fautif dégraderait en
 silence vers le repli).
+
+`Tests/modules/test-lazy-vague4.js` (vague 4) : la liste centrale étendue à `spares` — son contenu
+EXACT est verrouillé ICI (délégation des vagues précédentes au dernier fichier à l'avoir étendue) —
+et le boot qui saute les CINQ ; **M4b** — les mises à jour résiduelles rapportées par le serveur sont
+refetchées GROUPÉES par collection (un `getMany` portant tous les ids), une copie absorbée est
+ÉCRASÉE par la vérité serveur, un enregistrement jamais absorbé est ABSORBÉ (`partial`), un échec du
+refetch ne casse pas l'écriture, et l'absence de résidu est un no-op strict ; la **partition PURE**
+de la résolution groupée (`TargetLabelResolution` : par collection, dédoublonnée, familles inconnues
+et ids au cache écartés — partition VIDE = le cas du mode fichier, aucun appel adaptateur) ; **G7** —
+le jumeau `sparesOfEquipmentAsync` (FK indexée, absorption, tri par nom IDENTIQUE au jumeau
+synchrone, mode fichier sans réseau) ; enfin le `sortField` unique du listing spares
+(`purchase_date` ∈ liste blanche), les colonnes DÉRIVÉES qui n'en déclarent aucun, et l'absence
+voulue de `filter.field` (énumérations fermées).

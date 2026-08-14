@@ -6,7 +6,7 @@
    elles ne connaissent que l'état d'hydratation, jamais un nom de collection). Ce fichier verrouille
    ce qui est PROPRE à la vague — c'est-à-dire, pour l'essentiel, la garde G8 :
 
-   1. la liste centrale ÉTENDUE (`core/LazyCollections`) et le boot qui saute les QUATRE collections ;
+   1. la liste centrale ÉTENDUE (`core/LazyCollections`) et le boot qui saute TOUTES les collections lazy ;
    2. 🚨 G8 côté PARTAGÉ (`src-shared/ListFacets`) : la LISTE BLANCHE des colonnes facettables dérivée
       de la spec, son INCLUSION dans la liste blanche de tri (même source), le `SELECT DISTINCT`
       golden et la barrière anti-injection ;
@@ -102,8 +102,11 @@ const WIFI_ROWS = [
 module.exports = async () => {
 
   await section("Vague 3 : la liste centrale s'étend à `wifiClients` (la plus VOLUMINEUSE)", async () => {
-    ck.eq(LAZY_COLLECTIONS_API.join(","), "contacts,attachments,applications,wifiClients",
-      "vague 3 : `wifiClients` rejoint les trois précédentes — c'est la DERNIÈRE vague exécutable du chantier");
+    // Le CONTENU EXACT de la liste (vagues 1 à 4) est verrouillé par test-lazy-vague4.js, le dernier
+    // à l'avoir étendue (même délégation que la vague 2 envers celle-ci) : ici, seule la présence de
+    // la collection de CETTE vague compte — c'est son comportement que ce fichier éprouve.
+    ck(LAZY_COLLECTIONS_API.indexOf("wifiClients") !== -1,
+      "vague 3 : `wifiClients` rejoint les précédentes sur la MÊME liste centrale");
     const unknown = LAZY_COLLECTIONS_API.filter((c) => EntityRegistry.COLLECTIONS.indexOf(c) === -1);
     ck.eq(unknown.join(","), "", "🎯 INVARIANT : chaque nom est une VRAIE collection — un nom fautif serait sans effet, en silence");
     ck(LAZY_COLLECTIONS_API.indexOf("vms") === -1, "`vms` reste EXCLUE du chantier (transverse : graphe, purge, certs, IPAM, bulle 3D)");
@@ -111,8 +114,8 @@ module.exports = async () => {
     const adapter = makeApiAdapter(await documentFixtures({ wifiClients: WIFI_ROWS }));
     const store = apiStore(adapter);
     await store.init();
-    ck.eq(adapter.calls.load[0].slice().sort().join(","), "applications,attachments,contacts,wifiClients",
-      "🎯 le chargement initial saute les QUATRE collections lazy (le plus gros gain du chantier est ici)");
+    ck.eq(adapter.calls.load[0].slice().sort().join(","), LAZY_COLLECTIONS_API.slice().sort().join(","),
+      "🎯 le chargement initial saute TOUTES les collections lazy (le plus gros gain du chantier est ici)");
     ck.eq(store.hydration.levelOf("wifiClients"), "none", "wifiClients : déclarée lazy APRÈS `_hydrate` (contrat du lot 0)");
     ck.eq(store.all("wifiClients").length, 0, "… et rien n'en est en cache");
     ck.eq(store.countHint("wifiClients"), 0, "sanité G6 : la pastille part de 0 (valeur inconnue) et déclenche son relevé");

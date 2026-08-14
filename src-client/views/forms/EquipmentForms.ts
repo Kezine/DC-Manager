@@ -46,6 +46,7 @@ import { FaceEditor } from "./FaceEditor";
 import { SubEquipmentForms } from "./SubEquipmentForms";   // section « Sous-équipements » de la fiche (import croisé différé, cf. son en-tête)
 import { AttachmentUi } from "./AttachmentUi";   // section « Pièces jointes » de la fiche (factorisée avec la fiche sous-équipement)
 import { ApplicationUi } from "./ApplicationUi";   // section « Applications hébergées » de la fiche (factorisée avec la fiche VM)
+import { AsyncSection } from "./AsyncSection";   // section « Spares affectés » alimentée en ASYNC (G7, vague 4 — rendu inline : une seule fiche en affiche)
 import { PerspectiveEditor } from "../../ui/PerspectiveEditor";
 import { StitchEditor } from "../../ui/StitchEditor";
 import { Download } from "../../core/Download";
@@ -216,15 +217,22 @@ export class EquipmentForms extends FormBase {
     // et l'absence de la section rendrait la fonctionnalité inatteignable sur un équipement neuf.
     SubEquipmentForms.attachSection(store, host, root, store.subEquipmentsOf(eq.id), { addTo: eq.id });
 
-    // spares (pièces de rechange) affectés à cet équipement
-    const spares = store.sparesOfEquipment(eq.id);
-    if (spares.length) {
-      const dS = document.createElement("div"); dS.className = "section-divider"; dS.textContent = I18n.t("equipment.detail.sparesSection", { count: spares.length }); root.appendChild(dS);
+    // spares (pièces de rechange) affectés à cet équipement — section MASQUÉE si vide (historique).
+    // Source UNIQUE : le jumeau ASYNC `Store.sparesOfEquipmentAsync` (garde G7 — `spares` est chargée
+    // paresseusement en mode API depuis la vague 4 : la lecture synchrone du cache afficherait une
+    // section VIDE alors que le serveur a des lignes). `AsyncSection` réserve la PLACE tout de suite
+    // (sinon la section atterrirait en fin de fiche) et la remplit à l'arrivée ; en mode fichier la
+    // promesse est résolue sur le cache, aucun réseau, aucun écart visible (principe n°15). Le rendu
+    // reste INLINE (contrairement à `ApplicationUi`) : une seule fiche affiche des spares — rien à
+    // factoriser tant qu'une deuxième surface n'existe pas (principe n°3, pas d'abstraction spéculative).
+    AsyncSection.attach(root, store.sparesOfEquipmentAsync(eq.id), (holder, spares) => {
+      if (!spares.length) return;   // liste vide → conteneur laissé vide, la section reste masquée
+      const dS = document.createElement("div"); dS.className = "section-divider"; dS.textContent = I18n.t("equipment.detail.sparesSection", { count: spares.length }); holder.appendChild(dS);
       const tw = document.createElement("div"); tw.className = "table-wrap";
       const rows = spares.map((s: any) => `<tr><td class="cell-name">${Html.escape(s.displayName())}</td><td><span class="pill">${SpareTypes.svg(s.type)}${Html.escape(SpareTypes.label(s.type))}</span></td><td>${s.techSummary() ? Html.escape(s.techSummary()) : '<span style="color:var(--fg-dimmer)">—</span>'}</td><td>${s.serial ? Html.escape(s.serial) : '<span style="color:var(--fg-dimmer)">—</span>'}</td></tr>`).join("");
       tw.innerHTML = `<table><thead><tr><th>${I18n.t("lists.col.designation")}</th><th>${I18n.t("lists.col.type")}</th><th>${I18n.t("lists.col.characteristics")}</th><th>${I18n.t("equipment.detail.colSerial")}</th></tr></thead><tbody>${rows}</tbody></table>`;
-      root.appendChild(tw);
-    }
+      holder.appendChild(tw);
+    });
 
     // APPLICATIONS hébergées sur cet équipement (décision D5 du cadrage applications 2026-08-10) : nom
     // CLIQUABLE → fiche application (elle s'empile, cette fiche se reconstruit au retour via `onResume`).

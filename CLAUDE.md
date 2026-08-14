@@ -286,8 +286,11 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   **G8 facettes SERVEUR** — liste blanche partagée `ListFacets` dérivée de la spec (⊂ celle du tri) +
   route de LECTURE PURE `GET …/facets/:collection?field=…` (`SELECT DISTINCT` sensible à la casse,
   vides exclus, plafond), options async mémoïsées `CollectionFacetCache` servies en synchrone ;
-  gardes G4-G10, vagues 1-3 livrées (`contacts`, `attachments`+`applications`, `wifiClients`) ;
-  instrumentation `HydrationStats`, seuils D3 5 Mo / 1 s).
+  gardes G4-G10, vagues 1-4 livrées (`contacts`, `attachments`+`applications`, `wifiClients`,
+  `spares`) ; **M4b** — les mises à jour RÉSIDUELLES d'un `/transact` (`residual.updates`) sont
+  refetchées GROUPÉES au cache ; **résolution GROUPÉE des libellés de cibles d'intervention**
+  (`core/TargetLabelResolution` — remplace l'hydratation en masse, doctrine « hydraté = ce que le
+  3D consomme ») ; instrumentation `HydrationStats`, seuils D3 5 Mo / 1 s).
 - [`i18n.md`](docs/i18n.md) — **localisation du client** (i18next enveloppé par la classe `I18n`,
   catalogues `.ts` par domaine `fr`/`en`, détection de locale + préférence persistée, bascule =
   reload assumé, pilote = libellés d'onglets, test de complétude fr⇄en, phase 2 = codes serveur).

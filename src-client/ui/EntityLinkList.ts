@@ -102,6 +102,15 @@ export class EntityLinkList {
     // Copie DÉFENSIVE : le composant travaille sur SA liste et n'altère jamais l'objet de l'appelant.
     // Ce dernier reçoit une copie fraîche à chaque `onChange`, à recopier dans sa propre référence.
     let value: EntityLinkRef[] = opts.value.map((v) => ({ kind: v.kind, id: v.id }));
+    // DERNIER LIBELLÉ CONNU des candidats fraîchement choisis. Motif (vague 4 lazy-load) : en mode API,
+    // les candidats viennent de la recherche transverse SERVEUR et ne sont PAS absorbés au cache — pour
+    // une famille vivant dans une collection paresseuse (application, spare), `labelOf` rendrait null
+    // sur le lien qu'on vient d'ajouter, et la rangée afficherait « introuvable » alors que le popover
+    // vient d'en montrer le nom. On garde donc le libellé PORTÉ PAR LE CANDIDAT comme repli — jamais
+    // comme premier choix : `labelOf` reste l'autorité (il suit un renommage, détecte une suppression
+    // réelle une fois le cache au courant). Périmètre borné à la SESSION du composant : la modale
+    // suivante repart de liens résolus par son ouvreur (préalable `prepareLabels`).
+    const pickedLabels = new Map<string, string>();
 
     const root = document.createElement("div");
 
@@ -124,7 +133,9 @@ export class EntityLinkList {
           icon.innerHTML = opts.kindIcon(ref.kind);
           row.appendChild(icon);
         }
-        const resolved = opts.labelOf(ref.kind, ref.id);
+        // `labelOf` d'abord (autorité) ; à défaut, le dernier libellé connu du candidat choisi (cf. la
+        // carte ci-dessus) ; « introuvable » en dernier recours seulement.
+        const resolved = opts.labelOf(ref.kind, ref.id) ?? pickedLabels.get(TargetSearch.key(ref.kind, ref.id)) ?? null;
         const text = document.createElement("span");
         text.textContent = opts.kindLabel(ref.kind) + " · " + (resolved !== null ? resolved : opts.labels.unknown);
         // Cible disparue (orphelin) : le lien RESTE affiché mais grisé — on ne le supprime pas en douce
@@ -161,6 +172,7 @@ export class EntityLinkList {
         // Un doublon résiduel (course entre deux frappes) est IGNORÉ avec un toast discret plutôt que
         // silencieusement dupliqué : la dédup du fetch n'est pas atomique avec le clic.
         if (value.some((v) => v.kind === t.kind && v.id === t.id)) { Notify.toast(opts.labels.duplicate, "info"); return; }
+        pickedLabels.set(TargetSearch.key(t.kind, t.id), t.label);   // repli de rendu si la cible n'est pas (encore) au cache
         value.push({ kind: t.kind, id: t.id });
         renderLinks(); emitChange();
       },

@@ -30,11 +30,15 @@
 
 /** Collections chargées PARESSEUSEMENT en mode API (vague 1 : `contacts` ; vague 2 :
     `attachments` + `applications` ; vague 3 : `wifiClients`, la plus VOLUMINEUSE —
-    alimentée par la synchro d'un contrôleur wifi, c'est elle qui porte le gain réel).
+    alimentée par la synchro d'un contrôleur wifi, c'est elle qui porte le gain réel ;
+    vague 4 : `spares` — rendue possible par M4b, qui rafraîchit au cache les spares
+    DÉTACHÉS par la cascade serveur, et par la résolution GROUPÉE des libellés de
+    cibles d'intervention, cf. docs/hydratation.md § « Vague 4 »).
     DONNÉE pure (cf. CLAUDE.md principe n°2 : les tables restent de simples exports).
     Les noms doivent appartenir à `EntityRegistry.COLLECTIONS` — un nom fautif serait
     silencieusement sans effet, d'où l'invariant testé (Tests/modules/test-lazy-contacts.js
-    pour la vague 1, test-lazy-vague2.js pour la vague 2, test-lazy-vague3.js pour la 3).
+    pour la vague 1, test-lazy-vague2.js pour la 2, test-lazy-vague3.js pour la 3,
+    test-lazy-vague4.js pour la 4 — qui verrouille le contenu EXACT de la liste).
     ⚠ `wifiClients` appartient à une feature AMOVIBLE : retirer l'inventaire wifi impose de
     retirer son nom d'ICI (cf. docs/wifi-unifi.md § « Suppression de la feature »). */
-export const LAZY_COLLECTIONS_API: readonly string[] = ["contacts", "attachments", "applications", "wifiClients"];
+export const LAZY_COLLECTIONS_API: readonly string[] = ["contacts", "attachments", "applications", "wifiClients", "spares"];
