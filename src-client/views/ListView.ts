@@ -61,6 +61,14 @@ export interface ListActions {
   /** Raffinement PAR LIGNE de `show` : « Afficher » n'apparaît que si ce prédicat accepte l'enregistrement
       (type visualisable). Absent → `show` vaut pour toutes les lignes. */
   canShow?: (id: string) => boolean;
+  /** Raffinement PAR LIGNE de `edit` : « Modifier » n'est proposé que si ce prédicat accepte l'enregistrement
+      (ex. VMs : seules les MANUELLES — à `provider_id` vide — s'éditent ; les synchronisées sont écrasées à
+      chaque passe). Absent → `edit` vaut pour toutes les lignes (comportement historique). */
+  canEdit?: (id: string) => boolean;
+  /** Raffinement PAR LIGNE de `del` : « Supprimer » n'est proposé que si ce prédicat accepte l'enregistrement
+      (ex. VMs : seules les MANUELLES ; les synchronisées passent par la fiche/purge de masse). Absent → `del`
+      vaut pour toutes les lignes (comportement historique). */
+  canDel?: (id: string) => boolean;
 }
 export interface ListOptions {
   collection: string;
@@ -587,8 +595,8 @@ export class ListView {
     let html = `<span data-id="${id}">`;
     if (a.view) html += IconButton.html({ icon: Icons.INFO, label: I18n.t("lists.chrome.rowView"), act: "view" });
     if (a.manage) html += IconButton.html({ icon: Icons.RACK_CONTENT, label: I18n.t("lists.chrome.rowManage"), act: "manage" });   // éditeur de contenu de baie (inline, à côté de Détails)
-    if (a.edit) html += IconButton.html({ icon: Icons.EDIT, label: I18n.t("lists.chrome.rowEdit"), act: "edit" });
-    if (this._rowCanShow(id) || this._rowCanLocate(id) || a.clone || a.del || a.download) {
+    if (this._rowCanEdit(id)) html += IconButton.html({ icon: Icons.EDIT, label: I18n.t("lists.chrome.rowEdit"), act: "edit" });
+    if (this._rowCanShow(id) || this._rowCanLocate(id) || a.clone || this._rowCanDel(id) || a.download) {
       const moreLbl = I18n.t("lists.chrome.rowMore");
       html += `<button type="button" class="btn btn-ghost btn-sm icon-action row-overflow" data-act="__more__" title="${moreLbl}" aria-label="${moreLbl}" aria-haspopup="menu" aria-expanded="false">${Icons.MORE}</button>`;
     }
@@ -605,6 +613,16 @@ export class ListView {
     return !!this.actions.show && (!this.actions.canShow || this.actions.canShow(id));
   }
 
+  /** `edit` effectif pour UNE ligne : action activée ET prédicat par ligne (s'il existe) satisfait. */
+  private _rowCanEdit(id: string): boolean {
+    return !!this.actions.edit && (!this.actions.canEdit || this.actions.canEdit(id));
+  }
+
+  /** `del` effectif pour UNE ligne : action activée ET prédicat par ligne (s'il existe) satisfait. */
+  private _rowCanDel(id: string): boolean {
+    return !!this.actions.del && (!this.actions.canDel || this.actions.canDel(id));
+  }
+
   /** Ouvre le menu « plus d'actions » (overflow) d'une ligne : actions secondaires actives, déléguées à onAction. */
   private _openRowMenu(trigger: HTMLElement, id: string): void {
     const a = this.actions;
@@ -616,7 +634,7 @@ export class ListView {
     if (this._rowCanShow(id)) items.push({ label: I18n.t("lists.chrome.rowShow"), icon: Icons.EYE, onClick: () => this.onAction && this.onAction("show", id) });
     if (a.download) items.push({ label: I18n.t("lists.chrome.rowDownload"), icon: Icons.EXPORT, onClick: () => this.onAction && this.onAction("download", id) });
     if (a.clone) items.push({ label: I18n.t("lists.chrome.rowClone"), icon: Icons.CLONE, onClick: () => this.onAction && this.onAction("clone", id) });
-    if (a.del) items.push({ label: I18n.t("ui.action.delete"), icon: Icons.DELETE, danger: true, onClick: () => this.onAction && this.onAction("del", id) });
+    if (this._rowCanDel(id)) items.push({ label: I18n.t("ui.action.delete"), icon: Icons.DELETE, danger: true, onClick: () => this.onAction && this.onAction("del", id) });
     RowMenu.open(trigger, items);
   }
 

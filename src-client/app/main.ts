@@ -710,9 +710,11 @@ async function boot(): Promise<void> {
     form: (id, done) => Forms.equipment(store, formHost, id, done), addLabel: I18n.t("app.add.equipment"),
     links: ["groupes", "faceimages", "spares", "sousequipements", "applications", "attachments"], locate: "equipment",
   });
-  // VMs : onglet de PREMIER NIVEAU (à côté d'Équipements) — ALIMENTÉ PAR LA SYNCHRO (Proxmox…). Pas de
-  // `form`/`addLabel` : AUCUN bouton « + créer » en v1 (liste en lecture seule, cf. ListConfigs.vms `actions: view`) ;
-  // les enrichissements locaux (notes + groupes) se font depuis la fiche. Actions d'en-tête (feature amovible) :
+  // VMs : onglet de PREMIER NIVEAU (à côté d'Équipements). Deux origines : la SYNCHRO (Proxmox…) et la SAISIE
+  // MANUELLE (forme B, cadrage 2026-08-15 : une VM manuelle = `provider_id` vide). Le bouton « + VM » et le
+  // formulaire complet `VmForms.manual` sont donc câblés (`form`/`addLabel`) — dans LES DEUX modes (fichier ET
+  // API : c'est le point du chantier), le VIEWER en étant privé par `addListTab` (VIEWER ⇒ addLabel/onAdd undefined).
+  // Actions d'en-tête (feature amovible) :
   //  - « Réseaux virtuels… » : mapping bridge/tag → réseau logique (méta) — les deux modes, hors viewer ;
   //  - « Purger… » : purge de MASSE des orphelines / des VMs d'un provider disparu — les deux modes, hors
   //    viewer, et CONDITIONNEL (masqué s'il n'y a rien à purger, cf. `visible` ci-dessous) ;
@@ -767,6 +769,11 @@ async function boot(): Promise<void> {
   addListTab("vms", I18n.t("tabs.vms.label"), ListConfigs.vms, {
     icon: Icons.VM,
     title: I18n.t("tabs.vms.title"), subtitle: I18n.t("tabs.vms.subtitle"),
+    // Création/édition d'une VM MANUELLE (formulaire complet). `cfg.actions` de ListConfigs.vms (edit/del + gating
+    // canEdit/canDel par ligne) PRIME sur le défaut `edit: !!formFn` d'`addListTab` (spread `...(cfg.actions || …)`)
+    // — le gating « manuelles seulement » est donc préservé. La SUPPRESSION passe par le chemin GÉNÉRIQUE (Dialog +
+    // store.remove, cascade standard) : aucun `onDel` spécifique n'est nécessaire.
+    form: (id, done) => VmForms.manual(store, formHost, id, done), addLabel: I18n.t("app.add.vm"),
     extraActions: VIEWER ? undefined : vmExtraActions, links: vmLinks,
     locate: "equipment", locateTarget: (id) => VmLocate.hostEquipmentId(store.get("vms", id), store),
   });

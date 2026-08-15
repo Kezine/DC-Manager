@@ -578,11 +578,15 @@ export class ListConfigs {
     };
   }
 
-  /** Équipements VIRTUELS (VMs QEMU / conteneurs LXC) — collection ALIMENTÉE PAR LA SYNCHRO d'un cluster
-      (Proxmox en 1re implémentation). Liste en LECTURE : champs SOURCE (nom, type, statut, hôte, vNIC, IPs, tags).
-      Pas de création/édition depuis la liste en v1 (`actions: { view: true }` + aucun `form` sur l'onglet) :
-      les VMs viennent de la synchro ; l'enrichissement des champs LOCAUX passera par la fiche (T3.2). */
+  /** Équipements VIRTUELS (VMs QEMU / conteneurs LXC). Deux origines coexistent : la SYNCHRO d'un cluster
+      (Proxmox — champs source écrasés à chaque passe) et la SAISIE MANUELLE (forme B du cadrage 2026-08-15 :
+      une VM manuelle = une VM à `provider_id` vide). Les VMs SYNCHRONISÉES restent LECTURE SEULE (les éditer
+      serait un mensonge à durée de vie d'une synchro) ; les MANUELLES s'éditent et se suppriment — d'où le
+      gating PAR LIGNE `canEdit`/`canDel` (le `+ VM` et le formulaire complet sont câblés côté main.ts). */
   static vms(store: Store): ListOptions {
+    // Une VM est MANUELLE si son `provider_id` est vide : aucune synchro ne la couvre (protection structurelle,
+    // cf. VmSyncService / VmPurge, verrouillée par test). C'est le prédicat de gating d'édition/suppression.
+    const isManual = (id: string): boolean => { const v: any = store.get("vms", id); return !!v && !v.provider_id; };
     // Hôte hébergeur : nom de l'équipement RÉSOLU (host_equipment_id, rapproché au sync) sinon le nom de nœud
     // BRUT du provider (host_node) — qui reste informatif tant que le rapprochement par nom n'a pas eu lieu.
     const hostText = (v: any): string => {
@@ -619,7 +623,8 @@ export class ListConfigs {
     return {
       collection: "vms",
       defaultSort: { key: "name", dir: "asc" },
-      actions: { view: true },   // lecture seule : alimentée par la synchro (ni + créer, ni éditer/cloner/supprimer en v1)
+      // Édition/suppression RÉSERVÉES aux VMs manuelles (gating par ligne) : les synchronisées restent lecture seule.
+      actions: { view: true, edit: true, del: true, canEdit: isManual, canDel: isManual },
       emptyText: I18n.t("lists.empty.vms"),
       columns: [
         { head: I18n.t("lists.col.name"), essential: true, cls: "cell-name", sortKey: "name", sort: (v) => v.name, render: (v) => Html.escape(v.name || I18n.t("lists.ph.vm")) },

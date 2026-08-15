@@ -151,6 +151,7 @@ export const app = {
     contact: "+ Contact",
     application: "+ Application",
     attachment: "+ Attachment",
+    vm: "+ VM",
   },
   vm: {
     netMapping: "Virtual networks…",

@@ -1413,6 +1413,16 @@ module.exports = async () => {
     // Et un record qui prétendrait venir d'une autre instance est écarté (garde-fou).
     const foreign = VmReconcile.plan(mkInput([mkVmRecord({ provider_id: "pve-lab" })], []));
     ck.eq(foreign.creates.length, 0, "record d'une autre instance → écarté (l'adaptateur estampille, le plan vérifie)");
+
+    // VERROU (chantier VMs MANUELLES 2026-08-15) : une VM manuelle a `provider_id` VIDE. En production la garde
+    // est structurelle — `VmSyncService.syncProvider` ne lit que `findBy("vms","provider_id",config.id)`, donc une
+    // manuelle n'entre JAMAIS dans `existingVms`. Ici on verrouille le PLAN lui-même : même si une manuelle fuitait
+    // dans `existingVms`, son provider_id vide (≠ le provider de la passe) la met hors périmètre — jamais orphelinée,
+    // jamais patchée. La synchro ne peut donc NI écraser NI supprimer une VM saisie à la main.
+    const manuelle = { ...base, id: "vm-manuelle", ext_id: "", provider_id: "", name: "saisie-main" };
+    const manuelScoped = VmReconcile.plan(mkInput([], [manuelle]));
+    ck.eq(manuelScoped.orphans.length + manuelScoped.updates.length + manuelScoped.creates.length, 0,
+      "VM MANUELLE (provider_id vide) : hors périmètre de toute synchro — jamais orphelinée, jamais touchée");
   }
   });
 

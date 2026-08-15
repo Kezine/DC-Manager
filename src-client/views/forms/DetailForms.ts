@@ -662,6 +662,10 @@ export class DetailForms extends IpamForms {
   static vmDetail(store: Store, host: FormHost, id: string, onChanged?: () => void): void {
     const vm: any = store.get("vms", id);
     if (!vm) { Notify.toast(I18n.t("detail.nf.vm"), "err"); return; }
+    // VM MANUELLE (forme B du cadrage 2026-08-15) = `provider_id` vide : aucune synchro ne la couvre. Change
+    // l'affichage du provider (libellé « Manuel » au lieu de « — ») et de la dernière synchro (« — » estompé, pas
+    // de fausse date), et le formulaire d'édition ouvert par le pied (formulaire COMPLET, pas les enrichissements).
+    const isManual = !vm.provider_id;
     const root = document.createElement("div");
 
     // -- IDENTITÉ SOURCE (lecture seule) --
@@ -686,8 +690,11 @@ export class DetailForms extends IpamForms {
       // dans un conteneur DÉDIÉ ; le HTML produit est neutralisé/filtré, injectable en innerHTML sans risque.
       [I18n.t("detail.vm.descSource"), vm.description_src ? `<div class="md-body">${Markdown.render(vm.description_src)}</div>` : this.MUTED],
       [I18n.t("detail.vm.tagsSource"), tagsHtml],
-      [I18n.t("detail.vm.lastSync"), Html.escape(Format.dateTime(vm.last_sync))],
-      [I18n.t("detail.vm.providerId"), vm.ext_id ? `<span style="font-family:var(--mono);color:var(--fg-dim)">${Html.escape(vm.ext_id)}</span>${vm.provider_id ? ` <span style="color:var(--fg-dimmer)">· ${Html.escape(vm.provider_id)}</span>` : ""}` : this.MUTED],
+      // Dernière synchro : « — » ESTOMPÉ pour une manuelle (last_sync vide) — pas de fausse date (Format.dateTime("")
+      // rendrait un « — » NON estompé). Une VM synchronisée porte toujours un horodatage.
+      [I18n.t("detail.vm.lastSync"), vm.last_sync ? Html.escape(Format.dateTime(vm.last_sync)) : this.MUTED],
+      // Provider : pour une MANUELLE (ext_id ET provider_id vides), pastille « Manuel » estompée au lieu de « — ».
+      [I18n.t("detail.vm.providerId"), isManual ? `<span class="pill" style="color:var(--fg-dimmer)">${I18n.t("detail.vm.manual")}</span>` : (vm.ext_id ? `<span style="font-family:var(--mono);color:var(--fg-dim)">${Html.escape(vm.ext_id)}</span>${vm.provider_id ? ` <span style="color:var(--fg-dimmer)">· ${Html.escape(vm.provider_id)}</span>` : ""}` : this.MUTED)],
     ]));
 
     // -- vNIC : réseau logique RÉSOLU via la table de mapping (bridge/tag → réseau), pastille de couleur comme
@@ -878,7 +885,10 @@ export class DetailForms extends IpamForms {
     }
     if (!this.isViewer()) {
       const editBtn = document.createElement("button"); editBtn.type = "button"; editBtn.className = "btn btn-primary";
-      editBtn.textContent = I18n.t("lists.chrome.rowEdit"); editBtn.onclick = () => VmForms.edit(store, host, id, onChanged);
+      editBtn.textContent = I18n.t("lists.chrome.rowEdit");
+      // MANUELLE → formulaire COMPLET (`manual`, tous les champs saisis) ; SYNCHRONISÉE → enrichissements locaux
+      // uniquement (`edit`, les champs source seraient réécrasés à la synchro suivante).
+      editBtn.onclick = () => (isManual ? VmForms.manual(store, host, id, onChanged) : VmForms.edit(store, host, id, onChanged));
       footerActions.push(editBtn);
     }
     host.openModal({ title: I18n.t("detail.vm.title"), subtitle: Html.escape(vm.name || ""), body: root, footerActions, stackKey: "detail:vms/" + id, onResume: () => this.vmDetail(store, host, id, onChanged), hideFooter: true, wide: true });

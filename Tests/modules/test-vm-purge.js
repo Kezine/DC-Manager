@@ -132,6 +132,26 @@ module.exports = async () => {
     ck(ok, "INVARIANT : hasPurgeable(...) ≡ groups(...).length > 0 sur tout le corpus de cas");
   });
 
+  await section("VmPurge : une VM MANUELLE (provider_id vide, jamais orpheline) n'est JAMAIS purgeable (verrou forme B)", async () => {
+    // Chantier VMs manuelles 2026-08-15 (forme B) : une VM saisie à la main a `provider_id: ""` et n'est jamais
+    // `orphan` (seul VmReconcile pose ce drapeau, et il ignore les manuelles). La suppression d'une manuelle passe
+    // par le chemin ORDINAIRE (action de ligne / fiche), JAMAIS par la purge de masse — sinon un simple identifiant
+    // de provider vide la rangerait avec de vrais résidus. Ce verrou protège cette frontière PAR TEST.
+    const manuelle = vm({ id: "man", name: "saisie-main", provider_id: "", orphan: false });
+    const r = readers();
+    // (a) Aucun groupe, que la config des providers soit CONNUE (mode API) ou INCONNUE (mode fichier).
+    ck.eq(VmPurge.groups([manuelle], ["pve-prod"], r).length, 0, "config connue : la VM manuelle n'entre dans AUCUN groupe de purge");
+    ck.eq(VmPurge.groups([manuelle], [], r).length, 0, "aucun provider configuré : toujours aucun groupe (pas de « provider disparu » à provider vide)");
+    ck.eq(VmPurge.groups([manuelle], null, r).length, 0, "mode fichier (config inconnue) : toujours aucun groupe");
+    // (b) hasPurgeable la juge non purgeable dans les trois cas (le bouton « Purger… » ne s'allume pas pour elle).
+    ck.eq(VmPurge.hasPurgeable([manuelle], ["pve-prod"]), false, "hasPurgeable (config connue) : rien à purger");
+    ck.eq(VmPurge.hasPurgeable([manuelle], null), false, "hasPurgeable (mode fichier) : rien à purger");
+    // Cohabitation : une VRAIE orpheline reste proposée SANS entraîner la manuelle voisine (même provider_id vide).
+    const groups = VmPurge.groups([manuelle, vm({ id: "orph", name: "z", provider_id: "", orphan: true })], null, r);
+    ck.eq(groups.length, 1, "une orpheline sans provider → un groupe ; la manuelle ne s'y ajoute pas");
+    ck.eq(groups[0].entries.map((e) => e.id).join(","), "orph", "…seule l'orpheline est listée, la VM manuelle est épargnée");
+  });
+
   /* ============ 3. SÉLECTION + COMPTES DU RÉCAPITULATIF ============ */
 
   await section("VmPurge : sélection (enrichies opt-in) et comptes du récapitulatif", async () => {

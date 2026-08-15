@@ -130,8 +130,9 @@ francophone). Garder cette langue pour toute contribution — commentaires inclu
     (`src-shared/`, lecteur injecté), le serveur ET le Store client la consomment chacun dans son mode.
     Exceptions documentées à ce jour : **PKI/certificats** (crypto navigateur = contexte sécurisé
     localhost/HTTPS + coffres serveur), **contacts/notifications** (le service de notification est
-    serveur), **VMs** (synchro côté serveur ; évolution prévue : un provider « Manuel » pour créer une
-    VM à la main), **clients wifi** (même exception que les VMs, et pour la même raison : la synchro
+    serveur), **VMs** (seule la SYNCHRO est serveur ; la création/édition MANUELLE d'une VM — à
+    `provider_id` vide, forme B — est disponible dans les DEUX modes, cf. `docs/vm-proxmox.md`
+    § « VMs manuelles »), **clients wifi** (même exception que les VMs, et pour la même raison : la synchro
     interroge un contrôleur tiers avec un secret chiffré au repos — la collection `wifiClients` reste,
     elle, entièrement lisible/cherchable/enrichissable en mode fichier, cf. `docs/wifi-unifi.md`
     § « Mode local »). ⚠ Écart CONNU à résorber : les **interventions** n'existent qu'en mode API alors

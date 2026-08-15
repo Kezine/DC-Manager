@@ -230,6 +230,7 @@ export const detail = {
     tagsSource: "Tags (source)",
     lastSync: "Last sync",
     providerId: "Provider identifier",
+    manual: "Manual",
     nicsSection: "Network interfaces (vNIC) ({{count}})",
     colMac: "MAC",
     colBridge: "Bridge / VLAN",

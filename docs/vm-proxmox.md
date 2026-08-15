@@ -658,13 +658,50 @@ fichiers dédiés ci-dessus).
 
 ## Mode local (fichier) — principe n°15
 
-**Non disponible en mode fichier AUJOURD'HUI — écart assumé et documenté** (principe n°15 de
-`CLAUDE.md`) : l'inventaire est produit par la SYNCHRO côté serveur (jetons chiffrés au repos,
-appels Proxmox). ⚠ Ce qui ne dépend PAS du serveur reste, lui, disponible en local : la
-collection `vms` est une collection du DOCUMENT (lisible, cherchable, enrichissable), et la
-**purge de masse** fonctionne SANS serveur — un document exporté avec ses orphelines se purge
-en local, avec le repli documenté « liste des providers inconnue » (cf. « Purge de masse des
-orphelines »). ⚠ **Évolution PRÉVUE** (décision utilisateur 2026-08-02) : un provider
-**« Manuel »** permettant de créer/éditer une VM à la main — ce chemin-là devra fonctionner
-AUSSI en mode fichier (`vms` est une collection du DOCUMENT ; seule la synchro est serveur).
-Cadrage à venir : `.notes/toDos/vms-provider-manuel-todo-2026-08-02.md`.
+**Seule la SYNCHRONISATION reste serveur** (jetons chiffrés au repos, appels Proxmox) : c'est
+l'unique écart au principe n°15 encore assumé pour cette feature. Tout le RESTE fonctionne en
+mode fichier, parce que `vms` est une collection du DOCUMENT :
+
+- **lecture / recherche / enrichissement** de l'inventaire déjà présent (notes, groupes, hôte) ;
+- **purge de masse** des orphelines SANS serveur — un document exporté avec ses orphelines se
+  purge en local, avec le repli documenté « liste des providers inconnue » (cf. « Purge de
+  masse des orphelines ») ;
+- **création / édition MANUELLE** d'une VM (cf. « VMs manuelles » ci-dessous) — le bouton
+  « + VM » et le formulaire complet sont offerts dans LES DEUX modes.
+
+### VMs manuelles (forme B — création à la main, cadrage 2026-08-15)
+
+Une **VM manuelle** est une VM à **`provider_id` vide** : PAS de « provider Manuel »
+(la forme A envisagée en 2026-08-02 est écartée — un provider vit dans `vm-providers.db`
+serveur chiffrée, il n'existerait donc qu'en mode API, exactement là où le besoin est moindre).
+Le formulaire `VmForms.manual` (modale standard) crée ET édite une telle VM ; le bouton
+« + VM » de l'onglet l'ouvre en création (les deux modes, hors viewer), le pied de sa fiche en
+édition.
+
+- **Frontière des champs.** Pour une VM synchronisée, les champs source (nom, type, statut,
+  hôte, vNIC…) sont écrasés à chaque passe, d'où `VmForms.edit` qui n'expose que les
+  enrichissements locaux. **Pour une manuelle, la frontière s'efface : la SOURCE est
+  l'utilisateur.** Tous les champs sont donc saisis — y compris `host_equipment_id` (le
+  commentaire « champ dérivé, non éditable » de `edit` ne vaut que parce qu'une synchro
+  re-résout `host_node` ; sans synchro, la saisie est le seul chemin). Les vNIC s'éditent en
+  rangées dynamiques (nom / MAC / pont / tag / IPs séparées par des virgules), normalisées par
+  `VmSync.normalizeNic` ; l'invariant partagé « IPv4 des vNIC » (`DataValidation`) refuse un
+  enregistrement invalide.
+- **Champs de synchro NON saisis** : `ext_id`, `orphan`, `last_sync`, `description_src`,
+  `host_node`, `tags_src` restent à leurs défauts de spec (vides) — sans sens pour une manuelle.
+- **Protections STRUCTURELLES (rien à coder, verrouillées PAR TEST).** La synchro ignore les
+  manuelles par construction : `VmSyncService.syncProvider` ne lit que
+  `findBy("vms", "provider_id", config.id)` → une VM à `provider_id` vide n'entre jamais dans
+  la réconciliation, n'est ni écrasée ni marquée orpheline (verrou `VmReconcile.plan` dans
+  `Tests/modules/test-server.js`). Et n'étant jamais `orphan`, elle n'apparaît dans AUCUN groupe
+  de `VmPurge` (verrou dans `Tests/modules/test-vm-purge.js`) — la purge de masse ne la propose
+  jamais.
+- **Affichage.** La fiche libelle un `provider_id` vide « **Manuel** » (pastille estompée) là
+  où une synchronisée montre `ext_id · provider_id`, et « dernière synchro » vide reste « — »
+  estompé (pas de fausse date).
+- **Édition / suppression réservées aux manuelles.** Le listing (`ListConfigs.vms`) active
+  `edit`/`del` par un gating PAR LIGNE (`canEdit`/`canDel` de `ListActions`, prédicat
+  `provider_id` vide) : une VM SYNCHRONISÉE reste lecture seule (l'éditer serait un mensonge à
+  durée de vie d'une passe ; sa suppression passe par la fiche orpheline / la purge de masse).
+  La suppression d'une manuelle suit le chemin GÉNÉRIQUE (`Dialog.confirm` + `store.remove`,
+  cascade standard qui détache IP/applications comme pour toute VM).
