@@ -110,7 +110,12 @@ francophone). Garder cette langue pour toute contribution — commentaires inclu
       d'options que `select(...)`** — donc la règle métier qui la construit (filtre par famille,
       contrainte de conteneur, options `disabled`, tri, `keepId`…) ne bouge PAS : on remplace le
       contrôle, jamais la règle. Le filtrage par la saisie et les règles de valeur sont, eux, dans le
-      module pur `core/OptionSearch` (testé). ⚠ **Distinguer entité et ÉNUMÉRATION** : un statut, une
+      module pur `core/OptionSearch` (testé). Variante **`FormControls.entityPickerAsync`** (source
+      injectée `core/EntityPickerSource`) pour les collections VOLUMINEUSES ou chargées paresseusement
+      dont les options ne portent AUCUNE règle métier : les candidats et le libellé de la valeur
+      viennent d'une source serveur-pilotée (parcours au focus par la route de listing, recherche
+      transverse, résolution async) au lieu d'une liste en mémoire — dès qu'une règle d'options
+      existe, c'est `entityPicker` qui s'applique. ⚠ **Distinguer entité et ÉNUMÉRATION** : un statut, une
       famille, une orientation, un mode de placement restent des `<select>` — `entityPicker` est pour
       les objets du modèle, dont la liste est longue, croissante et à libellés composés.
     Ces primitives portent le thème, l'accessibilité et le comportement clavier ; les réimplémenter

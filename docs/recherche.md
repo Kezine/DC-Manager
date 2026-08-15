@@ -370,6 +370,40 @@ jamais la *règle*. Tant que le document reste **entièrement chargé**, ces rè
 corpus complet — les brancher sur le serveur n'aurait pas de sens (le serveur ne connaît pas la contrainte
 de conteneur d'un formulaire donné).
 
+**Le régime ASYNC** (`FormControls.entityPickerAsync` → `EntityPicker.buildAsync`, source
+`core/EntityPickerSource`) — l'exception cadrée : une collection **VOLUMINEUSE ou chargée
+PARESSEUSEMENT** dont les options ne portent **AUCUNE règle métier** (chaque enregistrement est
+candidat — ni filtre, ni `disabled`, ni `keepId`) n'a pas à être hydratée en entier pour remplir un
+champ. Le contrôle consomme alors un **CONTRAT injecté** (`EntityPickerCandidates` : `debounceMs`,
+`fetch`, `labelOf`, `resolveLabel`) ; la source standard mono-collection est
+`CollectionPickerSource` (construite par `main.ts`, la vue ne connaît que le contrat) :
+
+- **PARCOURS au focus (requête vide)** — la condition du remplacement d'un `<select>`. La recherche
+  transverse ne sait **PAS** parcourir (requête vide → `{}` serveur, `TargetSearch.rank("")` → `[]`
+  client : un choix de la recherche, pas un manque) ; le parcours passe donc par la **route de
+  LISTING** : collection hydratée → cache local (tri alpha sur le libellé **normalisé**
+  `Schema.normSearch`, borné, surplus exact) ; sinon `store.list` (page 1, pageSize = plafond,
+  tri = colonne injectée `sortColumn`, validée contre `ListOrder.isSortable` — invalide : traitée
+  absente + trace), lignes **absorbées** au cache par construction, surplus = `total − rows`. Le
+  surplus du parcours est **ANNONCÉ** (rangée « + N masqués », la clé pluralisée du régime sync).
+- **RECHERCHE (requête non vide)** — déléguée à `EntityCandidateSource` (une famille) : annulation,
+  repli local sur échec réel et double mode n°15 déjà là, aucune logique nouvelle. **Pas d'annonce
+  de surplus** : le serveur ne rend pas de compte (cap 40/collection) — parité avec toutes les
+  recherches transverses.
+- **LIBELLÉ de la valeur courante** — sync d'abord (`store.get` + règle de nommage injectée) ;
+  inconnu du cache → pastille « Chargement… » + `resolveLabel` (`fetchOne` absorbé, **garde de
+  fraîcheur** : la réponse ne s'applique que si la valeur est encore cet id) ; introuvable →
+  `fallbackLabel(id)` injecté (défaut : l'id brut). Au **PICK**, aucune résolution : le libellé est
+  dans le résultat cliqué.
+- **Plafonds & rythme** — `OptionSearch.DEFAULT_LIMIT` (50) pour parcours ET recherche (parité du
+  contrôle sync) ; anti-rebond porté par la **SOURCE** (0 si locale, `EntityCandidateSource.DEBOUNCE_MS`
+  sinon), le SearchPop du contrôle le consomme.
+- **Limites assumées** — recherche sans annonce de surplus ; parcours sans `sortColumn` → ordre
+  serveur `created_date` + re-tri alpha **client de la page reçue** seulement (même famille que les
+  « tris sans colonne SQL » du régime pagé).
+- **Pilote** — le champ « Contact » des abonnements de notifications (`NotificationsAdminView`) :
+  la page n'hydrate plus le carnet (cf. `docs/hydratation.md` § vague 1, `docs/notifications.md`).
+
 ⚠ **Re-cadrage à prévoir pour l'option C (hydratation PARTIELLE).** Le jour où le document ne sera plus
 entièrement en mémoire, ces règles devront être re-cadrées : la **résolution des contraintes** (quels
 ports d'un équipement, quels conteneurs compatibles…) devra se faire **côté serveur ou à la demande**, car

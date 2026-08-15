@@ -21,6 +21,7 @@ import { Modal, Notify, FormControls, Dialog, Fullscreen, RichTooltip, Icons } f
 import { Html } from "../core/Html";
 import type { RemoteListReader } from "../core/StoreListRowSource";   // lecteur SERVEUR des listings (mode API — lot 3)
 import { EntityCandidateSource, type EntitySearchReader, type EntityCandidateFamily } from "../core/EntityCandidates";   // candidats d'entités serveur-pilotés (mode API — lot 4)
+import { CollectionPickerSource } from "../core/EntityPickerSource";   // source standard du picker ASYNC (parcours + recherche + libellés — chantier picker async)
 import { UserDirectory } from "../core/UserDirectory";   // annuaire client (résolution des auteurs d'audit — mode API)
 import { InterventionsFormat } from "../core/InterventionsFormat";   // OPEN_STATUS_SLUGS : filtre du comptage « interventions ouvertes »
 import { CertsFormat } from "../core/CertsFormat";   // libellés/échéances des certs — famille externe de la recherche globale
@@ -1084,7 +1085,17 @@ async function boot(): Promise<void> {
     title: I18n.t("tabs.notifications.label"), subtitle: I18n.t("tabs.notifications.subtitle"),
     onShow: () => notificationsView.show(),
   });
-  notificationsView = new NotificationsAdminView(store, notifyContainer, notifyClient, formHost);   // formulaires dans LA modale de l'app (principe n°11)
+  // Source du sélecteur de CONTACT des abonnements (picker ASYNC, pilote du chantier) : le carnet
+  // est chargé PARESSEUSEMENT en mode API — la page ne l'hydrate PLUS en entier, le champ va
+  // chercher ses candidats au serveur (parcours par la route de listing trié `name`, recherche
+  // transverse via `entitySearchReader` — null en mode fichier/viewer : source 100 % locale,
+  // principe n°15). Construite ICI et injectée : la vue ne connaît que le CONTRAT (principe n°2).
+  const contactPickerSource = new CollectionPickerSource(store, {
+    kind: "contact", collection: "contacts",
+    label: (contact: any) => contact.name || I18n.t("lists.ph.noName"),   // même règle de nommage que la table des abonnements
+    sortColumn: "name",
+  }, entitySearchReader);
+  notificationsView = new NotificationsAdminView(store, notifyContainer, notifyClient, formHost, contactPickerSource);   // formulaires dans LA modale de l'app (principe n°11)
   // INTERVENTIONS : page d'ADMINISTRATION du suivi des incidents & interventions (liés aux équipements/VMs/
   // spares). ONGLET PRINCIPAL (décision de cadrage), enregistré JUSTE AVANT « Certificats ». Vue custom
   // TOUJOURS enregistrée : `interventionsClient` est null hors mode API → la vue affiche « mode API requis »

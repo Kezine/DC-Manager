@@ -315,11 +315,16 @@ résout des libellés par identifiant. Le gain du chargement paresseux est **au 
 qui a réellement besoin du tout le charge à son ouverture, **une fois** — après quoi l'état passe à
 `full` et listing, compteur et gardes reprennent le régime local sans autre changement.
 
-Seule surface concernée par la vague 1 : `views/NotificationsAdminView` (abonnements de
-notification + historique des remises), qui appelle `store.hydrate(["contacts"])` **en parallèle**
-des appels au service `notify/` — les deux I/O sont indépendantes, et l'attente est déjà couverte
-par le message « Chargement… » de la page. Un échec réseau REJETTE : mieux vaut une page qui affiche
-son erreur qu'un `<select>` silencieusement amputé.
+`views/NotificationsAdminView`, la surface pilote de cette vague, ne passe **PLUS** par là : la
+page ne charge plus le carnet entier (chantier « picker async »). Ses tables (abonnements +
+historique) résolvent les seuls `contact_id` **RÉFÉRENCÉS** par ce qu'elles affichent — résolution
+GROUPÉE, patron de la vague 4 (`TargetLabelResolution.missingByCollection` + `fetchMany` absorbé),
+échec **AVALÉ** avec trace console : mieux vaut « (contact introuvable) » sur une ligne qu'une page
+en erreur. Le sélecteur de contact de la modale est un picker **ASYNC** serveur-piloté
+(`core/EntityPickerSource`, cf. `docs/recherche.md` § « Ce qui reste CLIENT » — régime async), et la
+note « aucun contact » s'adosse au compte exact `store.countOf("contacts")` (G6). `Store.hydrate`
+reste offert aux surfaces qui ont **réellement** besoin du tout (l'export G2 en est le cas
+d'école) — cette page n'en est simplement plus une.
 
 ### G9 — dégradations de la palette globale (actées, NON corrigées)
 
@@ -534,8 +539,9 @@ Le contrat porte donc **`prepareLabels(links): Promise<void>`** : un préalable 
 avant tout rendu qui résout des libellés, auquel elle passe les cibles QU'ELLE VA AFFICHER. La forme
 actuelle (résolution GROUPÉE des seuls ids référencés, appelants, mode fichier) est décrite au
 § « Vague 4 » — elle a REMPLACÉ l'hydratation en masse d'`applications` que cette vague avait posée
-(le patron `NotificationsAdminView` restait celui d'une surface qui a besoin de la liste COMPLÈTE,
-ce que la résolution de quelques libellés n'est pas). Le SEAM, lui, n'a pas bougé : la vue
+(résoudre quelques libellés n'est pas « avoir besoin de la liste COMPLÈTE » ; depuis le chantier
+« picker async », `NotificationsAdminView` suit d'ailleurs le MÊME patron de résolution groupée —
+plus aucune surface n'hydrate un carnet pour des libellés). Le SEAM, lui, n'a pas bougé : la vue
 interventions ne touche toujours pas le Store, et un **échec est AVALÉ** par l'hôte — mieux vaut un
 listing complet avec un libellé en moins qu'une page qui refuse de s'afficher (même doctrine que
 `ensureTrackerProviders`).

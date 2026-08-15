@@ -1,11 +1,16 @@
 import { Html } from "../core/Html";
 import { I18n } from "../i18n/I18n";
 import { EntityPicker } from "./EntityPicker";
-import type { EntityPickerElement } from "./EntityPicker";
+import type { EntityPickerElement, EntityPickerAsyncElement } from "./EntityPicker";
+import type { EntityPickerCandidates } from "../core/EntityPickerSource";
 
 export interface SelectOption { value: string; label: string; disabled?: boolean; group?: string; }
 /** Réglages du sélecteur d'entité à recherche (cf. `ui/EntityPicker`). */
 export interface EntityPickerOpts { limit?: number; }
+/** Réglages du sélecteur d'entité ASYNC (cf. `ui/EntityPicker.buildAsync`). `placeholder` est
+    porté ICI (et non par une option de tête, absente d'une source serveur-pilotée) ; absent →
+    le libellé générique du régime sync. */
+export interface EntityPickerAsyncOpts { placeholder?: string; fallbackLabel?: (id: string) => string; }
 export interface NumberOpts { min?: number | string; max?: number | string; step?: number | string; placeholder?: string; }
 /** Option d'un contrôle segmenté (`.rm-toggle`). `icon` = SVG de CONFIANCE (constante `ui/Icons`), jamais une donnée. */
 export interface SegOption { value: string; label?: string; icon?: string; title?: string; disabled?: boolean; }
@@ -95,6 +100,23 @@ export class FormControls {
       `ui/EntityPicker`, où vivent le rendu et l'arbitrage de conception. */
   static entityPicker(options: SelectOption[], value?: string | null, opts: EntityPickerOpts = {}): EntityPickerElement {
     return EntityPicker.build({ options, value, limit: opts.limit });
+  }
+
+  /** Sélecteur d'ENTITÉ à source SERVEUR-PILOTÉE — à employer quand la collection est VOLUMINEUSE
+      ou chargée PARESSEUSEMENT et que ses options ne portent AUCUNE règle métier (chaque
+      enregistrement est candidat) : hydrater le corpus entier pour remplir un champ serait un
+      contresens. Dès qu'une règle d'options existe (filtre, `disabled`, `keepId`…), c'est
+      `entityPicker` qui s'applique — on ne déporte jamais une règle métier vers le serveur.
+      La source (contrat `core/EntityPickerSource.EntityPickerCandidates`, source standard
+      `CollectionPickerSource`) est construite par l'hôte (main.ts) et INJECTÉE. L'élément rendu
+      expose `.value`, `focus()` et l'événement `change` — cf. `ui/EntityPicker` (bloc
+      « RÉGIME ASYNC »), où vivent le rendu et les arbitrages. */
+  static entityPickerAsync(source: EntityPickerCandidates, value?: string | null, opts: EntityPickerAsyncOpts = {}): EntityPickerAsyncElement {
+    return EntityPicker.buildAsync({
+      source, value,
+      placeholder: opts.placeholder || I18n.t("ui.entityPicker.searchPlaceholder"),
+      fallbackLabel: opts.fallbackLabel,
+    });
   }
 
   /** Bascule (toggle) : pilule + témoin ● + teinte (via .toggle-pill), distincte du bouton

@@ -4,6 +4,7 @@ import { IconButton } from "./IconButton";
 import { Icons } from "./Icons";
 import { OptionSearch } from "../core/OptionSearch";
 import type { PickableOption } from "../core/OptionSearch";
+import type { EntityPickerCandidates } from "../core/EntityPickerSource";
 import { Schema } from "../../src-shared/Schema";
 import { I18n } from "../i18n/I18n";
 
@@ -53,6 +54,20 @@ import { I18n } from "../i18n/I18n";
    POPOVER EN PORTAIL (toujours) : tout entityPicker vit dans un conteneur qui rogne (corps
    défilant de modale, panneau 3D `.dc-side`) ; le `SearchPop` est donc monté en `portal: true`
    pour que sa liste échappe à l'overflow de l'ancêtre au lieu d'y être coupée.
+
+   RÉGIME ASYNC (`buildAsync`, chantier « picker async ») : le régime SYNC ci-dessus
+   reste LA NORME — c'est lui qui porte les règles métier d'options. Pour une
+   collection VOLUMINEUSE ou chargée PARESSEUSEMENT dont les options n'ont AUCUNE
+   règle métier (chaque enregistrement est candidat — ni filtre, ni `disabled`),
+   hydrater le corpus entier pour remplir un champ serait un contresens : le
+   contrôle consomme alors une SOURCE injectée (`core/EntityPickerSource`) —
+   parcours au focus par la route de LISTING, recherche transverse serveur, et
+   résolution ASYNC du libellé de la valeur courante (pastille « Chargement… »
+   pendant le vol, repli injecté si introuvable). Même rendu, même API
+   `.value`/`change`/`focus()` — mais PAS de `setOptions` (il n'y a pas d'options
+   en mémoire, c'est le point) ni d'état « rien à choisir » (on ne peut pas le
+   savoir sans réseau — la note « aucun X » appartient à la vue appelante).
+   Cf. docs/recherche.md § « Ce qui reste CLIENT, et pourquoi » (régime async).
    ============================================================================= */
 
 export interface EntityPickerOptions {
@@ -74,6 +89,27 @@ export interface EntityPickerElement extends HTMLDivElement {
   setOptions(options: PickableOption[], value?: string | null): void;
 }
 
+/** Options du régime ASYNC (cf. bloc « RÉGIME ASYNC » de l'en-tête). */
+export interface EntityPickerAsyncOptions {
+  /** Source de candidats INJECTÉE (contrat `core/EntityPickerSource.EntityPickerCandidates`). */
+  source: EntityPickerCandidates;
+  /** Valeur initiale (`null`/absente = aucune sélection). */
+  value?: string | null;
+  /** Libellé de repli du champ de recherche. REQUIS ici, là où le régime sync le tire de l'option
+      de tête : sans liste d'options, il n'y a pas d'option de tête où le lire. */
+  placeholder: string;
+  /** Libellé de REPLI d'une valeur INTROUVABLE (supprimée, ou d'un autre document) — défaut :
+      l'id brut, une information exacte à défaut d'être belle. */
+  fallbackLabel?: (id: string) => string;
+}
+
+/** Élément racine du régime ASYNC : `.value` (le setter ne déclenche PAS `change` — même contrat
+    que le sync), `focus()` relayé, événement `change` au pick/effacement. PAS de `setOptions` :
+    il n'y a pas d'options en mémoire, c'est le point. */
+export interface EntityPickerAsyncElement extends HTMLDivElement {
+  value: string;
+}
+
 export class EntityPicker {
   /** Construit le contrôle. Le libellé de l'état vide et celui du champ de recherche sont TIRÉS de
       l'option de tête de la liste (celle de valeur ""), donc déjà localisés et déjà contextuels —
@@ -87,11 +123,7 @@ export class EntityPicker {
     root.style.cssText = "display:flex;align-items:center;gap:6px;flex-wrap:wrap";
 
     // Rangée de VALEUR : pastille + bouton d'effacement, insérées avant le champ de recherche.
-    const chip = document.createElement("span"); chip.className = "chip";
-    chip.style.cssText = "max-width:100%;min-width:0";
-    const chipText = document.createElement("span");
-    chipText.style.cssText = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
-    chip.appendChild(chipText);
+    const { chip, chipText } = EntityPicker.buildValueChip();
     const clearBtn = IconButton.build({
       icon: Icons.CLOSE,
       label: I18n.t("ui.entityPicker.clear"),
@@ -154,12 +186,7 @@ export class EntityPicker {
       }
     };
 
-    // La saisie ne doit pas SURVIVRE à la sortie du champ : au retour, l'utilisateur retrouverait un
-    // filtre dont il ne se souvient pas. On attend la fin de la bascule de focus avant de trancher,
-    // sinon un clic sur le ✕ interne (qui prend le focus) passerait pour une sortie.
-    root.addEventListener("focusout", () => {
-      window.setTimeout(() => { if (!root.contains(document.activeElement)) pop.reset(); }, 0);
-    });
+    EntityPicker.wireSearchReset(root, pop);
 
     Object.defineProperty(root, "value", {
       get() { return selected; },
@@ -177,5 +204,129 @@ export class EntityPicker {
 
     render();
     return root;
+  }
+
+  /** Construit le contrôle du régime ASYNC (cf. bloc « RÉGIME ASYNC » de l'en-tête) : MÊME rendu
+      que `build` — rangée [pastille] [✕] [champ de recherche] — mais les candidats et le libellé
+      de la valeur viennent de la SOURCE injectée, jamais d'une liste en mémoire. */
+  static buildAsync(opts: EntityPickerAsyncOptions): EntityPickerAsyncElement {
+    const source = opts.source;
+    const fallback = opts.fallbackLabel || ((id: string) => id);
+    let selected = opts.value == null ? OptionSearch.EMPTY_VALUE : String(opts.value);
+    /** Libellé CONNU de la sélection — null AVEC une valeur non vide = résolution EN VOL, la
+        pastille affiche « Chargement… » en attendant (arbitrage du chantier, cf. `applyValue`). */
+    let selectedLabel: string | null = null;
+
+    const root = document.createElement("div") as EntityPickerAsyncElement;
+    root.style.cssText = "display:flex;align-items:center;gap:6px;flex-wrap:wrap";
+
+    const { chip, chipText } = EntityPicker.buildValueChip();
+    const clearBtn = IconButton.build({
+      icon: Icons.CLOSE,
+      label: I18n.t("ui.entityPicker.clear"),
+      onClick: () => { selected = OptionSearch.EMPTY_VALUE; selectedLabel = null; render(); emitChange(); },
+    });
+
+    const pop = new SearchPop({
+      placeholder: opts.placeholder,
+      // Anti-rebond PORTÉ PAR LA SOURCE (0 si elle est locale, tempo serveur partagé sinon) : le
+      // contrôle ne sait pas s'il y a un réseau à ménager — la source, si.
+      debounceMs: source.debounceMs,
+      // 0 : le PARCOURS s'ouvre au focus (fetch("") = requête vide → route de listing côté
+      // source). C'est LA condition pour remplacer un `<select>`, comme au régime sync.
+      minChars: 0,
+      grow: true,
+      // PORTAIL : défaut de SearchPop — mêmes conteneurs qui rognent qu'au régime sync.
+      fetch: async (query) => {
+        const batch = await source.fetch(query);
+        const results: SearchPopResult[] = batch.options.map((option) => ({
+          id: option.value, label: option.label, data: option,
+        }));
+        // Surplus du PARCOURS annoncé — même mécanique et même clé pluralisée que le régime sync
+        // (un plafond silencieux ferait croire qu'une entité n'existe pas). La RECHERCHE, elle,
+        // rend toujours hidden = 0 (le serveur ne rend pas de compte — limite documentée à la source).
+        if (batch.hidden) results.push({ id: "", label: I18n.t("ui.autocomplete.overflow", { count: batch.hidden }), disabled: true });
+        return results;
+      },
+      // Au PICK, AUCUNE résolution : le libellé est DANS le résultat cliqué (arbitrage du chantier).
+      onPick: (result) => { selected = result.id; selectedLabel = result.label; pop.reset(); render(); emitChange(); },
+    });
+
+    const emitChange = (): void => { root.dispatchEvent(new Event("change", { bubbles: true })); };
+
+    const render = (): void => {
+      // Valeur sélectionnée → pastille + ✕ (libellé connu, ou « Chargement… » pendant la
+      // résolution) ; sinon la rangée commence directement par le champ — parité de rendu sync.
+      const label = selected === OptionSearch.EMPTY_VALUE ? null
+        : (selectedLabel !== null ? selectedLabel : I18n.t("ui.entityPicker.resolving"));
+      if (label !== null) {
+        chipText.textContent = label;
+        chip.title = label;   // le libellé est ellipsé : le texte entier reste lisible au survol
+        if (!chip.parentNode) root.insertBefore(chip, root.firstChild);
+        if (!clearBtn.parentNode) root.insertBefore(clearBtn, chip.nextSibling);
+      } else { chip.remove(); clearBtn.remove(); }
+    };
+
+    /** Pose une valeur et résout son libellé — SYNC d'abord (cache, via `labelOf`), sinon pastille
+        « Chargement… » + `resolveLabel` async ; introuvable → repli injecté (`fallbackLabel`).
+        GARDE DE FRAÎCHEUR : au retour du vol, n'appliquer que si la sélection est ENCORE cet id
+        (l'utilisateur a pu choisir ou effacer entre-temps — sa décision prime sur une réponse tardive). */
+    const applyValue = (id: string): void => {
+      selected = id;
+      if (id === OptionSearch.EMPTY_VALUE) { selectedLabel = null; render(); return; }
+      const cached = source.labelOf(id);
+      if (cached !== null) { selectedLabel = cached; render(); return; }
+      selectedLabel = null; render();   // inconnu du cache : « Chargement… » le temps du vol
+      source.resolveLabel(id).then(
+        (label) => { if (selected !== id) return; selectedLabel = label !== null ? label : fallback(id); render(); },
+        (error) => {
+          // Échec RÉSEAU (≠ introuvable) : MÊME repli — une pastille figée sur « Chargement… »
+          // mentirait, et le libellé de repli (à défaut l'id) reste une information exacte.
+          if (selected !== id) return;
+          console.warn("[picker] résolution du libellé impossible :", error);
+          selectedLabel = fallback(id); render();
+        },
+      );
+    };
+
+    EntityPicker.wireSearchReset(root, pop);
+
+    Object.defineProperty(root, "value", {
+      get() { return selected; },
+      // Le setter ne déclenche PAS `change` (même contrat que le sync) — mais il RELANCE la
+      // résolution du libellé : une valeur posée par programme doit s'afficher, elle aussi.
+      set(v: string | null) { applyValue(v == null ? OptionSearch.EMPTY_VALUE : String(v)); },
+      configurable: true,
+    });
+    // `focus()` d'un `<div>` ne fait rien : relais au champ de recherche, comme au régime sync.
+    root.focus = () => { pop.focus(); };
+
+    root.appendChild(pop.element);
+    applyValue(selected);
+    return root;
+  }
+
+  /* -------------------------------------------- briques PARTAGÉES des deux régimes -- */
+
+  /** Pastille de la VALEUR courante (libellé ellipsé) — STRICTEMENT partagée sync/async : même
+      balisage, mêmes styles, aucun comportement (le remplissage appartient au `render` de chaque
+      régime). */
+  private static buildValueChip(): { chip: HTMLSpanElement; chipText: HTMLSpanElement } {
+    const chip = document.createElement("span"); chip.className = "chip";
+    chip.style.cssText = "max-width:100%;min-width:0";
+    const chipText = document.createElement("span");
+    chipText.style.cssText = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+    chip.appendChild(chipText);
+    return { chip, chipText };
+  }
+
+  /** La saisie ne doit pas SURVIVRE à la sortie du champ : au retour, l'utilisateur retrouverait un
+      filtre dont il ne se souvient pas. On attend la fin de la bascule de focus avant de trancher,
+      sinon un clic sur le ✕ interne (qui prend le focus) passerait pour une sortie. Câblage
+      STRICTEMENT partagé sync/async. */
+  private static wireSearchReset(root: HTMLElement, pop: SearchPop): void {
+    root.addEventListener("focusout", () => {
+      window.setTimeout(() => { if (!root.contains(document.activeElement)) pop.reset(); }, 0);
+    });
   }
 }

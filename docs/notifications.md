@@ -389,7 +389,11 @@ côté serveur, on tire à la demande.
   jamais réaffiché ; « Tester » un canal (mode direct).
 - **Abonnements** : CRUD du routage `type × portée × contact × canal × instance`.
   `event_type` en saisie libre + suggestions ; portée « ce document » / « global » ;
-  contact pris dans le carnet du document courant.
+  contact pris dans le carnet du document courant via le sélecteur **SERVEUR-PILOTÉ**
+  (`FormControls.entityPickerAsync`, cf. `docs/recherche.md` § régime async) — la
+  page ne charge **plus** le carnet entier : les tables résolvent les seuls
+  `contact_id` référencés (résolution groupée, échec avalé), et la note « aucun
+  contact » s'adosse au compte exact `store.countOf("contacts")`.
 - **Rappels** : intervalle par type, **saisi en heures** (converti en secondes par
   `NotifyFormat`), minimum 1 minute ; « Réinitialiser » = retour au défaut 12 h.
 - **Alertes actives** : lecture seule (gravité, type, titre, portée, 1re détection,

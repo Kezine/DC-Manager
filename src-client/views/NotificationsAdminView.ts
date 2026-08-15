@@ -3,6 +3,8 @@ import { Icons } from "../ui/Icons";
 import { Html } from "../core/Html";
 import { Format } from "../core/Format";
 import { NotifyFormat, DEFAULT_REMIND_HOURS, EVENT_TYPE_SUGGESTIONS } from "../core/NotifyFormat";
+import { TargetLabelResolution } from "../core/TargetLabelResolution";
+import type { EntityPickerCandidates } from "../core/EntityPickerSource";
 import { FormControls } from "../ui/FormControls";
 import { Notify } from "../ui/Notify";
 import { Dialog } from "../ui/Dialog";
@@ -62,6 +64,11 @@ export class NotificationsAdminView {
   /** Taille de page de l'historique (cadrage §5). */
   private static readonly LOG_LIMIT = 50;
 
+  /** Compte EXACT du carnet de contacts (relevé G6 par `loadAbonnements`) — la note « aucun
+      contact » de la modale s'y adosse : `store.all("contacts").length` MENTIRAIT sur une
+      collection chargée paresseusement (il ne compte que les ids absorbés). */
+  private contactCount = 0;
+
   constructor(
     private readonly store: Store,
     private readonly container: HTMLElement,
@@ -69,6 +76,10 @@ export class NotificationsAdminView {
     private readonly client: NotifyClient | null,
     /** Hôte de modale de l'app — les formulaires s'ouvrent dans LA modale standard (même UX que Forms.*). */
     private readonly host: FormHost,
+    /** Source du sélecteur de CONTACT (picker async) — typée sur le CONTRAT et construite par
+        main.ts : la vue ne connaît ni le lecteur serveur ni la construction de la source
+        (principe n°2, même découplage que `client`/`host`). */
+    private readonly contactPicker: EntityPickerCandidates,
   ) {}
 
   /** Activation de la sous-page (onShow) : (re)construit l'ossature puis charge l'onglet courant. */
@@ -321,25 +332,35 @@ export class NotificationsAdminView {
      2) ABONNEMENTS (routage par type d'événement)
      -------------------------------------------------------------------------- */
 
-  /** HYDRATATION À LA DEMANDE du carnet de contacts (chantier lazy-load, cf. docs/hydratation.md).
-      Cette page a besoin de la liste COMPLÈTE des contacts, pas d'une page : elle RÉSOUT des libellés
-      par identifiant (tables des abonnements et de l'historique) et alimente un `<select>` où doit
-      figurer CHAQUE contact du document. Le gain du chargement paresseux est au BOOT ; une surface qui
-      a réellement besoin du tout le charge à son ouverture — une fois (l'état passe à `full`, les
-      appels suivants sont des no-op), et sans aucun test de mode : en mode fichier, tout est déjà
-      `full` par construction, `hydrate` ne fait rien. Parallélisée avec les appels du service : les
-      deux I/O sont indépendantes. */
-  private hydrateContacts(): Promise<string[]> { return this.store.hydrate(["contacts"]); }
+  /** RÉSOLUTION GROUPÉE des libellés de contacts (patron vague 4 du chantier lazy-load, cf.
+      docs/hydratation.md) : cette page n'a plus besoin du carnet ENTIER — ses tables ne résolvent
+      que les `contact_id` RÉFÉRENCÉS par ce qu'elles affichent, et le sélecteur de la modale est
+      serveur-piloté (picker async). On ne charge donc que les ids MANQUANTS au cache, en UN
+      `fetchMany` (absorbé + indexé) — rien du tout en mode fichier, par construction (tout y est
+      en cache, la partition rend vide). Un ÉCHEC est AVALÉ (trace console) : mieux vaut une ligne
+      « (contact introuvable) » qu'une page en erreur — divergence ASSUMÉE avec l'hydratation
+      complète du carnet qu'employait cette page, qui rejetait (doctrine vague 4, parité `prepareLabels`). */
+  private async resolveContactLabels(ids: ReadonlyArray<string | null | undefined>): Promise<void> {
+    const links = ids.filter((id): id is string => !!id).map((id) => ({ kind: "contact", id }));
+    const missing = TargetLabelResolution.missingByCollection(
+      links, () => "contacts", (collection, id) => !!this.store.get(collection, id));
+    if (!missing["contacts"] || !missing["contacts"].length) return;
+    try { await this.store.fetchMany("contacts", missing["contacts"]); }
+    catch (error) { console.warn("[notifications] résolution des libellés de contacts impossible :", error); }
+  }
 
   private async loadAbonnements(): Promise<void> {
     this.message(I18n.t("notify.abonnements.loading"));
     await this.guarded(async () => {
       // Les instances servent au sélecteur de canal ET à la résolution du libellé de canal en table.
-      // Le carnet de contacts est hydraté EN MÊME TEMPS : sans lui, la table et le `<select>` de la
-      // modale d'abonnement seraient vides en mode API (collection chargée paresseusement).
-      const [subs, instances] = await Promise.all([
-        this.client!.listSubscriptions(), this.client!.listInstances(), this.hydrateContacts(),
+      // Le COMPTE de contacts (exact, mémoïsé G6) est relevé EN MÊME TEMPS — il porte la note
+      // « aucun contact » de la modale ; les trois I/O sont indépendantes.
+      const [subs, instances, contactCount] = await Promise.all([
+        this.client!.listSubscriptions(), this.client!.listInstances(), this.store.countOf("contacts"),
       ]);
+      this.contactCount = contactCount;
+      // Libellés de la colonne « Contact » : seuls les ids référencés par les abonnements reçus.
+      await this.resolveContactLabels(subs.map((s) => s.contact_id));
       this.renderAbonnementsList(subs, instances);
     });
   }
@@ -394,22 +415,19 @@ export class NotificationsAdminView {
     const scopeSel = FormControls.select(scopeOpts, defaultScope);
     root.appendChild(FormControls.fieldRow(I18n.t("notify.abonnements.scopeField"), scopeSel, docId ? I18n.t("notify.abonnements.scopeHintDoc") : I18n.t("notify.abonnements.scopeHintNoDoc")));
 
-    // Contact : carnet du DOCUMENT COURANT (référence souple contact_id).
-    const contacts = this.store.all("contacts") as Array<{ id: string; name?: string }>;
-    const contactOpts = [{ value: "", label: I18n.t("notify.abonnements.contactChoose") }].concat(
-      contacts.slice().sort((a, b) => (a.name || "").localeCompare(b.name || "")).map((c) => ({ value: c.id, label: c.name || I18n.t("lists.ph.noName") })));
-    // Un contact d'un AUTRE document (édition d'un abonnement global) n'est pas dans le carnet courant : on
-    // l'ajoute À LA LISTE passée au picker (même valeur, même libellé) pour ne jamais perdre la valeur en
-    // place — esprit `keepId`. Fait AVANT la construction du contrôle, l'`<option>` posée à la main sur un
-    // `<select>` n'ayant pas d'équivalent sur un entityPicker.
-    if (existing && existing.contact_id && !contacts.some((c) => c.id === existing.contact_id)) {
-      contactOpts.push({ value: existing.contact_id, label: I18n.t("notify.abonnements.contactOther") });
-    }
-    // Contact = ENTITÉ à liste longue (carnet lazy, HYDRATÉ par `loadAbonnements` avant l'ouverture de cette
-    // modale) → sélecteur à recherche (principe n°14) ; la règle d'options ci-dessus ne change pas.
-    const contactSel = FormControls.entityPicker(contactOpts, existing ? existing.contact_id : "");
+    // Contact = ENTITÉ à liste longue SANS règle métier d'options → picker ASYNC (pilote du
+    // chantier « picker async ») : plus d'hydratation préalable du carnet, la SOURCE injectée est
+    // serveur-pilotée (parcours au focus par la route de listing, recherche transverse, libellé de
+    // la valeur résolu à la demande). Un contact d'un AUTRE document (édition d'un abonnement
+    // global) est introuvable dans CE document : le repli `fallbackLabel` reprend le libellé
+    // historique « contact d'un autre document » — la valeur en place n'est jamais perdue.
+    const contactSel = FormControls.entityPickerAsync(this.contactPicker, existing ? existing.contact_id : "", {
+      placeholder: I18n.t("notify.abonnements.contactChoose"),
+      fallbackLabel: () => I18n.t("notify.abonnements.contactOther"),
+    });
     root.appendChild(FormControls.fieldRow(I18n.t("notify.admin.colContact"), contactSel, I18n.t("notify.abonnements.contactHint")));
-    if (!contacts.length) this.appendNote(I18n.t("notify.abonnements.noContact"), root);
+    // Compte EXACT relevé par `loadAbonnements` (G6) — `all("contacts").length` mentirait en régime lazy.
+    if (!this.contactCount) this.appendNote(I18n.t("notify.abonnements.noContact"), root);
 
     const channelSel = FormControls.select([{ value: "email", label: I18n.t("notify.abonnements.chanEmail") }, { value: "sms", label: I18n.t("notify.abonnements.chanSms") }], existing ? existing.channel : "email");
     root.appendChild(FormControls.fieldRow(I18n.t("notify.abonnements.channelField"), channelSel, I18n.t("notify.abonnements.channelHint")));
@@ -583,12 +601,10 @@ export class NotificationsAdminView {
   private async loadHistorique(): Promise<void> {
     this.message(I18n.t("notify.historique.loading"));
     await this.guarded(async () => {
-      // Même hydratation à la demande que les abonnements : la colonne « Contact » résout un
-      // `contact_id` en NOM via le carnet du document (cf. hydrateContacts).
-      const [page] = await Promise.all([
-        this.client!.listLog({ limit: NotificationsAdminView.LOG_LIMIT, offset: this.logOffset }),
-        this.hydrateContacts(),
-      ]);
+      // Même résolution GROUPÉE que les abonnements : la colonne « Contact » résout un `contact_id`
+      // en NOM — on ne charge que les ids référencés par la PAGE reçue (cf. resolveContactLabels).
+      const page = await this.client!.listLog({ limit: NotificationsAdminView.LOG_LIMIT, offset: this.logOffset });
+      await this.resolveContactLabels(page.entries.map((e) => e.contact_id));
       this.renderHistorique(page);
     });
   }

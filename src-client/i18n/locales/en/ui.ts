@@ -74,6 +74,7 @@ export const ui = {
   entityPicker: {
     clear: "Clear the selection",
     searchPlaceholder: "Search…",
+    resolving: "Loading…",
   },
   autocomplete: {
     create: "+ Create",
