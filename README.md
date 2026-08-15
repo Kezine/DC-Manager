@@ -188,11 +188,21 @@ Lues par le serveur au démarrage — cœur dans [`src-server/src/index.ts`](src
 | `SSO_LOGIN_URL` | *(vide)* | URL de connexion SSO du bouton « Connexion » (écran d'accueil, si non authentifié). Macro `${clbkUrl}` → URL courante encodée (retour après login). Vide = pas de bouton. |
 | `DEV_USER` | — | Nom de l'utilisateur factice (mode dev). |
 | `BASIC_AUTH` | — | `"user:pass"` → impose une Basic Auth navigateur (dev). Prioritaire sur le SSO. |
+| `ROLES_FILE` | `<DOCS_DIR>/roles.json` | **Politique d'AUTORISATION** (RBAC) : fichier JSON `{ "users": { "<id-ou-login>": ["rôle"] }, "roles": { "<rôle custom>": ["grants"] } }`, relu **à chaud**. **Fail-closed** : absent/illisible → personne n'a de rôle (403 partout sauf `GET /me`). Cf. [`docs/auth.md`](docs/auth.md). |
+| `BOOTSTRAP_ADMIN_IDS` | *(vide)* | Ids canoniques ou logins (séparés par des **virgules**) promus rôle `admin`, **en plus** de `ROLES_FILE`. Amorçage d'un déploiement neuf : sans elle, le premier administrateur serait verrouillé dehors par la politique qu'il doit écrire. |
 | `DCMANAGER_SECRETS_KEY` | — | **Clé de chiffrement** des secrets serveur (coffre `SecretBox` partagé, lu par les modules — pas par `index.ts`). Requise par les modules **VM/Proxmox** (jetons des providers), **clients wifi** (clés d'API des contrôleurs), **réplication des interventions vers un tracker** (jetons d'API des trackers — jetons en **ÉCRITURE**, cf. `docs/jira-interventions.md`) et **notifications** (jetons de webhook) : absente → ces modules se désactivent et le signalent (**503 explicite**) ; le serveur démarre quand même. **Doit être un secret LONG et ALÉATOIRE (≥ 16 caractères** — refusé au démarrage du module sinon, car la clé en est un simple SHA-256 sans sel : une passphrase courte rendrait un backup de la base force-brutable hors ligne). La générer, p. ex. `openssl rand -base64 32`. **Seule variable lue** pour ce coffre : aucun autre nom n'est reconnu. La PKI/certs est *zéro-connaissance* (chiffrement navigateur) et **n'en dépend pas**. |
 | `JIRA_BASE_URL` | *(vide)* | **Base d'URL Jira** (module **interventions**) pour fabriquer un lien vers un ticket depuis une clé saisie à la main (ex. `https://monorg.atlassian.net/browse/`). Trimmée ; vide/absente → le client masque le lien. Exposée par `GET …/interventions/meta` ; simple RÉFÉRENCE (aucun appel Jira côté serveur). ⚠ **Sans rapport avec le pont de réplication** (`docs/jira-interventions.md`), qui PERSISTE le lien de chaque ticket au moment de la synchro et n'a donc aucune variable d'environnement propre. |
 
 **Authentification.** L'app **ne gère pas le login** : elle transmet les cookies de
 session au backend, qui valide via un SSO externe (ou le proxifie).
+
+**Autorisation (rôles / permissions).** *Qui est l'appelant* et *ce qu'il peut* sont deux questions
+distinctes. Une fois authentifié, l'accès est réglé par un **RBAC à permissions atomiques**
+(`dc.ip:update`, `certs:pki`…) : des rôles (`dc-viewer`, `dc-editor`, `cert-manager`, `admin`…) sont
+associés aux utilisateurs dans `ROLES_FILE`. **Opt-in strict** — un utilisateur authentifié SANS rôle
+n'a **aucune** permission et reçoit 403 partout sauf `GET /me`. Les déploiements existants ne changent
+pas de comportement : modes dev/basic et SSO `adminRight = "SUPER_ADMIN"` valent le rôle `admin`.
+Modèle complet, catalogue, format du fichier et procédures : [`docs/auth.md`](docs/auth.md).
 
 > ⚠️ L'intégration SSO actuelle répond à un **besoin personnel** (contrat spécifique : cookie de
 > session proxifié vers un endpoint renvoyant `{ logged, adminRight, expireDate }`, accès réservé à

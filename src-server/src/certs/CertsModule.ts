@@ -52,6 +52,16 @@ import { CertExpiryWatcher, type CertProblemReporter } from "./CertExpiryWatcher
 /** Période du timer d'échéances : 1 h (l'échéance se mesure en jours — inutile plus fin). */
 const EXPIRY_TICK_MS = 3600 * 1000;
 
+/** GARDES D'ACCÈS injectées — DÉPENDANCE INVERSÉE, exactement le patron de `ProblemReporter` : le
+    module déclare ICI le contrat MINIMAL qu'il attend du contrôle d'accès du cœur, et n'importe
+    RIEN de `access/`. C'est index.ts qui PONTE (typage STRUCTUREL) l'`AccessControl` au bootstrap.
+    ⚠ La quasi-duplication de cette interface d'une feature à l'autre est ASSUMÉE, comme celle des
+    `*ProblemReporter` : c'est le prix — trois lignes — de l'amovibilité de chaque module. */
+export interface CertsAccessGuards {
+  /** Middleware qui laisse passer si l'appelant détient la permission, 403 sinon. */
+  require(permission: string): express.RequestHandler;
+}
+
 export class CertsModule {
   private timer: ReturnType<typeof setInterval> | null = null;
 
@@ -69,9 +79,12 @@ export class CertsModule {
     private readonly problems: CertProblemReporter | null,
     private readonly configError: string | null,
     private readonly log: Logger,
+    /** Gardes d'accès injectées (cf. `CertsAccessGuards`) — REQUISES : un module sans garde serait
+        ouvert à tout utilisateur ayant une permission quelconque, ce que l'ACL existe pour empêcher. */
+    private readonly access: CertsAccessGuards,
   ) {}
 
-  static create(opts: { docs: DocumentStore; dataDir: string; sqlite: SqliteCtor; log?: Logger; live?: LivePublisher; problems?: CertProblemReporter }): CertsModule {
+  static create(opts: { docs: DocumentStore; dataDir: string; sqlite: SqliteCtor; access: CertsAccessGuards; log?: Logger; live?: LivePublisher; problems?: CertProblemReporter }): CertsModule {
     const log = opts.log || new Logger("error");
     const live = opts.live || null;
     try {
@@ -79,11 +92,11 @@ export class CertsModule {
       const watcher = opts.problems ? new CertExpiryWatcher(db, opts.problems, undefined, undefined, log) : null;
       log.info("module certificats prêt (certs.db — zéro-connaissance, aucune clé serveur"
         + (watcher ? ", suivi d'échéances actif)" : ", suivi d'échéances SANS rapporteur)"));
-      return new CertsModule(opts.docs, live, db, watcher, opts.problems || null, null, log);
+      return new CertsModule(opts.docs, live, db, watcher, opts.problems || null, null, log, opts.access);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       log.error("module certificats en erreur — démarré désactivé", message);
-      return new CertsModule(opts.docs, live, null, null, opts.problems || null, message, log);
+      return new CertsModule(opts.docs, live, null, null, opts.problems || null, message, log, opts.access);
     }
   }
 
@@ -119,7 +132,11 @@ export class CertsModule {
   extension(): ApiExtension {
     const router = express.Router({ mergeParams: true });
 
-    router.get("/", (req, res) => {
+    // 🚨 ORDRE : la garde de PERMISSION passe AVANT le 503 « module indisponible » (qui est en tête
+    // de chaque handler) — un appelant sans droit ne doit pas apprendre si la feature est
+    // configurée, et encore moins pourquoi elle ne l'est pas. Un middleware précède le handler :
+    // l'ordre est donc garanti ici par construction.
+    router.get("/", this.access.require("certs:read"), (req, res) => {
       const ctx = this.context(req, res); if (!ctx) return;
       const q: any = (req.query && typeof req.query === "object") ? req.query : {};
       // RÉTRO-COMPATIBILITÉ : sans AUCUN paramètre de listing, comportement HISTORIQUE (une page géante,
@@ -134,7 +151,7 @@ export class CertsModule {
 
     /* ---- Paramètres PKI (déclarés AVANT /:id — « pki » n'est pas un id) ---- */
 
-    router.get("/pki", (req, res) => {
+    router.get("/pki", this.access.require("certs:read"), (req, res) => {
       const ctx = this.context(req, res); if (!ctx) return;
       const params = ctx.db.pkiParams(ctx.docId);
       // COFFRES (cadrage §11) : la réponse porte TOUS les coffres (`vaults`, default en tête) — le client
@@ -145,7 +162,7 @@ export class CertsModule {
       res.json(params ? { initialized: true, ...params, vaults } : { initialized: false });
     });
 
-    router.put("/pki", (req, res) => {
+    router.put("/pki", this.access.require("certs:pki"), (req, res) => {
       const ctx = this.context(req, res); if (!ctx) return;
       const body: any = (req.body && typeof req.body === "object") ? req.body : {};
       try {
@@ -170,7 +187,7 @@ export class CertsModule {
     // même DEK (zéro-connaissance), l'opération est encadrée par un VERROU OPTIMISTE
     // (prev_wrapped_dek → 409 conflict si le coffre a changé entre-temps) et par
     // l'HISTORISATION de l'ancienne enveloppe (récupérable — cf. CertsDb.rekeyPki).
-    router.put("/pki/rekey", (req, res) => {
+    router.put("/pki/rekey", this.access.require("certs:pki"), (req, res) => {
       const ctx = this.context(req, res); if (!ctx) return;
       const body: any = (req.body && typeof req.body === "object") ? req.body : {};
       try {
@@ -195,7 +212,7 @@ export class CertsModule {
 
     // COFFRES ADDITIONNELS (cadrage §11) : initialisation d'un coffre nommé (ex. « root ») — sa propre
     // DEK emballée sous SA phrase, générées côté client. Le coffre « default » passe par PUT /pki.
-    router.put("/pki/vaults/:vaultId", (req, res) => {
+    router.put("/pki/vaults/:vaultId", this.access.require("certs:pki"), (req, res) => {
       const ctx = this.context(req, res); if (!ctx) return;
       const body: any = (req.body && typeof req.body === "object") ? req.body : {};
       try {
@@ -214,7 +231,7 @@ export class CertsModule {
 
     // CHANGEMENT DE PHRASE d'un coffre (générique — « default » y passe aussi, /pki/rekey reste l'alias
     // historique) : mêmes garde-fous que /pki/rekey (verrou optimiste + historisation par coffre).
-    router.put("/pki/vaults/:vaultId/rekey", (req, res) => {
+    router.put("/pki/vaults/:vaultId/rekey", this.access.require("certs:pki"), (req, res) => {
       const ctx = this.context(req, res); if (!ctx) return;
       const body: any = (req.body && typeof req.body === "object") ? req.body : {};
       try {
@@ -232,7 +249,7 @@ export class CertsModule {
 
     /* ---- Racines + agrégats (déclarée AVANT /:id — « roots » n'est pas un id, comme /pki) ---- */
 
-    router.get("/roots", (req, res) => {
+    router.get("/roots", this.access.require("certs:read"), (req, res) => {
       const ctx = this.context(req, res); if (!ctx) return;
       const q: any = (req.query && typeof req.query === "object") ? req.query : {};
       res.json(ctx.db.listRoots(ctx.docId, CertsModule.parseListQuery(q, true))); // forme ListResult + agrégats
@@ -240,14 +257,14 @@ export class CertsModule {
 
     /* ---- Certificats ---- */
 
-    router.get("/:id", (req, res) => {
+    router.get("/:id", this.access.require("certs:read"), (req, res) => {
       const ctx = this.context(req, res); if (!ctx) return;
       const cert = ctx.db.getOne(ctx.docId, (req.params as any).id);
       if (!cert) { res.status(404).json({ error: "certificat inconnu" }); return; }
       res.json({ certificate: cert }); // key_enc INCLUS — GET unitaire uniquement (Q5)
     });
 
-    router.put("/:id", (req, res) => {
+    router.put("/:id", this.access.require("certs:write"), (req, res) => {
       const ctx = this.context(req, res); if (!ctx) return;
       const id = (req.params as any).id as string;
       const body: any = (req.body && typeof req.body === "object") ? req.body : {};
@@ -276,7 +293,7 @@ export class CertsModule {
     // `?force=true` = INTENTION EXPLICITE de supprimer un certificat ENCORE VALIDE. Sans lui, un tel
     // certificat est refusé (428) : par l'API il n'y a aucun prompt, c'est donc la seule barrière
     // contre un effacement naïf d'un certificat en production. Révoqué/expiré : aucune cérémonie.
-    router.delete("/:id", (req, res) => {
+    router.delete("/:id", this.access.require("certs:write"), (req, res) => {
       const ctx = this.context(req, res); if (!ctx) return;
       const id = (req.params as any).id as string;
       const force = String((req.query as any)?.force ?? "") === "true";

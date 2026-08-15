@@ -48,8 +48,8 @@ enregistrement » pour toute l'application.
 | `src-server/src/RelationalRepository.list` | Listing d'UNE collection : LIKE sur `search` + `where` de colonnes + pagination + tri `sort`/`dir` (liste blanche partagée `ListOrder`, cf. § « Tri SERVEUR du régime pagé ») — la route que consomment les listings serveur-pilotés. |
 | `src-shared/ListOrder.ts` + `src-client/core/ListServerSort.ts` | Tri SERVEUR du régime pagé (pagination ordonnée complète) : liste blanche des colonnes triables DÉRIVÉE de la spec + fragment `ORDER BY` (partagé), et mapping critère de vue → champ du modèle (client, pur). |
 | `src-shared/ListFacets.ts` + `src-client/core/CollectionFacetCache.ts` | FACETTES du régime pagé : liste blanche des colonnes facettables DÉRIVÉE de la spec + `SELECT DISTINCT` (partagé), et valeurs async servies en synchrone aux options de filtre (client, pur). |
-| `GET /api/documents/:docId/search` | La route transverse (api.ts) — même garde que toute lecture du document (session SSO + SUPER_ADMIN). |
-| `GET /api/documents/:docId/facets/:collection` | Valeurs DISTINCTES d'une colonne (api.ts) — même garde, lecture PURE (cf. § « Facettes du régime pagé »). |
+| `GET /api/documents/:docId/search` | La route transverse (api.ts). Garde : « ≥ 1 lecture documentaire », puis **assiette RESTREINTE** aux collections que l'appelant a le droit de lire — l'intersection est passée au dépôt, aucune requête n'est émise pour une collection interdite (cf. [`auth.md`](auth.md) § 8.3). |
+| `GET /api/documents/:docId/facets/:collection` | Valeurs DISTINCTES d'une colonne (api.ts) — lecture PURE (cf. § « Facettes du régime pagé »), gardée par la lecture du domaine de la collection. |
 
 ## Exécution DOUBLE (principe n°15)
 

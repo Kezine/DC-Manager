@@ -149,6 +149,14 @@
     // (lifecycle.db, anti-bruit du 1er balayage) testé avec better-sqlite3 RÉEL (driver injecté).
     "src-server/src/lifecycle/WarrantyExpiryWatcher.ts",
     "src-server/src/lifecycle/LifecycleDb.ts",
+    // CONTRÔLE D'ACCÈS (service CORE, lot 1 auth/ACL) — testable SANS Express : `access/` déclare ses
+    // propres vues minimales de la requête/réponse (cf. AccessControl), donc aucune dépendance runtime
+    // n'entre ici. `RolesConfig` est PUR (JSON → politique) ; `FileRoleProvider` touche `node:fs`
+    // (fichiers temporaires réels en test) ; `AccessControl` s'éprouve avec des req/res factices.
+    // RoleProvider.ts (types seuls) est tiré transitivement. api.ts/server.ts restent HORS test.
+    "src-server/src/access/RolesConfig.ts",
+    "src-server/src/access/FileRoleProvider.ts",
+    "src-server/src/access/AccessControl.ts",
     // Annuaire utilisateurs (service CORE) — logique PURE (UserProfiles : clé canonique, normalisation,
     // caviardage, parsing d'ids) + impl v1 (AuthCacheUserResolver : cache mémoire + capture) testée SANS
     // SQLite (db null) + snapshot (UsersDb, users.db 1 table typée) testé avec better-sqlite3 RÉEL (driver

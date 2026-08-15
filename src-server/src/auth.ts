@@ -7,8 +7,12 @@ import type { ProfileSink } from "./users/UserResolver.js";   // TYPE seul (annu
    on proxifie le JETON (cookie nommé `cookieName`) au SSO `ssoUrl` qui répond
    avec l'utilisateur. On met en cache le résultat (clé = hash du jeton) tant
    que le cookie ne change pas ET que `expireDate` n'est pas dépassée.
-   Accès autorisé uniquement si `logged && adminRight === "SUPER_ADMIN"`
-   (la gestion fine des rôles viendra plus tard).
+
+   ⚠ PÉRIMÈTRE : cette classe répond à « QUI est l'appelant ? », et à rien d'autre.
+   « Ce qu'il PEUT » relève de l'AUTORISATION, service distinct et orthogonal
+   (`access/AccessControl`, politique de rôles `access/RoleProvider` — cf.
+   docs/auth.md). Le résultat rendu ici y entre comme une simple donnée d'entrée :
+   `adminRight === "SUPER_ADMIN"` et `dev` y valent le rôle `admin` (rétrocompat).
 
    ⚠️ Ce contrat SSO répond à un BESOIN PERSONNEL (endpoint renvoyant
    { logged, adminRight, expireDate }) et est peu réutilisable tel quel. En
@@ -107,7 +111,11 @@ export class Auth {
     if (this.sink && r.logged && r.user) this.sink.remember(r.user);
   }
 
-  /** Accès autorisé ? (connecté ET SUPER_ADMIN). */
+  /** Prédicat d'autorisation HISTORIQUE (connecté ET SUPER_ADMIN).
+      ⚠ PLUS AUCUN APPELANT : l'autorisation passe par `AccessControl` (permissions atomiques),
+      où cette règle survit sous forme de RÈGLE DE RÉTROCOMPATIBILITÉ — `SUPER_ADMIN` → rôle
+      `admin` (cf. `access/FileRoleProvider`, docs/auth.md). Conservé le temps du refactor de
+      cette classe en providers d'authentification ; à retirer avec lui. */
   isAuthorized(r: SsoResult): boolean { return !!r.logged && r.adminRight === "SUPER_ADMIN"; }
 
   /** Jeton = valeur du cookie `cookieName` (sinon tout l'en-tête Cookie, proxifié tel quel). */

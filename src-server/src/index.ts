@@ -9,6 +9,8 @@ import { Server } from "./server.js";
 import { Logger } from "./logger.js";
 import { UsersDb } from "./users/UsersDb.js";   // snapshot de l'annuaire (users.db) — service CORE
 import { AuthCacheUserResolver } from "./users/AuthCacheUserResolver.js";   // impl v1 de l'annuaire (cache d'auth + snapshot)
+import { AccessControl } from "./access/AccessControl.js";   // contrôle d'accès (service CORE) — gardes de permission, cf. docs/auth.md
+import { FileRoleProvider } from "./access/FileRoleProvider.js";   // politique de rôles v1 : roles.json relu à chaud, fail-closed
 import { VmModule } from "./vm/VmModule.js";   // module OPTIONNEL (feature amovible) — seul câblage hors de vm/
 import { WifiModule } from "./wifi/WifiModule.js";   // module OPTIONNEL (feature amovible) — seul câblage hors de wifi/
 import { NotifyModule } from "./notify/NotifyModule.js";   // module OPTIONNEL (feature amovible) — seul câblage hors de notify/
@@ -45,12 +47,28 @@ const userResolver = new AuthCacheUserResolver(usersDb, log.child("users"));
 // Auth reçoit l'annuaire comme PUITS de profils (ProfileSink) : chaque authentification réussie y est capturée,
 // sans qu'Auth connaisse l'implémentation (découplage — principe n°2).
 const auth = new Auth(log.child("auth"), { ssoUrl: SSO_URL, cookieName: COOKIE_NAME, devUser: DEV_USER, basicAuth: BASIC_AUTH }, userResolver);
+// AUTORISATION (service CORE, cf. docs/auth.md) — orthogonale à l'authentification ci-dessus :
+// `Auth` dit QUI est l'appelant, `AccessControl` dit CE QU'IL PEUT. La POLITIQUE (utilisateur →
+// rôles) vit dans un provider sélectionné ici : v1 = un `roles.json` relu à chaud (ROLES_FILE,
+// défaut <DOCS_DIR>/roles.json) + les administrateurs d'amorçage de BOOTSTRAP_ADMIN_IDS.
+// Fail-closed : fichier absent/illisible → personne n'a de rôle, jamais de repli ouvert.
+const roleProvider = FileRoleProvider.fromEnv(process.env, DOCS_DIR, log.child("access"));
+roleProvider.start();   // veille de rechargement à chaud (sondage, `persistent: false` — ne retient pas l'arrêt)
+// PONT vers l'authentification : `AccessControl` ne connaît PAS Express (il déclare ses propres
+// vues minimales de la requête, cf. AccessControl) ni `Auth`. C'est ici, au bootstrap — le seul
+// endroit qui connaît déjà les deux — que la validation de session lui est INJECTÉE. Le cast
+// traverse cette frontière de types volontairement étroite ; il ne masque aucune conversion.
+const access = new AccessControl({
+  session: (req) => auth.validate(req as any),
+  roles: roleProvider,
+  log: log.child("access"),
+});
 const docs = new DocumentStore(DOCS_DIR, Database as unknown as SqliteCtor, log.child("docs"));
 const live = new LiveBus(log.child("live"));
 // Notifications (alertes persistantes + rappels) : mêmes prérequis que vm/ (DCMANAGER_SECRETS_KEY
 // pour chiffrer les jetons des webhooks — module inactif en 503 explicite sans clé, cf. NotifyModule).
 // CRÉÉ AVANT vm : le module VM lui SIGNALE ses échecs de synchro (producteur vm-sync-failure, S4).
-const notify = NotifyModule.create({ docs, dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, log: log.child("notify") });
+const notify = NotifyModule.create({ docs, dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, access, log: log.child("notify") });
 // Inventaire VM (Proxmox…) : providers PAR DOCUMENT. Clé DCMANAGER_SECRETS_KEY présente (SecretBox
 // partagé — clé UNIQUE, sans repli depuis le 2026-07-20) → stockage DB chiffré (DOCS_DIR/vm-providers.db,
 // même driver better-sqlite3 injecté que DocumentStore) + CRUD, seule source de config ;
@@ -59,7 +77,7 @@ const notify = NotifyModule.create({ docs, dataDir: DOCS_DIR, sqlite: Database a
 // amovibles) : chaque échec de synchro persistant est signalé (raise) au module notifications, chaque
 // retour à la normale le clôt (resolve). L'anti-spam/rappels vit ENTIÈREMENT côté notify (no-op si
 // le module est inactif, faute de clé).
-const vm = VmModule.create({ docs, live, dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, log: log.child("vm"),
+const vm = VmModule.create({ docs, live, dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, access, log: log.child("vm"),
   problems: { raise: (k, e) => notify.raise(k, e), resolve: (k) => notify.resolve(k) } });
 // Inventaire des CLIENTS WIFI (contrôleur UniFi en 1re implémentation — la marque n'est qu'un adaptateur,
 // cf. docs/wifi-unifi.md § « Ajouter un provider d'une autre marque ») : providers PAR DOCUMENT, dans
@@ -68,13 +86,13 @@ const vm = VmModule.create({ docs, live, dataDir: DOCS_DIR, sqlite: Database as 
 // absente → module inactif (toutes les routes en 503 actionnable, cf. WifiModule).
 // PONT vers notify (typage STRUCTUREL — wifi/ n'importe RIEN de notify/, les deux features restent
 // amovibles) : chaque échec de synchro persistant est signalé (raise), chaque retour à la normale le clôt.
-const wifi = WifiModule.create({ docs, live, dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, log: log.child("wifi"),
+const wifi = WifiModule.create({ docs, live, dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, access, log: log.child("wifi"),
   problems: { raise: (k, e) => notify.raise(k, e), resolve: (k) => notify.resolve(k) } });
 // Certificats (PKI interne, ZÉRO-CONNAISSANCE : crypto côté navigateur, le serveur ne stocke que des
 // métadonnées + blobs chiffrés client — aucune clé d'environnement requise, cf. CertsModule).
 // PONT vers notify (typage structurel, comme vm) : le veilleur d'échéances signale cert-expiry
 // (seuils 30/14/7 j) et clôt au renouvellement/révocation/suppression.
-const certs = CertsModule.create({ docs, live, dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, log: log.child("certs"),
+const certs = CertsModule.create({ docs, live, dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, access, log: log.child("certs"),
   problems: { raise: (k, e) => notify.raise(k, e), resolve: (k) => notify.resolve(k) } });
 // Cycle de vie matériel (veilleur de GARANTIES — cadrage garantie-alerte 2026-08-15) : signale les
 // échéances de garantie (warranty-expiring ≤ 90 j / warranty-expired) des équipements ET sous-équipements
@@ -117,7 +135,7 @@ const lifecycle = LifecycleModule.create({ dataDir: DOCS_DIR, sqlite: Database a
 // La boucle de construction se dénoue par une FERMETURE : le rappel lit la variable AU MOMENT de
 // l'appel — donc après l'affectation trois lignes plus bas. Pont absent ⇒ `null` ⇒ rappel inerte.
 let tracker: TrackerModule | null = null;
-const interventions = InterventionsModule.create({ docs, live, dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, log: log.child("interventions"),
+const interventions = InterventionsModule.create({ docs, live, dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, access, log: log.child("interventions"),
   problems: { raise: (k, e) => notify.raise(k, e), resolve: (k) => notify.resolve(k) },
   onWrite: (docId, interventionId, kind) => tracker?.onInterventionWrite(docId, interventionId, kind) });
 // Réplication des interventions/incidents dans un tracker distant (Atlassian Jira Cloud en 1re
@@ -126,10 +144,10 @@ const interventions = InterventionsModule.create({ docs, live, dataDir: DOCS_DIR
 // (SecretBox PARTAGÉ) ; absente → module inactif, routes en 503 actionnable et hook inerte — les
 // interventions, elles, restent PLEINEMENT fonctionnelles. PONT vers notify (typage structurel) :
 // chaque passe en échec est signalée, chaque retour à la normale la clôt.
-const trackerModule = TrackerModule.create({ docs, interventions, live, dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, log: log.child("tracker"),
+const trackerModule = TrackerModule.create({ docs, interventions, live, dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, access, log: log.child("tracker"),
   problems: { raise: (k, e) => notify.raise(k, e), resolve: (k) => notify.resolve(k) } });
 tracker = trackerModule;
-new Server({ docs, auth, live, resolver: userResolver, clientDir: CLIENT_DIR, apiBase: API_BASE, loginUrl: SSO_LOGIN_URL, log, extensions: [vm.extension(), wifi.extension(), notify.extension(), certs.extension(), interventions.extension(), trackerModule.extension()] }).listen(PORT);
+new Server({ docs, auth, live, resolver: userResolver, access, clientDir: CLIENT_DIR, apiBase: API_BASE, loginUrl: SSO_LOGIN_URL, log, extensions: [vm.extension(), wifi.extension(), notify.extension(), certs.extension(), interventions.extension(), trackerModule.extension()] }).listen(PORT);
 vm.start();   // synchros périodiques (interval_sec > 0) — après l'écoute : le serveur répond pendant une 1re synchro lente
 wifi.start();   // synchros périodiques des clients wifi — même raison que vm.start()
 notify.start();   // timer de rappels (tick 60 s, unref) — après l'écoute, comme vm
@@ -153,6 +171,7 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
     try { lifecycle.stop(); } catch (e) { log.warn("lifecycle.stop a échoué", (e as any) && (e as any).message); }
     try { interventions.stop(); } catch (e) { log.warn("interventions.stop a échoué", (e as any) && (e as any).message); }
     try { trackerModule.stop(); } catch (e) { log.warn("tracker.stop a échoué", (e as any) && (e as any).message); }
+    try { roleProvider.stop(); } catch (e) { log.warn("roleProvider.stop a échoué", (e as any) && (e as any).message); }
     try { usersDb?.close(); } catch (e) { log.warn("usersDb.close a échoué", (e as any) && (e as any).message); }
     try { docs.closeAll(); } catch (e) { log.warn("closeAll a échoué", (e as any) && (e as any).message); }
     process.exit(0);

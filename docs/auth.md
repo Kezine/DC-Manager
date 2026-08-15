@@ -1,0 +1,453 @@
+# Authentification & autorisation (RBAC)
+
+Deux questions **orthogonales**, deux mécanismes qu'on ne fusionne pas :
+
+- **QUI est l'appelant ?** — l'*authentification*. L'application ne gère pas le login : elle
+  proxifie un cookie de session à un SSO externe, ou se contente d'un mode dev / d'un challenge
+  Basic. C'est `src-server/src/auth.ts` (`Auth`), décrit dans `README.md` § 4 et
+  [`../src-server/RUN.md`](../src-server/RUN.md) § « Authentification ».
+- **CE QU'IL PEUT** — l'*autorisation*, objet de ce document. Un **RBAC à permissions atomiques** :
+  un catalogue de permissions, des rôles qui les regroupent, une politique qui associe des rôles à
+  des utilisateurs, et des **gardes** posées sur chaque route.
+
+Les deux se rejoignent en un seul point, au bootstrap (`index.ts`), où la validation de session est
+**injectée** dans le contrôle d'accès. Changer de mode d'authentification ne touche donc pas à la
+politique, et inversement.
+
+## Vue d'ensemble
+
+```
+  REQUÊTE ─► requireAuth (garde GLOBALE, api.ts)                          ┌── src-shared/Permissions ──┐
+              │  ① Auth.validate  ──────────────►  session (QUI)          │  carte collection→domaine  │
+              │     !logged ⇒ 401                                         │  catalogue atomique        │
+              │  ② RoleProvider.rolesOf ────────►  rôles                   │  ROLE_PRESETS              │
+              │     (FileRoleProvider : roles.json + BOOTSTRAP_ADMIN_IDS)  │  PermissionSet (jokers)    │
+              │  ③ rôles → grants → PermissionSet ──────────────┐         └────────────┬───────────────┘
+              │     set VIDE ⇒ 403  (« authentifié ≠ autorisé ») │                      │ (partagé front ⇄ back)
+              ▼                                                  ▼                      ▼
+        GARDE DE ROUTE                                     req.authAccess          CLIENT (mode API)
+          access.require("dc.ip:update")                                            reconstruit le même
+          access.requireCollection("read")   ─ 403 { permission } ─►                PermissionSet depuis
+          access.requireBatch / requireAnyDocRead / …                               `GET /me`.permissions
+              │
+              ▼  HANDLER
+```
+
+## 1. Le modèle : permissions atomiques, grants à jokers
+
+Tout vit dans **`src-shared/Permissions.ts`** — code PARTAGÉ front ⇄ back, sur le patron de
+`ListOrder`/`ListFacets` : une liste blanche déclarative, lue des deux côtés, verrouillée par des
+tests. Le serveur **décide**, le client **anticipe** (masquage des vues et des actions, lot client).
+S'ils dérivaient, l'interface proposerait des gestes que le serveur refuse.
+
+| Notion | Forme | Qui l'emploie |
+|---|---|---|
+| **Permission atomique** | `domaine[.sous-domaine]:action` — `dc.ip:update`, `certs:pki`, `snapshot:write` | ce que les gardes **vérifient** — toujours atomique |
+| **Grant** | idem, jokers admis — `*`, `dc.*:read`, `certs:*`, `dc.ip:*`, `dc.*:*` | ce qu'un rôle **donne** |
+| **Rôle** | un nom → une liste de grants (preset partagé ou définition locale) | ce qu'une politique **associe** à un utilisateur |
+
+**Règles de matching** (elles vivent dans `PermissionSet.has`, et nulle part ailleurs) :
+
+- `*` couvre tout.
+- `<domaine>:*` couvre toutes les actions de ce domaine.
+- `<préfixe>.*:<action>` couvre les **sous-domaines** de `<préfixe>` — `dc.*:read` couvre
+  `dc.ip:read`, mais pas un domaine `dc` nu (il n'en existe pas, et l'ambiguïté ne se tranche pas au
+  plus large). De même, `vm:*` **ne couvre pas** `vm.providers:manage` : un sous-domaine n'est pas
+  son domaine, ce qui garde les jetons des providers hors de portée d'un opérateur VM.
+- Une **vérification** portant un joker est toujours refusée : un check est atomique par contrat, et
+  « faire au mieux » masquerait la faute en ouvrant l'accès.
+- Un grant **malformé** est ignoré, jamais interprété.
+
+La composition multi-rôles est une **union additive**, sans deny : l'ordre des rôles est indifférent,
+et une permission de plus ne peut jamais en retirer une autre.
+
+## 2. Carte collections → domaines
+
+Les 25 collections de `Schema.COLLECTIONS` sont **toutes** rattachées à un domaine. Un test
+d'invariant le vérifie : ajouter une collection sans la mapper **casse la suite de tests** plutôt que
+de laisser sa route générique sans permission utile.
+
+| Domaine | Collections |
+|---|---|
+| `dc.equipment` | `equipments`, `subEquipments`, `ports`, `aggregates`, `spares` |
+| `dc.cabling` | `cables`, `cableBundles`, `cableTypes`, `portTypes`, `waypoints` |
+| `dc.rack` | `racks`, `rackItems` |
+| `dc.site` | `sites`, `datacenters`, `floors`, `groups` (+ pseudo-collections `meta` et `images`) |
+| `dc.ip` | `networks`, `ipNetworks`, `ipAddresses`, `dhcpRanges` |
+| `dc.app` | `applications` |
+| `dc.contact` | `contacts` |
+| `dc.attachment` | `attachments` (métadonnées **et** binaires) |
+| `vm` | `vms` (VMs manuelles comprises — leur CRUD passe par les routes génériques) |
+| `wifi` | `wifiClients` |
+
+Actions : `read`, `create`, `update`, `delete`.
+
+> La découpe est un **compromis lisibilité / grain**, pas une taxonomie : elle est calibrée sur les
+> rôles réels (elle rend `dc-connector` trivial — `dc.cabling:*` plus trois lectures) sans pulvériser
+> le catalogue en 25 domaines que personne n'écrirait à la main.
+
+`meta` et `images` ne sont pas des collections du schéma mais bien de la donnée du document :
+rattachées à `dc.site`, ce sont les réglages et les fonds de plan du lieu.
+
+## 3. Catalogue des permissions
+
+**Cœur** — le CRUD de chacun des 10 domaines ci-dessus, plus quatre gestes d'administration qui ne
+sont pas de la donnée :
+
+| Permission | Ce qu'elle ouvre |
+|---|---|
+| `settings:manage` | réglages globaux de l'instance (`PUT /settings` — document par défaut) |
+| `documents:manage` | création / renommage / (dé)verrouillage / suppression de documents |
+| `snapshot:write` | remplacement **complet** d'un document (`PUT /snapshot`, import `.json`) |
+| `maintenance:run` | purge des binaires orphelins + VACUUM/checkpoint (`POST /maintenance`) |
+
+**Modules amovibles** — chaque module déclare les permissions de ses routes ; le cœur ne les
+connaît pas (voir § 6.2). Retirer un module ne laisse qu'une entrée de catalogue inerte : une
+permission que plus personne ne vérifie n'ouvre rien.
+
+| Module | Permissions |
+|---|---|
+| `vm/` | `vm:read` (partagée avec la lecture de la collection `vms`), `vm:sync`, `vm.providers:manage` |
+| `wifi/` | `wifi:read` (idem `wifiClients`), `wifi:sync`, `wifi.providers:manage` |
+| `tracker/` | `tracker:read`, `tracker:push`, `tracker.providers:manage` |
+| `certs/` | `certs:read`, `certs:write`, `certs:pki` |
+| `interventions/` | `interventions:read`, `interventions:write` |
+| `notify/` | `notify:read`, `notify:manage` |
+| `lifecycle/` | *(aucune — le module n'expose pas de route)* |
+
+`vm:read` et `wifi:read` sont **volontairement** les mêmes permissions que la lecture des collections
+correspondantes : « lire l'inventaire VM » et « lire l'état de la synchro VM » sont un seul droit du
+point de vue de l'utilisateur.
+
+## 4. Rôles
+
+Les **presets** sont une commodité de configuration ; la vérité reste le catalogue atomique.
+La lecture est scopée **par domaine** : il n'existe volontairement pas de « viewer global »
+implicite — « tout voir » s'écrit comme l'union explicite des `*-viewer`, pour qu'aucun droit ne
+s'acquière par distraction.
+
+| Rôle | Grants |
+|---|---|
+| `admin` | `*` |
+| `dc-viewer` | `dc.*:read` |
+| `dc-editor` | `dc.*:*` |
+| `dc-connector` | `dc.cabling:*`, `dc.equipment:read`, `dc.rack:read`, `dc.site:read` |
+| `vm-viewer` | `vm:read` |
+| `vm-operator` | `vm:read`, `vm:sync`, `vm:create`, `vm:update`, `vm:delete` |
+| `wifi-viewer` | `wifi:read` |
+| `wifi-operator` | `wifi:read`, `wifi:sync`, `wifi:create`, `wifi:update`, `wifi:delete` |
+| `cert-viewer` | `certs:read` |
+| `cert-manager` | `certs:read`, `certs:write` (**pas** `certs:pki`) |
+| `intervention-viewer` | `interventions:read`, `tracker:read` |
+| `intervention-editor` | `interventions:read`, `interventions:write`, `tracker:read`, `tracker:push` |
+| `notify-manager` | `notify:*`, `dc.contact:*` |
+
+Deux choix méritent leur justification. **Les opérateurs VM/wifi sont énumérés** plutôt qu'écrits
+`vm:*` : un rôle d'opérateur ne doit pas hériter en silence d'un futur verbe sensible, et la gestion
+des providers — qui porte des **jetons** — reste hors de son périmètre. **`cert-manager` n'a pas
+`certs:pki`** : les cérémonies de coffre (initialisation, re-chiffrement des clés racine) sont
+irréversibles si elles sont mal menées.
+
+## 5. La politique : `roles.json`
+
+Le `RoleProvider` (`src-server/src/access/RoleProvider.ts`) est un contrat ; l'implémentation servie
+est `FileRoleProvider`, un fichier JSON relu **à chaud**. C'est délibérément le support le plus
+simple qui soit : la politique d'un déploiement auto-hébergé tient en quelques lignes, et un fichier
+se sauvegarde, se versionne et se corrige sans base ni écran d'administration.
+
+```jsonc
+{
+  "users": {
+    "jdupont": ["dc-editor"],            // clé = login BRUT
+    "42": ["cert-manager", "vm-viewer"], // …ou id CANONIQUE (String(id) SSO)
+    "zoe": ["cabliste-nuit"]
+  },
+  "roles": {                             // rôles CUSTOM, optionnels — en plus des presets
+    "cabliste-nuit": ["dc.cabling:*", "dc.rack:read"]
+  }
+}
+```
+
+- **Recherche par id canonique PUIS par login**, et **union** des deux si les deux sont déclarés :
+  ce sont deux graphies de la même personne, un exploitant qui a écrit les deux doit obtenir la
+  somme. La correspondance est **exacte, sensible à la casse** — prévisible et testable ; au besoin,
+  déclarer les deux graphies.
+- **Pas de bucket `default`** : l'opt-in est strict. Un utilisateur absent du fichier n'a aucun rôle.
+- **Tolérant en forme, strict en droit.** Une clé de premier niveau inconnue est **ignorée et
+  signalée** (le fichier reste exploitable) ; une valeur mal typée n'accorde **rien** (jamais de
+  coercition) ; un grant hors catalogue est signalé comme la coquille qu'il est presque toujours —
+  il ne correspondrait à aucune vérification, et l'exploitant croirait avoir donné un droit.
+- Une définition locale qui porte le nom d'un preset le **masque** : le fichier est l'autorité du
+  déploiement (un avertissement le rappelle au chargement).
+
+### Fail-closed, et la nuance « absent » ≠ « illisible »
+
+Fichier absent, illisible, JSON invalide : **personne n'a de rôle**. Jamais de repli ouvert « le
+temps de réparer » — c'est précisément quand la configuration est cassée qu'un repli permissif
+serait exploité. Deux échecs se ressemblent pourtant, et reçoivent deux traitements :
+
+| Situation | Effet |
+|---|---|
+| Fichier **absent** (ou supprimé à chaud) | état parfaitement défini → politique **vide adoptée**, génération incrémentée, avertissement. C'est aussi l'état d'un déploiement neuf. |
+| Fichier **présent mais illisible** (JSON tronqué en cours d'édition, droits retirés) | on ignore ce que l'exploitant voulait → la **dernière politique valide reste en vigueur**, erreur journalisée. Écraser la politique en cours par du vide sur une faute de frappe déconnecterait toute l'équipe. |
+| **Premier** chargement illisible | il n'y a pas de « dernière valide » → politique **vide** (fail-closed). |
+
+### Rechargement à chaud
+
+Le fichier est surveillé par **sondage** (`fs.watchFile`, 2 s, `persistent: false`) et non par
+`fs.watch` : il vit dans `DOCS_DIR`, dossier très bruyant (les `-wal`/`-shm` SQLite y changent en
+permanence) et il est souvent remplacé par **renommage** — deux cas où une veille sur descripteur
+soit noie le signal, soit le perd définitivement. Le sondage voit indifféremment création,
+modification et suppression, ne jette pas quand la cible n'existe pas, et se comporte pareil sous
+Windows, Linux et en conteneur. Le coût est un `stat` toutes les 2 s.
+
+Chaque rechargement **adopté** incrémente une **génération**, seul signal d'invalidation du cache de
+permissions : sans elle, une session déjà vue garderait ses droits d'avant l'édition.
+
+### Amorçage — `BOOTSTRAP_ADMIN_IDS`
+
+Ids canoniques ou logins séparés par des virgules, promus `admin`. Sans cette porte **explicite**, le
+premier administrateur d'un déploiement neuf serait verrouillé dehors par la règle même qu'il doit
+écrire. C'est la seule ouverture qui ne vienne pas du fichier de politique.
+
+### Variables d'environnement
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `ROLES_FILE` | `<DOCS_DIR>/roles.json` | chemin du fichier de politique |
+| `BOOTSTRAP_ADMIN_IDS` | *(vide)* | ids canoniques ou logins, séparés par des virgules → rôle `admin` |
+
+## 6. Application : `requireAuth` + gardes par route
+
+### 6.1 La garde globale
+
+Montée en un point (`api.ts`), elle couvre le cœur **et** toutes les extensions :
+
+1. valide la session et la pose sur la requête (`authUser`, relue par l'audit et la notification
+   live) ; `!logged` → **401** ;
+2. résout rôles → grants → `PermissionSet`, posé sur la requête (`authAccess`) ;
+3. **403 immédiat si l'ensemble est vide** — c'est l'invariant « authentifié ≠ autorisé », garanti
+   en **un** point et donc impossible à oublier route par route. Une route nouvelle est au pire
+   fermée à ceux qui n'ont aucun droit, jamais ouverte à tous.
+
+Les gardes de route ne départagent ensuite que des utilisateurs **légitimes** entre eux.
+
+| Route du cœur | Garde |
+|---|---|
+| `GET /me` | **aucune** (montée avant la garde globale — § 7) |
+| `GET /users/resolve`, `GET /settings`, `GET /documents` | *authentifié* (aucune permission propre — **déclaré**, pas oublié) |
+| `PUT /settings` | `settings:manage` |
+| `POST /documents`, `PUT /documents/:docId`, `DELETE /documents/:docId` | `documents:manage` |
+| `POST /cascade-preview` | lecture du domaine de la collection racine (lue dans le **corps**) |
+| `GET /events` (SSE) | ≥ 1 lecture documentaire |
+| `GET /meta` · `PUT /meta` | `dc.site:read` · `dc.site:update` |
+| `POST /transact` | par opération — § 8.1 |
+| `PUT /snapshot` | `snapshot:write` |
+| `GET /images`, `GET /images/:id`, `GET /images/:id/blob` | `dc.site:read` |
+| `PUT /images/:id`, `DELETE /images/:id` | `dc.site:update` |
+| `POST /attachments` · `GET /attachments/:id/blob` | `dc.attachment:create` · `dc.attachment:read` |
+| `POST /maintenance` | `maintenance:run` |
+| `GET /search` | ≥ 1 lecture documentaire, **assiette restreinte** — § 8.3 |
+| `GET /facets/:collection` | lecture du domaine de la collection |
+| CRUD générique (`/:collection`, `/:collection/:id`) | `<domaine(collection)>:<read\|create\|update\|delete>` |
+
+Deux détails de placement qui comptent : sur `PUT /images/:id` et `POST /attachments`, la garde
+précède **multer** — sinon un appelant sans droit ferait quand même streamer son upload sur le
+disque du serveur avant d'être refusé. Une collection **inconnue** laisse passer la garde : le
+handler répond 404 comme avant l'ACL, un 403 y serait faux et renseignerait sur l'existence des
+collections.
+
+### 6.2 Modules : la garde est **injectée**
+
+Le contrat `ApiExtension { path, router }` n'a pas bougé. Chaque fabrique reçoit en plus un objet
+`access` par **typage structurel** — exactement le patron de `problems`/`onWrite` :
+
+```ts
+export interface VmAccessGuards { require(permission: string): express.RequestHandler }
+```
+
+Le module déclare cette interface **chez lui** et n'importe rien de `access/` ; c'est `index.ts` qui
+ponte l'`AccessControl` au bootstrap. La quasi-duplication de ces trois lignes d'un module à l'autre
+est assumée, comme celle des `*ProblemReporter` : c'est le prix de l'amovibilité.
+
+| Module | Permission → routes |
+|---|---|
+| `vm/` | `vm:read` → `GET /status`, `GET /providers` · `vm:sync` → `POST /sync` · `vm.providers:manage` → `PUT`/`DELETE /providers/:id`, `POST /providers/test` |
+| `wifi/` | symétrique (`wifi:read` / `wifi:sync` / `wifi.providers:manage`) |
+| `tracker/` | `tracker:read` → `GET /status`, `GET /providers` · `tracker:push` → `POST /sync`, `POST /replicate/:id`, `POST /push/:id` · `tracker.providers:manage` → `PUT`/`DELETE /providers/:id`, `POST /providers/test` |
+| `certs/` | `certs:read` → tous les `GET` · `certs:write` → `PUT /:id`, `DELETE /:id` · `certs:pki` → `PUT /pki`, `PUT /pki/rekey`, `PUT /pki/vaults/:vaultId(/rekey)` |
+| `interventions/` | `interventions:read` → les `GET` · `interventions:write` → `PUT /:id`, `DELETE /:id` (clôture comprise) |
+| `notify/` | `notify:read` → les `GET` · `notify:manage` → les `PUT`/`DELETE` + `POST /test` |
+
+> `GET /certs/:id` renvoie `key_enc` — une clé privée **chiffrée côté navigateur**, que le serveur ne
+> sait pas déchiffrer. `certs:read` suffit donc : c'est la conséquence assumée du modèle
+> zéro-connaissance (cf. [`certs.md`](certs.md)).
+
+🚨 **La garde de permission passe AVANT le 503 « module indisponible »** : un appelant sans droit ne
+doit pas apprendre si la feature est configurée, ni pourquoi elle ne l'est pas. Comme le 503 est
+émis en tête de handler et que la garde est un middleware, l'ordre est garanti par construction.
+
+### 6.3 Le verrou d'exhaustivité
+
+« Toute route porte une garde » est une convention, et une convention non tenue par une machine finit
+toujours par ne plus être tenue : la route ajoutée un vendredi hériterait du seul filet global
+(« ≥ 1 permission »), c'est-à-dire d'à peu près aucun contrôle.
+
+Toutes les gardes produites par `AccessControl` portent donc une **étiquette** (`aclTag`), et un test
+(`Tests/modules/test-access.js`) relit les **sources** des routeurs — `api.ts` et les six
+`*Module.ts` — pour échouer en **nommant** méthode, chemin et ligne de toute route sans garde. Même
+philosophie et même outil (le parseur TypeScript) que le verrou d'isolement de `src-shared/`. Le test
+vérifie aussi que chaque permission littérale appartient au catalogue partagé, et il porte un
+contrôle de **discrimination** qui prouve que son détecteur voit bien ce qu'il prétend voir.
+
+La liste des routes est **découverte**, jamais déclarée — c'est le point : un manifeste écrit à la
+main serait aveugle au cas visé, puisqu'une route oubliée y manquerait aussi. Une seule route est en
+liste blanche, `GET /me`, et le test échoue si cette entrée devient périmée.
+
+## 7. `GET /me`
+
+Seule route montée **avant** la garde globale : un utilisateur sans aucun droit doit pouvoir
+apprendre qu'il n'en a aucun (écran « aucun accès »), sinon il ne verrait qu'un 403 nu.
+
+La réponse est **additive** : tous les champs historiques (`logged`, `adminRight`, `user`,
+`expireDate`…) traversent inchangés, et s'y ajoute
+
+```jsonc
+{ "permissions": ["dc.*:read", "vm:read"] }   // les GRANTS effectifs, jokers compris
+```
+
+à partir desquels le client reconstruit le **même** `PermissionSet`. On expose les **permissions et
+jamais les rôles** : le client applique la politique, il ne la connaît pas — et les noms de rôles
+d'un déploiement ne le regardent pas.
+
+## 8. Cas transverses
+
+### 8.1 `/transact` — écriture de masse
+
+Chaque opération du lot est vérifiée **avant** que rien ne soit appliqué :
+`<domaine(collection)>:<create|update|delete>`. Une seule permission manquante refuse **tout** le
+lot (403 nommant la permission) — l'atomicité du refus répond à l'atomicité de la transaction : un
+lot à moitié écrit serait pire qu'un lot rejeté.
+
+Le calcul est **pur et testable** (`Permissions.forBatch` : liste d'opérations → liste de
+permissions) ; la garde HTTP ne fait que l'appeler. La `meta` d'un lot compte comme une écriture
+`dc.site:update` — l'oublier laisserait une porte dérobée vers les réglages du document. Une
+opération dont la collection est inconnue n'ajoute rien : le dépôt la rejettera de toute façon, et
+ce n'est pas à l'ACL de requalifier une erreur de forme en refus d'accès.
+
+### 8.2 Cascade de suppression — la permission porte sur les **racines**
+
+Un `DELETE` (comme les suppressions d'un `/transact`) entraîne une cascade calculée par le serveur
+sur plusieurs collections. **Cette cascade n'est pas re-vérifiée** : la permission porte sur les
+racines **demandées**, et la cascade est de l'**intégrité référentielle** — une conséquence
+mécanique, pas une action utilisateur distincte.
+
+La décision est délibérée. L'alternative — vérifier chaque collection impactée — rendrait la
+suppression d'un équipement impossible à un `dc-editor` dès qu'une pièce jointe y pend, alors même
+qu'il a le droit de supprimer l'équipement : le modèle deviendrait incompréhensible et l'application
+inutilisable. Même politique pour `POST /cascade-preview`, qui lit le plan de la même cascade.
+
+### 8.3 Recherche transverse — assiette restreinte
+
+`GET /search` n'exige qu'**une** lecture documentaire, sans quoi un lecteur partiel (`dc-viewer`) ne
+pourrait pas chercher du tout. La restriction fine se fait donc dans le handler : l'assiette
+effective est l'**intersection** de ce que le client demande et de ce qu'il a le droit de lire
+(`Permissions.readableCollections`).
+
+Le point d'injection est le paramètre `collections` du dépôt, qui borne la **boucle de requêtes** :
+aucune requête SQL n'est même émise pour une collection interdite — strictement mieux qu'un
+post-filtrage, qui l'aurait d'abord lue. Assiette vide → réponse vide immédiate (le dépôt interprète
+une liste vide comme « toutes les collections », la lui passer serait l'inverse de l'intention).
+
+### 8.4 SSE, annuaire, facettes
+
+- **`GET /events`** ne transporte que des changesets (noms de collection et ids), jamais du
+  contenu : ≥ 1 lecture documentaire suffit. Un filtrage fin du flux par collection reste possible
+  plus tard ; le rechargement qui suit est de toute façon gardé par les routes de listing.
+- **`GET /users/resolve`** n'exige aucune permission propre : l'audit affiche des noms partout. La
+  règle de confidentialité qui s'y applique est inchangée — e-mail et téléphone sont caviardés sauf
+  pour l'appelant (cf. [`user-resolver.md`](user-resolver.md)).
+- **`GET /facets/:collection`** est déjà scopée par collection : garde directe sur son domaine.
+
+## 9. Sémantique 401 / 403
+
+Conservée à l'identique, parce que le client **agit différemment** selon le cas :
+
+| Code | Quand | Ce que fait le client |
+|---|---|---|
+| **401** | `!logged` — session absente ou expirée | coupe la session locale et renvoie au **login** (verrou `SessionExpiry`) |
+| **403** | authentifié, mais sans le droit | reste où il est : se reconnecter n'y changerait rien |
+
+Les corps JSON gardent leur forme historique (`error`, `logged`, `adminRight`). Un refus de route
+l'**enrichit** d'un champ `permission` nommant ce qui manque — un refus muet est indiagnostiquable,
+côté support comme côté client. Quand une garde accepte plusieurs permissions (`any-doc-read`), le
+champ porte la sentinelle de la règle.
+
+## 10. Rétrocompatibilité
+
+Un déploiement existant se comporte **exactement** comme avant. Ces deux règles vivent dans le
+`RoleProvider`, parce qu'elles sont une politique et non une propriété de l'authentification :
+
+- modes **dev** et **basic** (`SsoResult.dev`) → rôle `admin`. Ces modes n'ont jamais authentifié
+  personne : tout appelant y était déjà `SUPER_ADMIN`, et le WARN de démarrage le crie depuis
+  toujours ;
+- SSO maison **`adminRight === "SUPER_ADMIN"`** → rôle `admin`. C'était l'unique droit d'accès de
+  l'application ; le retirer aurait fermé la porte à tous les utilisateurs actuels.
+
+Toute autre valeur d'`adminRight` ne donne rien : un utilisateur SSO valide mais non déclaré voit
+`/me` et rien d'autre — c'est l'opt-in strict.
+
+## Mode local (fichier) — principe n°15
+
+**L'authentification et les ACL sont serveur uniquement.** Écart assumé, et pour une raison de fond :
+en mode fichier, l'utilisateur est **propriétaire de son fichier**. Il n'y a ni identité, ni
+frontière de confiance, ni serveur pour la tenir — toute ACL y serait **décorative**, puisque le
+fichier reste lisible et éditable hors de l'application. Le client en mode fichier fonctionne donc
+sans restriction (équivalent `admin`), **par construction** : même logique que les écarts déjà
+documentés des modules serveur (VMs, wifi, PKI).
+
+Le `PermissionSet` vit quand même dans `src-shared/` : le mode fichier l'instancie « tout permis »
+(`PermissionSet.ALL`), le mode API le remplit depuis `/me` — patron d'**injection nulle** identique à
+`HydrationState` (un état inerte plutôt qu'un `if (mode === …)` disséminé dans les vues).
+
+## Procédures
+
+### Ajouter une route au cœur
+
+1. Choisir la permission : une permission de collection se dérive de la carte
+   (`access.requireCollection(action)`) ; un geste d'administration en demande une nouvelle
+   (§ 3), à ajouter à `Permissions.META_PERMISSIONS`.
+2. Poser la garde **en premier argument** de la route, avant tout autre middleware (multer compris).
+3. Le verrou d'exhaustivité échoue tant que ce n'est pas fait — c'est le rappel.
+
+### Ajouter une route à un module
+
+Même chose avec `this.access.require("<namespace>:<verbe>")`, et ajouter la permission à
+`Permissions.MODULE_PERMISSIONS` (sinon le verrou la signale comme hors catalogue).
+
+### Ajouter une collection
+
+Lui donner un domaine dans `Permissions.COLLECTION_DOMAINS` — l'invariant de test l'exige.
+
+### Ajouter un rôle
+
+Un preset partagé (`Permissions.ROLE_PRESETS`, s'il a du sens pour tout déploiement) ou un rôle local
+dans la section `roles` de `roles.json` (s'il est propre à un déploiement).
+
+### Écrire une nouvelle implémentation de politique
+
+Implémenter `RoleProvider` (`rolesOf`, plus éventuellement `grantsOfRole` et `generation`) et la
+sélectionner dans `index.ts`, comme `UserResolver`. Le reste du système est inchangé.
+
+## Limites de cette version
+
+- **Rôles GLOBAUX à l'instance**, pas par document. Le scope par document reste une extension future
+  du modèle (grants préfixés) sans casser le catalogue ; le module `notify/` n'est de toute façon
+  pas scopé document.
+- **Pas d'ACL par objet** (« cet utilisateur sur cette baie ») : le grain est le domaine.
+- **Pas de deny** : la composition est purement additive.
+- **Pas d'écran d'administration** des rôles — la politique s'édite dans `roles.json`.
+- Le grain des verbes reste **coarse** là où les routes le sont : `certs:write` couvre un `PUT /:id`
+  polyvalent (émission, renouvellement, révocation), et `interventions:write` inclut la clôture.
+  Les affiner exigerait d'inspecter le corps des requêtes — possible plus tard, si un besoin réel
+  l'exige.

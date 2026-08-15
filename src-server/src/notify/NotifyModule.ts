@@ -59,6 +59,16 @@ import type { Records } from "../../../src-shared/DataValidation.js";   // forme
     négligeable en coût (un SELECT sur les états actifs). */
 const REMINDER_TICK_MS = 60 * 1000;
 
+/** GARDES D'ACCÈS injectées — DÉPENDANCE INVERSÉE, exactement le patron de `ProblemReporter` : le
+    module déclare ICI le contrat MINIMAL qu'il attend du contrôle d'accès du cœur, et n'importe
+    RIEN de `access/`. C'est index.ts qui PONTE (typage STRUCTUREL) l'`AccessControl` au bootstrap.
+    ⚠ La quasi-duplication de cette interface d'une feature à l'autre est ASSUMÉE, comme celle des
+    `*ProblemReporter` : c'est le prix — trois lignes — de l'amovibilité de chaque module. */
+export interface NotifyAccessGuards {
+  /** Middleware qui laisse passer si l'appelant détient la permission, 403 sinon. */
+  require(permission: string): express.RequestHandler;
+}
+
 export class NotifyModule {
   private timer: ReturnType<typeof setInterval> | null = null;
   /** Anti-chevauchement du tick (une passe de rappels lente ne s'empile pas). */
@@ -76,9 +86,12 @@ export class NotifyModule {
     private readonly configError: string | null,
     private readonly keyMissing: boolean,
     private readonly log: Logger,
+    /** Gardes d'accès injectées (cf. `NotifyAccessGuards`) — REQUISES : un module sans garde serait
+        ouvert à tout utilisateur ayant une permission quelconque, ce que l'ACL existe pour empêcher. */
+    private readonly access: NotifyAccessGuards,
   ) {}
 
-  static create(opts: { docs: DocumentStore; dataDir: string; sqlite: SqliteCtor; log?: Logger }): NotifyModule {
+  static create(opts: { docs: DocumentStore; dataDir: string; sqlite: SqliteCtor; access: NotifyAccessGuards; log?: Logger }): NotifyModule {
     const log = opts.log || new Logger("error");
     // fromEnv PEUT jeter si la clé est PRÉSENTE mais trop courte (< MIN_PASSPHRASE_LENGTH) : clé
     // INVALIDE (≠ clé absente, qui désactive proprement). Encaissée en « module démarré EN ERREUR »
@@ -90,11 +103,11 @@ export class NotifyModule {
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       log.error("clé de chiffrement des secrets notifications invalide — module démarré en erreur", message);
-      return new NotifyModule(null, null, null, message, false, log);
+      return new NotifyModule(null, null, null, message, false, log, opts.access);
     }
     if (!box) {
       log.info("module notifications INACTIF — clé " + SecretBox.ENV_VAR + " absente (routes en 503 explicite)");
-      return new NotifyModule(null, null, null, null, true, log);
+      return new NotifyModule(null, null, null, null, true, log, opts.access);
     }
     try {
       const db = new NotifyDb(opts.dataDir, opts.sqlite, box, log);
@@ -118,11 +131,11 @@ export class NotifyModule {
       });
       db.purgeLog(); // purge d'ancienneté au démarrage (puis quotidienne, via le timer)
       log.info("module notifications prêt (notify.db, tick de rappels " + (REMINDER_TICK_MS / 1000) + " s)");
-      return new NotifyModule(db, engine, router, null, false, log);
+      return new NotifyModule(db, engine, router, null, false, log, opts.access);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       log.error("module notifications en erreur — démarré désactivé", message);
-      return new NotifyModule(null, null, null, message, false, log);
+      return new NotifyModule(null, null, null, message, false, log, opts.access);
     }
   }
 
@@ -191,12 +204,16 @@ export class NotifyModule {
 
     /* ---- Instances de canaux ---- */
 
-    router.get("/instances", (_req, res) => {
+    // 🚨 ORDRE : la garde de PERMISSION passe AVANT le 503 « module indisponible » (qui est en tête
+    // de chaque handler) — un appelant sans droit ne doit pas apprendre si la feature est
+    // configurée, et encore moins pourquoi elle ne l'est pas. Un middleware précède le handler :
+    // l'ordre est donc garanti ici par construction.
+    router.get("/instances", this.access.require("notify:read"), (_req, res) => {
       const db = this.backend(res); if (!db) return;
       res.json({ instances: db.listInstances() });
     });
 
-    router.put("/instances/:id", (req, res) => {
+    router.put("/instances/:id", this.access.require("notify:manage"), (req, res) => {
       const db = this.backend(res); if (!db) return;
       const body: any = (req.body && typeof req.body === "object") ? req.body : {};
       // Le jeton transite dans le corps UNIQUEMENT en écriture ; vide/absent = CONSERVER l'existant.
@@ -213,7 +230,7 @@ export class NotifyModule {
       }
     });
 
-    router.delete("/instances/:id", (req, res) => {
+    router.delete("/instances/:id", this.access.require("notify:manage"), (req, res) => {
       const db = this.backend(res); if (!db) return;
       if (!db.removeInstance((req.params as any).id)) { res.status(404).json({ error: "canal inconnu" }); return; }
       res.json({ ok: true });
@@ -221,13 +238,13 @@ export class NotifyModule {
 
     /* ---- Abonnements ---- */
 
-    router.get("/subscriptions", (req, res) => {
+    router.get("/subscriptions", this.access.require("notify:read"), (req, res) => {
       const db = this.backend(res); if (!db) return;
       const docId = typeof req.query.docId === "string" && req.query.docId !== "" ? req.query.docId : undefined;
       res.json({ subscriptions: db.listSubscriptions(docId) });
     });
 
-    router.put("/subscriptions/:id", (req, res) => {
+    router.put("/subscriptions/:id", this.access.require("notify:manage"), (req, res) => {
       const db = this.backend(res); if (!db) return;
       const body: any = (req.body && typeof req.body === "object") ? req.body : {};
       try {
@@ -245,7 +262,7 @@ export class NotifyModule {
       }
     });
 
-    router.delete("/subscriptions/:id", (req, res) => {
+    router.delete("/subscriptions/:id", this.access.require("notify:manage"), (req, res) => {
       const db = this.backend(res); if (!db) return;
       if (!db.removeSubscription((req.params as any).id)) { res.status(404).json({ error: "abonnement inconnu" }); return; }
       res.json({ ok: true });
@@ -253,14 +270,14 @@ export class NotifyModule {
 
     /* ---- États actifs + historique ---- */
 
-    router.get("/states", (req, res) => {
+    router.get("/states", this.access.require("notify:read"), (req, res) => {
       const db = this.backend(res); if (!db) return;
       const docId = typeof req.query.docId === "string" && req.query.docId !== "" ? req.query.docId : undefined;
       const states = db.listActive().filter((s) => docId === undefined || s.doc_id === docId);
       res.json({ states });
     });
 
-    router.get("/log", (req, res) => {
+    router.get("/log", this.access.require("notify:read"), (req, res) => {
       const db = this.backend(res); if (!db) return;
       res.json(db.listLog({
         limit: req.query.limit !== undefined ? parseInt(String(req.query.limit), 10) || undefined : undefined,
@@ -271,12 +288,12 @@ export class NotifyModule {
 
     /* ---- Réglages (intervalle de rappel par type — décision Q2) ---- */
 
-    router.get("/settings", (_req, res) => {
+    router.get("/settings", this.access.require("notify:read"), (_req, res) => {
       const db = this.backend(res); if (!db) return;
       res.json({ settings: db.listEventSettings() });
     });
 
-    router.put("/settings", (req, res) => {
+    router.put("/settings", this.access.require("notify:manage"), (req, res) => {
       const db = this.backend(res); if (!db) return;
       const body: any = (req.body && typeof req.body === "object") ? req.body : {};
       try {
@@ -288,7 +305,7 @@ export class NotifyModule {
       }
     });
 
-    router.delete("/settings/:eventType", (req, res) => {
+    router.delete("/settings/:eventType", this.access.require("notify:manage"), (req, res) => {
       const db = this.backend(res); if (!db) return;
       if (!db.removeEventSetting((req.params as any).eventType)) { res.status(404).json({ error: "réglage inconnu" }); return; }
       res.json({ ok: true });
@@ -296,7 +313,7 @@ export class NotifyModule {
 
     /* ---- Test (bouton de la page admin — producteur « test » du cadrage) ---- */
 
-    router.post("/test", (req, res) => {
+    router.post("/test", this.access.require("notify:manage"), (req, res) => {
       const db = this.backend(res); if (!db) return;
       const body: any = (req.body && typeof req.body === "object") ? req.body : {};
       const docId = typeof body.doc_id === "string" && body.doc_id !== "" ? (body.doc_id as string) : null;

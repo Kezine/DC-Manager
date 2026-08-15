@@ -194,6 +194,8 @@ par défaut — `.open <base>.db` pour changer (chemins relatifs à `/data/docum
 | `COOKIE_NAME` | *(vide)* | nom du cookie contenant le jeton à proxifier au SSO (`""` = en-tête `Cookie` complet) |
 | `SSO_LOGIN_URL` | *(vide)* | URL de connexion SSO du bouton « Connexion » (écran d'accueil, si non authentifié) ; macro `${clbkUrl}` → URL courante encodée. Vide = pas de bouton |
 | `DEV_USER` | `dev` | nom de l'utilisateur factice en mode dev |
+| `ROLES_FILE` | `<DOCS_DIR>/roles.json` | **politique d'AUTORISATION** (rôles/permissions), fichier JSON relu **à chaud** ; **fail-closed** : absent/illisible → personne n'a de rôle, 403 partout sauf `GET /me` (cf. ci-dessous et `docs/auth.md`) |
+| `BOOTSTRAP_ADMIN_IDS` | *(vide)* | ids canoniques ou logins séparés par des **virgules** → rôle `admin`, **en plus** du fichier. Amorçage d'un déploiement neuf (sans lui, le premier administrateur serait verrouillé dehors) |
 | `DCMANAGER_SECRETS_KEY` | *(vide)* | passphrase de chiffrement des secrets stockés en base (coffre `SecretBox` **partagé**), **≥ 16 caractères**. Consommée par les modules **VM/Proxmox**, **clients wifi**, **réplication des interventions vers un tracker** et **notifications** ; absente → ces modules sont inactifs et leurs routes répondent **503 actionnable**, le serveur démarre quand même (les interventions, elles, restent pleinement fonctionnelles). La générer p. ex. par `openssl rand -base64 32` (cf. `README.md` § 4) |
 | `JIRA_BASE_URL` | *(vide)* | base d'URL Jira du module **interventions** (ex. `https://monorg.atlassian.net/browse/`) pour lier une clé **saisie à la main** à son ticket ; vide/absente → pas de lien. Simple référence, aucun appel Jira (cf. `docs/interventions.md`). ⚠ **Sans rapport avec le pont de réplication** (`docs/jira-interventions.md`), qui persiste le lien de chaque ticket au moment de la synchro et n'a donc aucune variable d'environnement propre |
 
@@ -210,13 +212,14 @@ L'app **ne gère pas l'auth** : le serveur **proxifie le jeton** (cookie `COOKIE
 au SSO externe (`SSO_URL`) qui renvoie l'utilisateur
 (`logged`, `adminRight`, `expireDate`). Le résultat est **mis en cache** (clé =
 hash du cookie) tant que le cookie ne change pas et que `expireDate` n'est pas
-dépassée. **Accès autorisé uniquement si `logged` et `adminRight = "SUPER_ADMIN"`.**
+dépassée. L'authentification dit **qui** est l'appelant ; ce qu'il a le droit de faire est réglé
+séparément (section suivante).
 Le refus est distingué par le **code HTTP**, car le client agit différemment :
 - **`401` (non authentifié)** quand la session est absente ou **EXPIRÉE** (`logged: false`) → le client
   coupe la session locale et **renvoie au login** (une expiration en cours de session ne se traduit plus
   en erreurs éparses, mais en un retour propre à l'écran de connexion) ;
-- **`403` (accès refusé)** quand la session est valide mais **sans le droit `SUPER_ADMIN`** → le client
-  reste sur l'écran « accès refusé » (se reconnecter n'y changerait rien).
+- **`403` (accès refusé)** quand la session est valide mais **sans la permission** demandée → le client
+  reste où il est (se reconnecter n'y changerait rien).
 
 - **Mode dev** (offline, défaut du `docker-compose.yml`) : `SSO_URL=""` →
   utilisateur factice `dev` en SUPER_ADMIN, tout est autorisé.
@@ -228,6 +231,49 @@ Le refus est distingué par le **code HTTP**, car le client agit différemment :
   en-tête `Cookie` complet). Ex. `SSO_URL: https://sso.example.com/validate`.
 
 Après modif du compose : `docker compose up -d` (recrée le conteneur).
+
+### Autorisation (rôles & permissions)
+
+Une fois authentifié, l'accès est réglé par un **RBAC à permissions atomiques**
+(`dc.ip:update`, `certs:pki`, `documents:manage`…). Référence complète — catalogue, rôles,
+procédures : [`../docs/auth.md`](../docs/auth.md).
+
+🚨 **Opt-in strict** : un utilisateur authentifié **sans rôle** n'a aucune permission et reçoit
+**403 partout** sauf `GET /me`. C'est voulu, mais ça se prépare avant de basculer un déploiement.
+
+**Rétrocompatibilité** — rien à faire pour un déploiement existant : le mode **dev**, la **Basic
+Auth** et le SSO `adminRight = "SUPER_ADMIN"` valent tous le rôle `admin`.
+
+Pour donner des droits **fins**, créer `roles.json` dans `DOCS_DIR` (ou pointer `ROLES_FILE`) :
+
+```jsonc
+{
+  "users": {
+    "jdupont": ["dc-editor"],             // clé = login BRUT, ou id canonique SSO ("42")
+    "42": ["cert-manager", "vm-viewer"]
+  },
+  "roles": {                              // rôles CUSTOM optionnels (en plus des presets)
+    "cabliste-nuit": ["dc.cabling:*", "dc.rack:read"]
+  }
+}
+```
+
+Rôles fournis : `admin`, `dc-viewer`, `dc-editor`, `dc-connector`, `vm-viewer`, `vm-operator`,
+`wifi-viewer`, `wifi-operator`, `cert-viewer`, `cert-manager`, `intervention-viewer`,
+`intervention-editor`, `notify-manager`.
+
+À savoir en exploitation :
+
+- **Relu à chaud** (sondage ~2 s) : aucun redémarrage après édition. Les avertissements de lecture
+  (clé inconnue, grant mal orthographié) sortent dans les logs, scope `[access]`.
+- **Fail-closed.** Fichier **absent** → personne n'a de rôle. Fichier **illisible** (JSON tronqué en
+  cours d'édition) → la **dernière politique valide reste en vigueur** et une ERROR est journalisée :
+  une faute de frappe ne déconnecte pas l'équipe. Vérifier les logs après chaque édition.
+- **Amorçage** : `BOOTSTRAP_ADMIN_IDS=42,jdupont` promeut ces ids/logins `admin` en plus du fichier —
+  indispensable sur un déploiement neuf, et utile comme filet si le fichier est cassé.
+- La correspondance id/login est **exacte** (sensible à la casse) ; au besoin, déclarer les deux
+  graphies. Pour connaître l'identité vue par le serveur, appeler `GET <API_BASE>/me` : il renvoie
+  `user` et, désormais, la liste `permissions` effective.
 
 ---
 

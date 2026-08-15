@@ -14,20 +14,28 @@ import { DataValidator, type ValidationError, type EntityFetcher, type ChildFind
 import { Cascade } from "../../src-shared/Cascade.js";   // cascade de suppression PARTAGÉE (intégrité référentielle en DELETE)
 import { ListOrder } from "../../src-shared/ListOrder.js";   // liste blanche PARTAGÉE des colonnes triables (tri serveur de la route paginée)
 import { ListFacets } from "../../src-shared/ListFacets.js";   // liste blanche PARTAGÉE des colonnes facettables (valeurs distinctes — garde G8)
+import { Permissions, type PermissionSet } from "../../src-shared/Permissions.js";   // modèle d'autorisation PARTAGÉ (carte collections → domaines, assiette lisible)
 import { ApiRules } from "./ApiRules.js";             // règles PURES de la couche HTTP (verrou, changeset, lot) — testables sans Express
 import { AuditStamp } from "./AuditStamp.js";         // règles PURES d'estampillage « qui a écrit, quand » (created_by/updated_by + dates serveur)
+import { AccessControl } from "./access/AccessControl.js";   // contrôle d'accès (service CORE injecté) — gardes taguées, cf. docs/auth.md
 import { UserProfiles } from "./users/UserProfiles.js";   // logique PURE de l'annuaire (clé canonique, caviardage, parsing d'ids)
 import type { UserResolver } from "./users/UserResolver.js";   // contrat de résolution d'utilisateurs (service CORE injecté)
 
-/** Requête dont le dépôt du document a été résolu + l'utilisateur SSO validé (par `requireAdmin`).
+/** Requête dont le dépôt du document a été résolu + l'utilisateur SSO validé (par `AccessControl.requireAuth`).
+    `authAccess` : permissions EFFECTIVES de l'appelant, posées par la même garde — lues par les handlers qui
+    filtrent leur ASSIETTE plutôt que de refuser en bloc (recherche transverse, cf. `searchAll`).
     `changeset` : périmètre SSE, posé par défaut par `resolveRepo` et ÉLARGISSABLE par un handler (ex. la cascade
     de suppression touche plusieurs collections) — la publication live le lit au moment du `finish`. */
-type RepoRequest = Request & { repo?: RepositoryContract; authUser?: SsoResult; docRev?: number; changeset?: DocumentChangeset };
+type RepoRequest = Request & { repo?: RepositoryContract; authUser?: SsoResult; authAccess?: PermissionSet; docRev?: number; changeset?: DocumentChangeset };
 
 /** Point d'EXTENSION générique de l'API : routeur additionnel monté sous la même garde d'accès
-    (requireAdmin), déclaré par un module OPTIONNEL (ex. `vm/`) et câblé au bootstrap (index.ts).
-    Dépendance INVERSÉE : le cœur ne connaît que ce contrat, jamais les modules — condition de
-    leur amovibilité (supprimer un module = retirer son câblage au bootstrap, rien ici). */
+    globale (`AccessControl.requireAuth`), déclaré par un module OPTIONNEL (ex. `vm/`) et câblé au
+    bootstrap (index.ts). Dépendance INVERSÉE : le cœur ne connaît que ce contrat, jamais les
+    modules — condition de leur amovibilité (supprimer un module = retirer son câblage au
+    bootstrap, rien ici).
+    ⚠ Ce contrat N'A PAS bougé avec l'ACL : les gardes de PERMISSION d'un module lui sont INJECTÉES
+    à sa fabrique (`create({ …, access })`, typage structurel comme `problems`/`onWrite`), pas
+    imposées ici — le module reste seul juge du droit exigé par chacune de ses routes. */
 export interface ApiExtension {
   /** Chemin de montage SOUS la racine API (ex. "/documents/:docId/vm") — le routeur voit les
       params du chemin s'il est créé avec `mergeParams: true`. */
@@ -36,7 +44,7 @@ export interface ApiExtension {
 }
 
 /** Identité de l'AUTEUR d'une requête, dérivée de la session SSO validée par la garde d'accès
-    (`requireAdmin` pose `authUser`). Extrait en helper RÉUTILISABLE (principe n°3) : le cœur (notif
+    (`AccessControl.requireAuth` pose `authUser`). Extrait en helper RÉUTILISABLE (principe n°3) : le cœur (notif
     live) ET les modules d'extension qui estampillent un audit « qui a écrit ? » (ex. interventions/)
     appliquent la MÊME règle sans la dupliquer. Les modules importent déjà `ApiExtension` d'ici — pas
     de couplage nouveau. */
@@ -90,30 +98,37 @@ export class Api {
   private static readonly CASCADE_PREVIEW_CAP = 1000;
 
   constructor(private readonly docs: DocumentStore, private readonly auth: Auth, private readonly live: LiveBus,
-              private readonly resolver: UserResolver, private readonly extensions: ApiExtension[] = []) {}
+              private readonly resolver: UserResolver, private readonly access: AccessControl,
+              private readonly extensions: ApiExtension[] = []) {}
 
   router(): Router {
     const r = express.Router();
-    r.get("/me", this.me);                 // état d'auth (accessible sans être autorisé)
-    r.use(this.requireAdmin);              // tout le reste exige une session SSO valide + SUPER_ADMIN
+    r.get("/me", this.me);                 // état d'auth + permissions (SEULE route sans garde — cf. docs/auth.md)
+    // GARDE GLOBALE : session valide (401 sinon) + au moins UNE permission (403 sinon). Elle couvre
+    // le cœur ET toutes les extensions montées ci-dessous ; les gardes par route qui suivent ne
+    // départagent donc que des utilisateurs déjà légitimes (cf. AccessControl).
+    r.use(this.access.requireAuth);
 
     // -- extensions (modules optionnels) : montées TÔT — avant le routeur de données, dont la
     // route générique `/:collection` capterait sinon leurs segments (ex. « vm » lu comme collection).
+    // Chaque module porte SES propres gardes, reçues par INJECTION (il n'importe rien d'ici).
     for (const ext of this.extensions) r.use(ext.path, ext.router);
 
     // -- annuaire utilisateurs (service CORE, PAS un module amovible) : résolution BATCH d'ids
     // canoniques en profils affichables, derrière la même garde d'accès. Voir docs/user-resolver.md.
-    r.get("/users/resolve", this.usersResolve);
+    // `authenticated` : aucune permission propre — l'audit affiche des noms PARTOUT, et le caviardage
+    // des coordonnées (sauf pour l'appelant) est la règle de confidentialité qui vaut ici.
+    r.get("/users/resolve", this.access.requireAuthenticated, this.usersResolve);
 
     // -- réglages globaux (doc par défaut…) --
-    r.get("/settings", this.getSettings);
-    r.put("/settings", this.putSettings);
+    r.get("/settings", this.access.requireAuthenticated, this.getSettings);   // lu au bootstrap par TOUT client
+    r.put("/settings", this.access.require("settings:manage"), this.putSettings);
 
     // -- registre des documents --
-    r.get("/documents", this.listDocs);
-    r.post("/documents", this.createDoc);
-    r.put("/documents/:docId", this.renameDoc);
-    r.delete("/documents/:docId", this.deleteDoc);
+    r.get("/documents", this.access.requireAuthenticated, this.listDocs);     // point d'entrée : la liste, pas le contenu
+    r.post("/documents", this.access.require("documents:manage"), this.createDoc);
+    r.put("/documents/:docId", this.access.require("documents:manage"), this.renameDoc);       // renommage ET (dé)verrouillage
+    r.delete("/documents/:docId", this.access.require("documents:manage"), this.deleteDoc);
 
     // -- données SCOPÉES par document (/documents/:docId/...) --
     const data = express.Router({ mergeParams: true });
@@ -122,18 +137,22 @@ export class Api {
     // c'est une LECTURE PURE. Passée par `resolveRepo`, elle consommerait une révision et réveillerait
     // tous les clients par SSE à chaque ouverture de modale de confirmation. Elle résout donc le dépôt
     // par la moitié LECTURE de ce middleware (`resolveRepoRead`). Cf. docs/hydratation.md § G5.
-    data.post("/cascade-preview", this.resolveRepoRead, this.cascadePreview);
+    // La collection RACINE de l'aperçu est dans le CORPS (une liste d'ids ne tient pas en query
+    // string) : même carte, même refus que les routes génériques — seule la POSITION change.
+    data.post("/cascade-preview", this.access.requireCollectionInBody("read"), this.resolveRepoRead, this.cascadePreview);
     data.use(this.resolveRepo);
-    data.get("/events", this.events);      // canal live (SSE) — notifie les changements du document
-    data.get("/meta", this.getMeta);
-    data.put("/meta", this.putMeta);
-    data.post("/transact", this.transact);
-    data.put("/snapshot", this.snapshot);
-    data.get("/images", this.listImages);
-    data.get("/images/:id", this.getImage);
-    data.get("/images/:id/blob", this.getImageBlob);
-    data.put("/images/:id", this.upload.single("blob"), this.putImage);
-    data.delete("/images/:id", this.deleteImage);
+    data.get("/events", this.access.requireAnyDocRead, this.events);      // canal live (SSE) — notifie les changements du document
+    data.get("/meta", this.access.require("dc.site:read"), this.getMeta);
+    data.put("/meta", this.access.require("dc.site:update"), this.putMeta);
+    data.post("/transact", this.access.requireBatch, this.transact);      // UNE permission manquante ⇒ 403, rien n'est écrit
+    data.put("/snapshot", this.access.require("snapshot:write"), this.snapshot);
+    data.get("/images", this.access.require("dc.site:read"), this.listImages);
+    data.get("/images/:id", this.access.require("dc.site:read"), this.getImage);
+    data.get("/images/:id/blob", this.access.require("dc.site:read"), this.getImageBlob);
+    // ⚠ Garde AVANT multer : sinon un appelant sans droit ferait quand même streamer son upload sur
+    // le disque du serveur avant d'être refusé (le refus doit précéder l'effet, pas le suivre).
+    data.put("/images/:id", this.access.require("dc.site:update"), this.upload.single("blob"), this.putImage);
+    data.delete("/images/:id", this.access.require("dc.site:update"), this.deleteImage);
     // -- pièces jointes : SEULES les deux routes du BINAIRE sont dédiées (création multipart streamée +
     // download streamé). Tout le reste — listing, lecture, ÉDITION de métadonnées, SUPPRESSION — passe par
     // les routes GÉNÉRIQUES de collection ci-dessous (`attachments` est une collection ordinaire du
@@ -141,21 +160,28 @@ export class Api {
     // route générique capterait « attachments » et créerait des métadonnées sans binaire) ; le GET blob
     // (3 segments) ne peut pas être capté par `GET /:collection/:id` (2 segments). D5 : la suppression
     // d'un enregistrement ne fait AUCUN unlink — la purge des binaires est le travail de la maintenance.
-    data.post("/attachments", this.attachmentUpload.single("blob"), this.createAttachment);
-    data.get("/attachments/:id/blob", this.getAttachmentBlob);
-    data.post("/maintenance", this.maintenance);   // AVANT /:collection (sinon « maintenance » serait une collection)
-    data.get("/search", this.searchAll);           // AVANT /:collection aussi — recherche TRANSVERSE (palette Ctrl+K, cf. docs/recherche.md)
+    // Garde AVANT multer, même raison que `PUT /images/:id` (ici 50 Mo streamés sur disque).
+    data.post("/attachments", this.access.require("dc.attachment:create"), this.attachmentUpload.single("blob"), this.createAttachment);
+    data.get("/attachments/:id/blob", this.access.require("dc.attachment:read"), this.getAttachmentBlob);
+    data.post("/maintenance", this.access.require("maintenance:run"), this.maintenance);   // AVANT /:collection (sinon « maintenance » serait une collection)
+    // Recherche TRANSVERSE : garde « ≥ 1 lecture documentaire » PUIS assiette RESTREINTE aux
+    // collections lisibles (cf. `searchAll`) — un lecteur partiel cherche, mais pas au-delà de ses droits.
+    data.get("/search", this.access.requireAnyDocRead, this.searchAll);           // AVANT /:collection aussi (palette Ctrl+K, cf. docs/recherche.md)
     // FACETTES d'un listing (garde G8, cf. docs/hydratation.md § « Vague 3 ») : valeurs DISTINCTES d'une
     // colonne, pour un listing dont la collection n'est PAS en cache. ⚠ Le segment `facets` vient EN TÊTE
     // (et non `/:collection/facets`) précisément pour ne rien ambiguïser : un chemin en `/:collection/:id`
     // ferait dépendre le routage de la valeur d'un id. Comme `/search` et `/maintenance`, la route est
     // montée AVANT le CRUD générique et `facets` n'est pas un nom de collection.
-    data.get("/facets/:collection", this.facets);
-    data.get("/:collection", this.list);
-    data.get("/:collection/:id", this.getOne);
-    data.post("/:collection", this.create);
-    data.put("/:collection/:id", this.update);
-    data.delete("/:collection/:id", this.remove);
+    data.get("/facets/:collection", this.access.requireCollection("read"), this.facets);
+    // CRUD générique : le domaine se déduit de `:collection` en UN point (la carte partagée) —
+    // c'est ce qui permet de garder 25 collections sans écrire 100 lignes de gardes.
+    // ⚠ La CASCADE de suppression qui suit un DELETE n'est PAS re-vérifiée : la permission porte
+    // sur la RACINE demandée, la cascade est de l'intégrité référentielle (cf. docs/auth.md).
+    data.get("/:collection", this.access.requireCollection("read"), this.list);
+    data.get("/:collection/:id", this.access.requireCollection("read"), this.getOne);
+    data.post("/:collection", this.access.requireCollection("create"), this.create);
+    data.put("/:collection/:id", this.access.requireCollection("update"), this.update);
+    data.delete("/:collection/:id", this.access.requireCollection("delete"), this.remove);
     r.use("/documents/:docId", data);
     return r;
   }
@@ -185,23 +211,19 @@ export class Api {
   }
 
   /* -- auth (proxy SSO) : état de session, toujours accessible (le client adapte son UI) -- */
-  private me: RequestHandler = async (req, res) => { res.json(await this.auth.validate(req)); };
-
-  /** Garde d'accès : session SSO valide + SUPER_ADMIN. Le refus est distingué par le code HTTP, car le
-      client AGIT différemment selon le cas :
-        - **401 « non authentifié »** quand `!r.logged` (session absente ou EXPIRÉE) → le client coupe la
-          session locale et RENVOIE au login. Sans cette distinction, une expiration en cours de session
-          se traduisait par un 403 indiscernable, donc en erreurs éparses sans jamais ramener à la connexion
-          (cf. RestDocumentController.sessionExpired côté client).
-        - **403 « accès refusé »** quand la session est VALIDE mais sans le droit SUPER_ADMIN → le client
-          reste sur l'écran « accès refusé » (pas de boucle de reconnexion : se reconnecter n'y changerait rien).
-      Le corps JSON portait DÉJÀ `logged`/`adminRight` — seul le CODE HTTP résumait mal les deux cas. */
-  private requireAdmin: RequestHandler = async (req, res, next) => {
-    const r = await this.auth.validate(req);
-    (req as RepoRequest).authUser = r;   // réutilisé par resolveRepo (qui a écrit, pour le live)
-    if (this.auth.isAuthorized(r)) { next(); return; }
-    if (!r.logged) { res.status(401).json({ error: "non authentifié", logged: false, adminRight: r.adminRight || "NONE" }); return; }
-    res.status(403).json({ error: "accès refusé", logged: true, adminRight: r.adminRight || "NONE" });
+  /** `GET /me` — SEULE route montée AVANT la garde globale : un utilisateur sans aucun droit doit
+      pouvoir apprendre qu'il n'en a aucun (écran « aucun accès »), sinon il ne verrait qu'un 403 nu.
+      La réponse est ADDITIVE : tous les champs historiques du `SsoResult` (`logged`, `adminRight`,
+      `user`, `expireDate`…) traversent INCHANGÉS — le client d'avant l'ACL continue de fonctionner
+      tel quel — et s'y ajoute `permissions`, la liste PLATE des grants effectifs (jokers compris),
+      à partir de laquelle le client reconstruit le MÊME `PermissionSet` (src-shared/Permissions).
+      On expose les PERMISSIONS et jamais les rôles : le client APPLIQUE la politique, il ne la
+      connaît pas — et les noms de rôles d'un déploiement ne le regardent pas.
+      ⚠ Copie (`{ ...session }`) et non mutation : `Auth.validate` rend l'objet MIS EN CACHE. */
+  private me: RequestHandler = async (req, res) => {
+    const session = await this.auth.validate(req);
+    const set = await this.access.setFor(session);
+    res.json({ ...session, permissions: set.grants() });
   };
 
   /** Résolution BATCH d'utilisateurs par id canonique : `GET /users/resolve?id=…&id=…`.
@@ -597,14 +619,26 @@ export class Api {
   };
 
   /** Recherche GLOBALE transverse (`GET …/search?q=…&collections=a,b`) : UN aller-retour pour la palette
-      Ctrl+K en mode API — jamais ~20 `list()` par frappe. Même garde d'accès que toute lecture du document
-      (`requireAdmin` global + `resolveRepo`), délégation au dépôt (`searchAll` : LIKE par collection sur la
-      colonne `search`, plafond par collection SEARCH_ALL_LIMIT signalé par `truncated` — cap assumé v1).
-      `collections` (CSV, facultatif) restreint la recherche — les noms inconnus sont ignorés par le dépôt.
-      Cf. docs/recherche.md. */
+      Ctrl+K en mode API — jamais ~20 `list()` par frappe. Délégation au dépôt (`searchAll` : LIKE par
+      collection sur la colonne `search`, plafond par collection SEARCH_ALL_LIMIT signalé par `truncated`
+      — cap assumé v1). `collections` (CSV, facultatif) restreint la recherche côté client.
+      Cf. docs/recherche.md.
+
+      🚨 ASSIETTE RESTREINTE (ACL) : la garde de route n'exige qu'UNE lecture documentaire — sans quoi
+      un lecteur partiel (ex. `dc-viewer`) ne pourrait pas chercher du tout. C'est donc ICI que la
+      restriction fine s'applique : l'assiette effective est l'INTERSECTION de ce que le client demande
+      et de ce qu'il a le droit de lire. Le point d'injection est le paramètre `collections` du dépôt,
+      qui borne la BOUCLE de requêtes : aucune requête SQL n'est même émise pour une collection
+      interdite — strictement mieux qu'un post-filtrage, qui l'aurait d'abord lue.
+      Assiette VIDE → réponse vide immédiate : le dépôt interprète une liste vide comme « toutes les
+      collections » (défaut historique), la lui passer serait exactement l'inverse de l'intention. */
   private searchAll: RequestHandler = (req, res) => {
     const q = req.query as Record<string, any>;
-    const collections = q.collections ? String(q.collections).split(",").filter(Boolean) : null;
+    const requested = q.collections ? String(q.collections).split(",").filter(Boolean) : null;
+    const readable = Permissions.readableCollections(AccessControl.setOf(req as RepoRequest));
+    const allowed = new Set(readable);
+    const collections = requested ? requested.filter((c) => allowed.has(c)) : readable;
+    if (!collections.length) { res.json({ results: {}, truncated: [] }); return; }
     res.json(this.repoOf(req).searchAll(String(q.q || ""), { collections }));
   };
 

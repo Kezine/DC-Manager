@@ -52,6 +52,16 @@ import { VmStatusEnrichment } from "./VmStatusEnrichment.js";
 /** Nom de la base des providers — utilisé pour détecter le cas « clé absente mais DB présente ». */
 const PROVIDERS_DB_FILE = "vm-providers.db";
 
+/** GARDES D'ACCÈS injectées — DÉPENDANCE INVERSÉE, exactement le patron de `ProblemReporter` : le
+    module déclare ICI le contrat MINIMAL qu'il attend du contrôle d'accès du cœur, et n'importe
+    RIEN de `access/`. C'est index.ts qui PONTE (typage STRUCTUREL) l'`AccessControl` au bootstrap.
+    ⚠ La quasi-duplication de cette interface d'une feature à l'autre est ASSUMÉE, comme celle des
+    `*ProblemReporter` : c'est le prix — trois lignes — de l'amovibilité de chaque module. */
+export interface VmAccessGuards {
+  /** Middleware qui laisse passer si l'appelant détient la permission, 403 sinon. */
+  require(permission: string): express.RequestHandler;
+}
+
 export class VmModule {
   private constructor(
     private readonly docs: DocumentStore,
@@ -63,9 +73,12 @@ export class VmModule {
     /** Vrai quand la clé de chiffrement est absente → TOUTES les routes répondent 503 « définir la clé ». */
     private readonly keyMissing: boolean,
     private readonly log: Logger,
+    /** Gardes d'accès injectées (cf. `VmAccessGuards`) — REQUISES : un module sans garde serait
+        ouvert à tout utilisateur ayant une permission quelconque, ce que l'ACL existe pour empêcher. */
+    private readonly access: VmAccessGuards,
   ) {}
 
-  static create(opts: { docs: DocumentStore; live: VmLivePublisher; dataDir: string; sqlite: SqliteCtor; log?: Logger; problems?: ProblemReporter }): VmModule {
+  static create(opts: { docs: DocumentStore; live: VmLivePublisher; dataDir: string; sqlite: SqliteCtor; access: VmAccessGuards; log?: Logger; problems?: ProblemReporter }): VmModule {
     const log = opts.log || new Logger("error");
     // Coffre PARTAGÉ (clé unique DCMANAGER_SECRETS_KEY ; aucun repli — cf. SecretBox).
     // fromEnv PEUT jeter si la clé est PRÉSENTE mais trop courte (< MIN_PASSPHRASE_LENGTH) : ce
@@ -78,7 +91,7 @@ export class VmModule {
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       log.error("clé de chiffrement des secrets VM invalide — module démarré en erreur (feature désactivée)", message);
-      return new VmModule(opts.docs, null, null, message, false, log);
+      return new VmModule(opts.docs, null, null, message, false, log, opts.access);
     }
 
     // ---- Clé PRÉSENTE : stockage DB chiffré (UNIQUE source de config). ----
@@ -90,11 +103,11 @@ export class VmModule {
         // seul le rapporteur de problèmes (optionnel, injecté au bootstrap) est ajouté.
         const service = new VmSyncService(opts.docs, opts.live, providerDb, log, VmSyncService.adapterFor, VmSyncService.DEFAULT_MIN_INTERVAL_SEC, opts.problems);
         log.info("module VM prêt (stockage DB chiffré, CRUD actif)", "node " + process.version);
-        return new VmModule(opts.docs, service, providerDb, null, false, log);
+        return new VmModule(opts.docs, service, providerDb, null, false, log, opts.access);
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
         log.error("stockage DB des providers VM en erreur — module démarré en erreur (synchro désactivée)", message);
-        return new VmModule(opts.docs, null, null, message, false, log);
+        return new VmModule(opts.docs, null, null, message, false, log, opts.access);
       }
     }
 
@@ -106,10 +119,10 @@ export class VmModule {
       const message = PROVIDERS_DB_FILE + " présent mais aucune clé de chiffrement (" + SecretBox.ENV_VAR
         + ") — base chiffrée présente sans clé : définissez la clé pour déchiffrer les jetons stockés";
       log.error("module VM en erreur : base chiffrée présente sans clé", message);
-      return new VmModule(opts.docs, null, null, message, true, log);
+      return new VmModule(opts.docs, null, null, message, true, log, opts.access);
     }
     log.info("module VM inactif : aucune clé de chiffrement (" + SecretBox.ENV_VAR + ") — configuration des providers indisponible");
-    return new VmModule(opts.docs, null, null, null, true, log);
+    return new VmModule(opts.docs, null, null, null, true, log, opts.access);
   }
 
   /** Démarre les synchros périodiques (no-op si config en erreur/absente). */
@@ -126,7 +139,11 @@ export class VmModule {
   extension(): ApiExtension {
     const router = express.Router({ mergeParams: true });
 
-    router.post("/sync", (req, res) => {
+    // 🚨 ORDRE : la garde de PERMISSION passe AVANT le 503 « module indisponible » (qui est en tête
+    // de chaque handler) — un appelant sans droit ne doit pas apprendre si la feature est
+    // configurée, et encore moins pourquoi elle ne l'est pas. Un middleware précède le handler :
+    // l'ordre est donc garanti par construction ici.
+    router.post("/sync", this.access.require("vm:sync"), (req, res) => {
       const docId = (req.params as any).docId as string;
       if (!this.docs.get(docId)) { res.status(404).json({ error: "document inconnu" }); return; }
       if (!this.service) { this.respondUnavailable(res); return; }
@@ -141,7 +158,7 @@ export class VmModule {
         });
     });
 
-    router.get("/status", (req, res) => {
+    router.get("/status", this.access.require("vm:read"), (req, res) => {
       const docId = (req.params as any).docId as string;
       if (!this.docs.get(docId)) { res.status(404).json({ error: "document inconnu" }); return; }
       if (!this.service) { this.respondUnavailable(res); return; }
@@ -153,14 +170,14 @@ export class VmModule {
 
     /* ---- CRUD des providers (stockage DB chiffré uniquement) ---- */
 
-    router.get("/providers", (req, res) => {
+    router.get("/providers", this.access.require("vm:read"), (req, res) => {
       const docId = (req.params as any).docId as string;
       if (!this.docs.get(docId)) { res.status(404).json({ error: "document inconnu" }); return; }
       const db = this.crudBackend(res); if (!db) return;
       res.json({ providers: db.listFor(docId) }); // SANS jeton (has_token: true)
     });
 
-    router.put("/providers/:id", (req, res) => {
+    router.put("/providers/:id", this.access.require("vm.providers:manage"), (req, res) => {
       const docId = (req.params as any).docId as string;
       const id = (req.params as any).id as string;
       if (!this.docs.get(docId)) { res.status(404).json({ error: "document inconnu" }); return; }
@@ -183,7 +200,7 @@ export class VmModule {
       }
     });
 
-    router.delete("/providers/:id", (req, res) => {
+    router.delete("/providers/:id", this.access.require("vm.providers:manage"), (req, res) => {
       const docId = (req.params as any).docId as string;
       const id = (req.params as any).id as string;
       if (!this.docs.get(docId)) { res.status(404).json({ error: "document inconnu" }); return; }
@@ -193,7 +210,7 @@ export class VmModule {
       res.json({ ok: true });
     });
 
-    router.post("/providers/test", (req, res) => {
+    router.post("/providers/test", this.access.require("vm.providers:manage"), (req, res) => {
       const docId = (req.params as any).docId as string;
       if (!this.docs.get(docId)) { res.status(404).json({ error: "document inconnu" }); return; }
       const db = this.crudBackend(res); if (!db) return;

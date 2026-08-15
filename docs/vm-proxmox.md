@@ -390,10 +390,12 @@ quel par la liste et l'enregistrement (aucune réserve, contrairement au jeton).
 
 ### Modèle de menace — administrateur de confiance (limites assumées)
 
-La gate d'accès de l'API est un **SUPER_ADMIN unique** (pas de rôles fins en v1). La
-sécurité de la feature repose donc explicitement sur un **administrateur de confiance** :
-plusieurs surfaces le supposent, et le chiffrement au repos NE protège PAS d'un admin
-malveillant (il protège les copies de la base — cf. `SecretBox`).
+La configuration des providers est réservée à la permission **`vm.providers:manage`**
+(cf. [`auth.md`](auth.md)) — volontairement HORS du rôle `vm-operator`, justement parce que
+ces routes touchent aux **jetons**. La sécurité de la feature repose donc explicitement sur un
+**détenteur de confiance de cette permission** : plusieurs surfaces le supposent, et le
+chiffrement au repos NE protège PAS d'un administrateur malveillant (il protège les copies de
+la base — cf. `SecretBox`).
 
 - **Repointage d'endpoint = exfiltration du jeton.** Un admin peut éditer un provider
   pour faire pointer un `url` d'endpoint vers **un serveur qu'il contrôle**, puis lancer
@@ -403,15 +405,15 @@ malveillant (il protège les copies de la base — cf. `SecretBox`).
 - **`POST …/vm/providers/test` = sonde HTTPS du réseau interne.** La route ouvre une
   connexion TLS vers une URL fournie et en renvoie le résultat (joignabilité, version,
   message d'erreur) : elle peut servir de **scanner** du réseau interne joignable par le
-  serveur (SSRF **assumé**, réservé au SUPER_ADMIN).
+  serveur (SSRF **assumé**, réservé à `vm.providers:manage`).
 - **Absence d'AAD** (cf. `SecretBox`) : les jetons chiffrés ne sont pas liés à leur
   table/ligne — un attaquant ayant l'**ÉCRITURE** sur les bases pourrait échanger deux
   ciphertexts (jeton de webhook ↔ jeton de provider) sans erreur de déchiffrement. Hors
   modèle (protection des copies en LECTURE), à lier via une AAD dans un éventuel format v2.
 
-Tout ceci est **ASSUMÉ** tant que l'admin est de confiance (gate SUPER_ADMIN unique) —
-**à réévaluer** si des rôles plus fins apparaissent (un « éditeur » non-admin ne devrait
-alors ni repointer un endpoint ni sonder le réseau).
+Tout ceci est **ASSUMÉ** pour qui détient `vm.providers:manage`. C'est précisément pourquoi
+cette permission est séparée de `vm:read`/`vm:sync` : un « opérateur VM » synchronise et édite
+les VMs manuelles sans jamais pouvoir repointer un endpoint ni sonder le réseau.
 
 > **Note d'implémentation (`markChanged`)** : une passe qui écrit consomme une révision
 > (`docs.markChanged`) **avant** `repo.transact`. Si l'écriture échoue, la révision est

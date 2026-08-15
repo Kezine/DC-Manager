@@ -128,7 +128,9 @@ historiques résolvent en dummy jusqu'à leur reconnexion — le snapshot évite
 
 ## Endpoint batch : `GET /users/resolve`
 
-Monté dans `Api`, **derrière `requireAdmin`** (comme tout le reste). Réponse `{ users: ResolvedUser[] }`.
+Monté dans `Api`, derrière la garde globale `requireAuth` (comme tout le reste) et **sans permission
+propre** — l'audit affiche des noms partout, la règle de confidentialité qui s'applique ici est le
+caviardage ci-dessous (cf. [`auth.md`](auth.md)). Réponse `{ users: ResolvedUser[] }`.
 
 - Paramètre `id` **RÉPÉTABLE** (`?id=…&id=…`), **dédupliqué**, **plafonné à 200**, **ordre de la
   requête préservé** (`UserProfiles.parseIdList` — pur, testé).

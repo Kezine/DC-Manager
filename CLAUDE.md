@@ -306,6 +306,18 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
 - [`i18n.md`](docs/i18n.md) — **localisation du client** (i18next enveloppé par la classe `I18n`,
   catalogues `.ts` par domaine `fr`/`en`, détection de locale + préférence persistée, bascule =
   reload assumé, pilote = libellés d'onglets, test de complétude fr⇄en, phase 2 = codes serveur).
+- [`auth.md`](docs/auth.md) — **authentification & AUTORISATION** (RBAC à permissions atomiques
+  `domaine:action`, grants à JOKERS et checks atomiques — `src-shared/Permissions` partagé front⇄back,
+  carte des 25 collections → 10 domaines verrouillée par invariant, rôles presets + rôles CUSTOM ;
+  politique `roles.json` relue à chaud (`ROLES_FILE`), FAIL-CLOSED — « absent » (adopté) ≠ « illisible »
+  (dernière config valide conservée) —, amorçage `BOOTSTRAP_ADMIN_IDS`, rétrocompat SUPER_ADMIN/dev/basic ;
+  enforcement = garde GLOBALE `requireAuth` (401 si non loggé, **403 si 0 permission**) + gardes TAGUÉES
+  par route, INJECTÉES dans les modules par typage structurel (contrat `ApiExtension` inchangé, garde
+  AVANT le 503) ; 🚨 **verrou d'EXHAUSTIVITÉ** — un test relit les SOURCES des routeurs et nomme toute
+  route sans garde ; `/transact` vérifié opération par opération (refus atomique), **cascade suivie SANS
+  re-vérification** (intégrité référentielle, décision justifiée), `search` à ASSIETTE restreinte,
+  `/me` ADDITIF (`permissions`), sémantique 401/403 conservée ; section « Mode local » — ACL serveur
+  seulement, `PermissionSet.ALL` par construction en mode fichier).
 - [`user-resolver.md`](docs/user-resolver.md) — **annuaire utilisateurs** (service CORE interface-driven
   `UserResolver` : id canonique `String(id)` SSO sinon login → profil affichable ; impl v1
   `AuthCacheUserResolver` = cache d'auth capturé par puits injecté `ProfileSink` + snapshot SQLite

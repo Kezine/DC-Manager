@@ -59,6 +59,16 @@ const REMINDER_TICK_MS = 5 * 60 * 1000;
     POURRAIT pas, sur une suppression). */
 export type InterventionsWriteHook = (docId: string, interventionId: string, kind: "put" | "delete") => void;
 
+/** GARDES D'ACCÈS injectées — DÉPENDANCE INVERSÉE, exactement le patron de `ProblemReporter` : le
+    module déclare ICI le contrat MINIMAL qu'il attend du contrôle d'accès du cœur, et n'importe
+    RIEN de `access/`. C'est index.ts qui PONTE (typage STRUCTUREL) l'`AccessControl` au bootstrap.
+    ⚠ La quasi-duplication de cette interface d'une feature à l'autre est ASSUMÉE, comme celle des
+    `*ProblemReporter` : c'est le prix — trois lignes — de l'amovibilité de chaque module. */
+export interface InterventionsAccessGuards {
+  /** Middleware qui laisse passer si l'appelant détient la permission, 403 sinon. */
+  require(permission: string): express.RequestHandler;
+}
+
 export class InterventionsModule {
   private timer: ReturnType<typeof setInterval> | null = null;
 
@@ -78,9 +88,12 @@ export class InterventionsModule {
     private readonly log: Logger,
     /** Rappel d'écriture OPTIONNEL (pont tracker du bootstrap) — null = aucune réplication branchée. */
     private readonly onWrite: InterventionsWriteHook | null,
+    /** Gardes d'accès injectées (cf. `InterventionsAccessGuards`) — REQUISES : un module sans garde serait
+        ouvert à tout utilisateur ayant une permission quelconque, ce que l'ACL existe pour empêcher. */
+    private readonly access: InterventionsAccessGuards,
   ) {}
 
-  static create(opts: { docs: DocumentStore; dataDir: string; sqlite: SqliteCtor; log?: Logger; live?: LivePublisher; problems?: InterventionProblemReporter; onWrite?: InterventionsWriteHook }): InterventionsModule {
+  static create(opts: { docs: DocumentStore; dataDir: string; sqlite: SqliteCtor; access: InterventionsAccessGuards; log?: Logger; live?: LivePublisher; problems?: InterventionProblemReporter; onWrite?: InterventionsWriteHook }): InterventionsModule {
     const log = opts.log || new Logger("error");
     const live = opts.live || null;
     const onWrite = opts.onWrite || null;
@@ -90,11 +103,11 @@ export class InterventionsModule {
       log.info("module interventions prêt (interventions.db"
         + (watcher ? ", rappels actifs" : ", rappels SANS rapporteur")
         + (onWrite ? ", réplication branchée)" : ")"));
-      return new InterventionsModule(opts.docs, live, db, watcher, opts.problems || null, null, log, onWrite);
+      return new InterventionsModule(opts.docs, live, db, watcher, opts.problems || null, null, log, onWrite, opts.access);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       log.error("module interventions en erreur — démarré désactivé", message);
-      return new InterventionsModule(opts.docs, live, null, null, opts.problems || null, message, log, onWrite);
+      return new InterventionsModule(opts.docs, live, null, null, opts.problems || null, message, log, onWrite, opts.access);
     }
   }
 
@@ -172,7 +185,11 @@ export class InterventionsModule {
   extension(): ApiExtension {
     const router = express.Router({ mergeParams: true });
 
-    router.get("/", (req, res) => {
+    // 🚨 ORDRE : la garde de PERMISSION passe AVANT le 503 « module indisponible » (qui est en tête
+    // de chaque handler) — un appelant sans droit ne doit pas apprendre si la feature est
+    // configurée, et encore moins pourquoi elle ne l'est pas. Un middleware précède le handler :
+    // l'ordre est donc garanti ici par construction.
+    router.get("/", this.access.require("interventions:read"), (req, res) => {
       const ctx = this.context(req, res); if (!ctx) return;
       const q: any = (req.query && typeof req.query === "object") ? req.query : {};
       res.json(ctx.db.listPage(ctx.docId, InterventionsModule.parseListQuery(q)));
@@ -180,7 +197,7 @@ export class InterventionsModule {
 
     // /meta déclarée AVANT /:id (« meta » n'est pas un id). Sert au client à fabriquer le lien vers
     // un ticket depuis une clé Jira (jira_ref) — SANS aucun appel Jira côté serveur.
-    router.get("/meta", (req, res) => {
+    router.get("/meta", this.access.require("interventions:read"), (req, res) => {
       const ctx = this.context(req, res); if (!ctx) return;
       res.json({ jira_base_url: InterventionsValidate.jiraBaseUrl() });
     });
@@ -188,20 +205,20 @@ export class InterventionsModule {
     // /counts déclarée AVANT /:id (« counts » n'est pas un id). Comptes d'interventions OUVERTES par cible
     // (badges de fiche équipement/VM/spare). `target` = paramètre RÉPÉTABLE « <kind>:<id> » ; validation
     // souple (cibles malformées ignorées, plafonnées par la couche DB).
-    router.get("/counts", (req, res) => {
+    router.get("/counts", this.access.require("interventions:read"), (req, res) => {
       const ctx = this.context(req, res); if (!ctx) return;
       const q: any = (req.query && typeof req.query === "object") ? req.query : {};
       res.json({ counts: ctx.db.countOpenForTargets(ctx.docId, InterventionsModule.parseTargets(q.target)) });
     });
 
-    router.get("/:id", (req, res) => {
+    router.get("/:id", this.access.require("interventions:read"), (req, res) => {
       const ctx = this.context(req, res); if (!ctx) return;
       const item = ctx.db.getOne(ctx.docId, (req.params as any).id);
       if (!item) { res.status(404).json({ error: "intervention inconnue" }); return; }
       res.json({ intervention: item });
     });
 
-    router.put("/:id", (req, res) => {
+    router.put("/:id", this.access.require("interventions:write"), (req, res) => {
       const ctx = this.context(req, res); if (!ctx) return;
       const id = (req.params as any).id as string;
       const body: any = (req.body && typeof req.body === "object") ? req.body : {};
@@ -228,7 +245,7 @@ export class InterventionsModule {
       }
     });
 
-    router.delete("/:id", (req, res) => {
+    router.delete("/:id", this.access.require("interventions:write"), (req, res) => {
       const ctx = this.context(req, res); if (!ctx) return;
       const id = (req.params as any).id as string;
       if (!ctx.db.remove(ctx.docId, id)) { res.status(404).json({ error: "intervention inconnue" }); return; }
