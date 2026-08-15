@@ -175,6 +175,12 @@ export const lists = {
     faceOther: "Other",
     kindDataPill: "data",
     kindPowerPill: "power",
+    // Fixed options of the "Age / warranty" column filter (part 2 of the
+    // age-garantie-mise-en-evidence TODO) — ids = the state slugs of `LifecycleFormat.warrantyFilterState`.
+    warrantyOk: "Under warranty",
+    warrantyWarn: "Expiring soon",
+    warrantyErr: "Expired",
+    warrantyNone: "No warranty",
   },
   ph: {
     noName: "(no name)",

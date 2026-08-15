@@ -83,6 +83,33 @@ module.exports = async () => {
     ck.eq(LifecycleFormat.warranty("2027-01-01", new Date("nawak")), null, "warranty : now invalide → null");
   });
 
+  await section("Lifecycle : warrantyFilterState — 4e état pour le filtre-colonne (volet 2)", async () => {
+    const NOW = day("2026-08-04");
+    const fs = (iso) => LifecycleFormat.warrantyFilterState(iso, NOW);
+    const isoIn = (days) => new Date(NOW.getTime() + days * 86400000).toISOString().slice(0, 10);
+
+    ck.eq(fs(isoIn(200)), "ok", "warrantyFilterState : échéance lointaine → ok");
+    ck.eq(fs(isoIn(90)), "warn", "warrantyFilterState : 90 j pile → warn (borne inclusive, comme warranty)");
+    ck.eq(fs(isoIn(0)), "warn", "warrantyFilterState : J-0 « expire aujourd'hui » → warn (pas err)");
+    ck.eq(fs(isoIn(-1)), "err", "warrantyFilterState : dépassement strict → err");
+
+    // « none » : tout ce qui n'a pas d'état de garantie exploitable — vide, illisible, `now` invalide.
+    ck.eq(fs(""), "none", "warrantyFilterState : champ vide → none");
+    ck.eq(fs(null), "none", "warrantyFilterState : null → none");
+    ck.eq(fs(undefined), "none", "warrantyFilterState : undefined → none");
+    ck.eq(fs("pas-une-date"), "none", "warrantyFilterState : chaîne illisible → none");
+    ck.eq(LifecycleFormat.warrantyFilterState("2027-01-01", new Date("nawak")), "none", "warrantyFilterState : now invalide → none");
+
+    // Verrou de non-dérive : l'état du filtre EST le statut de `warranty(...)` quand il existe — jamais
+    // de re-dérivation locale du seuil WARN_DAYS (source unique).
+    const samples = [isoIn(365), isoIn(90), isoIn(91), isoIn(1), isoIn(0), isoIn(-1), isoIn(-400), "", "pas-une-date"];
+    for (const iso of samples) {
+      const w = LifecycleFormat.warranty(iso, NOW);
+      const expected = w ? w.status : "none";
+      ck.eq(fs(iso), expected, `warrantyFilterState : cohérent avec warranty(...) pour « ${iso}»`);
+    }
+  });
+
   await section("Lifecycle : daysUntil — jours entiers signés, null si invalide", async () => {
     const NOW = day("2026-08-04");
     ck.eq(LifecycleFormat.daysUntil("2026-08-04", NOW), 0, "daysUntil : aujourd'hui → 0");

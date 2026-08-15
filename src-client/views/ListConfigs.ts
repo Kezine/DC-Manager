@@ -21,7 +21,7 @@ import { EntityViz } from "./EntityViz";
 import { ListTargets } from "./ListTargets";
 import { AttachmentViewKind } from "../core/AttachmentViewKind";   // « Afficher » de ligne : proposé seulement si visualisable
 import type { EntitySearchReader } from "../core/EntityCandidates";
-import type { ListOptions } from "./ListView";
+import type { ListOptions, FilterOption } from "./ListView";
 
 const dim = (s: string) => `<span style="color:var(--fg-dimmer)">${s}</span>`;
 const swatch = (c: string | null) => (c ? `<span class="swatch-dot" style="background:${c}"></span> ` : "");
@@ -45,6 +45,21 @@ const ageWarrantyCell = (o: any): string => {
   }
   return parts.length ? parts.join(" · ") : dim("—");
 };
+// Filtre-COLONNE de « Âge / garantie » (volet 2 du TODO age-garantie-mise-en-evidence, § 2) : états
+// CALCULÉS par `LifecycleFormat.warrantyFilterState` (ok/warn/err/none), PAS de propriété `field` — cet
+// état n'a AUCUNE colonne SQL en face (dérivé de `warranty_end`) et les deux collections consommatrices
+// (equipments, subEquipments) sont HYDRATÉES en entier (hors régime pagé) : les options FIXES ci-dessous
+// couvrent exactement les 4 valeurs possibles, c'est le contrat documenté de `ListColumn.filter` (repli
+// « options du cache » sans `field`, cf. ListView). `new Date()` à CHAQUE évaluation de `valueOf` — même
+// règle que `ageWarrantyCell` : l'état suit l'horloge réelle, cohérence rendu ⇄ filtre. Factorisée entre
+// les deux listings (mêmes champs, même patron que le filtre `type`/`group` ci-dessous).
+const warrantyFilterOptions = (): FilterOption[] => [
+  { id: "ok", label: I18n.t("lists.opt.warrantyOk") },
+  { id: "warn", label: I18n.t("lists.opt.warrantyWarn") },
+  { id: "err", label: I18n.t("lists.opt.warrantyErr") },
+  { id: "none", label: I18n.t("lists.opt.warrantyNone") },
+];
+const warrantyFilterValueOf = (o: any): string => LifecycleFormat.warrantyFilterState(o.warranty_end, new Date());
 
 /* Configurations de colonnes par collection (paramètrent ListView). Classe de méthodes
    statiques ; chaque méthode renvoie les options d'une liste. Le JEU de colonnes est aligné
@@ -87,8 +102,9 @@ export class ListConfigs {
         { head: I18n.t("lists.col.subEquipments"), cls: "cell-num", sort: (e) => store.subEquipmentsOf(e.id).length, render: (e) => { const n = store.subEquipmentsOf(e.id).length; return n ? `<span class="pill">${n}</span>` : dim("—"); } },
         // Âge / garantie (colonne COMBINÉE, non essentielle) : l'onglet Équipements n'avait aucune colonne datée.
         // Tri par `warranty_end` — l'axe ACTIONNABLE (« quels équipements hors garantie » ; croissant = expirées
-        // en tête). L'âge est AFFICHÉ mais non triable (le filtre par état viendra au volet 2, hors périmètre ici).
-        { head: I18n.t("lists.col.ageWarranty"), sortKey: "warranty", sort: (e) => e.warranty_end || "", render: ageWarrantyCell },
+        // en tête). L'âge est AFFICHÉ mais non triable. Filtre par état CALCULÉ (volet 2) : cf. commentaire de
+        // `warrantyFilterOptions` ci-dessus.
+        { head: I18n.t("lists.col.ageWarranty"), sortKey: "warranty", sort: (e) => e.warranty_end || "", render: ageWarrantyCell, filter: { label: I18n.t("lists.col.ageWarranty"), options: warrantyFilterOptions, valueOf: warrantyFilterValueOf } },
         { head: I18n.t("lists.col.description"), cls: "cell-desc", sort: (e) => e.description || "", render: descCell },
       ],
     };
@@ -131,8 +147,9 @@ export class ListConfigs {
         },
         // Âge / garantie (colonne COMBINÉE) : REMPLACE les deux ex-colonnes « Achat »/« Garantie » brutes
         // (densité ; les dates brutes restent lisibles en fiche). Tri par `warranty_end` — l'axe ACTIONNABLE
-        // (croissant = expirées en tête) ; l'âge est affiché mais non triable (filtre → volet 2, hors périmètre).
-        { head: I18n.t("lists.col.ageWarranty"), sortKey: "warranty", sort: (se) => se.warranty_end || "", render: ageWarrantyCell },
+        // (croissant = expirées en tête) ; l'âge est affiché mais non triable. Filtre par état CALCULÉ
+        // (volet 2) : cf. commentaire de `warrantyFilterOptions` en tête de fichier.
+        { head: I18n.t("lists.col.ageWarranty"), sortKey: "warranty", sort: (se) => se.warranty_end || "", render: ageWarrantyCell, filter: { label: I18n.t("lists.col.ageWarranty"), options: warrantyFilterOptions, valueOf: warrantyFilterValueOf } },
         { head: I18n.t("lists.col.description"), cls: "cell-desc", sort: (se) => se.description || "", render: descCell },
       ],
     };

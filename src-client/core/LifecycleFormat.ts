@@ -26,6 +26,10 @@ import { I18n } from "../i18n/I18n";
 /** Statut d'une garantie (mappé en variable CSS par la vue) : sous garantie / bientôt / expirée. */
 export type WarrantyStatus = "ok" | "warn" | "err";
 
+/** État de FILTRE de garantie (volet 2 du TODO `age-garantie-mise-en-evidence`) : les trois statuts
+    de `WarrantyStatus` + `"none"` — un 4ᵉ état qui n'existe QUE pour le filtre (cf. `warrantyFilterState`). */
+export type WarrantyFilterState = WarrantyStatus | "none";
+
 /** État de garantie rendu : le STATUT sémantique + le LIBELLÉ déjà localisé (« expire dans X »,
     « expirée depuis X », « expire aujourd'hui »). La vue mappe `status` → couleur, elle ne reformule pas. */
 export interface WarrantyState {
@@ -132,5 +136,17 @@ export class LifecycleFormat {
     if (days === 0) return { status: "warn", label: I18n.t("detail.lifecycle.expiresToday") };
     const status: WarrantyStatus = days <= LifecycleFormat.WARN_DAYS ? "warn" : "ok";
     return { status, label: I18n.t("detail.lifecycle.expiresIn", { d: LifecycleFormat.durationLabel(now, d) }) };
+  }
+
+  /** État de FILTRE de garantie (volet 2 du TODO `age-garantie-mise-en-evidence`, § 2 — filtre-colonne
+      à états CALCULÉS sur la colonne combinée « Âge / garantie », zéro primitive nouvelle). DÉLÈGUE
+      à `warranty(...)` pour les trois statuts existants — JAMAIS de re-dérivation du seuil `WARN_DAYS` :
+      une seule source pour « c'est `warn` ». `"none"` couvre tout le reste (vide, chaîne illisible, `now`
+      invalide) : `warranty` renvoie `null` pour « pas de garantie », ce qui ne se filtre PAS — le filtre
+      a besoin d'un état TOTAL (une valeur pour CHAQUE ligne) afin qu'un enregistrement sans date de fin
+      reste TROUVABLE via l'option « Sans garantie », plutôt qu'invisible de toute sélection. */
+  static warrantyFilterState(warrantyIso: string | null | undefined, now: Date): WarrantyFilterState {
+    const w = LifecycleFormat.warranty(warrantyIso, now);
+    return w ? w.status : "none";
   }
 }
