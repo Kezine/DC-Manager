@@ -1533,7 +1533,7 @@ module.exports = async () => {
 
   /* ============ SERVEUR : NotifyEngine (moteur anti-spam PUR du module notify/) ============ */
 
-  await section("Serveur : NotifyEngine — nouveau problème, rappel dû/pas dû, resolve, échec d'envoi, multi-types", async () => {
+  await section("Serveur : NotifyEngine — nouveau problème, rappel dû/pas dû, resolve, échec d'envoi, multi-types, création silencieuse", async () => {
   {
     const { NotifyEngine, DEFAULT_REMIND_INTERVAL_SEC } = SERVER("notify/NotifyEngine.js");
     const { MemoryNotifyStateStore } = SERVER("notify/MemoryNotifyStateStore.js");
@@ -1682,6 +1682,53 @@ module.exports = async () => {
       await consoleNotifier.send({ event_type: "test", severity: "info", title: "Ping", body: "corps", doc_id: null, target: { contact_id: "c1", address: "c1@exemple.test", channel: "email" } });
       ck.eq(consoleNotifier.kind, "console", "kind = console");
       ck(lines.length === 1 && /INFO/.test(lines[0]) && /test/.test(lines[0]) && /Ping/.test(lines[0]) && /c1@exemple\.test/.test(lines[0]), "une ligne lisible : gravité + type + titre + destinataire");
+    }
+
+    // -- 5) Option `silent` (lot B garantie-alerte 2026-08-15) : création SILENCIEUSE — l'alerte
+    //       EXISTE (active) mais rien ne part et AUCUN rappel n'est programmé (next_remind_at null,
+    //       jamais dû → silencieuse À VIE) ; resolve muet (Q1) ; chemin normal INCHANGÉ. --
+    {
+      const chan = mkNotifier("webhook");
+      const store = new MemoryNotifyStateStore();
+      const journal = [];
+      const engine = new NotifyEngine({
+        store, clock,
+        router: () => [{ notifier_id: "wh-s", notifier: chan, target: mkTarget("c9", "email") }],
+        journal: (e) => journal.push(e),
+      });
+
+      // Création silencieuse : état créé/actif, AUCUN envoi, AUCUN rappel programmé, AUCUNE ligne de journal.
+      ck.eq(await engine.raise("warranty:d1:equipments:e1", { event_type: "warranty-expired", severity: "error", title: "Garantie expirée", body: "-", doc_id: "d1" }, { silent: true }), "silenced", "raise silent (problème NOUVEAU) → « silenced » (aucun envoi)");
+      ck.eq(chan.sent.length, 0, "…aucune remise au destinataire routé");
+      ck.eq(journal.length, 0, "…aucune entrée de journal (rien n'a été tenté)");
+      const silentState = store.get("warranty:d1:equipments:e1");
+      ck(silentState !== null && silentState.resolved_at === null && silentState.first_seen === new Date(nowMs).toISOString(), "…état CRÉÉ et ACTIF (visible dans les alertes actives), first_seen posé");
+      ck(silentState.last_sent === null && silentState.next_remind_at === null, "…last_sent null ET next_remind_at null (AUCUN rappel programmé — sinon le flood serait juste différé de 12 h)");
+
+      // Raises suivants NON silencieux sur l'alerte silencieuse : « déjà suivi » inchangé → toujours rien
+      // (le rappel n'est JAMAIS dû, next_remind_at est null), le message est tout de même rafraîchi.
+      nowMs += 48 * HOUR;
+      ck.eq(await engine.raise("warranty:d1:equipments:e1", { event_type: "warranty-expired", severity: "error", title: "Garantie expirée", body: "corps rafraîchi", doc_id: "d1" }), "silenced", "raise NON silencieux sur alerte née silencieuse → toujours silencieux (48 h plus tard : rappel jamais dû)");
+      ck.eq(chan.sent.length, 0, "…toujours aucune remise (silencieuse à vie — contrat voulu)");
+      ck.eq(store.get("warranty:d1:equipments:e1").body, "corps rafraîchi", "…message rafraîchi dans l'état (comportement « déjà suivi » historique)");
+      ck.eq(await engine.runReminders(), 0, "…et la passe de rappels AUTONOME l'ignore (next_remind_at null)");
+
+      // Resolve d'une alerte silencieuse : clôture MUETTE — Q1 fait déjà le bon travail (last_sent null).
+      ck.eq(await engine.resolve("warranty:d1:equipments:e1"), "resolved-silent", "resolve d'une alerte silencieuse → clôture muette (pas de « rétabli » mensonger)");
+      ck.eq(chan.sent.length, 0, "…aucun message de rétablissement");
+
+      // Ré-apparition APRÈS resolve, à nouveau silencieuse : nouvel épisode, même contrat.
+      ck.eq(await engine.raise("warranty:d1:equipments:e1", { event_type: "warranty-expired", severity: "error", title: "Garantie expirée", body: "-", doc_id: "d1" }, { silent: true }), "silenced", "ré-apparition silencieuse après resolve → nouvel épisode, toujours muet");
+      ck.eq(store.get("warranty:d1:equipments:e1").next_remind_at, null, "…nouvel épisode silencieux : toujours aucun rappel programmé");
+
+      // NON-RÉGRESSION du chemin normal : sans option → envoi immédiat + rappel planifié (historique intact).
+      ck.eq(await engine.raise("warranty:d1:equipments:e2", { event_type: "warranty-expired", severity: "error", title: "Autre garantie", body: "-", doc_id: "d1" }), "sent", "raise SANS option → envoi immédiat (chemin normal inchangé)");
+      ck(chan.sent.length === 1 && store.get("warranty:d1:equipments:e2").next_remind_at !== null, "…remise effectuée + rappel planifié comme avant l'extension");
+
+      // `silent` sur un problème DÉJÀ ACTIF (sonore) : SANS EFFET — l'échéance de rappel de l'état décide.
+      nowMs += 13 * HOUR;   // rappel 12 h dépassé
+      ck.eq(await engine.raise("warranty:d1:equipments:e2", { event_type: "warranty-expired", severity: "error", title: "Autre garantie", body: "-", doc_id: "d1" }, { silent: true }), "reminded", "silent sur alerte DÉJÀ ACTIVE sonore → ignoré (rappel dû → rappel émis, comportement historique)");
+      ck.eq(chan.sent.length, 2, "…le rappel est bien parti malgré l'option");
     }
   }
   });

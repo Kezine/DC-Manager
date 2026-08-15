@@ -10,9 +10,15 @@ import type { NotificationMessage, NotificationTarget, Notifier, NotifySeverity 
      `vm-sync:<docId>:<providerId>`). IDEMPOTENT PAR RUN : les détecteurs
      appellent raise à CHAQUE passe sans jamais spammer — envoi seulement si le
      problème est NOUVEAU ou si le rappel est DÛ (now ≥ next_remind_at).
+   - `raise(key, …, { silent: true })` — création SILENCIEUSE (extension générique,
+     cadrage garantie-alerte 2026-08-15) : l'alerte est CRÉÉE et ACTIVE mais rien
+     ne part et AUCUN rappel n'est programmé (next_remind_at null — jamais dû).
+     Anti-bruit du PREMIER balayage d'un producteur : l'état du parc est visible
+     sans inonder les abonnés. Sans effet sur un problème déjà actif.
    - `resolve(key)` — clôt le problème ; message « rétabli » UNE seule fois, et
      SEULEMENT si l'alerte initiale avait été effectivement envoyée (décision
-     Q1 — pas de « rétabli » pour une alerte restée silencieuse).
+     Q1 — pas de « rétabli » pour une alerte restée silencieuse, née silencieuse
+     ou jamais remise).
    - RAPPELS à intervalle PAR TYPE d'événement (décision Q2 : défaut 12 h,
      réglable par type — d'où l'accès par FONCTION injectée, relue à chaque
      échéance pour suivre un réglage modifié à chaud).
@@ -123,8 +129,17 @@ export class NotifyEngine {
   /** Signale un problème (idempotent par run — appelable à CHAQUE passe du détecteur).
       Nouveau problème (ou ré-apparition après resolve) → envoi immédiat ; déjà suivi →
       envoi seulement si le rappel est dû, sinon silencieux (l'état mémorise quand même
-      le dernier message/severity du producteur, pour des rappels fidèles). */
-  async raise(key: string, event: { event_type: string; severity: NotifySeverity; title: string; body: string; doc_id?: string | null }): Promise<RaiseOutcome> {
+      le dernier message/severity du producteur, pour des rappels fidèles).
+      OPTION `silent` (extension GÉNÉRIQUE, cadrage garantie-alerte 2026-08-15) : un
+      problème NOUVEAU levé silencieux est CRÉÉ (visible dans les alertes actives,
+      first_seen posé) mais RIEN ne part et RIEN n'est programmé — `last_sent` reste null
+      ET `next_remind_at` reste null (un rappel planifié ne ferait que DIFFÉRER le flood
+      anti-bruit de 12 h au lieu de l'éviter). Une alerte née silencieuse le reste donc À
+      VIE (le rappel n'est jamais dû) et se clôt en silence (Q1 : pas de « rétabli » sans
+      `last_sent`) — c'est le contrat voulu par l'anti-bruit du premier balayage. Sur un
+      problème DÉJÀ ACTIF, `silent` est SANS EFFET (comportement historique, envoi selon
+      l'échéance de rappel de l'état). */
+  async raise(key: string, event: { event_type: string; severity: NotifySeverity; title: string; body: string; doc_id?: string | null }, opts?: { silent?: boolean }): Promise<RaiseOutcome> {
     const now = this.clock();
     const existing = this.store.get(key);
 
@@ -132,6 +147,7 @@ export class NotifyEngine {
     // après un resolve est un NOUVEL épisode : first_seen repart, l'alerte repart).
     if (!existing || existing.resolved_at !== null) {
       const interval = this.remindIntervalSec(event.event_type);
+      const silent = opts?.silent === true;
       const state: NotifyState = {
         key,
         event_type: event.event_type,
@@ -141,11 +157,19 @@ export class NotifyEngine {
         body: event.body,
         first_seen: now.toISOString(),
         last_sent: null,
-        next_remind_at: NotifyEngine.plusSec(now, interval),
+        // Silencieux → AUCUNE échéance de rappel (null = jamais dû) ; l'intervalle est tout de
+        // même mémorisé (colonne informative, cohérente avec les autres états du même type).
+        next_remind_at: silent ? null : NotifyEngine.plusSec(now, interval),
         remind_interval_sec: interval,
         resolved_at: null,
         last_error: null,
       };
+      if (silent) {
+        // Aucun routage tenté, aucune entrée de journal : l'alerte EXISTE (page « Alertes
+        // actives »), elle n'est simplement jamais remise.
+        this.store.set(state);
+        return "silenced";
+      }
       await this.deliver(state, "alerte", now);
       this.store.set(state);
       return "sent";

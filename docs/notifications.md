@@ -83,13 +83,25 @@ le même que `vm/`) ; le câblage concret tient en quelques lignes dans `index.t
 Le moteur travaille sur un **état par problème** (`NotifyState`, une ligne par `key`)
 et ne connaît que trois entrées, toutes idempotentes/sûres à rejouer.
 
-- **`raise(key, event)` — idempotent PAR RUN.** Les détecteurs l'appellent à
+- **`raise(key, event, opts?)` — idempotent PAR RUN.** Les détecteurs l'appellent à
   **chaque** passe sans jamais spammer.
   - `key` inconnue, OU ré-apparition après un `resolve` (nouvel épisode :
     `first_seen` repart) → **envoi immédiat** (`alerte`) ;
   - problème déjà suivi → l'état mémorise le dernier `severity`/`title`/`body` du
     producteur (rappels fidèles à un diagnostic qui s'affine), puis **envoie
-    seulement si le rappel est dû** (`now ≥ next_remind_at`) — sinon **silence**.
+    seulement si le rappel est dû** (`now ≥ next_remind_at`) — sinon **silence** ;
+  - **`opts.silent: true` — création SILENCIEUSE** (extension GÉNÉRIQUE du contrat
+    producteur, cadrage garantie-alerte 2026-08-15) : sur un problème **NOUVEAU**
+    (ou une ré-apparition après resolve), l'état est **CRÉÉ et ACTIF** (visible
+    dans les alertes actives, `first_seen` posé) mais **rien ne part et rien
+    n'est programmé** — `last_sent` reste null ET `next_remind_at` reste null
+    (aucun rappel : un rappel planifié ne ferait que DIFFÉRER le flood anti-bruit
+    de 12 h). Une alerte née silencieuse le reste donc **à vie** (le rappel n'est
+    jamais dû, même si les raises suivants ne portent plus l'option) et se clôt
+    **en silence** (Q1 : pas de « rétabli » sans `last_sent`). Sur un problème
+    **déjà actif**, l'option est **SANS EFFET** (comportement historique).
+    Cas d'usage : l'anti-bruit du premier balayage d'un producteur qui découvre
+    un parc ancien (cf. [`lifecycle.md`](lifecycle.md)).
 - **`resolve(key)` — « rétabli » AU PLUS UNE FOIS (décision Q1).** Clôt le problème
   (`resolved_at` posé, plus aucun rappel). Le message « Rétabli — … » n'est remis
   que si l'alerte initiale était **effectivement partie** (`last_sent` posé) : pas
@@ -318,6 +330,14 @@ l'expiration (gravité croissante sur les seuils 30/14/7 j), avec la clé stable
 Même schéma que `vm/` (interface `CertProblemReporter` déclarée côté consommateur, pont
 structurel dans `index.ts` sur le MÊME `NotifyModule`) — détails dans
 [`certs.md`](certs.md).
+
+**Producteur `warranty-expiring` / `warranty-expired`** (`lifecycle/WarrantyExpiryWatcher.ts`) :
+le veilleur de GARANTIES balaye les équipements/sous-équipements de tous les documents —
+préavis ≤ 90 j en `warning`, dépassement strict en `error`, sur la **même** clé
+`warranty:<docId>:<collection>:<id>` (la gravité et le type ESCALADENT sur une alerte
+unique). Premier consommateur de l'option **`silent`** ci-dessus (anti-bruit du premier
+balayage d'un document). Détails, frontières partagées `src-shared/Lifecycle` et marqueur
+persistant : [`lifecycle.md`](lifecycle.md).
 
 **Ajouter un producteur** — 3 étapes (recette générique) :
 

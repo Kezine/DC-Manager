@@ -40,7 +40,8 @@ const DOMAINS = [
   "./test-vm-purge.js",          // PURGE DE MASSE des VMs (lot A) : règle pure `core/VmPurge` (groupes configuré/disparu/fichier, critère « enrichie » par famille, comptes du plan) + garantie transactionnelle de `Store.removeMany` (60 racines = 1 transaction / 1 undo, puis 1 révision / 1 SSE sur DocumentStore RÉEL)
   "./test-i18n.js",              // localisation : complétude des catalogues fr ⇄ en
   "./test-certs.js",             // certificats : crypto client pure (PkiCrypto/PkiSession)
-  "./test-lifecycle-format.js",  // cycle de vie matériel (core/LifecycleFormat) : âge d'achat + état de garantie (now injecté), granularité adaptative, frontière 90 j
+  "./test-lifecycle-format.js",  // cycle de vie matériel (core/LifecycleFormat) : âge d'achat + état de garantie (now injecté), granularité adaptative, frontière 90 j — délègue à src-shared/Lifecycle (source unique verrouillée ici)
+  "./test-warranty-watcher.js",  // veilleur de GARANTIES serveur (module amovible lifecycle/) : WarrantyExpiryWatcher pur (paliers partagés, silencieux 1er balayage, escalade UNE clé, resolve différentiel/prune) + LifecycleDb (marqueur persistant, better-sqlite3 réel)
   "./test-format.js",            // formatage d'affichage (core/Format) : `bytes()` — taille de fichier lisible (pièces jointes, lot B)
   "./test-attachment-view.js",   // VIEWER intégré des pièces jointes (cadrage B) : choix du rendu par MIME/extension (core/AttachmentViewKind), politique d'images markdown (core/MarkdownImagePolicy), repli extension → MIME du sélecteur (ui/FilePicker.resolveMime)
   "./test-rapprochement-certs.js", // rapprochement cert ↔ équipement/VM (HostnameMatch/CertSubject/CertTargetMatch, pur)

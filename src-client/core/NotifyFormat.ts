@@ -25,8 +25,9 @@ export const MIN_REMIND_SEC = 60;
 
 /** Suggestions d'`event_type` proposées en autocomplétion (datalist) des formulaires d'abonnement et
     de rappel. Données pures d'UI : « * » = tous les types ; « test » = remise d'essai routée. Les
-    autres correspondent aux producteurs connus (VM, certificats) — enrichissable sans risque (saisie libre). */
-export const EVENT_TYPE_SUGGESTIONS = ["*", "test", "vm-sync-failure", "cert-expiry"] as const;
+    autres correspondent aux producteurs connus (VM, certificats, garanties — préavis ≤ 90 j et
+    dépassement, deux types pour router différemment) — enrichissable sans risque (saisie libre). */
+export const EVENT_TYPE_SUGGESTIONS = ["*", "test", "vm-sync-failure", "cert-expiry", "warranty-expiring", "warranty-expired"] as const;
 
 export class NotifyFormat {
   /** HEURES (saisie UI) → SECONDES (protocole serveur). Arrondi à la seconde. Ne borne PAS : la

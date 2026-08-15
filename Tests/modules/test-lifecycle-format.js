@@ -5,7 +5,7 @@
    borne « expire aujourd'hui ». Les libellés composés (I18n, locale fr du harnais)
    sont vérifiés VERBATIM. Harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, D } = require("./harness.js");
+const { ck, section, D, SHARED } = require("./harness.js");
 
 module.exports = async () => {
   const { LifecycleFormat } = D("core/LifecycleFormat.js");
@@ -117,5 +117,32 @@ module.exports = async () => {
     ck.eq(LifecycleFormat.daysUntil("2026-08-01", NOW), -3, "daysUntil : il y a 3 jours → -3");
     ck.eq(LifecycleFormat.daysUntil("", NOW), null, "daysUntil : vide → null");
     ck.eq(LifecycleFormat.daysUntil("pas-une-date", NOW), null, "daysUntil : illisible → null");
+  });
+
+  // SOURCE UNIQUE (chantier garantie-alerte 2026-08-15) : la règle jours/frontières a DÉMÉNAGÉ dans
+  // src-shared/Lifecycle (le veilleur serveur la consomme aussi) — LifecycleFormat DÉLÈGUE. Cette
+  // section verrouille la délégation : mêmes constantes, mêmes décisions, sur les mêmes échantillons.
+  await section("Lifecycle : source unique — LifecycleFormat délègue à src-shared/Lifecycle (WARN_DAYS, warrantyStatus, daysUntil)", async () => {
+    const { Lifecycle } = SHARED("src-shared/Lifecycle.js");
+    const NOW = day("2026-08-04");
+    const isoIn = (days) => new Date(NOW.getTime() + days * 86400000).toISOString().slice(0, 10);
+
+    ck.eq(LifecycleFormat.WARN_DAYS, Lifecycle.WARN_DAYS, "WARN_DAYS : l'alias client EST la constante partagée (jamais une seconde valeur)");
+    ck.eq(Lifecycle.WARN_DAYS, 90, "…et vaut 90 jours (la valeur affichée en orange = celle qui alerte)");
+
+    // Parité warrantyStatus ⇄ warranty().status sur des échantillons couvrant toutes les frontières
+    // (lointain, 91/90, veille, J-0, J-1, expiré ancien, vide, illisible) : le statut rendu par le
+    // client est EXACTEMENT la décision partagée — null partagé ⇔ null client.
+    const samples = [isoIn(365), isoIn(91), isoIn(90), isoIn(1), isoIn(0), isoIn(-1), isoIn(-400), "", "pas-une-date", null, undefined];
+    for (const iso of samples) {
+      const w = LifecycleFormat.warranty(iso, NOW);
+      ck.eq(Lifecycle.warrantyStatus(iso, NOW), w ? w.status : null, `warrantyStatus ⇄ warranty().status : parité pour « ${iso} »`);
+    }
+    // daysUntil : la version client est une pure délégation (mêmes valeurs, mêmes null).
+    for (const iso of [isoIn(10), isoIn(0), isoIn(-3), "", "pas-une-date"]) {
+      ck.eq(LifecycleFormat.daysUntil(iso, NOW), Lifecycle.daysUntil(iso, NOW), `daysUntil : délégation exacte pour « ${iso} »`);
+    }
+    // `now` invalide → null des DEUX côtés (garde partagée).
+    ck.eq(Lifecycle.warrantyStatus("2027-01-01", new Date("nawak")), null, "warrantyStatus : now invalide → null (garde partagée)");
   });
 };

@@ -131,9 +131,11 @@ export class NotifyModule {
      -------------------------------------------------------------------------- */
 
   /** Signale un problème persistant (fire-and-forget : les producteurs n'attendent pas la
-      remise — un échec d'envoi est géré par le moteur, jamais remonté au producteur). */
-  raise(key: string, event: { event_type: string; severity: NotifySeverity; title: string; body: string; doc_id?: string | null }): void {
-    void this.engine?.raise(key, event).catch((e) =>
+      remise — un échec d'envoi est géré par le moteur, jamais remonté au producteur).
+      `opts.silent` est RELAYÉ au moteur (création silencieuse : alerte active, aucune
+      remise ni rappel — cf. NotifyEngine.raise). */
+  raise(key: string, event: { event_type: string; severity: NotifySeverity; title: string; body: string; doc_id?: string | null }, opts?: { silent?: boolean }): void {
+    void this.engine?.raise(key, event, opts).catch((e) =>
       this.log.error("notify: raise en échec inattendu", key, e instanceof Error ? e.message : String(e)));
   }
 

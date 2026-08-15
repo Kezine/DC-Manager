@@ -15,6 +15,8 @@ import { NotifyModule } from "./notify/NotifyModule.js";   // module OPTIONNEL (
 import { CertsModule } from "./certs/CertsModule.js";   // module OPTIONNEL (feature amovible) — seul câblage hors de certs/
 import { InterventionsModule } from "./interventions/InterventionsModule.js";   // module OPTIONNEL (feature amovible) — seul câblage hors de interventions/
 import { TrackerModule } from "./tracker/TrackerModule.js";   // module OPTIONNEL (feature amovible) — PONT interventions ⇄ tracker distant
+import { LifecycleModule } from "./lifecycle/LifecycleModule.js";   // module OPTIONNEL (feature amovible) — seul câblage hors de lifecycle/
+import { Schema } from "./constants.js";   // pageSize « tout » du balayage des garanties (pont lifecycle ci-dessous)
 
 /* Bootstrap : lit l'environnement, ouvre le registre multi-documents (driver better-sqlite3) et démarre le serveur. */
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -74,6 +76,36 @@ const wifi = WifiModule.create({ docs, live, dataDir: DOCS_DIR, sqlite: Database
 // (seuils 30/14/7 j) et clôt au renouvellement/révocation/suppression.
 const certs = CertsModule.create({ docs, live, dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, log: log.child("certs"),
   problems: { raise: (k, e) => notify.raise(k, e), resolve: (k) => notify.resolve(k) } });
+// Cycle de vie matériel (veilleur de GARANTIES — cadrage garantie-alerte 2026-08-15) : signale les
+// échéances de garantie (warranty-expiring ≤ 90 j / warranty-expired) des équipements ET sous-équipements
+// de TOUS les documents. PREMIER veilleur à balayer les documents via DocumentStore — la source est un
+// contrat de LECTURE réduit (WarrantySource), rempli ICI : lifecycle/ n'importe rien de documents.ts.
+// ⚠ COÛT ASSUMÉ du balayage : `docs.repo(id)` OUVRE chaque document (migration legacy comprise au premier
+// accès) — passe QUOTIDIENNE sur un parc de documents PETIT, et les dépôts ouverts restent en cache
+// (DocumentStore.repos) : le coût réel est une lecture de deux collections par document et par jour.
+// PONT vers notify (typage STRUCTUREL, comme vm/certs) : l'option `silent` (anti-bruit du premier
+// balayage d'un document — cf. docs/lifecycle.md) est RELAYÉE au moteur.
+const lifecycle = LifecycleModule.create({ dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, log: log.child("lifecycle"),
+  source: {
+    documentIds: () => docs.list().map((d) => d.id),
+    sweep: () => {
+      const items: Array<{ doc_id: string; collection: "equipments" | "subEquipments"; id: string; label: string; warranty_end: string }> = [];
+      for (const meta of docs.list()) {
+        const repo = docs.repo(meta.id);
+        if (!repo) continue;   // document supprimé entre list() et repo() — course bénigne, passe suivante
+        for (const collection of ["equipments", "subEquipments"] as const) {
+          for (const row of repo.list(collection, { page: 1, pageSize: Schema.PAGE_SIZE_ALL }).rows) {
+            // Seuls les porteurs d'une échéance intéressent le veilleur (l'immense majorité n'en a pas).
+            const warrantyEnd = typeof row.warranty_end === "string" ? row.warranty_end : "";
+            if (warrantyEnd === "") continue;
+            items.push({ doc_id: meta.id, collection, id: String(row.id), label: String(row.name || row.id), warranty_end: warrantyEnd });
+          }
+        }
+      }
+      return items;
+    },
+  },
+  problems: { raise: (k, e, o) => notify.raise(k, e, o), resolve: (k) => notify.resolve(k) } });
 // Interventions/incidents (objets liés aux équipements/VMs/spares — aucune clé d'environnement requise,
 // base interventions.db dédiée, cf. InterventionsModule). PONT vers notify (typage structurel, comme
 // vm/certs) : le veilleur de rappels signale intervention-reminder (paliers 24 h/1 h/heure H) et clôt
@@ -102,6 +134,7 @@ vm.start();   // synchros périodiques (interval_sec > 0) — après l'écoute :
 wifi.start();   // synchros périodiques des clients wifi — même raison que vm.start()
 notify.start();   // timer de rappels (tick 60 s, unref) — après l'écoute, comme vm
 certs.start();    // suivi d'échéances (passe immédiate + tick horaire, unref)
+lifecycle.start();   // veilleur de garanties (passe immédiate + tick QUOTIDIEN, unref — granularité jour assumée)
 interventions.start();   // veilleur de rappels (passe immédiate + tick 5 min, unref)
 trackerModule.start();   // ramassage des poussées laissées en plan (non bloquant) + passes périodiques (interval_sec > 0, unref)
 
@@ -112,11 +145,12 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.on(sig, () => {
     log.info("signal reçu, arrêt propre", sig);
     // Modules optionnels d'abord (timers + bases dédiées vm-providers.db / wifi-providers.db / notify.db /
-    // certs.db / interventions.db / tracker-providers.db), cœur ensuite.
+    // certs.db / lifecycle.db / interventions.db / tracker-providers.db), cœur ensuite.
     try { vm.stop(); } catch (e) { log.warn("vm.stop a échoué", (e as any) && (e as any).message); }
     try { wifi.stop(); } catch (e) { log.warn("wifi.stop a échoué", (e as any) && (e as any).message); }
     try { notify.stop(); } catch (e) { log.warn("notify.stop a échoué", (e as any) && (e as any).message); }
     try { certs.stop(); } catch (e) { log.warn("certs.stop a échoué", (e as any) && (e as any).message); }
+    try { lifecycle.stop(); } catch (e) { log.warn("lifecycle.stop a échoué", (e as any) && (e as any).message); }
     try { interventions.stop(); } catch (e) { log.warn("interventions.stop a échoué", (e as any) && (e as any).message); }
     try { trackerModule.stop(); } catch (e) { log.warn("tracker.stop a échoué", (e as any) && (e as any).message); }
     try { usersDb?.close(); } catch (e) { log.warn("usersDb.close a échoué", (e as any) && (e as any).message); }

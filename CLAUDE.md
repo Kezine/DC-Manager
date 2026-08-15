@@ -274,6 +274,12 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   page « Interventions » localisée + intégration « fiches » (badge, mini-listing, filtre CIBLE) ; `jira_ref` =
   simple référence MANUELLE via `JIRA_BASE_URL` — limite LEVÉE par le pont OPTIONNEL `tracker/` (colonnes
   `tracker_*` + hook `onWrite`, cf. `jira-interventions.md`) ; limites v1 et script de suppression).
+- [`lifecycle.md`](docs/lifecycle.md) — **cycle de vie matériel : alerte de garantie** (module serveur
+  AMOVIBLE `lifecycle/`, gabarit cert-expiry — PREMIER veilleur à balayer les documents via `DocumentStore`,
+  contrat de lecture réduit ponté dans `index.ts` ; frontières PARTAGÉES `src-shared/Lifecycle` — source
+  unique avec l'affichage client ; 🚨 UNE clé par équipement `warranty:<docId>:<collection>:<id>`, gravité
+  ET type escaladent sur la MÊME alerte ; anti-bruit du 1er balayage = raise `silent` du moteur notify +
+  marqueur persistant `lifecycle.db` ; tick QUOTIDIEN assumé, script de suppression).
 - [`recherche.md`](docs/recherche.md) — **recherche** (palette Ctrl+K, scoring client à paliers, termes
   PARTAGÉS `src-shared/SearchTerms` — exécution DOUBLE n°15 : corpus local en mode fichier, route
   transverse `GET …/search` serveur-pilotée en mode API avec debounce/abort/repli, caps assumés,

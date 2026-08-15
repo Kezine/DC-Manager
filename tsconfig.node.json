@@ -143,6 +143,12 @@
     // Veilleur de rappels (producteur intervention-reminder, paliers 24 h/1 h/heure H) — PUR
     // (source/rapporteur/horloge/seuils injectés), testé avec stubs + horloge contrôlée.
     "src-server/src/interventions/InterventionReminderWatcher.ts",
+    // Module `lifecycle/` AMOVIBLE — veilleur de GARANTIES (producteurs warranty-expiring/-expired,
+    // frontières PARTAGÉES src-shared/Lifecycle) : PUR (source/rapporteur/état de balayage/horloge
+    // injectés), testé avec stubs + horloge contrôlée ; marqueur persistant « document déjà balayé »
+    // (lifecycle.db, anti-bruit du 1er balayage) testé avec better-sqlite3 RÉEL (driver injecté).
+    "src-server/src/lifecycle/WarrantyExpiryWatcher.ts",
+    "src-server/src/lifecycle/LifecycleDb.ts",
     // Annuaire utilisateurs (service CORE) — logique PURE (UserProfiles : clé canonique, normalisation,
     // caviardage, parsing d'ids) + impl v1 (AuthCacheUserResolver : cache mémoire + capture) testée SANS
     // SQLite (db null) + snapshot (UsersDb, users.db 1 table typée) testé avec better-sqlite3 RÉEL (driver

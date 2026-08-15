@@ -1,11 +1,19 @@
 /* =============================================================================
-   LifecycleFormat — logique PURE du CYCLE DE VIE matériel (aucun DOM, aucun store,
+   LifecycleFormat — PRÉSENTATION du CYCLE DE VIE matériel (aucun DOM, aucun store,
    aucun réseau) : ÂGE d'un équipement depuis sa date d'achat + ÉTAT de sa garantie
    depuis sa date de fin. Consommé par les FICHES (EquipmentForms/SubEquipmentForms)
    et par la colonne combinée « Âge / garantie » des LISTINGS (ListConfigs).
 
+   ⚠ La RÈGLE jours/frontières (parse ISO/UTC, `daysUntil`, seuil `WARN_DAYS`,
+   décision `ok`/`warn`/`err` avec la borne « J-0 = encore couverte ») vit dans le
+   module PARTAGÉ `src-shared/Lifecycle` depuis le chantier garantie-alerte
+   (2026-08-15) : le veilleur SERVEUR `WarrantyExpiryWatcher` applique la MÊME
+   frontière que l'affichage — ce fichier DÉLÈGUE et ne garde que ce qui est
+   propre à la présentation : décomposition calendaire, granularité adaptative,
+   libellés i18n, et l'état de FILTRE (`warrantyFilterState`).
+
    Pourquoi une classe pure dédiée (principes n°2/n°7) : ces règles (décomposition
-   calendaire, seuil de garantie, granularité adaptative) sont testables en isolation
+   calendaire, granularité adaptative) sont testables en isolation
    (Tests/modules/test-lifecycle-format.js) et réutilisables par les vues sans les
    charger de calculs. Le PRÉCÉDENT direct est `core/CertsFormat` (échéances des
    certificats) : comme lui, on compose les libellés via `I18n.t` au POINT DE RENDU
@@ -16,15 +24,13 @@
 
    `now: Date` est TOUJOURS INJECTÉ (jamais de `new Date()` interne) : c'est ce qui
    rend l'âge et l'échéance déterministes en test (bissextiles, fins de mois, bornes
-   de granularité, frontière exacte des 90 jours).
-
-   DATES : les champs `purchase_date` / `warranty_end` sont des chaînes ISO COURTES
-   (« YYYY-MM-DD », `default: ""`). On raisonne en UTC (composantes getUTC*) pour
-   coller à la nature « date seule » de ces champs et rester insensible au fuseau. */
+   de granularité, frontière exacte des 90 jours). */
 import { I18n } from "../i18n/I18n";
+import { Lifecycle, type WarrantyStatus } from "../../src-shared/Lifecycle";
 
-/** Statut d'une garantie (mappé en variable CSS par la vue) : sous garantie / bientôt / expirée. */
-export type WarrantyStatus = "ok" | "warn" | "err";
+/** Ré-export du statut PARTAGÉ (mappé en variable CSS par la vue) : les consommateurs
+    historiques continuent d'importer depuis ce fichier — la définition vit dans src-shared/. */
+export type { WarrantyStatus };
 
 /** État de FILTRE de garantie (volet 2 du TODO `age-garantie-mise-en-evidence`) : les trois statuts
     de `WarrantyStatus` + `"none"` — un 4ᵉ état qui n'existe QUE pour le filtre (cf. `warrantyFilterState`). */
@@ -45,34 +51,14 @@ export interface DurationParts {
 }
 
 export class LifecycleFormat {
-  /** Seuil d'AVERTISSEMENT de garantie : une échéance à 90 jours ou moins passe en `warn` (orange).
-      Constante nommée (comme `CertsFormat.WARN_DAYS`) : source unique, réutilisée/testée sans la redécouvrir. */
-  static readonly WARN_DAYS = 90;
+  /** Seuil d'AVERTISSEMENT de garantie — ALIAS de la source unique `Lifecycle.WARN_DAYS`
+      (src-shared/) : conservé pour les consommateurs historiques, JAMAIS une seconde valeur. */
+  static readonly WARN_DAYS = Lifecycle.WARN_DAYS;
 
-  /** Millisecondes par jour (constante nommée : évite les 86400000 magiques). */
-  private static readonly DAY_MS = 24 * 60 * 60 * 1000;
-
-  /** Parse une date ISO courte en `Date` (UTC), ou null si vide / non-chaîne / illisible. */
-  private static parse(iso: string | null | undefined): Date | null {
-    if (typeof iso !== "string" || iso.trim() === "") return null;
-    const t = Date.parse(iso);
-    if (Number.isNaN(t)) return null;
-    return new Date(t);
-  }
-
-  /** `now` est-il une `Date` valide ? (garde-fou : un appelant peut passer n'importe quoi). */
-  private static validNow(now: Date): boolean {
-    return now instanceof Date && !Number.isNaN(now.getTime());
-  }
-
-  /** Jours ENTIERS de `now` vers l'échéance `iso` (négatif si déjà passée) ; null si date/`now` invalide.
-      Différence de MINUITS UTC → entier exact (plancher), même granularité « jour » que `CertsFormat.daysUntil`. */
+  /** Jours ENTIERS de `now` vers l'échéance `iso` — DÉLÉGATION pure à la règle partagée
+      (`Lifecycle.daysUntil`), conservée ici pour les appelants historiques du client. */
   static daysUntil(iso: string | null | undefined, now: Date): number | null {
-    const d = LifecycleFormat.parse(iso);
-    if (!d || !LifecycleFormat.validNow(now)) return null;
-    const a = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-    const b = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-    return Math.floor((b - a) / LifecycleFormat.DAY_MS);
+    return Lifecycle.daysUntil(iso, now);
   }
 
   /** Décomposition calendaire de la durée écoulée entre `from` et `to` (années pleines, puis mois pleins,
@@ -115,26 +101,25 @@ export class LifecycleFormat {
       est POSTÉRIEUR à `now` (jamais un âge négatif). Un achat DU JOUR (0 jour) affiche « 0 jour » — décision
       assumée et testée : l'âge zéro reste une information, on ne le masque pas. */
   static age(purchaseIso: string | null | undefined, now: Date): string | null {
-    const d = LifecycleFormat.parse(purchaseIso);
-    if (!d || !LifecycleFormat.validNow(now)) return null;
-    const days = LifecycleFormat.daysUntil(purchaseIso, now);   // now → achat : > 0 si l'achat est dans le futur
+    const d = Lifecycle.parseDate(purchaseIso);
+    if (!d || !Lifecycle.validNow(now)) return null;
+    const days = Lifecycle.daysUntil(purchaseIso, now);   // now → achat : > 0 si l'achat est dans le futur
     if (days === null || days > 0) return null;
     return LifecycleFormat.durationLabel(d, now);
   }
 
-  /** ÉTAT de garantie depuis la date de fin : `err` = expirée (« expirée depuis X »), `warn` = expire dans
-      ≤ WARN_DAYS jours (« expire dans X », ou « expire aujourd'hui » à J-0), `ok` au-delà (« expire dans X »).
-      null si vide/illisible ou `now` invalide.
-      BORNE « expire aujourd'hui » (décision assumée + testée) : le jour même de l'échéance = encore `warn`,
-      PAS `err` — la garantie couvre la journée en cours ; seul un dépassement STRICT (jours < 0) passe en `err`. */
+  /** ÉTAT de garantie depuis la date de fin : le STATUT vient de la règle PARTAGÉE
+      (`Lifecycle.warrantyStatus` — frontières J-0/90 j décidées LÀ-BAS, jamais re-dérivées ici),
+      ce fichier n'y AJOUTE que le libellé localisé : `err` → « expirée depuis X », `warn` à J-0 →
+      « expire aujourd'hui », sinon « expire dans X » (warn et ok partagent la formulation).
+      null si vide/illisible ou `now` invalide (mêmes cas que la règle partagée). */
   static warranty(warrantyIso: string | null | undefined, now: Date): WarrantyState | null {
-    const d = LifecycleFormat.parse(warrantyIso);
-    if (!d || !LifecycleFormat.validNow(now)) return null;
-    const days = LifecycleFormat.daysUntil(warrantyIso, now);
-    if (days === null) return null;
-    if (days < 0) return { status: "err", label: I18n.t("detail.lifecycle.expiredSince", { d: LifecycleFormat.durationLabel(d, now) }) };
-    if (days === 0) return { status: "warn", label: I18n.t("detail.lifecycle.expiresToday") };
-    const status: WarrantyStatus = days <= LifecycleFormat.WARN_DAYS ? "warn" : "ok";
+    const status = Lifecycle.warrantyStatus(warrantyIso, now);
+    const d = Lifecycle.parseDate(warrantyIso);
+    const days = Lifecycle.daysUntil(warrantyIso, now);
+    if (status === null || !d || days === null) return null;   // les trois sont null exactement ensemble
+    if (status === "err") return { status, label: I18n.t("detail.lifecycle.expiredSince", { d: LifecycleFormat.durationLabel(d, now) }) };
+    if (days === 0) return { status, label: I18n.t("detail.lifecycle.expiresToday") };
     return { status, label: I18n.t("detail.lifecycle.expiresIn", { d: LifecycleFormat.durationLabel(now, d) }) };
   }
 
