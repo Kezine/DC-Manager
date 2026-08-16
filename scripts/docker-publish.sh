@@ -1,25 +1,49 @@
 #!/usr/bin/env bash
 # Build & push de l'image Docker DC Manager (client buildé + backend Node/SQLite) vers un registre.
-# Le contexte de build est la RACINE du dépôt (le Dockerfile, dans src-server/, y copie src-client/ src-server/ src-shared/).
-#
-# Usage (variables d'env OU arguments positionnels) :
-#   REGISTRY=ghcr.io IMAGE=kezine/dc-manager TAG=1.0.0 scripts/docker-publish.sh
-#   scripts/docker-publish.sh <image> <tag> [registry]
-#   ex. : scripts/docker-publish.sh kezine/dc-manager 1.0.0 ghcr.io
-#
-# Options :
-#   SKIP_PUSH=1    → build seulement (pas de login/push)
-#   SKIP_LATEST=1  → ne pas (re)taguer/pousser :latest
-#   REBUILD_APP=1  → force le rebuild de la layer CLIENT (webpack) SANS toucher au reste
-#                    (deps serveur + module natif better-sqlite3 restent en cache). Pratique
-#                    quand le cache n'a pas vu un changement de sources. Implémenté via le
-#                    `--no-cache-filter` de BuildKit (étage `client` du Dockerfile).
-#   Pour tout reconstruire de zéro : NO_CACHE=1 (équivaut à `docker build --no-cache`).
-#
-# Registres : laisser REGISTRY vide pour le Docker Hub officiel ; sinon ghcr.io,
-# registry.exemple.com, etc. Le login se fait de manière interactive (ou via un
-# `docker login` préalable / `DOCKER_PASSWORD` côté CI).
+# Aide : scripts/docker-publish.sh --help
 set -euo pipefail
+
+# Aide en ligne — SOURCE UNIQUE du détail (principe n°3 : ne pas dupliquer cette doc
+# dans l'en-tête ET ici, cf. CLAUDE.md).
+usage() {
+  cat <<'EOF'
+Build & push de l'image Docker DC Manager (client buildé + backend Node/SQLite) vers un registre.
+Le contexte de build est la RACINE du dépôt (le Dockerfile, dans src-server/, y copie src-client/ src-server/ src-shared/).
+
+Usage (variables d'env OU arguments positionnels) :
+  REGISTRY=ghcr.io IMAGE=kezine/dc-manager TAG=1.0.0 scripts/docker-publish.sh
+  scripts/docker-publish.sh <image> <tag> [registry]
+  ex. : scripts/docker-publish.sh kezine/dc-manager 1.0.0 ghcr.io
+
+Options :
+  SKIP_PUSH=1    → build seulement (pas de login/push)
+  SKIP_LATEST=1  → ne pas (re)taguer/pousser :latest
+  REBUILD_APP=1  → force le rebuild de la layer CLIENT (webpack) SANS toucher au reste
+                   (deps serveur + module natif better-sqlite3 restent en cache). Pratique
+                   quand le cache n'a pas vu un changement de sources. Implémenté via le
+                   `--no-cache-filter` de BuildKit (étage `client` du Dockerfile).
+  Pour tout reconstruire de zéro : NO_CACHE=1 (équivaut à `docker build --no-cache`).
+
+Registres : laisser REGISTRY vide pour le Docker Hub officiel ; sinon ghcr.io,
+registry.exemple.com, etc. Le login se fait de manière interactive (ou via un
+`docker login` préalable / `DOCKER_PASSWORD` côté CI).
+EOF
+}
+
+# ${1:-} : sous `set -u`, un premier argument absent (mode variables d'env) ne doit
+# pas faire échouer ce test — sinon `-x` non reconnu serait avalé comme nom d'image
+# plus bas par le même `${1:-...}`.
+case "${1:-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  -*)
+    echo "✗ option inconnue : $1" >&2
+    usage >&2
+    exit 1
+    ;;
+esac
 
 # Se placer à la racine du dépôt quel que soit le dossier d'appel (ce script vit dans scripts/).
 cd "$(dirname "$0")/.."
