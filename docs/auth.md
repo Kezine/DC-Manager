@@ -4,8 +4,9 @@ Deux questions **orthogonales**, deux mécanismes qu'on ne fusionne pas :
 
 - **QUI est l'appelant ?** — l'*authentification*. L'application ne gère pas le login : elle
   proxifie un cookie de session à un SSO externe, ou se contente d'un mode dev / d'un challenge
-  Basic. C'est `src-server/src/auth.ts` (`Auth`), décrit dans `README.md` § 4 et
-  [`../src-server/RUN.md`](../src-server/RUN.md) § « Authentification ».
+  Basic. C'est un **orchestrateur** (`src-server/src/auth.ts`, `Auth`) et **un provider par mode**
+  (`src-server/src/auth/`) — décrits à la section suivante ; le mode d'emploi côté exploitation
+  vit dans `README.md` § 4 et [`../src-server/RUN.md`](../src-server/RUN.md) § « Authentification ».
 - **CE QU'IL PEUT** — l'*autorisation*, objet de ce document. Un **RBAC à permissions atomiques** :
   un catalogue de permissions, des rôles qui les regroupent, une politique qui associe des rôles à
   des utilisateurs, et des **gardes** posées sur chaque route.
@@ -32,6 +33,101 @@ politique, et inversement.
               │
               ▼  HANDLER
 ```
+
+## L'authentification — un orchestrateur, un provider par mode
+
+`Auth` ne sait pas authentifier : il **choisit au boot** celui qui sait, puis lui ajoute les trois
+services transverses qui ne dépendent d'aucun mode. C'est le patron *interface / implémentation
+sélectionnée au câblage / injection* déjà tenu par [`UserResolver`](user-resolver.md) et par
+`RoleProvider` (§ 5) — appliqué ici au dernier `switch` sur un mode qui restait dans le serveur.
+
+```
+  auth.ts  ── Auth (ORCHESTRATEUR)
+   │   ① cache de session : clé = SHA-256 du jeton présenté, durée = expireDate
+   │   ② capture d'annuaire : ProfileSink.remember (jamais un non-loggé)
+   │   ③ annonce du mode au boot (WARN quand rien n'est configuré)
+   │   ④ `mode` exposé — server.ts y accroche le gate de transport Basic
+   │
+   └── auth/AuthProvider.ts  ── CONTRAT (types seuls, aucun import)
+         authenticate(req: AuthRequestView): Promise<SsoResult | null>   // null = anonyme
+         sessionKey?(req): string | null                                  // OPTIONNEL — cf. plus bas
+         │
+         ├── auth/DevAuthProvider.ts         (défaut)
+         ├── auth/BasicAuthProvider.ts       (BASIC_AUTH)
+         └── auth/LegacySsoAuthProvider.ts   (SSO_URL + COOKIE_NAME, `fetch` injecté)
+```
+
+**Les trois modes**, et l'inférence qui les sélectionne — *inchangée* :
+
+| Mode | Sélection | Ce que le provider rend |
+|---|---|---|
+| `basic` | `BASIC_AUTH="user:pass"` — **prioritaire** | session `SUPER_ADMIN` + `dev: true` si les identifiants sont bons, sinon anonyme |
+| `sso` | `SSO_URL` (sinon) | le **JSON du SSO, tel quel** (cf. passthrough ci-dessous) |
+| `dev` | aucun des deux (défaut) | l'utilisateur factice `DEV_USER` (défaut `dev`), `SUPER_ADMIN` + `dev: true` |
+
+La règle de format de `BASIC_AUTH` vit **chez le provider basic** (`fromSpec`) : « la valeur ne
+décrit pas un couple » et « pas de mode basic » sont la même réponse, et l'orchestrateur n'a pas à
+connaître le format d'un secret qui ne le concerne pas.
+
+**Express n'entre pas dans le contrat.** Un provider ne voit qu'une vue minimale de la requête —
+`AuthRequestView { headers: { cookie?, authorization? } }` — dont le `Request` d'Express est un
+sur-ensemble **structurel**. Même doctrine que l'`AccessRequest` d'`access/AccessControl`, et mêmes
+bénéfices : les providers sont **testables sans monter de serveur**
+(`Tests/modules/test-auth-providers.js`), et ils ne dépendent pas d'une version d'Express (le
+programme de test du dépôt n'en résout pas la même que le serveur). Un provider qui aurait besoin
+d'autre chose que des en-têtes ferait plus que « lire l'identité présentée » : l'élargissement doit
+rester un geste délibéré sur le contrat.
+
+### Ce que l'orchestrateur garde, et pourquoi
+
+- **Le cache de session** est à lui, pas aux providers — mais il ne s'applique qu'à ceux qui savent
+  **nommer** la session présentée (`sessionKey`, optionnelle). Aujourd'hui, seul le SSO l'implémente
+  (elle rend le jeton ; `Auth` le **hache** avant d'en faire une clé — un secret ne devient pas un
+  identifiant en clair). Dev et basic répondent de mémoire, sans le moindre appel sortant : les
+  mettre en cache n'économiserait rien et ouvrirait une fenêtre pendant laquelle une identité
+  révoquée resterait valide. Durée : `expireDate` pour une session authentifiée, **une minute** pour
+  tout le reste — assez pour absorber une rafale, trop peu pour qu'une identité rétablie attende, et
+  c'est aussi ce qui évite de **marteler un SSO déjà en difficulté**.
+- **La capture d'annuaire** (`ProfileSink`, cf. [`user-resolver.md`](user-resolver.md)) : sur
+  défaut de cache uniquement, et **jamais** un profil non loggé.
+- **L'annonce du mode au démarrage** : WARN bien visible en mode dev (aucune authentification, tout
+  appelant est `SUPER_ADMIN`), INFO descriptive sinon.
+
+### `SsoResult` est le principal — il n'y en a pas deux
+
+Le type de session **reste `SsoResult`** (`auth/AuthProvider.ts`), et il est le seul modèle
+d'identité : `GET /me` en fait un passthrough additif (§ 7), le client le consomme tel quel, et le
+contrôle d'accès n'en voit qu'un sous-ensemble **structurel** qu'il déclare chez lui
+(`AccessControl.AccessSession`). Un second type « normalisé » n'ajouterait qu'une conversion à tenir
+à jour des deux côtés.
+
+Il porte un champ **`groups?: string[]`** — groupes bruts de l'annuaire d'entreprise, jamais
+calculés par l'application. **Vide partout aujourd'hui** : aucun des trois providers n'a de groupes
+à donner. Il est déclaré maintenant parce qu'il est la moitié manquante de la frontière auth ⇄
+autorisation : les providers d'en-têtes de reverse-proxy et OIDC le rempliront, et la politique de
+rôles pourra mapper « groupe → rôles » sans qu'on touche ni au type de session, ni au contrat.
+
+**Passthrough SSO, et c'est un engagement** : le provider legacy rend le JSON du SSO *tel quel*, les
+champs que nous ne connaissons pas compris (l'index de signature de `SsoResult` les porte). Un
+déploiement peut en dépendre — ne rien normaliser là n'est pas une paresse.
+
+**Fail-closed** : SSO injoignable, en erreur HTTP, ou répondant autre chose qu'un objet → session
+**anonyme** (`ANONYMOUS_SESSION`, définie une seule fois avec le type). Le jeton, lui, n'apparaît
+dans **aucun** log : les messages nomment l'URL et le code, jamais le secret de session.
+
+### Le challenge Basic n'est pas une identité
+
+Deux rôles à ne pas confondre : renvoyer `401 WWW-Authenticate: Basic` pour que le **navigateur**
+demande les identifiants est un geste de **transport** — il reste dans `server.ts` (`basicGate`),
+monté sur tout le serveur, pages comprises. `Auth.checkBasic` est le point de contact : le gate
+demande si les identifiants présentés sont bons, sans rien savoir de plus, et hors mode basic il n'a
+rien à opposer (`true`). L'**identité**, elle, passe par `Auth.validate` dans tous les modes.
+
+> **Ajouter un mode d'authentification.** Écrire une classe de `auth/` implémentant `AuthProvider`
+> (plus `sessionKey` si le mode présente un jeton qu'il vaut la peine de mettre en cache), la
+> sélectionner dans le constructeur d'`Auth`, documenter ses variables d'environnement (README § 4 +
+> RUN.md, principe n°13) et lui donner une section dans `test-auth-providers.js`. Rien d'autre ne
+> bouge : ni `api.ts`, ni `access/`, ni le client.
 
 ## 1. Le modèle : permissions atomiques, grants à jokers
 

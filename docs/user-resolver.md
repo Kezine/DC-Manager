@@ -79,7 +79,8 @@ définition. `UserProfiles.fromSsoUser` normalise un profil brut (mapping `preno
 fournit pas).
 
 > **`RawUserProfile` plutôt qu'un import de `SsoUser`.** `users/` définit sa propre forme d'entrée
-> (sous-ensemble de `SsoUser`) au lieu d'importer le type d'`auth.ts` : découplage (principe n°2) et
+> (sous-ensemble de `SsoUser`) au lieu d'importer le type du contrat d'authentification
+> (`auth/AuthProvider.ts`, ré-exporté par `auth.ts`) : découplage (principe n°2) et
 > compilation en isolation. `SsoUser` (dont l'`id` est un `number`) reste **assignable** à
 > `RawUserProfile`, donc `Auth` pousse ses `SsoUser` sans conversion. Quand le SSO fournira le
 > téléphone, on étendra `RawUserProfile` + `fromSsoUser` ensemble.

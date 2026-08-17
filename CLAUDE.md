@@ -306,7 +306,12 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
 - [`i18n.md`](docs/i18n.md) — **localisation du client** (i18next enveloppé par la classe `I18n`,
   catalogues `.ts` par domaine `fr`/`en`, détection de locale + préférence persistée, bascule =
   reload assumé, pilote = libellés d'onglets, test de complétude fr⇄en, phase 2 = codes serveur).
-- [`auth.md`](docs/auth.md) — **authentification & AUTORISATION** (RBAC à permissions atomiques
+- [`auth.md`](docs/auth.md) — **authentification & AUTORISATION** (**AUTHENTIFICATION** = orchestrateur
+  `Auth` (`auth.ts` : cache par hash de jeton via `sessionKey?` du provider, capture annuaire, annonce du
+  mode) + UN provider PAR mode dans `auth/` — `Dev`/`Basic`/`LegacySso`, contrat `AuthProvider` à vue
+  MINIMALE de requête sans Express (testables en isolation), le type de session RESTE `SsoResult`
+  (passthrough `/me`, champ `groups?` réservé aux providers IdP du futur — proxy identity-aware, OIDC) ;
+  **AUTORISATION** = RBAC à permissions atomiques
   `domaine:action`, grants à JOKERS et checks atomiques — `src-shared/Permissions` partagé front⇄back,
   carte des 25 collections → 10 domaines verrouillée par invariant, rôles presets + rôles CUSTOM ;
   politique `roles.json` relue à chaud (`ROLES_FILE`), FAIL-CLOSED — « absent » (adopté) ≠ « illisible »
