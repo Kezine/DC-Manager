@@ -411,34 +411,29 @@ de file finit toujours par être servie.
 Un provider = **une instance de tracker + un projet de destination**. Champs communs à toute
 marque, options propres à la marque.
 
-| Champ | Requis | Défaut | Notes |
-|---|---|---|---|
-| `id` | oui | — | immuable après création (référencé par `interventions.tracker_provider_id`) |
-| `kind` | oui | — | doit être un type **connu** (`jira`) — sinon la validation refuse, en listant les types supportés |
-| `url` | oui | — | **https obligatoire** : le jeton voyage en en-tête d'autorisation à chaque requête |
-| `account` | oui | — | moitié **PUBLIQUE** de l'identification (Jira Cloud : l'adresse e-mail du compte). **Relue et réaffichée** à l'édition, contrairement au jeton |
-| `token` | oui à la création | — | jeton d'API, **chiffré au repos**, jamais relu ni renvoyé |
-| `interval_sec` | non | `0` | `0` = synchro **manuelle** uniquement. ⚠ À régler **haut** en usage réel : l'état d'un ticket n'a pas la volatilité d'un client wifi |
-| `timeout_sec` | non | `20` | délai d'UNE requête. Plus généreux que les 15 s de `vm/`/`wifi/` : ici une requête est une **recherche** SaaS (jusqu'à ~100 identifiants) qui traverse Internet |
-| `options.project_key` *(Jira)* | **oui** | `""` | clé du **projet de destination**. **REQUIS** : sans projet, un provider de réplication n'a littéralement rien à faire |
-| `options.type_incident` *(Jira)* | non | `"Incident"` | type de ticket des objets `kind: incident` |
-| `options.type_intervention` *(Jira)* | non | `"Infrastructure"` | type de ticket des objets `kind: intervention` |
-| `options.auto_replicate` *(Jira)* | non | `true` | réplication **automatique** à l'enregistrement. Défaut vrai : configurer un provider de réplication, c'est vouloir que les interventions y arrivent |
+> **Configuration et exploitation** (tableau des champs et de leurs défauts, 503, dépannage de
+> clé, procédure de re-validation de l'API Jira, déploiement) :
+> [`../user-docs/jira-tracker.md`](../user-docs/jira-tracker.md). Ci-dessous, ce qui explique
+> **comment** c'est fait.
 
-⚠ Les **libellés de type** dépendent de la configuration du projet **et de sa langue** : ce
-sont des **réglages**, pas des énumérations — ils ne sont donc contraints à aucune liste
-(seulement à « non vide »). Un type inconnu du projet fait **refuser la création**, et le
-message du tracker remonte intact.
+Deux points de FORME que le tableau des champs ne dit pas :
 
-⚠ **Plusieurs providers en `auto_replicate` sur le même document ⇒ AUCUNE réplication
-automatique**, et le fait est **journalisé** (cf. le tableau du § « poussée tolérante »). La
-réplication se fait alors par l'action manuelle, qui désigne le provider.
+- `id` est **immuable** après création — il est référencé par
+  `interventions.tracker_provider_id` ;
+- `options.project_key` est **REQUIS** (et non simplement « conseillé ») : sans projet, un
+  provider de réplication n'a littéralement rien à faire.
 
 Les **options** sont persistées en **JSON** dans une colonne `options` : c'est ce qui permet
 d'ajouter une marque **sans toucher au schéma de la base**. Une option **non déclarée** est
 écartée silencieusement (une option d'une autre marque, ou d'une version antérieure, ne doit
 pas rendre une config irrécupérable) ; une option déclarée mais **mal typée** est une erreur
-explicite.
+explicite. Les **libellés de type** de ticket sont des **réglages**, pas des énumérations :
+ils dépendent de la configuration du projet et de sa langue, et ne sont donc contraints à
+aucune liste (seulement à « non vide »).
+
+⚠ **Plusieurs providers en `auto_replicate` sur le même document ⇒ AUCUNE réplication
+automatique**, et le fait est **journalisé** (cf. le tableau du § « poussée tolérante »). La
+réplication se fait alors par l'action manuelle, qui désigne le provider.
 
 ### Stockage : `tracker-providers.db` (chiffrée)
 
@@ -466,8 +461,7 @@ Invariants de sécurité (les mêmes que `vm/` et `wifi/`) :
 
 Le module utilise **la même clé** que `vm/`, `wifi/` et `notify/`, via le `SecretBox` serveur
 partagé (AES-256-GCM). **C'est voulu** : une seule clé d'infrastructure à distribuer, protéger
-et faire tourner. Passphrase de **16 caractères minimum** (la dérivation est un SHA-256
-direct : toute la robustesse repose sur la longueur du secret).
+et faire tourner.
 
 > 🚨 **MODÈLE DE MENACE ÉLARGI par rapport aux modules d'INVENTAIRE.** Le jeton stocké ici
 > n'est **pas en lecture seule** : le contrat d'adaptateur porte une **création** de ticket et
@@ -477,25 +471,11 @@ direct : toute la robustesse repose sur la longueur du secret).
 > jamais un compte nominatif d'administrateur. Le chiffrement protège les **copies** de la
 > base (backups, exfiltration du fichier), pas un attaquant qui contrôle l'hôte.
 
-### Clé absente / config invalide (503)
-
-- **clé absente** → module inactif : **toutes** les routes répondent `503` avec un `detail`
-  actionnable (« définir `DCMANAGER_SECRETS_KEY`… »), et le **hook d'écriture devient un
-  no-op**. Si une `tracker-providers.db` existe **déjà** sans clé, le message est enrichi (des
-  jetons chiffrés attendent la clé) ;
-- **clé présente mais trop courte, ou base illisible** → module « démarré en erreur », routes
-  en `503` avec le détail. Le serveur démarre normalement.
-
-⚠ **Le module interventions reste PLEINEMENT fonctionnel** dans les deux cas : le pont est un
-supplément, jamais une dépendance.
-
-### Dépannage — clé CHANGÉE (jetons indéchiffrables)
-
-Symptômes : les providers concernés disparaissent des passes, le statut les **réaffiche en
-erreur** avec « le secret doit être ressaisi » (ils sont réinjectés exprès — sans cela ils
-disparaîtraient silencieusement de l'UI), et « Tester » répond `422` avec le même message.
-Correctif : rouvrir « Providers… », **ressaisir le jeton d'API** de chaque provider,
-enregistrer. Rien d'autre n'est perdu (URL, compte, options, intervalles sont en clair).
+> Contrainte de longueur, génération et portée de la variable :
+> [`../user-docs/configuration.md`](../user-docs/configuration.md) § 2. Effets observables
+> d'une clé absente ou changée — et le fait que le module **interventions** reste pleinement
+> fonctionnel dans les deux cas :
+> [`../user-docs/jira-tracker.md`](../user-docs/jira-tracker.md) §§ 3-4.
 
 ## Routes REST
 
@@ -605,35 +585,12 @@ demandés **exactement** (`FIELDS` = `status`, `assignee`, `labels`) — ni `sum
 
 ### Procédure de re-validation (au premier déploiement, ou si l'API dévie)
 
-Sur un **projet de test**, avec un **compte de service dédié** :
-
-1. **Configurer un provider** (URL, compte, jeton, `project_key`, types) et cliquer
-   **« Tester la connexion »** :
-   - échec d'authentification → le message vient de Jira (compte, jeton, droits) ;
-   - « l'API de RECHERCHE n'a pas répondu comme attendu » → hypothèse **3** (le test le
-     signale sans bloquer : l'authentification, elle, est prouvée).
-2. **Pousser une intervention de test** (« Répliquer »), puis **vérifier dans Jira** :
-   **type** de ticket conforme à `type_intervention` (et à `type_incident` sur un incident),
-   **résumé** et **description** présents, **priorité** correspondant à la table,
-   **échéance** = la date de `planned_end`, **étiquettes** `DCM-EQ-…`/`DCM-VM-…` pour chaque
-   objet lié.
-3. 🚨 **Poser à la main une étiquette ÉTRANGÈRE** sur ce ticket (p. ex. `ops-2026`), puis
-   modifier l'intervention dans DC Manager et attendre la poussée : l'étiquette étrangère doit
-   **SURVIVRE**, et seules les `DCM-*` obsolètes doivent disparaître. C'est le risque n°1 du
-   chantier — à tester explicitement, jamais par déduction.
-4. **Éditer côté DC Manager** (titre, description) et vérifier que le ticket est **écrasé**
-   par le contenu DC Manager (c'est le comportement voulu — cf. « Le partage des vérités »).
-5. **Fermer le ticket côté Jira**, lancer « Synchroniser », et vérifier que la **pastille**
-   change (statut brut + catégorie `done`) **sans** que le statut DC Manager bouge.
-6. **Projet sans priorité** (créer un projet *team-managed*) : la poussée doit **réussir en
-   DÉGRADÉ** — le statut de la passe porte « poussée(s) DÉGRADÉE(S) — priorité non
-   appliquée… » et le ticket est bien créé.
-7. **Ticket supprimé côté Jira** : la passe suivante doit marquer l'intervention
-   **« introuvable »** (pastille d'avertissement), **sans** rien supprimer localement et sans
-   re-créer de ticket.
-8. **Volume** : si un lot plafonne, vérifier `BATCH_SIZE` et `MAX_PAGES_PER_BATCH` (hypothèses
-   3 et 4) ; les identifiants non revenus ressortent en « introuvables », ce qui est
-   précisément le signal qu'il faut regarder.
+À dérouler sur un **projet de test**, avec un **compte de service dédié** :
+[`../user-docs/jira-tracker.md`](../user-docs/jira-tracker.md) § 5. Elle transforme les
+hypothèses du tableau ci-dessus en constats, et son **étape 3** couvre le risque n°1 du
+chantier : prouver qu'une étiquette d'une **autre source** survit à une poussée. Ce point ne se
+déduit pas — la mécanique de diff par verbes est testée en isolation, mais seule l'instance
+réelle prouve que Jira l'applique comme attendu.
 
 ## Mode local (fichier) — principe n°15
 
@@ -704,8 +661,8 @@ Aucun autre module ne dépend de `tracker/` : le cœur ne l'importe jamais, et
 5. **Tests / build** — supprimer `Tests/modules/test-tracker.js` + sa ligne dans `run.js`, et
    les entrées `src-server/src/tracker/*` de `tsconfig.node.json`.
 6. **Documentation** — supprimer ce fichier, son entrée dans l'index de `CLAUDE.md`, la ligne
-   `tracker-providers.db` de `src-server/RUN.md` § 5, et les mentions du module dans les
-   descriptions de `DCMANAGER_SECRETS_KEY` (`README.md` § 4, `RUN.md` § 6 et § 8) ainsi que la
+   `tracker-providers.db` de `user-docs/exploitation.md` § 3, et les mentions du module dans
+   `user-docs/configuration.md` (portée de `DCMANAGER_SECRETS_KEY`) ainsi que la
    ligne « pont tracker » des limites d'`interventions.md`.
 7. **Ce qui RESTE, parce que ça ne vient pas de ce chantier** :
    - **`jira_ref`**, la variable **`JIRA_BASE_URL`**, la route `GET …/interventions/meta`, la
@@ -757,18 +714,11 @@ fermée** est traduisible).
 
 ## Déploiement
 
-| Variable | Rôle | Sans elle |
-|---|---|---|
-| `DCMANAGER_SECRETS_KEY` | passphrase de chiffrement des jetons (**partagée** avec `vm/`, `wifi/` et `notify/`), **≥ 16 caractères** | pont inactif, routes en `503` actionnable, hook inerte — les interventions restent pleinement fonctionnelles |
-
-Aucune autre variable d'environnement n'est propre à cette feature : le lien de chaque ticket
-est **persisté** au moment de la synchro (`tracker_url`), il n'y a donc rien à configurer pour
-le fabriquer. (`JIRA_BASE_URL` appartient, elle, à la référence **manuelle** du module
-interventions.)
-
-Au premier déploiement : définir/vérifier la clé, configurer un provider, **valider les
-hypothèses d'API** (procédure ci-dessus) avec `interval_sec = 0` le temps de la validation,
-puis poser une période réaliste.
+Une seule variable d'environnement conditionne le pont — `DCMANAGER_SECRETS_KEY`, partagée avec
+`vm/`, `wifi/` et `notify/` ; **aucune autre ne lui est propre**, le lien de chaque ticket étant
+**persisté** au moment de la synchro (`tracker_url`). (`JIRA_BASE_URL` appartient, elle, à la
+référence **manuelle** du module interventions.) Marche à suivre du premier déploiement :
+[`../user-docs/jira-tracker.md`](../user-docs/jira-tracker.md) § 6.
 
 ## Tests
 

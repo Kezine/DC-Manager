@@ -388,13 +388,11 @@ spare / d'un sous-équipement / d'une application, et y **voir d'un coup d'œil*
 
 ## Configuration
 
-| Variable | Défaut | Rôle |
-|---|---|---|
-| `JIRA_BASE_URL` | *(vide)* | Base d'URL pour fabriquer un lien vers un ticket depuis une clé Jira (ex. `https://monorg.atlassian.net/browse/`). Trimmée ; vide/absente → `null` (le client masque alors le lien). Exposée par `GET …/interventions/meta`. |
-
-> La variable peut être ajoutée à `src-server/docker-compose.yml` (section `environment`) ; ce
-> fichier n'est PAS modifié ici (l'utilisateur y a des modifications locales non committées).
-> Doc de référence des variables d'environnement : `README.md` §4.
+Une seule variable d'environnement — **`JIRA_BASE_URL`**, lue par
+`InterventionsValidate.jiraBaseUrl` (point unique) et exposée par `GET …/interventions/meta`.
+Elle sert à fabriquer le lien d'un ticket dont la clé a été **saisie à la main** ; le serveur
+n'appelle jamais Jira pour elle. Valeur, défaut et rôle : table de référence
+[`../user-docs/configuration.md`](../user-docs/configuration.md).
 
 ## Suppression de la feature (script d'amovibilité)
 
@@ -426,7 +424,7 @@ le retirer **d'abord** (son script d'amovibilité est dans
    `Tests/modules/run.js`, et les **trois entrées `src-server/src/interventions/…`** de
    `tsconfig.node.json` (`include`).
 4. **Documentation** : supprimer ce fichier (`docs/interventions.md`), son entrée dans l'index
-   de `CLAUDE.md`, la ligne `JIRA_BASE_URL` de `README.md` §4 et de `src-server/RUN.md` §6.
+   de `CLAUDE.md` et la ligne `JIRA_BASE_URL` de `user-docs/configuration.md` + `.env.example`.
 5. **Ce qui RESTE (indépendant du module)** :
    - les **extensions de primitives UI RÉUTILISABLES** faites pour cette page (principe n°14) : les modes
      `date-time`/`time` de `FormControls.date`, l'option **`onClose`** d'`ui/Modal` (rappel générique

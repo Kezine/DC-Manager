@@ -84,7 +84,7 @@ export class OidcRoutes {
 
   /** Valeur à injecter au client comme `loginUrl` quand `SSO_LOGIN_URL` est vide (cf. `index.ts`).
       RELATIVE, sans slash initial : toutes les URLs du client sont ancrées sur le `<base>` du HTML
-      (cf. docs/reverse-proxy.md), exactement comme `apiBaseUrl` que `server.ts` dérive de la même
+      (cf. user-docs/reverse-proxy.md), exactement comme `apiBaseUrl` que `server.ts` dérive de la même
       façon (`"/api"` → `"api"`). Une valeur absolue casserait le déploiement en sous-dossier. */
   static readonly DEFAULT_CLIENT_LOGIN_URL = OidcRoutes.PATH_LOGIN.replace(/^\/+/, "");
 

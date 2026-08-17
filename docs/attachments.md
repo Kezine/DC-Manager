@@ -64,7 +64,7 @@ référencés sont les ids de la **table `attachments`** (requête sur la collec
 `attachments/<docId>/` est emporté avec le `.db`.
 
 **Sauvegarde/restauration d'un document serveur = le `.db` ET son dossier `attachments/<docId>/`**
-(cf. `src-server/RUN.md` § Données) — un `.db` restauré seul laisse des enregistrements dont le
+(cf. [`../user-docs/exploitation.md`](../user-docs/exploitation.md) § 3) — un `.db` restauré seul laisse des enregistrements dont le
 download répond 404.
 
 ## Mode local (principe n°15) : AUCUN écart

@@ -44,7 +44,7 @@ Idempotence de bout en bout : un inventaire inchangé ne produit **aucune**
 | `PveHttp.ts` | Client HTTPS d'UN nœud : jeton d'API (`PVEAPIToken=…`) et **hiérarchie de confiance TLS** par endpoint (`trustOptions`, statique pure : épinglage d'empreinte SHA-256 > CA du cluster `ca_pem` > CA système) — jamais « accepter tout ». Erreurs TYPÉES (`PveHttpError.retryable` : joignabilité vs applicatif). Le jeton n'apparaît jamais dans une erreur/un log. **Réponse BORNÉE** : au-delà de `MAX_RESPONSE_BYTES` (32 Mio) la requête est avortée (erreur non-retryable — données cluster-wide, basculer ne servirait à rien) pour qu'un endpoint détraqué ne gonfle pas la mémoire du serveur. **Agent HTTPS injectable** (dernier paramètre, optionnel) : sans injection, une socket **dédiée par requête** ; avec l'agent keep-alive du pool, les connexions sont réutilisées (cf. `PveHttpPool.ts`). |
 | `PveHttpPool.ts` | **Pool de nœuds** avec bascule sur défaillance de joignabilité (jamais sur une erreur applicative) et préférence collante (le nœud mort ne coûte son délai qu'une fois par passe). **Agent keep-alive PARTAGÉ à la durée d'UNE passe** (`fromConfig` l'ouvre, `dispose()` le détruit en fin d'inventaire) : les **handshakes TLS sont AMORTIS** sur les ~N appels de détail d'une passe. Sans lui, `agent: false` repaierait TCP + un handshake TLS complet par requête — ~50 ms de pur handshake par appel sur un gros cluster. Sûr entre endpoints aux confiances TLS différentes : l'agent réutilise les sockets **par origine** (host:port), chacune validée à SON handshake ; deux nœuds = deux origines distinctes. Le N+1 séquentiel lui-même **reste** (assumé, volumes faibles). |
 | `ProxmoxParse.ts` | Décodage PUR des réponses JSON (chaînes `netN` QEMU/LXC, `/cluster/resources` → VMs ET nœuds **avec métriques**, `/cluster/status` → nom + quorate + `nodes_expected` (membres déclarés) + composition `{name, ip, nodeid, online}`, config, guest-agent). Les deux endpoints décrivent les nœuds **sous deux angles disjoints** : `/cluster/status` est la SEULE source de l'**adresse**, `/cluster/resources` la seule des **métriques**. TOLÉRANT : clé inconnue ignorée, valeur manquante → null, jamais de throw. |
-| `ProxmoxAdapter.ts` | Orchestration des appels (`/cluster/status` → identité + quorum + composition, `/cluster/resources` SANS filtre → VMs + nœuds, `/version` → version + gamme, configs, agent pour les QEMU allumées). **Fusion des deux vues d'un nœud PAR NOM court** (`mergeNodesByName`, même clé que `host_node`/le rapprochement équipement, aucun appel de plus — les deux réponses sont déjà là) : un nœud vu d'un SEUL côté est **conservé**, champ manquant → null (aucune des deux réponses ne fait autorité sur la composition) ; ordre déterministe `resources` puis `status`-seul. HTTP **injecté** (`PveJsonClient`) → testable par stub. Échec d'une config individuelle ou d'une métadonnée cluster SECONDAIRE (quorum/version) toléré ; **deux** échecs rejettent : l'inventaire de masse, et le **nom du cluster** — socle d'identité des `ext_id`, jamais une métadonnée (`requireClusterName` : non résolu ⇒ passe avortée, aucune écriture, cf. « Dépannage — VMs en DOUBLE »). Les segments issus du cluster distant (nom de nœud, `vmid`) sont **encodés** (`encodeURIComponent`) avant d'entrer dans un chemin d'URL. |
+| `ProxmoxAdapter.ts` | Orchestration des appels (`/cluster/status` → identité + quorum + composition, `/cluster/resources` SANS filtre → VMs + nœuds, `/version` → version + gamme, configs, agent pour les QEMU allumées). **Fusion des deux vues d'un nœud PAR NOM court** (`mergeNodesByName`, même clé que `host_node`/le rapprochement équipement, aucun appel de plus — les deux réponses sont déjà là) : un nœud vu d'un SEUL côté est **conservé**, champ manquant → null (aucune des deux réponses ne fait autorité sur la composition) ; ordre déterministe `resources` puis `status`-seul. HTTP **injecté** (`PveJsonClient`) → testable par stub. Échec d'une config individuelle ou d'une métadonnée cluster SECONDAIRE (quorum/version) toléré ; **deux** échecs rejettent : l'inventaire de masse, et le **nom du cluster** — socle d'identité des `ext_id`, jamais une métadonnée (`requireClusterName` : non résolu ⇒ passe avortée, aucune écriture, cf. « Dépannages »). Les segments issus du cluster distant (nom de nœud, `vmid`) sont **encodés** (`encodeURIComponent`) avant d'entrer dans un chemin d'URL. |
 | `ProviderConfigValidate.ts` | Validation PURE d'UN provider (id/kind/token requis, pool d'urls https + empreintes par nœud + doublons, include_lxc/interval_sec/timeout_sec avec défauts) — utilisée par le CRUD DB (messages d'erreur uniques, zéro duplication). Le token n'apparaît jamais dans un message. |
 | `../SecretBox.ts` | Coffre de chiffrement des secrets AU REPOS — module serveur **PARTAGÉ** (hors de `vm/`, réutilisé par `notify/`) : AES-256-GCM (authentifié), clé = SHA-256 de la passphrase d'env `DCMANAGER_SECRETS_KEY` (**clé UNIQUE, sans repli**), IV aléatoire 12 o, format versionné `v1:<iv>:<tag>:<ct>` (base64). Aucun secret (passphrase/clé/jeton) dans un log ou une erreur. Limites assumées + clé perdue = jetons à ressaisir (cf. « Configuration »). |
 | `ProviderConfigDb.ts` | Stockage DB chiffré (`vm-providers.db`, tables typées `vm_providers` + `vm_provider_endpoints` ordonnées, jetons `token_enc`) — **UNIQUE source de config**. Deux surfaces : LECTURE synchro (`providersFor`/`configuredDocIds`) ET CRUD sans fuite de jeton (`listFor`/`save`/`remove`/`buildForTest` — `has_token` seul, jamais le jeton). Driver SQLite injecté. |
@@ -159,7 +159,7 @@ par construction. Un test d'invariant vérifie la liste contre le modèle.
 ## Purge de masse des orphelines
 
 Le geste unitaire de la fiche suffit pour un résidu isolé, pas pour un **accident
-d'identité** : une bascule du nom de cluster (cf. « Dépannage — VMs en DOUBLE ») peut
+d'identité** : une bascule du nom de cluster (cf. « Dépannages ») peut
 laisser **des dizaines** d'orphelines d'un coup, et supprimer un provider **FIGE** ses
 VMs — qui ne deviendront jamais orphelines, puisque plus aucune passe ne couvre leur
 `provider_id`. D'où une action de masse.
@@ -325,15 +325,15 @@ La configuration est **par document** (chaque document = une infrastructure) et
 vit **côté serveur** — jamais dans le document (répliqué aux clients), pour que
 les jetons ne quittent pas le serveur. Elle se fait EXCLUSIVEMENT par l'**UI**
 (modale « Providers… » du sous-onglet Clusters) ; le stockage est la base
-chiffrée `vm-providers.db`, **UNIQUE source de configuration**. La clé
-`DCMANAGER_SECRETS_KEY` est donc **REQUISE** pour toute la feature.
+chiffrée `vm-providers.db`, **UNIQUE source de configuration** — **aucun fichier
+de configuration n'est lu**, et surtout pas un `vm-providers.json`, qui porterait
+des jetons en clair sur disque. La clé `DCMANAGER_SECRETS_KEY` est donc
+**REQUISE** pour toute la feature.
 
-> 🚨 **Aucun fichier de configuration n'est lu**, et surtout pas un `vm-providers.json` :
-> ce format porterait des jetons **EN CLAIR sur disque**, en contradiction directe avec la
-> promesse « un backup n'expose aucun jeton ». Le code ne le lit jamais. **À vérifier sur
-> tout serveur** : s'il traîne un `vm-providers.json` (ou un `vm-providers.json.imported-*`),
-> le **SUPPRIMER à la main** — il porte des jetons exploitables. La configuration se
-> (re)saisit alors via l'UI, une fois `DCMANAGER_SECRETS_KEY` définie.
+> **Configuration et exploitation** (champs d'un provider, confiance TLS, séparation de
+> privilèges du jeton Proxmox, 503, dépannages, déploiement, gamme supportée) :
+> [`../user-docs/vm-proxmox.md`](../user-docs/vm-proxmox.md). Ci-dessous, ce qui explique
+> **comment** c'est fait.
 
 ### Stockage de référence : `vm-providers.db` (chiffré)
 
@@ -377,16 +377,18 @@ quel par la liste et l'enregistrement (aucune réserve, contrairement au jeton).
   de 12 octets par chiffrement, format stocké versionné `v1:<iv>:<tag>:<ct>`
   (base64, le préfixe autorise une rotation d'algorithme future).
 - **Longueur minimale VÉRIFIÉE** : l'hypothèse « secret long et aléatoire » (sur
-  laquelle repose l'absence de sel/itérations) n'est plus seulement documentée —
+  laquelle repose l'absence de sel/itérations) n'est pas seulement documentée —
   `SecretBox` **REFUSE au démarrage** toute passphrase de moins de
   `MIN_PASSPHRASE_LENGTH` (**16**) caractères (le module concerné démarre alors
   « en erreur », routes en **503** avec le message actionnable, sans faire tomber
-  le serveur). Générer un vrai secret, p. ex. `openssl rand -base64 32`.
+  le serveur).
 - **Limites ASSUMÉES** : la clé vit dans l'environnement du serveur — le
   chiffrement protège les **copies** de la base (backups, exfiltration du
   fichier), PAS un attaquant qui contrôle l'hôte. Ni la passphrase, ni la clé, ni
   un jeton (clair ou chiffré) n'apparaissent dans un log ou une erreur.
-- **Clé perdue = jetons à ressaisir** (aucune récupération — c'est le but).
+
+> Contrainte, génération et portée de la variable, côté exploitant :
+> [`../user-docs/configuration.md`](../user-docs/configuration.md) § 2.
 
 ### Modèle de menace — administrateur de confiance (limites assumées)
 
@@ -423,196 +425,60 @@ les VMs manuelles sans jamais pouvoir repointer un endpoint ni sonder le réseau
 
 ### Clé absente / config invalide (503)
 
-- Clé **absente** : la feature est ENTIÈREMENT désactivée (le mode fichier a été
-  retiré) — **TOUTES** les routes `vm` (synchro/statut ET CRUD/test) répondent **503**
-  actionnable (« définir `DCMANAGER_SECRETS_KEY`… ») et l'UI affiche un bandeau au lieu
-  des contrôles. Sans clé, ni inventaire ni gestion des providers n'est possible.
-- Clé absente **mais** `vm-providers.db` présente : module « en erreur » explicite,
-  message ENRICHI (« base chiffrée présente sans clé — définissez la clé pour déchiffrer
-  les jetons stockés »). Pas de silence.
-- Config invalide (DB en erreur) : module « en erreur », routes en **503** avec le
-  détail — visibilité opérateur sans faire tomber le reste.
+Le module distingue trois états — clé absente (feature entièrement désactivée), clé
+absente avec `vm-providers.db` présente (message enrichi), config invalide (module
+« en erreur ») — tous rendus par un **503 actionnable** qui ne fait jamais tomber le
+serveur. Effets observables et messages :
+[`../user-docs/vm-proxmox.md`](../user-docs/vm-proxmox.md) § 3.
 
-### Dépannage — clé `DCMANAGER_SECRETS_KEY` CHANGÉE (jetons stockés indéchiffrables)
+### Dépannages (clé changée, VMs en double)
 
-**Symptôme** (incident réel) : la vue **Clusters** n'affiche plus aucun cluster
-et le bouton **« Tester »** d'un provider échoue — alors que la clé est bien
-définie et la liste des providers reste affichée. Les logs serveur montrent :
+Symptômes, diagnostic différentiel et remédiation :
+[`../user-docs/vm-proxmox.md`](../user-docs/vm-proxmox.md) §§ 4-5.
 
-```
-ERROR [vm] POST /vm/providers/test : construction en échec <docId>
-  SecretBox : déchiffrement refusé (clé DCMANAGER_SECRETS_KEY différente ou
-  donnée altérée) — le secret doit être ressaisi
-```
-
-**Cause** : la valeur de `DCMANAGER_SECRETS_KEY` a **changé** depuis
-l'enregistrement du jeton (ou la variable a été renommée depuis l'ancien
-`VM_PROVIDERS_KEY` sans reporter la MÊME valeur). Le jeton est
-chiffré AU REPOS avec une clé dérivée de la passphrase (cf. « Chiffrement des
-jetons ») : une passphrase différente ne peut PAS le déchiffrer (AES-256-GCM
-authentifié — c'est le but : clé perdue = secret irrécupérable). Ce n'est PAS le
-cas « clé absente » (§ 503) : ici la clé EST présente, mais ce n'est pas la bonne.
-Le module fonctionne, la liste des providers s'affiche (elle ne déchiffre aucun
-jeton), mais toute opération qui a besoin du jeton en clair (synchro, test) échoue.
-
-**Comportement UI — explicite, jamais silencieux** :
-
-- **Vue Clusters** : le provider concerné, qu'un simple `providersFor` écarterait
-  (il rejette tout jeton indéchiffrable), est **réinjecté** comme
-  une carte **« Provider en erreur »** (bandeau rouge) portant le message
-  ci-dessus — au lieu d'une liste vide silencieuse.
-- **Bouton « Tester »** : affiche le message SecretBox actionnable dans la zone
-  d'erreur du formulaire (réponse **422**, corps `{ error }`) — plus de « test
-  impossible » générique.
-- **Bouton « Synchroniser »** : le résultat inclut aussi ces providers en erreur.
-
-**Solution** : ré-ouvrir le provider (**Providers…** → *Modifier*), **ressaisir
-le jeton** dans le champ « Jeton d'API » puis **Enregistrer**. Le jeton est
-re-chiffré avec la clé COURANTE et redevient déchiffrable. (Alternative : restaurer
-l'ANCIENNE valeur de `DCMANAGER_SECRETS_KEY` dans l'environnement du serveur, si
-elle est connue.) Aucune donnée du document n'est perdue entre-temps : les VMs déjà
-synchronisées restent en place, la synchro reprend une fois le jeton ressaisi.
-
-### Dépannage — VMs en DOUBLE (identité de réconciliation)
-
-**Symptôme** : après une ou plusieurs synchros, chaque VM apparaît **deux fois**
-dans le listing.
-
-**Mécanique en jeu** : la clé de réconciliation est `ext_id` =
-`nomDuCluster/vmid`, et le périmètre d'une passe est `provider_id`. Toute VM dont
-le couple (`provider_id`, `ext_id`) n'est pas retrouvé est **créée** ; toute VM du
-périmètre absente de l'inventaire passe **orpheline**. Un doublon est donc TOUJOURS
-la trace d'un changement d'identité — jamais d'une écriture dupliquée (la table
-`vms` a `id` en clé primaire, et la réconciliation ignore un `ext_id` déjà vu).
-
-**Diagnostic DIFFÉRENTIEL** — ouvrir les DEUX fiches (`ext_id · provider_id` et
-« Dernière synchro » y sont affichés) :
-
-| Ce qu'on observe sur la paire | Cause |
-|---|---|
-| `provider_id` IDENTIQUE, `ext_id` de préfixe DIFFÉRENT, un exemplaire portant la pastille **orpheline** | le **nom du cluster** a changé d'une passe à l'autre (renommage, nœud isolé ayant rejoint un cluster — ou, avant le garde-fou ci-dessous, un simple échec de `/cluster/status`) |
-| `ext_id` IDENTIQUE, `provider_id` DIFFÉRENT, **aucune** pastille orpheline, les deux `last_sync` vivantes | **deux providers** synchronisent le MÊME cluster (doublon de configuration) |
-| `ext_id` IDENTIQUE, `provider_id` DIFFÉRENT, l'ancien exemplaire **sans** pastille orpheline et `last_sync` FIGÉE | le provider a été **supprimé/recréé sous un autre id** : les VMs de l'ancien id ne sont plus dans AUCUN périmètre — elles ne sont donc jamais marquées orphelines, elles se figent |
-
-⚠ Conséquence du 3ᵉ cas, à connaître : **supprimer un provider ne rend pas ses VMs
-orphelines** — plus aucune passe ne couvre leur `provider_id`. Elles se **figent** dans
-leur dernier état, sans pastille, jusqu'à une suppression explicite. C'est exactement ce
-que le groupe « provider disparu » de la **purge de masse** sait retrouver (il compare
-les `provider_id` du document à la configuration serveur) — voir « Purge de masse des
-orphelines ».
-
-**Garde-fou (identité FAILLIBLE)** : le nom du cluster vient de `/cluster/status`.
-Il est le **socle d'identité** de la passe, pas une métadonnée : s'il n'est pas
-résolu (appel en échec, réponse sans entrée cluster nommée ni nœud unique), la
-passe **AVORTE** — statut du provider en erreur, message actionnable, **aucune
-écriture** (`ProxmoxAdapter.requireClusterName`). Se replier sur une autre valeur
-recréerait TOUT l'inventaire sous une seconde identité, et la passe suivante ferait
-le chemin inverse (battement). Corollaire : la **composition** de l'`ext_id` ne se
-change pas non plus « pour la rendre plus stable » — ce serait dédoubler l'existant
-une fois de plus.
-
-**Voir l'identité AVANT le dommage** : la carte provider du sous-onglet **Clusters**
-affiche l'identité de réconciliation en clair — ligne « **Identité** » :
-`<nomDuCluster>/…` (la partie variable étant le `vmid`), tirée du DERNIER état cluster
-connu. Un préfixe qui n'est plus celui des `ext_id` affichés sur les fiches VM est
-l'alarme la plus précoce disponible : c'est la lecture qui rend le tableau de diagnostic
-ci-dessus immédiat. Aucune ligne n'apparaît tant que le provider n'a pas été synchronisé
-depuis le démarrage du serveur — il n'y a alors PAS d'identité connue, et en inventer une
-afficherait un préfixe que la synchro n'utilise pas.
-
-Deux autres lectures de la même carte, issues de la MÊME réponse `/cluster/status` (aucun
-appel réseau de plus) : le quorum porte le ratio « **x/y nœuds** » — nœuds RÉPONDANTS en
-ligne sur nœuds MEMBRES déclarés par le cluster (`nodes_expected`) —, l'écart signalant un
-membre éteint ou injoignable ; et la table des nœuds porte leur **adresse** (colonne IP,
-« — » si le nœud n'est pas décrit par cet endpoint). Composition inconnue (nœud isolé,
-`/cluster/status` muet) → aucun ratio affiché, libellé de quorum historique.
-
-**Remédier aux doublons existants** : les exemplaires **orphelins** (1ᵉʳ cas) se
-purgent **depuis leur fiche** (bouton « Supprimer cette VM orpheline… ») ou, quand ils
-se comptent par dizaines, d'un seul geste via « **Purger…** » (en-tête de l'onglet VMs
-ou carte provider — cf. « Purge de masse des orphelines »). Vérifier AVANT si
-l'exemplaire supprimé porte des enrichissements locaux (notes, groupes, hôte rattaché) :
-ils ne sont PAS reportés sur son jumeau, ils sont perdus — c'est pourquoi la purge de
-masse **exclut les enrichies par défaut** et les liste par leur nom.
-Les exemplaires des 2ᵉ/3ᵉ cas ne portent PAS la pastille orpheline, donc pas le bouton
-de fiche (réservé aux orphelines — supprimer une VM encore inventoriée serait vain) :
-il faut d'abord **retirer le provider en trop** de la configuration, puis purger ses
-VMs — elles apparaissent alors dans le groupe « **provider disparu** » de la purge de
-masse, qui est précisément là pour ça.
+Ce qu'il faut en retenir CÔTÉ CODE : la clé de réconciliation est `ext_id` =
+`nomDuCluster/vmid`, et le périmètre d'une passe est `provider_id`. Le nom du cluster
+vient de `/cluster/status` ; il est le **socle d'identité** de la passe, pas une
+métadonnée — non résolu, la passe **AVORTE** sans écrire (`ProxmoxAdapter.requireClusterName`).
+Se replier sur une autre valeur recréerait TOUT l'inventaire sous une seconde identité, et
+la passe suivante ferait le chemin inverse (battement). Corollaire : la **composition** de
+l'`ext_id` ne se change pas non plus « pour la rendre plus stable » — ce serait dédoubler
+l'existant une fois de plus. Corollaire d'exploitation : **supprimer un provider ne rend pas
+ses VMs orphelines** (plus aucune passe ne couvre leur `provider_id`) — c'est ce que le
+groupe « provider disparu » de la purge de masse sait retrouver.
 
 ### Champs d'un provider (validation `ProviderConfigValidate`)
 
-La validation est assurée par `ProviderConfigValidate` (classe pure) — messages
-d'erreur identiques par l'UI (400 affichée telle quelle) et par le CRUD DB.
+La validation est assurée par `ProviderConfigValidate` (classe PURE) — mêmes messages
+d'erreur par l'UI (400 affichée telle quelle) et par le CRUD DB. Deux invariants à ne pas
+perdre en la faisant évoluer :
 
-- `id` : unique par document ; **immuable en édition** (clé de réconciliation des
-  VMs — `ext_id` = `nomDuCluster/vmid`, seul repli : le nom du nœud d'une
-  installation ISOLÉE ; sans nom résolu la passe avorte, cf. « Dépannage — VMs en DOUBLE »).
-- `kind` : `proxmox` (seul type supporté par `VmSyncService.adapterFor`).
-- **Pool de nœuds** (éditeur ordonné dans l'UI) — palier à la défaillance d'un
-  nœud : l'API Proxmox répond sur chaque nœud, les endpoints sont essayés dans
-  l'ORDRE et le pool **bascule** quand un nœud est injoignable (réseau, DNS, délai,
-  TLS). La bascule ne s'applique JAMAIS à une erreur applicative (authentification,
-  statut HTTP) — elle échouerait à l'identique partout. Préférence collante : le
-  dernier nœud ayant répondu est réessayé en premier, un nœud mort ne coûte donc son
-  délai qu'une fois par passe (cf. `PveHttpPool.ts`). L'UI émet la forme pool (`urls`,
-  empreinte par nœud) ; la validation partagée tolère aussi le raccourci mono-nœud
-  `url` (+ `fingerprint`), exclusif de `urls`.
-- **Confiance TLS — HIÉRARCHIE à 3 niveaux, décidée PAR ENDPOINT** (cf.
-  `PveHttp.trustOptions`, du plus spécifique au plus général) :
-  1. `fingerprint` de l'endpoint présent → **ÉPINGLAGE** : empreinte SHA-256 du
-     certificat à épingler, **PAR NŒUD** (chaque nœud Proxmox porte SON propre
-     certificat — l'UI Proxmox l'affiche). Le plus spécifique, **prioritaire** ;
-     recommandé avec les certificats auto-signés.
-  2. sinon `ca_pem` du provider présent → validation TLS par **CETTE CA de
-     cluster** (`rejectUnauthorized: true` + option `ca`). ⚠ Le nom d'hôte de l'URL
-     doit alors correspondre au CN/SAN du certificat du nœud (sinon
-     `ERR_TLS_CERT_ALTNAME_INVALID`, expliqué par `explainNetworkError`).
-  3. sinon → validation par les **CA système** (cas par défaut).
-- `ca_pem` : certificat **CA du cluster** (`pve-root-ca.pem`), au format PEM. La CA
-  du cluster émet le certificat de CHAQUE nœud : lui faire confiance = **UNE seule
-  valeur pour tout le pool**, qui SURVIT aux régénérations de certificats
-  (`pvecm updatecerts`) — alternative plus robuste que l'épinglage par nœud. Où le
-  trouver : fichier `/etc/pve/pve-root-ca.pem` sur un nœud, ou UI Proxmox
-  (*Datacenter → … → Certificats*). **PUBLIC** (pas un secret) : il transite sans
-  réserve et est renvoyé en lecture. Combinable avec des empreintes par endpoint
-  (le pin prime par nœud, la CA sert de repli). Absent = validation CA système.
-- `token` : jeton d'API Proxmox — le rôle lecture seule **PVEAuditor** suffit ;
-  les jetons Proxmox sont cluster-wide : un seul jeton pour tout le pool. Dans
-  l'UI, il est en **écriture seule** (champ password jamais pré-rempli ; vide en
-  édition = jeton conservé). Chiffré au repos dès l'enregistrement.
-  ⚠ **Séparation de privilèges** : par défaut (`privsep=1`), un jeton n'hérite
-  PAS des permissions de son utilisateur — l'API filtre alors les résultats et
-  `/cluster/resources` renvoie une liste **vide sans erreur** (« synchro OK,
-  0 VM »). Donner le rôle AU JETON lui-même :
-  `pveum acl modify / --tokens 'sync@pve!inventaire' --roles PVEAuditor --propagate 1`
-  (UI Proxmox : *Datacenter → Permissions → Add → API Token Permission*, chemin `/`,
-  propagation cochée) — ou créer le jeton avec `--privsep 0` pour qu'il hérite de
-  l'utilisateur. Le statut de synchro signale explicitement ce cas.
-- `include_lxc` : défaut `true` (décision de cadrage : conteneurs inclus).
-- `interval_sec` : période de synchro automatique (entier ≥ 0) ; `0` = manuelle.
-- `timeout_sec` : délai maximal d'UNE requête HTTP, en secondes (entier ≥ 1,
-  défaut 15) — borne aussi le coût d'une bascule sur nœud mort.
+- `id` **immuable en édition** : c'est la clé de réconciliation des VMs (cf. ci-dessus) ;
+- l'UI émet la forme **pool** (`urls`, empreinte PAR nœud) ; la validation partagée tolère
+  aussi le raccourci mono-nœud `url` (+ `fingerprint`), exclusif de `urls`.
+
+La **confiance TLS** est décidée PAR ENDPOINT (`PveHttp.trustOptions`, du plus spécifique au
+plus général : empreinte épinglée → `ca_pem` du provider → CA système), et la **bascule de
+pool** (`PveHttpPool.ts`) ne s'applique JAMAIS à une erreur applicative (authentification,
+statut HTTP) — elle échouerait à l'identique partout ; préférence collante sur le dernier
+nœud ayant répondu.
+
+Tableau des champs, valeurs par défaut, où trouver le `ca_pem`, et le piège de la
+**séparation de privilèges** des jetons Proxmox (`privsep=1` ⇒ « synchro OK, 0 VM ») :
+[`../user-docs/vm-proxmox.md`](../user-docs/vm-proxmox.md) § 2.
 
 ### Déploiement
 
-Ajouter **`DCMANAGER_SECRETS_KEY`** (une passphrase LONGUE) à l'environnement du
-serveur : elle est **REQUISE** pour toute la feature VM (inventaire ET gestion des
-providers par l'UI) et chiffre les secrets au repos (clé UNIQUE partagée par tous
-les modules à secrets — VM, notifications, wifi). **Aucun autre nom n'est reconnu** :
-un déploiement qui porterait la passphrase sous un autre nom doit **renommer** la
-variable en `DCMANAGER_SECRETS_KEY` (même valeur → même dérivation, jetons déjà
-stockés déchiffrables sans réécriture). Sans clé : la feature est entièrement
-désactivée (toutes les routes en 503 actionnable). **Clé perdue = jetons à ressaisir**
-(aucune récupération possible).
+[`../user-docs/vm-proxmox.md`](../user-docs/vm-proxmox.md) § 6.
 
 ## Gamme Proxmox supportée
 
-Déclarée dans `ProxmoxAdapter` : **PVE 8 à 9**. `test()` lit `GET /version` ;
-hors gamme → **avertissement, pas de blocage** (l'inventaire est tenté quand
-même — les endpoints utilisés sont stables depuis PVE 7). Le parsing est
-tolérant par principe ; si une release future casse l'API, l'évolution reste
-confinée à l'adaptateur (le reste de l'application ne connaît que `VmRecord`).
+Déclarée dans `ProxmoxAdapter` : **PVE 8 à 9**. `test()` lit `GET /version` ; hors gamme →
+**avertissement, pas de blocage** (l'inventaire est tenté quand même — les endpoints utilisés
+sont stables depuis PVE 7). Le parsing est tolérant par principe ; si une release future casse
+l'API, l'évolution reste confinée à l'adaptateur (le reste de l'application ne connaît que
+`VmRecord`). Vu de l'exploitant :
+[`../user-docs/vm-proxmox.md`](../user-docs/vm-proxmox.md) § 7.
 
 ## Suppression de la feature (script d'amovibilité, vérifié T4.1)
 

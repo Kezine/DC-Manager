@@ -10,7 +10,7 @@ import type { AuthProvider, AuthRequestView, SsoResult, SsoUser } from "./AuthPr
    PASSE l'identité à l'application dans des en-têtes de confiance. L'app ne
    gère alors AUCUN flux OAuth, aucun cookie, aucune expiration : elle LIT.
    C'est le mode qui colle au déploiement réel (l'app est déjà derrière un
-   proxy, cf. docs/reverse-proxy.md) et celui qui rend l'IdP maître des
+   proxy, cf. user-docs/reverse-proxy.md) et celui qui rend l'IdP maître des
    utilisateurs — la table `groups` de `roles.json` mappe ensuite ses GROUPES
    vers des rôles (cf. `access/RolesConfig`, docs/auth.md § 5).
 
@@ -41,7 +41,7 @@ import type { AuthProvider, AuthRequestView, SsoResult, SsoUser } from "./AuthPr
       en-tête — pas même le nom d'utilisateur (cf. `authenticate`). La
       comparaison est à TEMPS CONSTANT (`SecretCompare`), comme celle du mode
       basic : c'est un secret, pas un identifiant.
-   Même discipline que `X-Forwarded-Prefix` (docs/reverse-proxy.md) : un en-tête
+   Même discipline que `X-Forwarded-Prefix` (user-docs/reverse-proxy.md) : un en-tête
    n'est cru que dans la mesure où l'on sait d'où il vient.
 
    ── Ce que ce provider ne fait PAS, et pourquoi ───────────────────────────

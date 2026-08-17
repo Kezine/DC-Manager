@@ -104,9 +104,8 @@ La suppression d'un équipement le **détache** (cascade `equipments`), sans tou
 
 ### « Déconnecté » ≠ « orphelin »
 
-Le champ persisté s'appelle `orphan`, comme pour les VMs, et la **mécanique est identique**
-(patch, jamais de `DELETE`, réapparition couverte sans cas particulier) — c'est ce qui permet
-de partager toute la chaîne. Mais le **sens** diffère : l'API d'un contrôleur ne liste que les
+Le module VM parle d'**orphelines** : une VM que le cluster ne renvoie plus est
+vraisemblablement supprimée. Ici, le contrôleur ne liste que les
 clients **connectés**, donc disparaître est un événement **quotidien**, pas un incident. D'où :
 
 - libellé UI « **déconnecté** » (`lists.ph.disconnected`), jamais « orphelin » ;
@@ -115,30 +114,28 @@ clients **connectés**, donc disparaître est un événement **quotidien**, pas 
 - **aucune suppression** proposée dans la fiche (contrairement aux VMs orphelines) : un
   client revient dès qu'il se reconnecte, purger détruirait ses notes pour rien.
 
+> Ce que cela change pour l'exploitant :
+> [`../user-docs/wifi-unifi.md`](../user-docs/wifi-unifi.md) § 5.
+
 ## Configuration des providers (par document)
 
 Un provider = **une console + UN site**. Multi-sites ⇒ plusieurs providers.
 **Pas de pool d'endpoints** (écart assumé au patron VM) : un cluster Proxmox répond sur
 chaque nœud, ce qui donne son sens à la bascule ; un contrôleur wifi n'a qu'une console.
 
-### Champs d'un provider
+> **Configuration et exploitation** (champs d'un provider, confiance TLS, 503, dépannage de
+> clé, procédure de re-validation d'API, déploiement) :
+> [`../user-docs/wifi-unifi.md`](../user-docs/wifi-unifi.md). Ci-dessous, ce qui explique
+> **comment** c'est fait.
 
-| Champ | Requis | Défaut | Notes |
-|---|---|---|---|
-| `id` | oui | — | immuable après création (clé de réconciliation des clients) |
-| `kind` | oui | — | doit être un type **connu** (`unifi`) — sinon la validation refuse |
-| `url` | oui | — | **https obligatoire** : la clé voyage en en-tête à chaque requête |
-| `token` | oui à la création | — | clé d'API, **chiffrée au repos**, jamais relue |
-| `fingerprint` | non | `null` | empreinte SHA-256 à épingler (console auto-signée) |
-| `ca_pem` | non | `null` | CA de la console (PEM) — **publique**, renvoyée en lecture |
-| `interval_sec` | non | `0` | `0` = synchro **manuelle** uniquement |
-| `timeout_sec` | non | `15` | délai d'UNE requête HTTP |
-| `options.site` *(UniFi)* | non | `"default"` | identifiant **OU** nom du site |
-| `options.include_wired` *(UniFi)* | non | `false` | opt-in : l'API expose aussi le filaire |
+### Champs d'un provider — la forme, pas les valeurs
 
-Les **options** sont propres à la marque et validées par la branche `kind` correspondante ;
-elles sont persistées en **JSON** dans une colonne `options` — c'est ce qui permet d'ajouter
-une marque **sans toucher au schéma de la base**.
+Les champs communs (`id`, `kind`, `url`, `token`, `fingerprint`, `ca_pem`, `interval_sec`,
+`timeout_sec`) sont validés par la branche `kind` correspondante ; les **options** sont
+propres à la marque (`options.site`, `options.include_wired` pour UniFi) et persistées en
+**JSON** dans une colonne `options` — c'est ce qui permet d'ajouter une marque **sans
+toucher au schéma de la base**. `id` est **immuable** après création : c'est la clé de
+réconciliation des clients.
 
 ### Stockage : `wifi-providers.db` (chiffrée)
 
@@ -157,33 +154,16 @@ Invariants de sécurité (les mêmes que le module VM) :
 
 ### Chiffrement — `DCMANAGER_SECRETS_KEY` (coffre serveur PARTAGÉ)
 
-Le module utilise **la même clé** que `vm/` et `notify/`, via le `SecretBox` serveur partagé
-(AES-256-GCM, format `v1:iv:tag:ct`). **C'est voulu** : une seule clé d'infrastructure à
-distribuer, à protéger et à faire tourner, plutôt qu'une par feature. Passphrase de **16
-caractères minimum** (le constructeur refuse en dessous : la dérivation est un SHA-256 direct,
-toute la robustesse repose sur la longueur du secret).
-
-Le chiffrement protège les **copies** de la base (backups, exfiltration du fichier), pas un
+Le module utilise **la même clé** que `vm/`, `tracker/` et `notify/`, via le `SecretBox`
+serveur partagé (AES-256-GCM, format `v1:iv:tag:ct`). **C'est voulu** : une seule clé
+d'infrastructure à distribuer, à protéger et à faire tourner, plutôt qu'une par feature. Le
+chiffrement protège les **copies** de la base (backups, exfiltration du fichier), pas un
 attaquant qui contrôle l'hôte — limite assumée, identique à celle documentée pour `vm/`.
 
-### Clé absente / config invalide (503)
-
-- **clé absente** → module inactif : **toutes** les routes répondent `503` avec un `detail`
-  actionnable (« définir `DCMANAGER_SECRETS_KEY`… »). Si une `wifi-providers.db` existe
-  **déjà** sans clé, le message est enrichi (des jetons chiffrés attendent la clé) ;
-- **clé présente mais trop courte, ou base illisible** → module « démarré en erreur »,
-  routes en `503` avec le détail. Le serveur, lui, **démarre normalement** : une config
-  invalide ne fait jamais tomber l'application.
-
-La modale « Providers… » affiche ce `detail` **à la place** des contrôles d'édition — il n'y
-a rien à configurer tant que la clé n'est pas là.
-
-### Dépannage — clé CHANGÉE (jetons indéchiffrables)
-
-Symptômes : les providers disparaissent de la synchro, le statut les réaffiche **en erreur**
-avec « le secret doit être ressaisi », et « Tester » répond `422` avec le même message.
-Correctif : rouvrir « Providers… », **ressaisir la clé d'API** de chaque provider, enregistrer.
-Rien d'autre n'est perdu (URL, site, intervalles, empreinte, CA sont en clair).
+> Contrainte de longueur, génération et portée de la variable :
+> [`../user-docs/configuration.md`](../user-docs/configuration.md) § 2. Effets observables
+> d'une clé absente ou changée : [`../user-docs/wifi-unifi.md`](../user-docs/wifi-unifi.md)
+> §§ 3-4.
 
 ## Routes REST
 
@@ -252,15 +232,12 @@ dans la console.
 
 Constat mesuré, pas un problème d'alias : **l'API d'intégration officielle ne sert le SSID nulle
 part**, ni dans la liste des clients ni dans la fiche détail (`GET …/clients/{clientId}` rend
-exactement le même objet, sans champ SSID caché). Conséquence :
-
-- la colonne **SSID reste vide** pour tous les clients d'un provider UniFi — `UnifiParse` ne
-  peut pas décoder ce qu'elle ne reçoit jamais ;
-- le champ `ssid` du pivot `WifiClientRecord` **n'est pas retiré** pour autant : il reste au
-  contrat commun (multi-marques, décision D9) — une autre marque, ou une future version de
-  l'API UniFi, peut le servir ;
-- `FIELD_ALIASES.ssid` reste le **point unique** où brancher le champ si l'Integration API
-  l'ajoute un jour.
+exactement le même objet, sans champ SSID caché). Le champ `ssid` du pivot `WifiClientRecord`
+**n'est pas retiré** pour autant : il reste au contrat commun (multi-marques, décision D9) — une
+autre marque, ou une future version de l'API UniFi, peut le servir. `FIELD_ALIASES.ssid` reste le
+**point unique** où brancher le champ si l'Integration API l'ajoute un jour. Conséquence pour
+l'exploitant (colonne SSID vide) :
+[`../user-docs/wifi-unifi.md`](../user-docs/wifi-unifi.md) § 5.
 
 **Piste documentée, SANS implémentation** (décision à prendre par l'utilisateur avant tout
 code) : le SSID existe côté contrôleur et est visible dans l'**API privée** de la console
@@ -273,19 +250,13 @@ d'une release à l'autre, et sort du modèle de confiance (clé d'API scoping) d
 
 ### Procédure de re-validation (si une future version d'API dévie)
 
-1. créer une clé d'API **en lecture seule** dans la console ;
-2. configurer un provider (URL, clé, site) et cliquer **« Tester la connexion »** :
-   - `404` → la base d'API est différente (console « Network Application » autonome :
-     essayer sans le préfixe `/proxy/network`) ;
-   - « site INTROUVABLE » → le message ÉNUMÈRE les sites disponibles de la console (nom et
-     identifiant, plafonné à `UnifiAdapter.MAX_SITES_IN_ERROR`) : recopier l'un des deux dans
-     le champ « Site » plutôt que le deviner ;
-   - `401/403` → droits de la clé ;
-3. lancer une **synchro manuelle** et vérifier dans le listing : nom (ou MAC), IP, type, AP,
-   « connecté depuis » (le SSID restera vide, cf. limite ci-dessus). Un champ systématiquement
-   vide = un alias à corriger dans `FIELD_ALIASES` ;
-4. vérifier le volume : si le total plafonne à `MAX_PAGES × PAGE_SIZE`, la pagination de la
-   console ne se comporte pas comme constaté (cf. `UnifiParse.nextOffset`).
+À dérouler au premier déploiement, ou si une future version d'API dévie :
+[`../user-docs/wifi-unifi.md`](../user-docs/wifi-unifi.md) § 6. Ce qu'elle vérifie, côté
+code : la base d'API (`UnifiAdapter.API_BASE`), la résolution de site
+(`UnifiAdapter.resolveSite` et son message énumérant les sites), les alias de champs
+(`FIELD_ALIASES` — un champ systématiquement vide est un alias à corriger) et la pagination
+(`UnifiParse.nextOffset` — un total qui plafonne à `MAX_PAGES × PAGE_SIZE` signale une
+console qui ne pagine pas comme constaté).
 
 ## Transport HTTPS et confiance TLS
 
@@ -408,18 +379,10 @@ remonter un champ propre à la marque jusqu'au pivot `WifiClientRecord`.
 
 ## Déploiement
 
-| Variable | Rôle | Sans elle |
-|---|---|---|
-| `DCMANAGER_SECRETS_KEY` | passphrase de chiffrement des jetons (**partagée** avec `vm/` et `notify/`), **≥ 16 caractères** | module inactif, routes en `503` actionnable |
-
-Aucune autre variable d'environnement n'est propre à cette feature (le dossier des documents
-et le driver SQLite sont ceux du cœur). Au **premier déploiement** :
-
-1. définir/vérifier `DCMANAGER_SECRETS_KEY` (si `vm/` ou `notify/` tournent déjà, elle est
-   là — c'est le but du coffre partagé) ;
-2. configurer un provider et **valider les hypothèses d'API** (cf. la procédure plus haut) ;
-3. régler `interval_sec` : `0` (manuel) le temps de la validation, puis une période réaliste
-   — la synchro relit **tout** l'inventaire du site à chaque passe.
+Une seule variable d'environnement conditionne la feature — `DCMANAGER_SECRETS_KEY`, partagée
+avec `vm/`, `tracker/` et `notify/` ; **aucune autre ne lui est propre** (le dossier des
+documents et le driver SQLite sont ceux du cœur). Marche à suivre du premier déploiement :
+[`../user-docs/wifi-unifi.md`](../user-docs/wifi-unifi.md) § 7.
 
 ## Tests
 

@@ -188,6 +188,10 @@ Le routeur matérialise le `NotifyRouter` injecté au moteur — **relu à chaqu
 Pour `(event_type, doc_id)`, il déroule les **abonnements applicables** puis résout
 chacun en un destinataire concret.
 
+> Ce que l'exploitant configure (canaux, abonnements, intervalles de rappel, types
+> d'événements produits par le serveur) :
+> [`../user-docs/notifications-certs.md`](../user-docs/notifications-certs.md) § A.2.
+
 **Sélection des abonnements** (`subscriptionsFor`, SQL) : ceux qui sont `enabled` ET
 (`event_type` exact **OU** `*`) ET (portée **globale** `doc_id IS NULL` **OU**
 document de l'événement). Un abonnement `*` global capte donc tout ; un abonnement
@@ -215,48 +219,19 @@ global. Les autres destinataires du même problème sont servis normalement.
 
 Les services d'envoi de l'utilisateur (SMS, e-mail) **existent déjà** et s'appellent
 en HTTP. Le module POSTe donc sur l'URL configurée, en JSON, un corps aux champs
-français (comme les passerelles de l'utilisateur). **Trois réglages PAR INSTANCE**
+alignés sur ces passerelles. **Trois réglages PAR INSTANCE**
 (cf. `notify.db` : `simple_mode`, `simple_max_chars`, `html`) choisissent la forme
 du payload — le formatage vit dans le module PUR `WebhookFormat` (testé en isolation).
 
-**Forme NORMALE** (défaut) — payload complet en clés ANGLAISES (contrat aligné sur les
-passerelles de l'utilisateur, décision 2026-07-15), avec une clé `format`
-(`"text"` | `"html"`) qui indique à la passerelle comment lire `body` :
+> **Contrat de payload** (forme normale et forme simplifiée, clé par clé, avec les bornes
+> et les valeurs par défaut) :
+> [`../user-docs/notifications-certs.md`](../user-docs/notifications-certs.md) § A.3 —
+> c'est la RÉFÉRENCE pour qui écrit la passerelle en face.
 
-```
-POST https://webhook.exemple.lan/notify
-Content-Type: application/json
-Authorization: Bearer <jeton>          (optionnel — omis si le canal n'a pas de jeton)
+Ce qui est verrouillé côté code, et pourquoi :
 
-{
-  "to": "ops@exemple.lan",             // adresse résolue (email ou téléphone selon le canal)
-  "subject": "Synchro VM en échec — pve-prod",
-  "body": "…résumé lisible du problème…",   // texte brut, OU HTML échappé (paragraphes/<br>) si html=true
-  "severity": "error",                 // info | warning | error
-  "event_type": "vm-sync-failure",
-  "format": "text"                     // "text" (défaut) | "html"
-}
-```
-
-- `html=false` (défaut) → `body` en texte brut (le linefeed est le seul formatage).
-  `html=true` → `body` mis en forme HTML, **entités échappées** (le contenu vient des
-  producteurs — jamais de confiance).
-
-**Forme SIMPLIFIÉE** (`simple_mode=true`) — pour les passerelles SMS basiques : le POST
-n'émet **QUE** deux clés, rien d'autre :
-
-```
-{
-  "to":   "+32...",                    // adresse du destinataire
-  "text": "[erreur] Synchro VM en échec — pve-prod : timeout…"   // message compact, une ligne
-}
-```
-
-- `text` = gravité (`[avertissement] `/`[erreur] `, rien pour info) + sujet + `— corps`,
-  linefeeds repliés en espaces, **tronqué à `simple_max_chars`** (défaut **300**, bornes
-  `[20, 5000]`) — l'ellipse « … » finale compte DANS la limite. Le réglage `html` est
-  **ignoré** en mode simplifié.
-
+- **Échappement** : en `html=true`, le corps est mis en forme HTML **entités échappées** —
+  le contenu vient des producteurs, jamais de confiance.
 - **Auth** : jeton en `Authorization: Bearer` s'il est défini. Il arrive **en clair**
   à l'instant de l'envoi (déchiffré par `NotifyDb`/`SecretBox`, jamais avant) et ne
   vit qu'en mémoire.
@@ -275,28 +250,24 @@ n'émet **QUE** deux clés, rien d'autre :
 
 Le module réutilise le **coffre `SecretBox` partagé** (`src-server/src/SecretBox.ts`)
 pour chiffrer les jetons de webhook au repos — la MÊME clé unique
-`DCMANAGER_SECRETS_KEY` que le module `vm/` (détails cryptographiques : AES-256-GCM,
-clé = SHA-256 de la passphrase, format versionné `v1:…` — cf. [`vm-proxmox.md`](vm-proxmox.md)).
+`DCMANAGER_SECRETS_KEY` que les modules `vm/`, `wifi/` et `tracker/` (détails
+cryptographiques : AES-256-GCM, clé = SHA-256 de la passphrase, format versionné `v1:…` —
+cf. [`vm-proxmox.md`](vm-proxmox.md)).
 
-- **Un seul nom de variable est reconnu**, sans repli : `DCMANAGER_SECRETS_KEY`. Une
-  passphrase portée sous un autre nom se renomme (même valeur, même dérivation) ; sinon
-  le module reste INACTIF (clé absente).
 - **Clé absente → module INACTIF en bloc.** Uniformité assumée : même les canaux
   `console` (pourtant sans secret) sont indisponibles — un module, un prérequis, un
-  message. Les routes répondent **503 explicite** (« définir `DCMANAGER_SECRETS_KEY`… »)
-  et la page admin affiche un bandeau actionnable au lieu des contrôles.
-  `raise`/`resolve` deviennent des no-op (les producteurs ne voient qu'une interface
-  optionnelle inerte).
-- **Module en erreur** (ex. `notify.db` illisible) : routes **503** avec le détail —
-  visibilité opérateur sans faire tomber le reste du serveur.
-- **Clé perdue = jetons à ressaisir** (aucune récupération — c'est le but). Un test
-  direct sur un canal dont le jeton est indéchiffrable répond **409** (« ressaisir le
-  jeton du canal »).
+  message. `raise`/`resolve` deviennent des no-op (les producteurs ne voient qu'une
+  interface optionnelle inerte).
 - **Absence d'AAD (limite assumée)** : les jetons chiffrés ne sont pas liés à leur
   ligne — un attaquant ayant l'**écriture** sur les bases pourrait échanger deux
   ciphertexts (jeton de webhook ↔ jeton de provider) sans erreur de déchiffrement. Hors
   modèle de menace (protection des copies en LECTURE) — détail dans
   [`vm-proxmox.md`](vm-proxmox.md) (« Modèle de menace »).
+
+> Contrainte de longueur, génération et portée de la variable :
+> [`../user-docs/configuration.md`](../user-docs/configuration.md) § 2. Effets observables
+> (503, bandeau d'administration, 409 « ressaisir le jeton du canal ») :
+> [`../user-docs/notifications-certs.md`](../user-docs/notifications-certs.md) § A.1.
 
 ## Producteurs de problèmes
 

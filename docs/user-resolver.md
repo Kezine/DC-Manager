@@ -216,7 +216,7 @@ sa modale de détail. `RestAdapter.resolveUsers(ids)` est le seul point d'accès
 
 Interroge le **SSO par id** pour obtenir le profil à jour (téléphone compris). Sélectionnable par
 **variable d'environnement** (pattern des modes d'auth) ; si une telle variable est introduite, la
-lister dans le **README §4** (principe n°13).
+lister dans **[`../user-docs/configuration.md`](../user-docs/configuration.md)** (principe n°13).
 
 ### Procédure d'ajout d'une implémentation
 
@@ -224,7 +224,7 @@ lister dans le **README §4** (principe n°13).
 2. Câbler dans `index.ts` : choisir l'implémentation (selon l'environnement) et l'injecter dans
    `Server` (`resolver`). Si elle doit aussi **capturer** (implémenter `ProfileSink`), la passer à
    `Auth` comme puits — sinon passer un autre puits (ou aucun).
-3. Documenter toute nouvelle variable d'environnement (README §4) et compléter les tests.
+3. Documenter toute nouvelle variable d'environnement (`user-docs/configuration.md`) et compléter les tests.
 
 ## Suppression
 

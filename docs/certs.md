@@ -246,7 +246,8 @@ manques à combler :
   indisponible. La page le détecte (`PkiCrypto.available()`) et affiche un bandeau
   actionnable ; la consultation des métadonnées/échéances, elle, reste possible.
   Déploiement : servir l'app derrière un proxy TLS (cf.
-  [`reverse-proxy.md`](reverse-proxy.md)) ou y accéder via `http://localhost`.
+  [`../user-docs/reverse-proxy.md`](../user-docs/reverse-proxy.md)) ou y accéder via
+  `http://localhost`.
 
 ## Architecture — qui fait quoi
 
@@ -480,100 +481,26 @@ bouton grisé dans l'UI.
 ## Déployer la confiance (magasins clients)
 
 Produire un certificat ne suffit pas : pour qu'une machine, un navigateur ou un service
-**valide** les certificats signés par une autorité interne, il faut installer cette
-autorité dans son **magasin de confiance**. La page « Certificats » offre, sur chaque
-AUTORITÉ (racine X.509 ou CA SSH), une action **« Déployer la confiance… »** qui ouvre une
-modale **de consultation** (disponible même verrouillé — aucune clé requise) : les mêmes
-procédures que ci-dessous, avec les commandes **pré-remplies** du nom de l'autorité et un
-bouton « Copier » par bloc. Le contenu pur (données des procédures) vit dans
-`core/CertDeployGuide.ts` (testé) ; **cette section de doc est la RÉFÉRENCE**, la modale
-n'en est que le pense-bête pré-rempli.
+**valide** les certificats signés par une autorité interne, il faut installer cette autorité
+dans son **magasin de confiance**.
+
+> **Les procédures d'installation** (Linux et ses caveats NSS/JVM/Node/Python, Windows et le
+> piège `.pem` vs `.crt`, Android et la restriction Android 7+, CA SSH par
+> `TrustedUserCAKeys` / `@cert-authority`) sont la RÉFÉRENCE de l'exploitant :
+> [`../user-docs/notifications-certs.md`](../user-docs/notifications-certs.md) § B.1.
+
+Ce que le CODE apporte autour d'elles : la page « Certificats » offre, sur chaque AUTORITÉ
+(racine X.509 ou CA SSH), une action **« Déployer la confiance… »** qui ouvre une modale **de
+consultation** (disponible même verrouillé — aucune clé requise) : les mêmes procédures, avec
+les commandes **pré-remplies** du nom de l'autorité et un bouton « Copier » par bloc. Le
+contenu pur (données des procédures) vit dans `core/CertDeployGuide.ts` (testé) ; la modale
+est un **pense-bête pré-rempli**, jamais la référence — les deux doivent rester en phase.
 
 > **On ne déploie QUE le PUBLIC.** Seul le **certificat public** de l'autorité se déploie
-> (export « Certificat public » → `cert.pem`, renommable en `.crt`). La **clé privée** de la
-> CA ne quitte JAMAIS la PKI — ne l'installez sur aucun client. Rappel du partage des rôles :
-> un serveur TLS présente sa **feuille** (et, s'il y a des intermédiaires, la **fullchain**
-> SANS la racine) ; la **racine**, elle, vit dans le magasin de confiance des **clients**.
-
-### CA racine X.509 — magasins de confiance
-
-Dans ce qui suit, `<FICHIER>` = le certificat public de la racine, renommé avec l'extension
-`.crt` (ex. `CA Racine interne.crt`).
-
-**Linux.** Le fichier doit porter l'extension `.crt` (contenu PEM accepté).
-
-- Debian / Ubuntu :
-  ```
-  sudo cp <FICHIER> /usr/local/share/ca-certificates/
-  sudo update-ca-certificates
-  ```
-- RHEL / Fedora / CentOS :
-  ```
-  sudo cp <FICHIER> /etc/pki/ca-trust/source/anchors/
-  sudo update-ca-trust
-  ```
-- Vérifier une feuille signée par la racine :
-  ```
-  openssl verify -CAfile /etc/ssl/certs/ca-certificates.crt feuille.pem
-  ```
-
-*Caveats Linux* — magasins qui NE lisent PAS le magasin système :
-
-- **Firefox** (et applications NSS) ont leur propre magasin : importer la racine dans
-  Paramètres → Vie privée et sécurité → Certificats → Autorités, ou activer
-  `security.enterprise_roots.enabled` (`about:config`) pour qu'il lise le magasin système.
-- **Java (JVM)** : `keytool -importcert -cacerts -alias <alias> -file <FICHIER>`.
-- **Node.js** : `NODE_EXTRA_CA_CERTS=/chemin/vers/<FICHIER>` (variable d'environnement).
-- **Python (requests)** : `REQUESTS_CA_BUNDLE=/chemin/vers/<FICHIER>` (ou `verify=…`).
-
-**Windows.** En **administrateur**, dans le magasin de la **machine** (« Ordinateur local »
-→ « Autorités de certification racines de confiance ») :
-
-- Invite de commandes (admin) : `certutil -addstore -f Root <FICHIER>`
-- PowerShell (admin) : `Import-Certificate -FilePath <FICHIER> -CertStoreLocation Cert:\LocalMachine\Root`
-
-> **Extension `.pem` vs `.crt`** : `certutil` accepte le `.pem` exporté **tel quel** (inutile de
-> renommer). Seuls `Import-Certificate` (PowerShell) et l'installation par **double-clic** exigent
-> l'extension `.crt` — renommez alors le `.pem` en `.crt` (contenu identique).
-- Interface graphique : double-cliquer le fichier → « Installer un certificat » →
-  « Ordinateur local » → placer **explicitement** dans le magasin « Autorités de
-  certification racines de confiance » (ne pas laisser la sélection automatique).
-- Parc en domaine : déployer par **GPO** (Configuration ordinateur → Stratégies →
-  Paramètres Windows → Paramètres de sécurité → Stratégies de clé publique → Autorités de
-  certification racines de confiance).
-- **Firefox** : même remarque que sous Linux (magasin NSS propre —
-  `security.enterprise_roots.enabled`).
-
-**Android.** Installation MANUELLE : Paramètres → Sécurité → Chiffrement et identifiants →
-Installer un certificat → Certificat CA (puis choisir le fichier).
-
-- Android 11+ : ce passage est **manuel** (obligatoire) et un avertissement s'affiche — le
-  confirmer.
-- Un bandeau « le réseau peut être surveillé » apparaît ensuite : c'est **normal** pour un
-  CA installé par l'utilisateur.
-- ⚠ Depuis **Android 7**, les **applications tierces** ne font confiance qu'aux CA du
-  magasin **système** : un CA « utilisateur » est reconnu par Chrome et les navigateurs,
-  mais **pas** par les applis — sauf opt-in explicite (`networkSecurityConfig`).
-- Parc géré : déployer le CA via une solution **MDM** (Android Enterprise).
-
-### CA SSH — confiance déclarée à la main
-
-Une CA SSH n'a pas de magasin système : la confiance se déclare différemment pour les
-certificats **utilisateur** et **hôte**. On ne publie que la **clé publique** de la CA (la
-ligne `authorized_keys` = le `public_pem` stocké) ; sa clé privée ne quitte jamais la PKI.
-
-- **Serveurs** — accepter les certificats **UTILISATEUR** signés : déposer la clé publique
-  de la CA (ex. `/etc/ssh/ca.pub`), la déclarer dans `sshd_config`, puis recharger :
-  ```
-  TrustedUserCAKeys /etc/ssh/ca.pub
-  ```
-  (`sudo systemctl reload sshd`).
-- **Clients** — accepter les certificats **HÔTE** signés : ajouter une ligne
-  `@cert-authority` dans un `known_hosts` (global `/etc/ssh/ssh_known_hosts` ou personnel
-  `~/.ssh/known_hosts`) :
-  ```
-  @cert-authority *.exemple.lan <clé publique de la CA>
-  ```
+> (export « Certificat public » → `cert.pem`). La **clé privée** de la CA ne quitte JAMAIS la
+> PKI. Rappel du partage des rôles : un serveur TLS présente sa **feuille** (et, s'il y a des
+> intermédiaires, la **fullchain** SANS la racine) ; la **racine**, elle, vit dans le magasin
+> de confiance des **clients**.
 
 ## Suivi d'échéances (`CertExpiryWatcher`, C7)
 
@@ -671,6 +598,9 @@ Le neuf porte **`renewed_from`** = id de l'ancien (lignée) ; l'ancien est **ré
   renouvellement à l'unité (`BulkActions.canRenew`).
 
 ### Renouvellement d'une CA — racine OU intermédiaire (opération de masse)
+
+> Ce que l'exploitant doit choisir, et ce que chaque choix lui coûte en redéploiement de
+> confiance : [`../user-docs/notifications-certs.md`](../user-docs/notifications-certs.md) § B.3.
 
 `renewCaDialog` (root-ca **et intermediate-ca** — Lot 4) — avertissement clair + deux mécaniques + durée
 (plafonnée à l'échéance du PARENT pour un intermédiaire) :
@@ -913,41 +843,15 @@ Cas d'usage : purger un coffre dont la phrase maître est perdue au-delà de ce 
 ou inspecter l'état réel. **À réserver au dépannage** — l'UI et l'API restent la voie normale
 (elles appliquent les garde-fous : descendance, `force`).
 
-Le `docker-compose.yml` déclare un service **`sqlite`** sous `profiles: ["tools"]` : il est
-**inerte** (`docker compose up` l'ignore), donc **l'image de production ne contient aucun éditeur
-de base**. Il monte le même volume nommé — c'est ce qui suffit à atteindre les fichiers.
+> Procédure (service `sqlite` du compose, arrêt du serveur pour cause de WAL, `PRAGMA
+> foreign_keys = ON` avant toute suppression) et **restauration d'une enveloppe archivée** :
+> [`../user-docs/exploitation.md`](../user-docs/exploitation.md) § 5 — SOURCE UNIQUE, commune
+> à toutes les bases du serveur.
 
-```bash
-docker compose stop dc-manager        # ⚠️ INDISPENSABLE (WAL — voir ci-dessous)
-docker compose run --rm sqlite        # cibler le service active son profil automatiquement
-# sqlite> .tables
-# sqlite> SELECT id, label, revoked_at, not_after FROM certificates WHERE doc_id='…';
-# sqlite> DELETE FROM certificates WHERE doc_id='…' AND id='…';   -- les SAN partent en CASCADE
-docker compose start dc-manager
-```
-
-**Restaurer une enveloppe archivée** (coffre écrasé par un changement de phrase indésirable —
-cf. « Garde-fous du changement de phrase ») : chaque ligne de `pki_envelope_history` emballe
+Ce qu'il faut savoir de PROPRE à `certs.db` : chaque ligne de `pki_envelope_history` emballe
 la MÊME DEK ; en restaurer une rend le coffre déchiffrable avec la **phrase en vigueur à
-l'époque** de cette ligne.
-
-```sql
--- repérer l'enveloppe à restaurer (la plus récente saine, en général) :
-SELECT rowid, archived_date, kdf_iters FROM pki_envelope_history WHERE doc_id = '…' ORDER BY rowid;
--- la remettre en service (remplacer <N> par le rowid choisi) :
-UPDATE pki_documents
-   SET (kdf_version, kdf_salt, kdf_iters, wrapped_dek) =
-       (SELECT kdf_version, kdf_salt, kdf_iters, wrapped_dek FROM pki_envelope_history WHERE rowid = <N>)
- WHERE doc_id = '…';
-```
-
-> ⚠️ **Arrêter le serveur d'abord.** `CertsDb` ouvre en **WAL + `busy_timeout`** : écrire pendant
-> qu'il tourne, c'est **deux écrivains concurrents** — au mieux un timeout, au pire un état
-> incohérent (le serveur garde en mémoire des lignes qu'on vient d'effacer sous lui).
-
-> À la main, **aucun garde-fou ne s'applique** : `PRAGMA foreign_keys` n'est pas actif par défaut
-> dans le shell `sqlite3`. Un `DELETE` sur un émetteur peut donc **orpheliner sa descendance** et
-> laisser des SAN derrière lui. Activer `PRAGMA foreign_keys = ON;` avant toute suppression.
+l'époque** de cette ligne. Un `DELETE` sur un émetteur **orpheline sa descendance** et laisse
+ses SAN derrière lui — les FK ne sont pas actives par défaut dans le shell `sqlite3`.
 
 ### Ajouter un FORMAT d'export
 
@@ -973,6 +877,9 @@ UPDATE pki_documents
 Grâce au chiffrement en enveloppe, changer la phrase est **O(1)** : on ne re-chiffre PAS
 les certificats, on ré-emballe seulement la DEK. Bouton **« Changer la phrase maître… »**
 de l'en-tête (session déverrouillée requise) → modale (phrase actuelle + nouvelle ×2).
+
+> Vu de l'exploitant (effets observables, récupération après un changement indésirable) :
+> [`../user-docs/notifications-certs.md`](../user-docs/notifications-certs.md) § B.2.
 
 1. le client dérive l'**ancienne KEK** (phrase actuelle + `kdf_salt`/`kdf_iters` courants)
    et la **nouvelle KEK** (nouvelle phrase + **sel régénéré**) ;

@@ -196,7 +196,7 @@ tracker = trackerModule;
 // se tromper. On défaut donc sur la route servie, en valeur RELATIVE (« auth/login », sans slash
 // initial) : les URLs du client sont ancrées sur le <base> du HTML, exactement comme `apiBaseUrl`
 // que server.ts dérive de la même façon — c'est ce qui fait marcher le déploiement en sous-dossier
-// (cf. docs/reverse-proxy.md). SSO_LOGIN_URL, si elle est renseignée, reste PRIORITAIRE : un
+// (cf. user-docs/reverse-proxy.md). SSO_LOGIN_URL, si elle est renseignée, reste PRIORITAIRE : un
 // exploitant qui veut passer par une page intermédiaire garde la main.
 const LOGIN_URL = SSO_LOGIN_URL || (auth.mode === "oidc" ? OidcRoutes.DEFAULT_CLIENT_LOGIN_URL : "");
 new Server({ docs, auth, live, resolver: userResolver, access, clientDir: CLIENT_DIR, apiBase: API_BASE, loginUrl: LOGIN_URL, log, extensions: [vm.extension(), wifi.extension(), notify.extension(), certs.extension(), interventions.extension(), trackerModule.extension()] }).listen(PORT);

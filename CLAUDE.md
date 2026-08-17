@@ -43,9 +43,23 @@ francophone). Garder cette langue pour toute contribution — commentaires inclu
 5. **Commentaires DÉTAILLÉS.** Expliquer le *pourquoi* (intention, piège évité,
    invariant), pas seulement le *quoi*. Les zones subtiles (concurrence, rendu,
    invalidation de cache) méritent un paragraphe.
-6. **Documentation profuse dans `docs/`.** Tout pan d'architecture non trivial est
-   décrit dans un `.md` de `docs/` (voir l'index plus bas), et référencé depuis le
-   code concerné.
+6. **Documentation profuse, dans DEUX registres.** Tout pan d'architecture non trivial est
+   décrit dans un `.md` de **`docs/`** (voir l'index plus bas), et référencé depuis le
+   code concerné : c'est la documentation du **DÉVELOPPEUR** — concepts, frontières,
+   décisions, invariants, procédures d'extension. Tout ce qu'un **TECHNICIEN IT** doit
+   savoir pour **installer, configurer, exploiter** un déploiement (et le **builder** depuis
+   les sources sans être développeur) vit dans **`user-docs/`** — la documentation du
+   **DÉPLOYEUR**, dont `README.md` est l'index. Les deux registres suivent la même règle de
+   fraîcheur (principe n°13).
+   ⚠ **Ni l'un ni l'autre n'est la documentation de l'UTILISATEUR FINAL** : celui-ci ne voit
+   jamais le dépôt, son aide sera **in-app**. Un mode d'emploi de vue (« la page X, bouton par
+   bouton ») n'a donc sa place dans aucun des deux registres — s'il en reste, c'est du matériau
+   en attente du chantier d'aide in-app.
+   **Où tranche-t-on ?** À la question « **à qui cette phrase s'adresse-t-elle ?** ». Un tableau
+   de champs d'un formulaire de configuration = déployeur ; le contrat TypeScript du même objet =
+   développeur. En cas de doute réel, garder côté `docs/` et **pointer**. Et on **EXTRAIT**, on ne
+   duplique pas : une section qui part vers `user-docs/` laisse derrière elle un pointeur d'une à
+   trois lignes, jamais une copie qui divergera.
 7. **Tests unitaires sur les fonctions isolées.** Tout module pur a des tests dans
    `Tests/modules/run.js`. Le découpage OO doit *faciliter* ces tests — si une logique
    est dure à tester, c'est souvent qu'elle doit être extraite dans un module pur.
@@ -80,11 +94,16 @@ francophone). Garder cette langue pour toute contribution — commentaires inclu
     le besoin est trivial (< ~30 lignes) ou spécifique au domaine de l'application.
 13. **DOCUMENTATION toujours À JOUR avec le code.** Toute contribution qui ajoute ou modifie
     un COMPORTEMENT OBSERVABLE (variable d'environnement, option de configuration, route, format
-    d'échange, invariant, commande) met à jour la documentation correspondante (`docs/`,
-    `CLAUDE.md`, aide en ligne) **dans le même commit**. En particulier, la doc de référence
-    doit lister **TOUTES** les variables d'environnement reconnues par le serveur. Une doc en
-    retard sur le code est un **bug** : dès qu'un écart est constaté, le corriger — ou, si ce
-    n'est pas le moment, le SIGNALER explicitement (note/issue) plutôt que le laisser filer.
+    d'échange, invariant, commande) met à jour la documentation correspondante — **`docs/` ET
+    `user-docs/`** selon le public concerné (principe n°6), plus `CLAUDE.md` et l'aide en ligne —
+    **dans le même commit**. En particulier, la **doc de référence des variables d'environnement
+    est [`user-docs/configuration.md`](user-docs/configuration.md)** : elle est la **SOURCE
+    UNIQUE** et doit lister **TOUTES** celles que le serveur reconnaît (à tenir en phase avec
+    `src-server/.env.example`, qui les illustre). Une variable documentée ailleurs sans y figurer
+    est un bug ; un `.md` qui recopie sa description au lieu de renvoyer ici en est un aussi.
+    Une doc en retard sur le code est un **bug** : dès qu'un écart est constaté, le corriger —
+    ou, si ce n'est pas le moment, le SIGNALER explicitement (note/issue) plutôt que le laisser
+    filer.
 14. **RÉUTILISER les primitives UI de l'app — JAMAIS réinventer un contrôle.** Cas particulier
     du principe n°3, appliqué à l'interface. Avant d'écrire un `<input>`, un `<button>` ou un
     sélecteur à la main, utiliser le composant maison correspondant (tous dans `ui/`). En
@@ -165,7 +184,8 @@ src-shared/         # CODE PARTAGÉ front ⇄ back (TS PUR : ni DOM, ni Node) �
   SearchTerms.ts #   termes de recherche DÉRIVÉS (spec par collection, lecteurs injectés) + requêtes inverses d'invalidation + catalogues fr/en + compositions tapables (cf. docs/recherche.md)
   Cascade.ts    #   cascade de suppression RÉCURSIVE et MULTI-RACINES (intégrité référentielle en DELETE) — Store (fichier) + serveur (API/transact)
   PowerAnalysis.ts #   moteur d'analyse énergie (graphe source→sink, charges, warnings codes+params) — store injecté par interface
-docs/           # documentation d'architecture (voir index)
+docs/           # documentation DÉVELOPPEUR : architecture & conception (voir index)
+user-docs/      # documentation DÉPLOYEUR : installer, configurer, exploiter (index = README.md)
 Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compilés
 ```
 
@@ -185,11 +205,19 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
 
 ## Documentation d'architecture (`docs/`)
 
-> **`docs/` = documentation PÉRENNE d'architecture UNIQUEMENT.** Les documents de SUIVI (checklists de
-> refactor, plans d'avancement, notes de session, TODO temporaires, rapports d'audit en cours) NE vont
-> PAS dans `docs/` ni dans le dépôt : les écrire dans un dossier NON VERSIONNÉ — `.notes/` (ajouté au
-> `.gitignore`) ou le répertoire scratchpad de la session. Un fichier de `docs/` doit décrire un pan
-> d'architecture stable, référencé depuis le code ; s'il ne survit pas à la tâche en cours, il n'y a pas sa place.
+> **`docs/` = documentation PÉRENNE d'architecture UNIQUEMENT — pour le DÉVELOPPEUR.** Les documents de
+> SUIVI (checklists de refactor, plans d'avancement, notes de session, TODO temporaires, rapports d'audit
+> en cours) NE vont PAS dans `docs/` ni dans le dépôt : les écrire dans un dossier NON VERSIONNÉ —
+> `.notes/` (ajouté au `.gitignore`) ou le répertoire scratchpad de la session. Un fichier de `docs/`
+> doit décrire un pan d'architecture stable, référencé depuis le code ; s'il ne survit pas à la tâche en
+> cours, il n'y a pas sa place.
+>
+> **L'autre registre est [`user-docs/`](user-docs/) — pour le DÉPLOYEUR** (principe n°6) : `installation`,
+> `configuration` (🚨 **source unique** des variables d'environnement), `auth`, `reverse-proxy`,
+> `exploitation`, plus un volet par module à configurer (`vm-proxmox`, `wifi-unifi`, `jira-tracker`,
+> `notifications-certs`). Son index est le [`README.md`](README.md). ⚠ **`user-docs/` n'est PAS référencé
+> depuis le code** — un chemin de doc dans un commentaire pointe `docs/`, sauf pour ce qui relève
+> strictement du déploiement (`user-docs/reverse-proxy.md`).
 
 - [`placement.md`](docs/placement.md) — **DOCTRINE : placement & repères** (conteneur de placement,
   chaîne bâtiment→étage→salle→baie, axes ORTHOGONAUX repère ⊥ portée, règles à appliquer à tout
@@ -203,8 +231,6 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   parité câbles : intra/stub/inter-salles, sélection partagée).
 - [`power.md`](docs/power.md) — **analyse énergie** (direction source/sink, tableau-racine,
   remontée/phase/tension déduites, charge par départ/phase, warnings SPOF/redondance).
-- [`reverse-proxy.md`](docs/reverse-proxy.md) — servir l'app **sous un sous-dossier**
-  (URLs relatives + `<base>` + `X-Forwarded-Prefix`), sans reconfiguration.
 - [`perf-3d.md`](docs/perf-3d.md) — **optimisations du moteur 3D WebGL** (visibilité vs
   rebuild, diff d'options, instancing…) : le fait sert de contexte, les idées « à faire »
   y sont consignées (à ne PAS coder sans demande).
@@ -231,7 +257,8 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
 - [`vm-proxmox.md`](docs/vm-proxmox.md) — **inventaire VM Proxmox** (module serveur AMOVIBLE `vm/`,
   pivot `VmRecord`, réconciliation source/locaux, providers PAR document dans `vm-providers.db`
   chiffrée (clé `DCMANAGER_SECRETS_KEY` requise), mapping bridge/tag → réseau, script de suppression,
-  procédure d'ajout d'un provider ; **purge de masse des orphelines** — 2 groupes (orphelines d'un
+  procédure d'ajout d'un provider ; configuration/dépannages/gamme → `user-docs/vm-proxmox.md` ;
+  **purge de masse des orphelines** — 2 groupes (orphelines d'un
   provider configuré / VMs FIGÉES d'un provider disparu), enrichies exclues par défaut et listées
   nominativement, comptes tirés du PLAN de cascade, garantie « UNE transaction = UNE révision, UN SSE,
   UN undo » (`Store.removeMany`), disponible AUSSI en mode fichier).
@@ -241,7 +268,7 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   AP dérivé du nom d'équipement, providers PAR document dans `wifi-providers.db` chiffrée (clé
   `DCMANAGER_SECRETS_KEY` partagée avec vm/notify), transport `node:https` + pagination, API UniFi
   VALIDÉE sur console réelle le 2026-08-04 (limite mesurée : le SSID n'est pas exposé par le contrat
-  officiel), script de suppression).
+  officiel), script de suppression ; configuration/re-validation → `user-docs/wifi-unifi.md`).
 - [`jira-interventions.md`](docs/jira-interventions.md) — **RÉPLICATION des incidents & interventions vers un
   tracker distant** (module serveur AMOVIBLE `tracker/` — un PONT, AUCUNE collection ; Atlassian Jira Cloud
   n'est que la 1re implémentation, contrats/service/config/routes/UI AGNOSTIQUES, ajout d'une marque en
@@ -255,10 +282,11 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   hook `onWrite`, câblage `index.ts` par typage structurel) ; providers PAR document dans `tracker-providers.db`
   chiffrée (clé `DCMANAGER_SECRETS_KEY` partagée avec vm/wifi/notify), `project_key` REQUIS, modèle de menace
   ÉLARGI (jeton en ÉCRITURE ⇒ compte de service dédié) ; ⚠ 11 hypothèses d'API Jira NON validées sur instance
-  réelle + procédure de re-validation ; script de suppression).
+  réelle — procédure de re-validation en `user-docs/jira-tracker.md` ; script de suppression).
 - [`notifications.md`](docs/notifications.md) — **service de notifications** (module serveur AMOVIBLE
   `notify/`, alertes persistantes anti-spam `raise`/`resolve`, moteur pur `NotifyEngine`, schéma
-  `notify.db` à 5 tables, routage par abonnements, webhooks, coffre `SecretBox` partagé, producteurs
+  `notify.db` à 5 tables, routage par abonnements, webhooks (contrat de payload →
+  `user-docs/notifications-certs.md`), coffre `SecretBox` partagé, producteurs
   via `ProblemReporter`, script de suppression, procédures d'ajout).
 - [`certs.md`](docs/certs.md) — **PKI interne zéro-connaissance** (module serveur AMOVIBLE `certs/`,
   crypto 100 % navigateur : phrases PBKDF2 + keycheck + clés privées chiffrées AES-GCM, serveur =
@@ -266,7 +294,8 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   racine, cérémonie « Protéger les clés racine » ; **hiérarchie à N niveaux** (CA intermédiaires,
   pathLen, NameConstraints, chaîne à servir) ; schéma `certs.db` à 5 tables + invariant Q5, formats
   X.509/OpenSSH/PKCS#12 validés croisés ssh-keygen/openssl, listing arborescent client, veilleur
-  d'échéances `cert-expiry`, limites assumées, procédures et script de suppression).
+  d'échéances `cert-expiry`, limites assumées, procédures et script de suppression ; déployer la
+  confiance / phrase maître / renouvellements → `user-docs/notifications-certs.md`).
 - [`interventions.md`](docs/interventions.md) — **incidents & interventions** (module serveur AMOVIBLE
   `interventions/`, base `interventions.db` à 2 tables, objets liés aux équipements/VMs/spares SANS FK
   inter-bases — orphelins tolérés ; audit posé SERVEUR via helper partagé `RequestAuthor`, `closed_date`

@@ -181,7 +181,7 @@ export const certs = {
     },
     lock: {
       insecureTitle: "Opérations de clé indisponibles — contexte non sécurisé",
-      insecureHint: "Le navigateur désactive la cryptographie WebCrypto (crypto.subtle) quand la page n'est pas servie dans un contexte sécurisé. Pour initialiser ou déverrouiller la PKI, accédez à l'application en HTTPS (cf. docs/reverse-proxy.md pour servir derrière un proxy TLS) ou via http://localhost. La liste des certificats et leurs échéances restent consultables ci-dessous.",
+      insecureHint: "Le navigateur désactive la cryptographie WebCrypto (crypto.subtle) quand la page n'est pas servie dans un contexte sécurisé. Pour initialiser ou déverrouiller la PKI, accédez à l'application en HTTPS (cf. user-docs/reverse-proxy.md pour servir derrière un proxy TLS) ou via http://localhost. La liste des certificats et leurs échéances restent consultables ci-dessous.",
       unlockTitle: "Déverrouiller les coffres",
       unlockHint: "Chaque coffre a sa propre phrase secrète. Déverrouillez un coffre pour créer une autorité, émettre ou exporter les clés privées qu'il protège ; verrouillé, la liste reste consultable et les opérations de métadonnées (exports publics, révocation, suppression) restent possibles.",
       passPlaceholder: "phrase secrète",

@@ -18,7 +18,7 @@
    ── 🚨 `OIDC_REDIRECT_URL` est REQUISE, et ne se devine pas ────────────────
    L'URL de callback doit être l'URL PUBLIQUE ABSOLUE que le navigateur atteint,
    celle qui est déclarée telle quelle chez l'OP. Or l'application ne la connaît
-   PAS : derrière un reverse-proxy à sous-chemin (cf. docs/reverse-proxy.md),
+   PAS : derrière un reverse-proxy à sous-chemin (cf. user-docs/reverse-proxy.md),
    elle ne voit ni le schéma public, ni l'hôte public, ni le préfixe — au mieux
    des en-têtes `X-Forwarded-*` que rien n'oblige le proxy à poser correctement.
    Deviner produirait une URL qui « marche en local et casse en production »,

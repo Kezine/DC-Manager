@@ -176,7 +176,7 @@ export const certs = {
     },
     lock: {
       insecureTitle: "Key operations unavailable — insecure context",
-      insecureHint: "The browser disables WebCrypto (crypto.subtle) when the page is not served in a secure context. To initialise or unlock the PKI, access the application over HTTPS (see docs/reverse-proxy.md to serve behind a TLS proxy) or via http://localhost. The certificate list and their expiries remain viewable below.",
+      insecureHint: "The browser disables WebCrypto (crypto.subtle) when the page is not served in a secure context. To initialise or unlock the PKI, access the application over HTTPS (see user-docs/reverse-proxy.md to serve behind a TLS proxy) or via http://localhost. The certificate list and their expiries remain viewable below.",
       unlockTitle: "Unlock the vaults",
       unlockHint: "Each vault has its own passphrase. Unlock a vault to create an authority, issue or export the private keys it protects; locked, the list stays viewable and metadata operations (public exports, revocation, deletion) remain possible.",
       passPlaceholder: "passphrase",

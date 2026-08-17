@@ -7,8 +7,7 @@ Deux questions **orthogonales**, deux mécanismes qu'on ne fusionne pas :
   cookie proxifié à un SSO maison, en-têtes d'un reverse-proxy *identity-aware*, challenge Basic,
   ou mode dev. C'est un **orchestrateur** (`src-server/src/auth.ts`, `Auth`) et **un provider par
   mode** (`src-server/src/auth/`) — décrits à la section suivante ; le mode d'emploi côté
-  exploitation vit dans `README.md` § 4 et [`../src-server/RUN.md`](../src-server/RUN.md)
-  § « Authentification ».
+  exploitation vit dans [`../user-docs/auth.md`](../user-docs/auth.md).
 - **CE QU'IL PEUT** — l'*autorisation*, objet de ce document. Un **RBAC à permissions atomiques** :
   un catalogue de permissions, des rôles qui les regroupent, une politique qui associe des rôles à
   des utilisateurs, et des **gardes** posées sur chaque route.
@@ -168,30 +167,22 @@ Un proxy *identity-aware* (Authelia, Authentik, oauth2-proxy, Pomerium, Cloudfla
 Tailscale…) authentifie en amont — login, MFA, session, déconnexion — puis **passe** l'identité à
 l'application dans des en-têtes. L'app ne gère alors **aucun** flux OAuth, aucun cookie, aucune
 expiration : elle lit. C'est le mode qui colle au déploiement réel (l'app est déjà derrière un proxy,
-cf. [`reverse-proxy.md`](reverse-proxy.md)) et celui qui rend l'**IdP maître des utilisateurs**, la
-table `groups` de `roles.json` traduisant ses groupes en rôles (§ 5).
+cf. [`../user-docs/reverse-proxy.md`](../user-docs/reverse-proxy.md)) et celui qui rend l'**IdP
+maître des utilisateurs**, la table `groups` de `roles.json` traduisant ses groupes en rôles (§ 5).
 
-**En-têtes configurables**, défauts = famille `Remote-*` :
+**En-têtes configurables**, défauts = famille `Remote-*` (`AUTH_FORWARD_USER_HEADER`,
+`…_EMAIL_HEADER`, `…_NAME_HEADER`, `…_GROUPS_HEADER`, `AUTH_FORWARD_SECRET`,
+`AUTH_FORWARD_SECRET_HEADER`). Il n'y a volontairement pas de « profils » par marque, qui
+vieilliraient mal et masqueraient la seule chose qui compte — quels en-têtes le proxy pose
+réellement.
 
-| Variable | Défaut | Contenu attendu |
-|---|---|---|
-| `AUTH_FORWARD_USER_HEADER` | `Remote-User` | **login** — requis : absent ou vide ⇒ appelant **anonyme** |
-| `AUTH_FORWARD_EMAIL_HEADER` | `Remote-Email` | adresse e-mail (`user.eMail`) |
-| `AUTH_FORWARD_NAME_HEADER` | `Remote-Name` | nom d'**affichage complet** (`user.nom`) |
-| `AUTH_FORWARD_GROUPS_HEADER` | `Remote-Groups` | groupes séparés par des **virgules** (rognés, vides écartées, doublons fondus) |
-| `AUTH_FORWARD_SECRET` | *(vide)* | **secret partagé** proxy↔app — cf. le modèle de confiance ci-dessous |
-| `AUTH_FORWARD_SECRET_HEADER` | `X-Auth-Secret` | en-tête portant ce secret |
+> Valeurs, défauts et conventions par outil (Authelia, oauth2-proxy, Cloudflare Access,
+> Tailscale), avec un exemple complet Authelia + nginx :
+> [`../user-docs/auth.md`](../user-docs/auth.md) § 2. Table de référence de toutes les
+> variables : [`../user-docs/configuration.md`](../user-docs/configuration.md).
 
-Pour un autre outil, l'exploitant **renomme** les en-têtes ; il n'y a volontairement pas de
-« profils » par marque, qui vieilliraient mal et masqueraient la seule chose qui compte — quels
-en-têtes le proxy pose réellement.
-
-| Outil | Utilisateur | Groupes |
-|---|---|---|
-| Authelia / Authentik | `Remote-User` | `Remote-Groups` |
-| oauth2-proxy | `X-Forwarded-User` (ou `X-Forwarded-Preferred-Username`) | `X-Forwarded-Groups` |
-| Cloudflare Access | `Cf-Access-Authenticated-User-Email` | *(néant — l'appartenance vit dans les politiques Access)* |
-| Tailscale (`tailscale serve`) | `Tailscale-User-Login` | *(néant)* |
+Un en-tête **répété** arrive en `string[]` : la normalisation (première valeur) est faite en
+**un** point (`ForwardHeaderAuthProvider.headerValue`).
 
 La session produite est **volontairement pauvre** : `logged: true`, `user.login`, `user.eMail`,
 `user.nom`, `user.domain = "forward"`, `groups`. Et rien d'autre :
@@ -225,8 +216,9 @@ Secret **non configuré** : le mode fonctionne, mais le boot émet un **WARN exp
 consigne réseau et ce qu'un client direct pourrait faire. Même ton que le WARN du mode dev, parce que
 c'est le même genre de trou. Le secret, lui, n'apparaît dans **aucun** log — comme le jeton SSO.
 
-Même discipline que `X-Forwarded-Prefix` ([`reverse-proxy.md`](reverse-proxy.md)) : un en-tête n'est
-cru que dans la mesure où l'on sait d'où il vient.
+Même discipline que `X-Forwarded-Prefix`
+([`../user-docs/reverse-proxy.md`](../user-docs/reverse-proxy.md)) : un en-tête n'est cru que dans
+la mesure où l'on sait d'où il vient.
 
 > **Consigne de déploiement.** Dans le proxy, **effacer** les quatre en-têtes d'identité venus du
 > client avant de les repositionner soi-même (`proxy_set_header Remote-User $user;` sous nginx,
@@ -234,7 +226,7 @@ cru que dans la mesure où l'on sait d'où il vient.
 > `Remote-User` peut le voir traverser. Le secret partagé rend cette faute inoffensive — raison de
 > plus pour le configurer.
 
-Exemple de configuration (Authelia + nginx) : [`../src-server/RUN.md`](../src-server/RUN.md) § 6.
+Exemple de configuration (Authelia + nginx) : [`../user-docs/auth.md`](../user-docs/auth.md) § 2.
 
 ### OIDC — l'application est elle-même le *Relying Party*
 
@@ -304,19 +296,19 @@ la clé est à l'intérieur.
 
 #### Variables d'environnement
 
-| Variable | Défaut | Rôle |
-|---|---|---|
-| `OIDC_ISSUER` | *(requis)* | émetteur de l'OP (`https://keycloak.exemple/realms/infra`) — la découverte en dérive les endpoints |
-| `OIDC_CLIENT_ID` | *(requis)* | identifiant du client déclaré chez l'OP |
-| `OIDC_REDIRECT_URL` | *(requis)* | **URL publique absolue** du callback, `…/auth/callback` |
-| `OIDC_CLIENT_SECRET` | *(vide)* | secret du client **confidentiel**. Vide = client **public** (PKCE seul) |
-| `OIDC_SCOPES` | `openid profile email groups` | scopes demandés — `openid` est **forcé** en tête s'il manque |
-| `OIDC_COOKIE_SECURE` | `1` | attribut `Secure` des cookies. `0` = **développement en HTTP local uniquement** (WARN de boot) |
+Six, toutes lues en **un seul point** (`auth/OidcConfig.ts`, source unique) : `OIDC_ISSUER`,
+`OIDC_CLIENT_ID` et `OIDC_REDIRECT_URL` **requises** (refus de démarrer sinon, refusées une à
+une pour que le message nomme celle qui manque), plus `OIDC_CLIENT_SECRET`, `OIDC_SCOPES` et
+`OIDC_COOKIE_SECURE`.
+
+> Valeurs, défauts et exemple complet côté Keycloak :
+> [`../user-docs/auth.md`](../user-docs/auth.md) § 3. Table de référence de toutes les
+> variables : [`../user-docs/configuration.md`](../user-docs/configuration.md).
 
 🚨 **`OIDC_REDIRECT_URL` est requise et ne se devine pas.** Derrière un reverse-proxy à sous-chemin
-([`reverse-proxy.md`](reverse-proxy.md)), l'application ne connaît ni le schéma, ni l'hôte, ni le
-préfixe publics — au mieux des en-têtes `X-Forwarded-*` que rien n'oblige le proxy à poser
-correctement. La deviner produirait une URL qui « marche en local et casse en production », avec pour
+([`../user-docs/reverse-proxy.md`](../user-docs/reverse-proxy.md)), l'application ne connaît ni le
+schéma, ni l'hôte, ni le préfixe publics — au mieux des en-têtes `X-Forwarded-*` que rien n'oblige
+le proxy à poser correctement. La deviner produirait une URL qui « marche en local et casse en production », avec pour
 seul symptôme un `redirect_uri_mismatch` opaque côté OP. C'est aussi pourquoi l'URL remise à la
 librairie au callback est la valeur **configurée** + la chaîne de requête reçue : **aucun en-tête
 réseau n'entre dans sa composition** (anti-empoisonnement d'hôte). Cette même URL sert à déduire la
@@ -431,8 +423,9 @@ rien à opposer (`true`). L'**identité**, elle, passe par `Auth.validate` dans 
 > (plus `sessionKey` si le mode présente un jeton qu'il vaut la peine de mettre en cache), l'ajouter
 > à `AuthModeResolution.MODES` (et le retirer de `PLANNED_MODES` s'il y figurait) avec sa règle de
 > **cohérence** si le mode exige une configuration, le sélectionner dans le `switch` du constructeur
-> d'`Auth`, documenter ses variables d'environnement (README § 4 + RUN.md + `.env.example`, principe
-> n°13) et lui donner une section dans `test-auth-providers.js`. Rien d'autre ne bouge : ni `api.ts`,
+> d'`Auth`, documenter ses variables d'environnement (`user-docs/configuration.md` +
+> `user-docs/auth.md` + `.env.example`, principe n°13) et lui donner une section dans
+> `test-auth-providers.js`. Rien d'autre ne bouge : ni `api.ts`,
 > ni `access/`, ni le client.
 >
 > Le mode `oidc` l'a vérifié en grand : **le contrat n'a pas bougé d'une ligne** pour l'accueillir,
@@ -531,26 +524,14 @@ point de vue de l'utilisateur.
 
 ## 4. Rôles
 
-Les **presets** sont une commodité de configuration ; la vérité reste le catalogue atomique.
-La lecture est scopée **par domaine** : il n'existe volontairement pas de « viewer global »
-implicite — « tout voir » s'écrit comme l'union explicite des `*-viewer`, pour qu'aucun droit ne
-s'acquière par distraction.
+Les **presets** sont une commodité de configuration ; la vérité reste le catalogue atomique
+(§ 3). La lecture est scopée **par domaine** : il n'existe volontairement pas de « viewer
+global » implicite — « tout voir » s'écrit comme l'union explicite des `*-viewer`, pour
+qu'aucun droit ne s'acquière par distraction.
 
-| Rôle | Grants |
-|---|---|
-| `admin` | `*` |
-| `dc-viewer` | `dc.*:read` |
-| `dc-editor` | `dc.*:*` |
-| `dc-connector` | `dc.cabling:*`, `dc.equipment:read`, `dc.rack:read`, `dc.site:read` |
-| `vm-viewer` | `vm:read` |
-| `vm-operator` | `vm:read`, `vm:sync`, `vm:create`, `vm:update`, `vm:delete` |
-| `wifi-viewer` | `wifi:read` |
-| `wifi-operator` | `wifi:read`, `wifi:sync`, `wifi:create`, `wifi:update`, `wifi:delete` |
-| `cert-viewer` | `certs:read` |
-| `cert-manager` | `certs:read`, `certs:write` (**pas** `certs:pki`) |
-| `intervention-viewer` | `interventions:read`, `tracker:read` |
-| `intervention-editor` | `interventions:read`, `interventions:write`, `tracker:read`, `tracker:push` |
-| `notify-manager` | `notify:*`, `dc.contact:*` |
+> **Liste des 13 rôles fournis et de leurs grants** :
+> [`../user-docs/auth.md`](../user-docs/auth.md) § 4 — c'est une table de configuration, elle
+> vit du côté de qui écrit `roles.json`.
 
 Deux choix méritent leur justification. **Les opérateurs VM/wifi sont énumérés** plutôt qu'écrits
 `vm:*` : un rôle d'opérateur ne doit pas hériter en silence d'un futur verbe sensible, et la gestion
@@ -565,27 +546,13 @@ est `FileRoleProvider`, un fichier JSON relu **à chaud**. C'est délibérément
 simple qui soit : la politique d'un déploiement auto-hébergé tient en quelques lignes, et un fichier
 se sauvegarde, se versionne et se corrige sans base ni écran d'administration.
 
-```jsonc
-{
-  "users": {
-    "jdupont": ["dc-editor"],            // clé = login BRUT
-    "42": ["cert-manager", "vm-viewer"], // …ou id CANONIQUE (String(id) SSO)
-    "zoe": ["cabliste-nuit"]
-  },
-  "groups": {                            // GROUPES de l'IdP (mode forward, OIDC demain)
-    "grp-infra": ["dc-editor"],
-    "grp-noc": ["vm-viewer", "wifi-viewer"]
-  },
-  "roles": {                             // rôles CUSTOM, optionnels — en plus des presets
-    "cabliste-nuit": ["dc.cabling:*", "dc.rack:read"]
-  }
-}
-```
+> **Format du fichier, exemple commenté, et ce qu'il faut savoir pour l'exploiter** :
+> [`../user-docs/auth.md`](../user-docs/auth.md) § 4. Ci-dessous, les règles du MODÈLE et ce
+> qu'elles imposent au code.
 
 - **Recherche par id canonique PUIS par login**, et **union** des deux si les deux sont déclarés :
   ce sont deux graphies de la même personne, un exploitant qui a écrit les deux doit obtenir la
-  somme. La correspondance est **exacte, sensible à la casse** — prévisible et testable ; au besoin,
-  déclarer les deux graphies.
+  somme. La correspondance est **exacte, sensible à la casse** — prévisible et testable.
 - **Pas de bucket `default`** : l'opt-in est strict. Un utilisateur absent du fichier — et dont aucun
   **groupe** n'y figure — n'a aucun rôle.
 - **Tolérant en forme, strict en droit.** Une clé de premier niveau inconnue est **ignorée et
@@ -597,8 +564,8 @@ se sauvegarde, se versionne et se corrige sans base ni écran d'administration.
 
 ### La table `groups` — la gestion des utilisateurs retourne dans l'IdP
 
-`groups` associe un **groupe de l'annuaire** à des rôles. C'est ce qui rend forward-auth (et demain
-OIDC) payant : le fichier ne décrit plus des personnes mais la **traduction** « groupe d'entreprise →
+`groups` associe un **groupe de l'annuaire** à des rôles. C'est ce qui rend les modes forward-auth
+et OIDC payants : le fichier ne décrit plus des personnes mais la **traduction** « groupe d'entreprise →
 rôle applicatif », et un nouvel arrivant du bon groupe a ses droits sans qu'on touche à `roles.json`.
 
 Les rôles effectifs sont l'**union** de `users[id]`, `users[login]` et de `groups[g]` pour chacun des
@@ -625,13 +592,16 @@ différents.
 
 Fichier absent, illisible, JSON invalide : **personne n'a de rôle**. Jamais de repli ouvert « le
 temps de réparer » — c'est précisément quand la configuration est cassée qu'un repli permissif
-serait exploité. Deux échecs se ressemblent pourtant, et reçoivent deux traitements :
+serait exploité. Deux échecs se ressemblent pourtant, et reçoivent deux traitements : un fichier
+**absent** est un état parfaitement défini (politique **vide adoptée**, génération incrémentée,
+avertissement — c'est aussi l'état d'un déploiement neuf), tandis qu'un fichier **présent mais
+illisible** ne dit pas ce que l'exploitant voulait (la **dernière politique valide reste en
+vigueur**, erreur journalisée). Écraser la politique en cours par du vide sur une faute de frappe
+déconnecterait toute l'équipe. Au **premier** chargement, il n'y a pas de « dernière valide » :
+politique vide, fail-closed.
 
-| Situation | Effet |
-|---|---|
-| Fichier **absent** (ou supprimé à chaud) | état parfaitement défini → politique **vide adoptée**, génération incrémentée, avertissement. C'est aussi l'état d'un déploiement neuf. |
-| Fichier **présent mais illisible** (JSON tronqué en cours d'édition, droits retirés) | on ignore ce que l'exploitant voulait → la **dernière politique valide reste en vigueur**, erreur journalisée. Écraser la politique en cours par du vide sur une faute de frappe déconnecterait toute l'équipe. |
-| **Premier** chargement illisible | il n'y a pas de « dernière valide » → politique **vide** (fail-closed). |
+> Le même tableau, vu de l'exploitant qui édite le fichier :
+> [`../user-docs/auth.md`](../user-docs/auth.md) § 4.
 
 ### Rechargement à chaud
 
@@ -653,14 +623,10 @@ premier administrateur d'un déploiement neuf serait verrouillé dehors par la r
 
 ### Variables d'environnement
 
-De la **politique** (l'authentification a les siennes : `AUTH_MODE` ci-dessus, `SSO_URL`,
-`BASIC_AUTH`, `AUTH_FORWARD_*` — liste complète dans `README.md` § 4 et
-[`../src-server/RUN.md`](../src-server/RUN.md) § 6) :
-
-| Variable | Défaut | Rôle |
-|---|---|---|
-| `ROLES_FILE` | `<DOCS_DIR>/roles.json` | chemin du fichier de politique |
-| `BOOTSTRAP_ADMIN_IDS` | *(vide)* | ids canoniques ou logins, séparés par des virgules → rôle `admin` |
+`ROLES_FILE` (défaut `<DOCS_DIR>/roles.json`) et `BOOTSTRAP_ADMIN_IDS` pour la **politique** ;
+l'authentification a les siennes (`AUTH_MODE`, `SSO_URL`, `BASIC_AUTH`, `AUTH_FORWARD_*`,
+`OIDC_*`). **Table de référence UNIQUE, avec défauts et rôles** :
+[`../user-docs/configuration.md`](../user-docs/configuration.md).
 
 ## 6. Application : `requireAuth` + gardes par route
 
@@ -834,6 +800,9 @@ Les corps JSON gardent leur forme historique (`error`, `logged`, `adminRight`). 
 l'**enrichit** d'un champ `permission` nommant ce qui manque — un refus muet est indiagnostiquable,
 côté support comme côté client. Quand une garde accepte plusieurs permissions (`any-doc-read`), le
 champ porte la sentinelle de la règle.
+
+> La même distinction, comme grille de diagnostic pour l'exploitant :
+> [`../user-docs/auth.md`](../user-docs/auth.md) § 5.
 
 ## 10. Gating côté client — anticiper, jamais décider
 

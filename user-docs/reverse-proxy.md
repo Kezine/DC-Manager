@@ -1,5 +1,8 @@
 # Servir l'app sous un sous-dossier (reverse-proxy)
 
+*Pour le technicien qui déploie/exploite — la conception du client et du service HTTP est dans
+[`docs/`](../docs/).*
+
 > DC Manager peut être servi **à la racine** (`https://host/`) **ou sous n'importe quel
 > sous-dossier** (`https://host/dc-manager/`) derrière un reverse-proxy, **sans
 > reconfiguration ni rebuild**. Ce document explique le mécanisme et les réglages proxy.

@@ -416,7 +416,7 @@ module.exports = async () => {
     ck.eq(OidcRoutes.PATH_CALLBACK, "/auth/callback", "chemin de callback");
     ck.eq(OidcRoutes.PATH_LOGOUT, "/auth/logout", "chemin de déconnexion");
     ck.eq(OidcRoutes.DEFAULT_CLIENT_LOGIN_URL, "auth/login",
-      "🚨 valeur injectée au client : RELATIVE, sans slash initial (ancrée sur le <base> — cf. apiBaseUrl et docs/reverse-proxy.md)");
+      "🚨 valeur injectée au client : RELATIVE, sans slash initial (ancrée sur le <base> — cf. apiBaseUrl et user-docs/reverse-proxy.md)");
 
     /* -- LOGIN : la redirection part vers l'OP, et les trois secrets sont MÉMORISÉS côté navigateur
        dans un cookie de transaction court. -- */

@@ -241,7 +241,7 @@ pratique le boot du serveur pour les documents actifs).
   des legacy `face_image*`.
 - **Échec** : toute exception d'un record est ENRICHIE de `collection/id` du fautif (l'erreur SQL brute ne nomme que la
   colonne) et la transaction s'annule EN BLOC — le fichier reste LISIBLE en legacy, le `.bak` est là. Marche à suivre
-  d'exploitation : [`src-server/RUN.md`](../src-server/RUN.md).
+  d'exploitation : [`../user-docs/exploitation.md`](../user-docs/exploitation.md).
 
 ## `meta` et `images` : HORS migration
 
@@ -263,7 +263,7 @@ fichier — module `AttachmentFiles`, décision D4 du cadrage pièces jointes). 
 un blob de dizaines de Mo dans la base gèlerait le thread Node ; sur disque, upload et download sont STREAMÉS et le
 `.db` reste petit (VACUUM/backup/WAL inchangés). `DocumentStore.maintenance` purge les binaires dont l'id a quitté la
 collection (`purgedAttachments` au rapport) ; `DocumentStore.delete` emporte le dossier avec le `.db`.
-⚠ **Sauvegarder un document = le `.db` ET son dossier `attachments/<docId>/`** (cf. `src-server/RUN.md`).
+⚠ **Sauvegarder un document = le `.db` ET son dossier `attachments/<docId>/`** (cf. [`../user-docs/exploitation.md`](../user-docs/exploitation.md) § 3).
 Architecture complète, sécurité et mode fichier : [`attachments.md`](attachments.md).
 
 ## Pourquoi le relationnel, et pas JSONB
