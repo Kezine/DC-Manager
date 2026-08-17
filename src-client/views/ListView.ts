@@ -69,6 +69,14 @@ export interface ListActions {
       (ex. VMs : seules les MANUELLES ; les synchronisées passent par la fiche/purge de masse). Absent → `del`
       vaut pour toutes les lignes (comportement historique). */
   canDel?: (id: string) => boolean;
+  /** Raffinement de `clone` (dupliquer = une CRÉATION), même idiome que `canEdit`/`canDel`. Existe pour que
+      l'AUTORISATION puisse le masquer : elle est évaluée AU RENDU, donc elle suit un changement de droits à
+      chaud, ce qu'un booléen figé à la construction du listing ne saurait pas faire. Absent → `clone` vaut
+      pour toutes les lignes. */
+  canClone?: (id: string) => boolean;
+  /** Raffinement de `manage` (éditeur de contenu de baie = une MISE À JOUR), même raison d'être que
+      `canClone`. Absent → `manage` vaut pour toutes les lignes. */
+  canManage?: (id: string) => boolean;
 }
 export interface ListOptions {
   collection: string;
@@ -594,9 +602,9 @@ export class ListView {
     const a = this.actions;
     let html = `<span data-id="${id}">`;
     if (a.view) html += IconButton.html({ icon: Icons.INFO, label: I18n.t("lists.chrome.rowView"), act: "view" });
-    if (a.manage) html += IconButton.html({ icon: Icons.RACK_CONTENT, label: I18n.t("lists.chrome.rowManage"), act: "manage" });   // éditeur de contenu de baie (inline, à côté de Détails)
+    if (this._rowCanManage(id)) html += IconButton.html({ icon: Icons.RACK_CONTENT, label: I18n.t("lists.chrome.rowManage"), act: "manage" });   // éditeur de contenu de baie (inline, à côté de Détails)
     if (this._rowCanEdit(id)) html += IconButton.html({ icon: Icons.EDIT, label: I18n.t("lists.chrome.rowEdit"), act: "edit" });
-    if (this._rowCanShow(id) || this._rowCanLocate(id) || a.clone || this._rowCanDel(id) || a.download) {
+    if (this._rowCanShow(id) || this._rowCanLocate(id) || this._rowCanClone(id) || this._rowCanDel(id) || a.download) {
       const moreLbl = I18n.t("lists.chrome.rowMore");
       html += `<button type="button" class="btn btn-ghost btn-sm icon-action row-overflow" data-act="__more__" title="${moreLbl}" aria-label="${moreLbl}" aria-haspopup="menu" aria-expanded="false">${Icons.MORE}</button>`;
     }
@@ -623,6 +631,16 @@ export class ListView {
     return !!this.actions.del && (!this.actions.canDel || this.actions.canDel(id));
   }
 
+  /** `clone` effectif pour UNE ligne : action activée ET prédicat par ligne (s'il existe) satisfait. */
+  private _rowCanClone(id: string): boolean {
+    return !!this.actions.clone && (!this.actions.canClone || this.actions.canClone(id));
+  }
+
+  /** `manage` effectif pour UNE ligne : action activée ET prédicat par ligne (s'il existe) satisfait. */
+  private _rowCanManage(id: string): boolean {
+    return !!this.actions.manage && (!this.actions.canManage || this.actions.canManage(id));
+  }
+
   /** Ouvre le menu « plus d'actions » (overflow) d'une ligne : actions secondaires actives, déléguées à onAction. */
   private _openRowMenu(trigger: HTMLElement, id: string): void {
     const a = this.actions;
@@ -633,7 +651,7 @@ export class ListView {
     // « Afficher » (viewer) AVANT « Télécharger » (cadrage B, D-B4) : consulter d'abord, télécharger ensuite.
     if (this._rowCanShow(id)) items.push({ label: I18n.t("lists.chrome.rowShow"), icon: Icons.EYE, onClick: () => this.onAction && this.onAction("show", id) });
     if (a.download) items.push({ label: I18n.t("lists.chrome.rowDownload"), icon: Icons.EXPORT, onClick: () => this.onAction && this.onAction("download", id) });
-    if (a.clone) items.push({ label: I18n.t("lists.chrome.rowClone"), icon: Icons.CLONE, onClick: () => this.onAction && this.onAction("clone", id) });
+    if (this._rowCanClone(id)) items.push({ label: I18n.t("lists.chrome.rowClone"), icon: Icons.CLONE, onClick: () => this.onAction && this.onAction("clone", id) });
     if (this._rowCanDel(id)) items.push({ label: I18n.t("ui.action.delete"), icon: Icons.DELETE, danger: true, onClick: () => this.onAction && this.onAction("del", id) });
     RowMenu.open(trigger, items);
   }

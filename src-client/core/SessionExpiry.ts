@@ -2,11 +2,18 @@
    EXPIRATION DE SESSION (mode API) — verrou PUR « a-t-on déjà ramené au login ? ».
    ----------------------------------------------------------------------------
    Quand le SSO expire PENDANT une session, la garde serveur répond 401 sur nos
-   requêtes (cf. Api.requireAdmin). Plusieurs fetches peuvent être EN VOL au même
-   instant (chargement d'un document, badges d'onglets, images…) → une RAFALE de
-   401 arrive. On ne veut qu'UNE seule action : couper la session locale et
-   revenir à l'écran de connexion. Ce module porte ce verrou d'IDEMPOTENCE, isolé
-   ici pour rester testable (aucun DOM, aucun réseau).
+   requêtes (cf. `AccessControl.requireAuth`, la garde GLOBALE — docs/auth.md
+   § 6.1). Plusieurs fetches peuvent être EN VOL au même instant (chargement d'un
+   document, badges d'onglets, images…) → une RAFALE de 401 arrive. On ne veut
+   qu'UNE seule action : couper la session locale et revenir à l'écran de
+   connexion. Ce module porte ce verrou d'IDEMPOTENCE, isolé ici pour rester
+   testable (aucun DOM, aucun réseau).
+
+   ⚠ NE PAS confondre avec le 403 (« authentifié, mais sans le droit »), qui a son
+   propre module — `core/AccessDenial` : la MÊME garde globale émet les deux
+   codes, mais le 403 ne renvoie JAMAIS au login (se reconnecter n'y changerait
+   rien) et se re-signale plus tard, d'où une fenêtre de silence par permission
+   plutôt qu'un verrou terminal.
 
    Rôles :
      - `install(onExpired)` — câblé UNE fois au boot (main.ts, mode REST seulement) ;

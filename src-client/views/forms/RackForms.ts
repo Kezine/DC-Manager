@@ -330,7 +330,7 @@ export class RackForms extends CableForms {
     // locateRack) — sinon toast d'erreur.
     const footerActions: HTMLElement[] = [];
     if (host.locate && rk.datacenter_id) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>${I18n.t("lists.chrome.rowLocate")}`; locBtn.onclick = () => host.locate!("rack", rk.id, () => this.rackDetail(store, host, rk.id, onChanged)); footerActions.push(locBtn); }
-    if (!this.isViewer()) {   // viewer : pas d'édition
+    if (this.canEditCollection("racks")) {   // viewer / droit de mise à jour absent : pas d'édition (contenu ni fiche)
       const contentBtn = document.createElement("button"); contentBtn.type = "button"; contentBtn.className = "btn btn-ghost"; contentBtn.textContent = I18n.t("rack.rackDetail.contentBtn");
       contentBtn.title = I18n.t("rack.rackDetail.contentTitle");
       contentBtn.onclick = () => this.rackContent(store, host, rk.id, onChanged);

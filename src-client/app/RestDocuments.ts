@@ -24,6 +24,8 @@ import { EntityRegistry } from "../models";
 import { Log } from "../core/Log";
 import { I18n } from "../i18n/I18n";
 import { SessionExpiry } from "../core/SessionExpiry";
+import { AccessState } from "../core/AccessState";
+import { AccessDenial } from "../core/AccessDenial";
 import { HydrationStats } from "../core/HydrationStats";
 
 const W = window as any;
@@ -41,6 +43,11 @@ export interface RestDocumentsHost {
   invalidate3D(): void;
   /** Pastille utilisateur SSO (topbar). */
   setUser(user: any): void;
+  /** ÉTAT D'AUTORISATION de l'utilisateur courant, reconstruit depuis `GET /me`.`permissions` (les GRANTS
+      effectifs, jokers compris — le client reçoit des permissions, jamais des noms de rôles). Appelé au
+      bootstrap, à chaque relecture de `/me` (403 en vol) et à l'expiration de session (retour à `NONE`).
+      L'hôte (main.ts) le mémorise et rafraîchit le gating de l'interface. Cf. docs/auth.md § « Gating côté client ». */
+  setAccess(access: AccessState): void;
   /** Écran « accès refusé » (auth SSO non autorisée) avec bouton Réessayer. */
   showAccessDenied(opts: { connected: boolean; user: string; onRetry: () => void; loginUrl: string }): void;
   /** Ferme TOUTES les modales de la pile (retour au login sur session expirée : sinon les fiches/formulaires
@@ -75,6 +82,13 @@ export class RestDocumentController {
   private reloading = false;        // un reload est EN COURS (fetch + rebuild 3D ≈ 1 s) → SÉRIALISE (jamais 2 en parallèle)
   private queuedConflict = false;   // un 409/400 est tombé PENDANT un reload → à rejouer (rechargement TOTAL) à la fin
   private readonly reloadPlanner = new ReloadPlanner();   // changeset → plan (quoi reconstruire) — cf. src/sync/RenderImpact.ts
+  // Anti-rafale des refus d'AUTORISATION (403) : une seule action fautive peut tirer plusieurs requêtes.
+  // Fenêtre de silence PAR PERMISSION — jamais un verrou terminal (cf. core/AccessDenial vs SessionExpiry).
+  private readonly denials = new AccessDenial();
+  private refreshingAccess = false;                       // une relecture de /me est déjà en vol (rafale de 403)
+  // Copie LOCALE de l'état d'autorisation : le contrôleur gate lui-même les gestes du SÉLECTEUR de documents
+  // (créer, renommer, verrouiller, supprimer, doc par défaut, importer) — ils vivent ici, dans aucune vue.
+  private access: AccessState = AccessState.NONE;
   private readonly flog = Log.scope("fs");                // trace REST (flag de débogage)
   private readonly adapter: RestAdapter; private readonly store: Store; private readonly imageStore: ImageStore;
   private readonly session: SaveState; private readonly prefs: Prefs; private readonly hasFsApi: boolean;
@@ -90,6 +104,11 @@ export class RestDocumentController {
     // 401 (session SSO absente/EXPIRÉE) sur une de nos requêtes → retour au login. Passe par SessionExpiry pour
     // l'IDEMPOTENCE : une rafale de 401 (fetches en vol) ne déclenche qu'UNE seule fois sessionExpired().
     this.adapter.onAuthExpired = () => { SessionExpiry.report(401); };
+    // 403 (authentifié SANS le droit) sur une de nos requêtes → JAMAIS de retour au login : l'utilisateur reste
+    // où il est. On l'informe (toast non bloquant nommant la permission manquante) et on RELIT `/me`, parce que
+    // la cause la plus probable est un changement de politique À CHAUD — l'interface a été bâtie avec les droits
+    // d'AVANT et doit se remettre en phase toute seule.
+    this.adapter.onForbidden = (info) => { this.accessRefused(info); };
     // 400 (validation PARTAGÉE serveur) : notre écriture OPTIMISTE a déjà muté le cache local, mais le serveur l'a
     // REFUSÉE → on RECHARGE (comme le 409) pour restaurer l'état serveur, sinon l'UI garderait un changement
     // inexistant côté serveur (divergence). Ne devrait quasi jamais arriver pour une écriture passée par la
@@ -127,11 +146,53 @@ export class RestDocumentController {
     this.pendingChangeset = null;
     this.host.closeAllModals();
     this.host.setUser(null);
+    // Plus de session ⇒ plus aucun droit CONNU : on retombe sur l'état vide plutôt que de garder l'ancien.
+    // L'overlay d'accueil couvre l'app de toute façon ; c'est une question d'honnêteté d'état, pas d'affichage.
+    this.applyAccess(AccessState.NONE);
+    this.denials.reset();
     this.host.showAccessDenied({
       connected: false, user: "",
       onRetry: () => { void this.bootstrap(); },
       loginUrl: (this.prefs.loginUrl && this.prefs.loginUrl.trim()) || this.injectedLoginUrl,   // même construction qu'au bootstrap
     });
+  }
+
+  /** Mémorise l'état d'autorisation ET le publie à l'hôte — POINT UNIQUE de ces deux gestes, pour qu'ils ne
+      puissent pas diverger. La copie locale sert au gating du sélecteur de documents (cf. `access`). */
+  private applyAccess(access: AccessState): void { this.access = access; this.host.setAccess(access); }
+
+  /** Refus d'AUTORISATION (HTTP 403) sur une requête EN VOL : l'utilisateur est authentifié, mais la politique
+      lui refuse ce geste — typiquement parce qu'un rôle vient de lui être retiré (le fichier de politique est
+      relu À CHAUD côté serveur) alors que l'interface avait été bâtie avec les droits d'avant.
+
+      Deux effets, et deux seulement :
+        1) une NOTIFICATION non bloquante nommant la permission manquante — un refus muet est indiagnostiquable,
+           et l'utilisateur doit comprendre que le geste n'a pas eu lieu. DÉDUPLIQUÉE par permission
+           (`core/AccessDenial`) : une vue en cours de rendu tire plusieurs requêtes, une rafale de 403
+           identiques noierait l'écran ;
+        2) une RELECTURE de `GET /me` → nouvel `AccessState` → le gating de l'interface se resserre tout seul
+           (les onglets et les gestes désormais interdits disparaissent, l'onglet actif se replie si besoin).
+      ⚠ JAMAIS de retour au login : ce n'est pas une question d'identité (cf. docs/auth.md § 9). */
+  private accessRefused(info: { permission?: string; error?: string } | null): void {
+    const permission = (info && typeof info.permission === "string") ? info.permission.trim() : "";
+    if (this.denials.accept(permission, Date.now())) {
+      Notify.toast(permission ? I18n.t("app.rest.forbiddenPermission", { permission }) : I18n.t("app.rest.forbidden"), "err");
+    }
+    void this.refreshAccess();
+  }
+
+  /** Relit `GET /me` et réinstalle l'état d'autorisation. SÉRIALISÉ (une rafale de 403 ne déclenche qu'UNE
+      relecture) et TOLÉRANT : `/me` injoignable ou session perdue ⇒ on ne touche à rien — un 401 en chemin est
+      déjà traité par son propre verrou, et écraser les droits par du vide sur une panne réseau masquerait
+      l'application à un utilisateur parfaitement légitime. */
+  private async refreshAccess(): Promise<void> {
+    if (this.refreshingAccess) return;
+    this.refreshingAccess = true;
+    try {
+      const me = await this.adapter.me().catch(() => null);
+      if (!me || !me.logged) return;
+      this.applyAccess(AccessState.fromGrants(me.permissions));
+    } finally { this.refreshingAccess = false; }
   }
 
   /** Recharge le document courant depuis le serveur. `changeset` (SSE) cible la reconstruction (3D sautée si aucune
@@ -325,6 +386,13 @@ export class RestDocumentController {
   async openChooser(): Promise<void> {
     let docs: any[]; try { docs = await this.adapter.listDocuments(); } catch { Notify.toast(I18n.t("app.rest.serverUnreachable"), "err"); return; }
     const defaultDocId = await this.adapter.getDefaultDocId().catch(() => null);   // doc par défaut global (best-effort) → mis en évidence + bascule par étoile
+    // GESTES D'ADMINISTRATION du sélecteur, gatés par leur permission MÉTA (docs/auth.md § 3) : le sélecteur
+    // reste OUVERT à qui n'a que la lecture (choisir son document est une navigation, `GET /documents` n'exige
+    // aucune permission propre) — seules les actions qui écrivent disparaissent. Le nom des permissions vient
+    // du catalogue partagé ; l'état « tout permis » du mode fichier les rend toutes vraies (injection nulle).
+    const canManageDocs = this.access.has("documents:manage");   // créer / verrouiller / supprimer
+    const canSetDefault = this.access.has("settings:manage");    // ★ document par défaut de l'instance (PUT /settings)
+    const canImport = canManageDocs && this.access.has("snapshot:write");   // import .json = créer un doc PUIS y pousser un snapshot
     const action = await Dialog.custom({
       title: I18n.t("app.rest.docsTitle"), cancelLabel: I18n.t("ui.action.close"),
       build: (root: HTMLElement) => {
@@ -348,30 +416,41 @@ export class RestDocumentController {
           star.title = isDefault ? I18n.t("app.rest.starRemove") : I18n.t("app.rest.starSet");
           star.style.cssText = "margin-left:auto;padding:0 6px;cursor:pointer;color:" + (isDefault ? "var(--accent)" : "var(--fg-dimmer)");
           star.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); chosen = "__default__:" + (isDefault ? "" : d.id); confirmBtn?.click(); };
+          // Sans `settings:manage`, l'étoile reste un REPÈRE (elle dit quel document est le défaut) mais cesse
+          // d'être un bouton : on retire le geste, pas l'information.
+          if (!canSetDefault) { star.onmousedown = null; star.style.cursor = "default"; star.title = isDefault ? I18n.t("app.rest.starIsDefault") : ""; }
           b.appendChild(star);
           // Cadenas : bascule de verrouillage (protège d'une suppression accidentelle). Verrouillé = 🔒 net ; libre = 🔓 estompé.
-          const lock = document.createElement("span"); lock.className = "gi"; lock.innerHTML = d.locked ? Icons.LOCK : Icons.UNLOCK;
-          lock.title = d.locked ? I18n.t("app.rest.lockUnlock") : I18n.t("app.rest.lockLock");
-          lock.style.cssText = "padding:0 6px;cursor:pointer;color:" + (d.locked ? "var(--accent)" : "var(--fg-dimmer)");
-          lock.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); chosen = "__lock__:" + d.id; confirmBtn?.click(); };
-          b.appendChild(lock);
+          if (canManageDocs) {
+            const lock = document.createElement("span"); lock.className = "gi"; lock.innerHTML = d.locked ? Icons.LOCK : Icons.UNLOCK;
+            lock.title = d.locked ? I18n.t("app.rest.lockUnlock") : I18n.t("app.rest.lockLock");
+            lock.style.cssText = "padding:0 6px;cursor:pointer;color:" + (d.locked ? "var(--accent)" : "var(--fg-dimmer)");
+            lock.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); chosen = "__lock__:" + d.id; confirmBtn?.click(); };
+            b.appendChild(lock);
+          }
           // Suppression proposée UNIQUEMENT si non verrouillé → flux délibéré « déverrouiller d'abord » (le serveur refuse en 423 par sécurité).
-          if (!d.locked) {
+          if (!d.locked && canManageDocs) {
             const del = document.createElement("span"); del.className = "gi"; del.innerHTML = Icons.CLOSE; del.title = I18n.t("app.rest.deleteDocHint"); del.style.cssText = "padding:0 8px;cursor:pointer;color:var(--fg-dimmer)";
             del.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); chosen = "__del__:" + d.id; confirmBtn?.click(); };
             b.appendChild(del);
           }
           wrap.appendChild(b);
         });
-        const nb = document.createElement("button"); nb.type = "button"; nb.className = "open-kind-btn";
-        const ni = document.createElement("span"); ni.className = "ok-ic"; ni.innerHTML = Icons.PLUS; const nt = document.createElement("span"); nt.className = "ok-tx";
-        const nti = document.createElement("span"); nti.className = "ok-title"; nti.textContent = I18n.t("app.rest.newDoc"); nt.appendChild(nti);
-        nb.append(ni, nt); nb.onmousedown = (e) => { e.preventDefault(); chosen = "__new__"; confirmBtn?.click(); }; wrap.appendChild(nb);
-        const ib = document.createElement("button"); ib.type = "button"; ib.className = "open-kind-btn";
-        const ii = document.createElement("span"); ii.className = "ok-ic"; ii.innerHTML = Icons.IMPORT; const itx = document.createElement("span"); itx.className = "ok-tx";
-        const iti = document.createElement("span"); iti.className = "ok-title"; iti.textContent = I18n.t("app.rest.importJsonBtn");
-        const ide = document.createElement("span"); ide.className = "ok-desc"; ide.textContent = I18n.t("app.rest.importJsonDesc");
-        itx.append(iti, ide); ib.append(ii, itx); ib.onmousedown = (e) => { e.preventDefault(); chosen = "__import__"; confirmBtn?.click(); }; wrap.appendChild(ib);
+        if (canManageDocs) {
+          const nb = document.createElement("button"); nb.type = "button"; nb.className = "open-kind-btn";
+          const ni = document.createElement("span"); ni.className = "ok-ic"; ni.innerHTML = Icons.PLUS; const nt = document.createElement("span"); nt.className = "ok-tx";
+          const nti = document.createElement("span"); nti.className = "ok-title"; nti.textContent = I18n.t("app.rest.newDoc"); nt.appendChild(nti);
+          nb.append(ni, nt); nb.onmousedown = (e) => { e.preventDefault(); chosen = "__new__"; confirmBtn?.click(); }; wrap.appendChild(nb);
+        }
+        // Import `.json` : geste DESTRUCTEUR par nature (il crée un document puis y pousse un snapshot COMPLET)
+        // → il exige les DEUX permissions, comme le serveur les exigera l'une après l'autre.
+        if (canImport) {
+          const ib = document.createElement("button"); ib.type = "button"; ib.className = "open-kind-btn";
+          const ii = document.createElement("span"); ii.className = "ok-ic"; ii.innerHTML = Icons.IMPORT; const itx = document.createElement("span"); itx.className = "ok-tx";
+          const iti = document.createElement("span"); iti.className = "ok-title"; iti.textContent = I18n.t("app.rest.importJsonBtn");
+          const ide = document.createElement("span"); ide.className = "ok-desc"; ide.textContent = I18n.t("app.rest.importJsonDesc");
+          itx.append(iti, ide); ib.append(ii, itx); ib.onmousedown = (e) => { e.preventDefault(); chosen = "__import__"; confirmBtn?.click(); }; wrap.appendChild(ib);
+        }
         root.appendChild(wrap);
         return { collect: () => chosen, validate: () => true };
       },
@@ -407,8 +486,15 @@ export class RestDocumentController {
   async bootstrap(): Promise<void> {
     const me = await this.adapter.me().catch(() => null);
     this.host.setUser(me && me.logged ? me.user : null);
-    const authorized = !!(me && me.logged && me.adminRight === "SUPER_ADMIN");
-    this.flog("auth", { logged: me && me.logged, adminRight: me && me.adminRight, authorized });
+    // AUTORISATION : la règle est celle du SERVEUR, et elle n'est plus DUPLIQUÉE ici. `/me` renvoie les GRANTS
+    // effectifs (`permissions`, jokers compris) ; le client en reconstruit le MÊME `PermissionSet` partagé et
+    // s'arrête au seul verdict qui lui appartienne — « cet utilisateur a-t-il au moins un droit ? ». C'est
+    // exactement l'invariant que la garde globale du serveur applique en 403 (docs/auth.md § 6.1) : authentifié
+    // ≠ autorisé. Aucune mention de rôle ni d'`adminRight` : le client APPLIQUE la politique, il ne la connaît pas.
+    const access = (me && me.logged) ? AccessState.fromGrants(me.permissions) : AccessState.NONE;
+    this.applyAccess(access);
+    const authorized = !!(me && me.logged) && !access.isEmpty();
+    this.flog("auth", { logged: me && me.logged, grants: access.grants(), authorized });
     if (!authorized) {
       // pas une app noire : on AFFICHE l'état sur l'écran d'accueil, avec un bouton Réessayer.
       const who = (me && me.user && (me.user.login || [me.user.prenom, me.user.nom].filter(Boolean).join(" "))) || "";
@@ -418,6 +504,7 @@ export class RestDocumentController {
     // Session VALIDE re-constatée → ré-arme le verrou d'expiration : une future coupure 401 pourra de nouveau
     // ramener au login (sans ce reset, un premier retour-login « collerait » et bloquerait les suivants).
     SessionExpiry.reset();
+    this.denials.reset();   // droits fraîchement relus : un refus déjà signalé doit pouvoir se re-signaler
     let docs: any[] = []; try { docs = await this.adapter.listDocuments(); } catch { /* serveur injoignable */ }
     const exists = (id: string | null | undefined) => !!id && docs.some((d) => d.id === id);
     // 1) dernier doc ouvert (s'il n'a pas été supprimé entre-temps)
@@ -428,6 +515,9 @@ export class RestDocumentController {
     if (!targetId && docs.length) targetId = docs[0].id;
     this.flog("boot: doc choisi", { targetId, last: this.prefs.lastRestDocId, total: docs.length });
     if (targetId) { const d = docs.find((x) => x.id === targetId); await this.openDocument(targetId, d?.name); }
-    else await this.newDocument("Document 1");
+    // Aucun document à ouvrir : on n'en crée un que si l'utilisateur en a le DROIT. Sinon on le dit —
+    // partir sur un `POST /documents` voué au 403 laisserait une application vide sans explication.
+    else if (this.access.has("documents:manage")) await this.newDocument("Document 1");
+    else Notify.toast(I18n.t("app.rest.noDocumentAvailable"), "err");
   }
 }

@@ -118,6 +118,40 @@ export class FormBase {
   /** Mode VISUALISEUR autonome (lecture seule) ? → on retire les entrées d'ÉDITION des fiches (façade, « Modifier »…). */
   protected static isViewer(): boolean { return typeof document !== "undefined" && document.body.classList.contains("viewer-mode"); }
 
+  /** ÉTAT D'AUTORISATION du client, POSÉ par le bootstrap — même point d'accroche que `FormBase.images` :
+      la chaîne des fiches est un ensemble de méthodes STATIQUES appelées par leur nom, sans constructeur où
+      injecter quoi que ce soit. Le contrat est réduit à ce dont les fiches ont besoin (structurel, aucun
+      import de `core/AccessState` ici) et la fonction relit l'état COURANT à chaque appel — un changement de
+      droits à chaud est donc pris en compte à la prochaine ouverture de fiche.
+      `null` = aucune restriction : c'est l'état des tests headless et de tout appelant qui n'a pas câblé
+      l'autorisation. En mode FICHIER, le bootstrap câble malgré tout un état « tout permis » (injection
+      nulle) — le comportement est le même, mais par une source unique plutôt que par un trou. */
+  static access: {
+    canCreateCollection(collection: string): boolean;
+    canUpdateCollection(collection: string): boolean;
+    canDeleteCollection(collection: string): boolean;
+  } | null = null;
+
+  /** Socle des trois prédicats ci-dessous : mode visualiseur ⇒ NON (règle historique, inchangée) ;
+      collection non nommée ou autorisation non câblée ⇒ OUI (comportement historique). */
+  private static allowedOn(collection: string | undefined, verb: (collection: string) => boolean): boolean {
+    if (this.isViewer()) return false;
+    if (!collection || !FormBase.access) return true;
+    return verb(collection);
+  }
+  /** Le geste d'ÉDITION d'une fiche de `collection` est-il proposable ? (permission de MISE À JOUR) */
+  protected static canEditCollection(collection?: string): boolean {
+    return this.allowedOn(collection, (c) => FormBase.access!.canUpdateCollection(c));
+  }
+  /** Le geste de CRÉATION depuis une fiche (« + Ajouter un sous-équipement »…) est-il proposable ? */
+  protected static canCreateInCollection(collection?: string): boolean {
+    return this.allowedOn(collection, (c) => FormBase.access!.canCreateCollection(c));
+  }
+  /** Le geste de SUPPRESSION depuis une fiche (VM orpheline, sous-équipement…) est-il proposable ? */
+  protected static canDeleteInCollection(collection?: string): boolean {
+    return this.allowedOn(collection, (c) => FormBase.access!.canDeleteCollection(c));
+  }
+
   /* ---- primitives de FICHE DÉTAIL, communes à toutes les fiches ----
      Elles vivaient `private` dans `DetailForms` ; elles sont ici parce que `SubEquipmentForms` en a besoin
      sans appartenir à cette chaîne d'héritage (même position que `FaceEditor` : étend `FormBase`, appelé par
@@ -142,12 +176,14 @@ export class FormBase {
     tw.innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
     root.appendChild(tw); return tw;
   }
-  /** Actions du PIED d'une fiche : bouton « Modifier » (si un éditeur est fourni et hors mode visualiseur).
+  /** Actions du PIED d'une fiche : bouton « Modifier » (si un éditeur est fourni, hors mode visualiseur, et
+      avec le droit de MISE À JOUR de `collection` quand elle est nommée).
       RETOURNE les boutons à passer à `openModal({ footerActions })` — plutôt que de les appendre au bas du
       corps DÉFILANT — pour qu'ils vivent dans le pied FIXE, toujours visible sur une fiche longue. Tableau
-      VIDE en mode visualiseur (aucune édition) : le pied reste alors masqué, la fiche n'ayant aucune action. */
-  protected static footer(edit?: () => void): HTMLElement[] {
-    if (edit && !this.isViewer()) { const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-primary"; b.textContent = I18n.t("lists.chrome.rowEdit"); b.onclick = edit; return [b]; }
+      VIDE en mode visualiseur ou sans le droit : le pied reste alors masqué, la fiche n'ayant aucune action.
+      C'est LE point commun du geste « Modifier » des fiches — le gater ici le gate partout. */
+  protected static footer(edit?: () => void, collection?: string): HTMLElement[] {
+    if (edit && this.canEditCollection(collection)) { const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-primary"; b.textContent = I18n.t("lists.chrome.rowEdit"); b.onclick = edit; return [b]; }
     return [];
   }
   /** Bits de localisation d'un équipement (hérités du rack / de la salle, ou saisis). */

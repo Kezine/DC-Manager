@@ -6,6 +6,8 @@
      - verrou optimiste : 409 → onConflict, SANS throw ni rejeu (le hôte recharge,
        ce qui resynchronise l'état optimiste local) ;
      - validation serveur (autorité) : 400 structuré → onValidationError ;
+     - authentification/autorisation : 401 → onAuthExpired (retour au login),
+       403 → onForbidden (l'appelant EST authentifié : jamais de retour au login) ;
      - 404 tolérés (allow404), 204 sans corps, corps JSON sinon.
    La réponse est reçue via l'interface minimale `RestResponse` (injectée) —
    un `fetch` Response réel s'y adapte trivialement, un test la simule.
@@ -28,12 +30,21 @@ export class RestProtocol {
   /** Données refusées par le serveur (HTTP 400, validation PARTAGÉE) : le serveur fait autorité et a rejeté
       l'écriture. Le hôte (main.ts) notifie l'utilisateur. `errors` = liste `{ collection, path, code, message }`. */
   onValidationError: ((errors: Array<{ collection: string; path: string; code: string; message: string }>) => void) | null = null;
-  /** Session SSO absente/EXPIRÉE (HTTP 401, garde serveur `requireAdmin`) : notre requête a été refusée faute
-      d'authentification (le SSO a expiré en cours de session). Le hôte (main.ts → SessionExpiry) coupe la session
-      locale et RENVOIE au login. ⚠ On notifie PUIS on `throw` (JAMAIS de retour null, contrairement aux 409/400) :
-      un `load()` nullifié produirait un snapshot VIDE qui ÉCRASERAIT le store par du vide. Le throw préserve la
-      sémantique des appelants (leurs catch locaux jouent ; l'écran bascule au login de toute façon). */
+  /** Session SSO absente/EXPIRÉE (HTTP 401, garde serveur `AccessControl.requireAuth`) : notre requête a été
+      refusée faute d'authentification (le SSO a expiré en cours de session). Le hôte (main.ts → SessionExpiry)
+      coupe la session locale et RENVOIE au login. ⚠ On notifie PUIS on `throw` (JAMAIS de retour null,
+      contrairement aux 409/400) : un `load()` nullifié produirait un snapshot VIDE qui ÉCRASERAIT le store par
+      du vide. Le throw préserve la sémantique des appelants (leurs catch locaux jouent ; l'écran bascule au
+      login de toute façon). */
   onAuthExpired: (() => void) | null = null;
+  /** Refus d'AUTORISATION (HTTP 403 — authentifié, mais sans le droit ; garde globale « 0 permission » ou garde
+      de route). ⚠ RIEN À VOIR avec le 401 : l'utilisateur EST authentifié, se reconnecter n'y changerait rien →
+      JAMAIS de retour au login. Le hôte notifie de façon NON BLOQUANTE et relit `GET /me` (les droits ont pu
+      changer à chaud : la politique serveur est rechargée par sondage). Le corps du 403 porte le champ
+      `permission` nommant ce qui manque (cf. docs/auth.md § 9) — un refus muet est indiagnostiquable.
+      On notifie PUIS on laisse le `throw` générique partir, exactement comme avant : le flux de contrôle des
+      appelants (leurs `catch` locaux, leurs replis) est INCHANGÉ. */
+  onForbidden: ((info: { permission?: string; error?: string } | null) => void) | null = null;
 
   /** En-têtes d'une ÉCRITURE : la révision de base que le serveur compare aux entités visées (verrou optimiste). */
   writeHeaders(): Record<string, string> { return { "X-Base-Rev": String(this.docRev) }; }
@@ -56,6 +67,11 @@ export class RestProtocol {
     if (res.status === 401) {   // session absente/expirée : on notifie le hôte (retour au login) PUIS on throw (jamais null → n'écrase pas le store)
       this.onAuthExpired?.();
       throw new Error("HTTP 401 sur " + method + " " + path);
+    }
+    if (res.status === 403) {   // authentifié SANS le droit : on notifie (toast + relecture de /me) et on laisse le throw partir
+      let info: any = null; try { info = JSON.parse(await res.text()); } catch (_) { /* corps absent/illisible */ }
+      this.onForbidden?.(info);
+      throw new Error("HTTP 403 sur " + method + " " + path + (info && info.permission ? " (" + info.permission + ")" : ""));
     }
     if (!res.ok) throw new Error("HTTP " + res.status + " sur " + method + " " + path);
     if (res.status === 204) return null;

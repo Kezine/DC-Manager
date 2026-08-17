@@ -79,7 +79,8 @@ export const shell = {
     modeHint: "Local mode (session): when the tab closes, the data is not kept in the browser — your file remains the reference.",
     login: "Log in",
     retry: "Retry",
-    accessDeniedConnected: "Logged in as « {{user}} », but this account does not have the required rights (SUPER_ADMIN). Contact an administrator.",
+    // No role name, no right name: the client applies the policy, it does not know it (docs/auth.md § 7).
+    accessDeniedConnected: "Logged in as « {{user}} », but no access right is granted to this account. Contact an administrator.",
     accessDeniedAnon: "You are not authenticated with the SSO. Log in, then retry.",
     modeBadge: "Access mode: <strong>{{mode}}</strong> — {{detail}}",
     modeDirDetail: "one grant covers the document and its images (.nmfb).",

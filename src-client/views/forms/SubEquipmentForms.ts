@@ -142,7 +142,7 @@ export class SubEquipmentForms extends FormBase {
     AttachmentUi.sectionAsync(store, host, root, store.attachmentsOfSubEquipmentAsync(se.id), (attId) => DetailForms.attachmentDetail(store, host, attId, onChanged));
 
     AuditLine.attach(root, se, host.userDirectory);   // « Créé/Modifié par » (mode API)
-    const footerActions = this.footer(() => this.form(store, host, se.equipment_id, se.id, onChanged));
+    const footerActions = this.footer(() => this.form(store, host, se.equipment_id, se.id, onChanged), "subEquipments");
     const tw = root;
     tw.querySelectorAll("[data-master-view]").forEach((el) => {
       (el as HTMLElement).onclick = () => EquipmentForms.equipmentDetail(store, host, (el as HTMLElement).dataset.masterView!, onChanged);
@@ -260,21 +260,24 @@ export class SubEquipmentForms extends FormBase {
     title.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:10px";
     const label = document.createElement("span"); label.textContent = I18n.t("subEquipment.section", { count: rows.length });
     title.appendChild(label);
-    if (opts.addTo && !this.isViewer()) {
+    if (opts.addTo && this.canCreateInCollection("subEquipments")) {
       const add = document.createElement("button"); add.type = "button"; add.className = "btn btn-ghost btn-sm";
       add.textContent = I18n.t("subEquipment.add");
       add.onclick = () => this.form(store, host, opts.addTo!, null);
       title.appendChild(add);
     }
     root.appendChild(title);
-    // Modifier/Supprimer masqués en mode visualiseur — MÊME garde que le bouton d'en-tête « + Ajouter » ci-dessus
-    // (principe n°10 : la fiche reste consultable, mais aucune écriture n'est offerte). Le bouton fiche, lui,
-    // reste toujours affiché : c'est le point d'entrée DEPUIS la fiche du maître (le listing dédié, D2 revue, est un autre chemin).
-    const viewer = this.isViewer();
+    // Modifier/Supprimer masqués en mode visualiseur ET sans le droit correspondant — MÊME garde que le bouton
+    // d'en-tête « + Ajouter » ci-dessus (principe n°10 : la fiche reste consultable, mais aucune écriture n'est
+    // offerte). Les deux verbes sont distingués : une politique peut donner la mise à jour sans la suppression.
+    // Le bouton fiche, lui, reste toujours affiché : c'est le point d'entrée DEPUIS la fiche du maître (le
+    // listing dédié, D2 revue, est un autre chemin).
+    const noEdit = !this.canEditCollection("subEquipments");
+    const noDel = !this.canDeleteInCollection("subEquipments");
     const tw = this.tbl(root, [I18n.t("lists.col.name"), I18n.t("subEquipment.slot"), I18n.t("lists.col.characteristics"), ""], rows.map((se: any) => {
       const view = `<button class="btn btn-ghost btn-sm icon-action" data-se-view="${Html.escape(se.id)}" title="${I18n.t("lists.chrome.rowView")}" aria-label="${I18n.t("lists.chrome.rowView")}">${Icons.INFO}</button>`;
-      const edit = viewer ? "" : `<button class="btn btn-ghost btn-sm icon-action" data-se-edit="${Html.escape(se.id)}" title="${I18n.t("lists.chrome.rowEdit")}" aria-label="${I18n.t("lists.chrome.rowEdit")}">${Icons.EDIT}</button>`;
-      const del = viewer ? "" : `<button class="btn btn-sm icon-action btn-danger" data-se-del="${Html.escape(se.id)}" title="${I18n.t("lists.chrome.rowDelete")}" aria-label="${I18n.t("lists.chrome.rowDelete")}">${Icons.DELETE}</button>`;
+      const edit = noEdit ? "" : `<button class="btn btn-ghost btn-sm icon-action" data-se-edit="${Html.escape(se.id)}" title="${I18n.t("lists.chrome.rowEdit")}" aria-label="${I18n.t("lists.chrome.rowEdit")}">${Icons.EDIT}</button>`;
+      const del = noDel ? "" : `<button class="btn btn-sm icon-action btn-danger" data-se-del="${Html.escape(se.id)}" title="${I18n.t("lists.chrome.rowDelete")}" aria-label="${I18n.t("lists.chrome.rowDelete")}">${Icons.DELETE}</button>`;
       const tech = this.techSummary(se);
       return [Html.escape(this.label(se)), se.slot ? Html.escape(se.slot) : '<span style="color:var(--fg-dimmer)">—</span>',
         tech ? Html.escape(tech) : '<span style="color:var(--fg-dimmer)">—</span>', `<span class="cell-actions">${view}${edit}${del}</span>`];

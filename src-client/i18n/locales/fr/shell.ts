@@ -84,7 +84,10 @@ export const shell = {
     modeHint: "Mode local (session) : à la fermeture de l'onglet, les données ne sont pas conservées dans le navigateur — votre fichier reste la référence.",
     login: "Connexion",
     retry: "Réessayer",
-    accessDeniedConnected: "Connecté en tant que « {{user}} », mais ce compte n'a pas les droits requis (SUPER_ADMIN). Contactez un administrateur.",
+    // Aucune mention de RÔLE ni de nom de droit : le client applique la politique, il ne la connaît pas
+    // (docs/auth.md § 7). Nommer un rôle enverrait l'utilisateur en réclamer un qui n'existe peut-être pas
+    // dans SON déploiement — la politique s'écrit dans `roles.json`, et elle est propre à chaque instance.
+    accessDeniedConnected: "Connecté en tant que « {{user}} », mais aucun droit d'accès n'est attribué à ce compte. Contactez un administrateur.",
     accessDeniedAnon: "Vous n'êtes pas authentifié auprès du SSO. Connectez-vous, puis réessayez.",
     modeBadge: "Mode d'accès : <strong>{{mode}}</strong> — {{detail}}",
     modeDirDetail: "une autorisation couvre le document et ses images (.nmfb).",

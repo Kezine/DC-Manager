@@ -28,6 +28,13 @@ export interface Drawable { depth: number; node: SVGElement; }
 
 /** Services applicatifs / callbacks de la vue Datacenter (câblés par le shell). */
 export interface DatacenterHost {
+  /** L'utilisateur peut-il ÉCRIRE la donnée SPATIALE (permission `dc.site:update`) ? Les OUTILS D'ÉDITION de
+      la barre d'outils (placement libre, édition de la salle / de l'étage, cases inaccessibles) disparaissent
+      quand c'est faux ; la NAVIGATION et la lecture (modes de vue, filtres, localisation, mesure) restent
+      intactes — voir une salle et la modifier sont deux droits distincts (docs/auth.md § « Gating côté client »).
+      Grain COARSE assumé pour la v1 : `dc.site:update` couvre tous les outils spatiaux, y compris ceux qui
+      écrivent en réalité des baies. ABSENT = aucune restriction (mode fichier/visualiseur, tests). */
+  canEditSpace?(): boolean;
   setDirty?(v: boolean): void;
   openRackForm?(id: string): void;
   openRackDetail?(id: string): void;          // fiche d'INFO d'une baie (clic) — l'édition reste openRackForm

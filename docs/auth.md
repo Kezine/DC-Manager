@@ -37,7 +37,7 @@ politique, et inversement.
 
 Tout vit dans **`src-shared/Permissions.ts`** — code PARTAGÉ front ⇄ back, sur le patron de
 `ListOrder`/`ListFacets` : une liste blanche déclarative, lue des deux côtés, verrouillée par des
-tests. Le serveur **décide**, le client **anticipe** (masquage des vues et des actions, lot client).
+tests. Le serveur **décide**, le client **anticipe** (masquage des vues et des actions — § 10).
 S'ils dérivaient, l'interface proposerait des gestes que le serveur refuse.
 
 | Notion | Forme | Qui l'emploie |
@@ -383,7 +383,133 @@ l'**enrichit** d'un champ `permission` nommant ce qui manque — un refus muet e
 côté support comme côté client. Quand une garde accepte plusieurs permissions (`any-doc-read`), le
 champ porte la sentinelle de la règle.
 
-## 10. Rétrocompatibilité
+## 10. Gating côté client — anticiper, jamais décider
+
+Le serveur refuse déjà tout ce qui doit l'être (§ 6). Ce que le client apporte est d'un autre ordre :
+**ne pas proposer un geste que le serveur refusera**. Un bouton qui produit un 403 n'est pas une
+sécurité qui fonctionne, c'est une interface qui ment.
+
+La règle qui gouverne tout ce volet : **le client APPLIQUE la politique, il ne la connaît pas.** Il ne
+voit jamais un nom de rôle, jamais `adminRight`. Il reçoit des **grants** (§ 7) et reconstruit le
+**même `PermissionSet` partagé** que le serveur. La version précédente dupliquait la règle d'accès
+(`me.adminRight === "SUPER_ADMIN"`) : cette duplication a disparu, et avec elle la possibilité que les
+deux côtés dérivent.
+
+### 10.1 `AccessState` — l'état, et son injection nulle
+
+`src-client/core/AccessState.ts` enveloppe un `PermissionSet` et n'ajoute **aucune règle de droit** :
+il traduit le vocabulaire du client (« puis-je créer un câble ? ») en vocabulaire du modèle (« ai-je
+`dc.cabling:create` ? »), en passant par `Permissions.forCollection` — la carte **partagée**, jamais
+une table locale. Trois états, et trois seulement :
+
+| État | Quand |
+|---|---|
+| `AccessState.ALL` | mode **fichier** et **visualiseur** — tout permis *par construction* |
+| `AccessState.NONE` | mode API **avant** la réponse de `GET /me`, et utilisateur sans aucun grant |
+| `AccessState.fromGrants(me.permissions)` | mode API, après le bootstrap (et après chaque relecture de `/me`) |
+
+🚨 **Le mode fichier ne change pas d'un pixel**, et c'est structurel : l'état « tout permis » rend
+chaque garde d'interface **inerte d'elle-même**. Il n'y a **aucun `if (mode === …)` disséminé** dans les
+vues — exactement le patron d'**injection nulle** de `HydrationState` (cf.
+[`hydratation.md`](hydratation.md)). L'unique test de mode de tout le volet tient en une ligne, dans
+`app/main.ts` : `REST_MODE ? AccessState.NONE : AccessState.ALL`.
+
+**Où il vit, comment il descend.** L'instance vit dans la racine de composition (`app/main.ts`), là où
+le mode est décidé, et descend **par des prédicats** — jamais par un import d'état global depuis une
+vue : `ShellView.visible` / `canAdd` pour les onglets et le « + créer », `ListActions.can*` pour les
+actions de ligne, `FormBase.access` pour la chaîne (statique) des fiches, `DatacenterHost.canEditSpace`
+pour les outils spatiaux, un prédicat de constructeur pour la page Notifications. Les prédicats
+**relisent l'état courant à chaque évaluation**, donc un changement de droits se propage sans rien
+reconstruire. Le mode API l'installe depuis `RestDocumentController` (`RestDocumentsHost.setAccess`) :
+c'est lui qui parle à `/me`.
+
+### 10.2 Ce qui est masqué, et par quoi
+
+Grain **coarse** assumé pour cette version : on masque des ensembles cohérents, pas bouton par bouton.
+
+**Onglets et vues** — permission de **lecture** :
+
+| Vue | Permission | Provenance |
+|---|---|---|
+| Tout onglet de **listing** (Équipements, Racks, Câbles, IPAM, Spares, Contacts, Applications, PJ, VMs, Wifi, …) | `<domaine(collection)>:read` | **DÉRIVÉE** de `ListOptions.collection` par la carte partagée — aucune table à tenir, un listing ajouté demain est gaté par construction |
+| Datacenter (2D/3D), bibliothèque d'images de façade | `dc.site:read` | carte `core/ViewAccess` |
+| Netmap | `dc.equipment:read` | idem |
+| Clusters VM | `vm:read` · Interventions `interventions:read` · Certificats `certs:read` · Notifications `notify:read` | idem |
+| Recherche globale (loupe / Ctrl+F) | ≥ 1 lecture documentaire | même règle que la garde de `GET /search` (§ 8.3) |
+
+Masquer une vue masque **tous** ses chemins d'accès (onglet desktop, entrée du menu responsive, entrée
+de menu de groupe, bouton-lien d'en-tête) ; un **groupe** disparaît quand aucun de ses enfants n'est
+visible. Si l'onglet **actif** devient inaccessible — droits retirés à chaud —, le Shell se replie sur
+la première vue visible ; si plus rien ne l'est, l'écran « aucun accès » couvre l'application.
+
+🚨 **Verrou de test** : `Tests/modules/test-client-access.js` relit les **sources** de `app/main.ts` et
+échoue en **nommant** toute vue déclarée (`shell.addView({ name: "…" })`) qui n'aurait ni entrée dans
+`ViewAccess` ni prédicat `visible`. Même philosophie et même outil que le verrou d'exhaustivité des
+routes (§ 6.3) : la liste est **découverte**, jamais déclarée. Les listings, eux, échappent au verrou
+sans risque : leur nom passe en propriété raccourcie (`name,`) parce qu'il vient d'un paramètre — la
+distinction est structurelle, pas une liste d'exceptions.
+
+**Gestes d'écriture** — masqués aux **points communs**, une fois pour toutes :
+
+| Geste | Permission | Point commun |
+|---|---|---|
+| Bouton « + créer » d'en-tête | `<domaine>:create` | `ShellView.canAdd`, alimenté par `addListTab` |
+| Actions de ligne : Modifier · Dupliquer · Supprimer · ▦ Contenu | `update` · `create` · `delete` · `update` | `ListActions.canEdit/canClone/canDel/canManage` — **composées** avec les raffinements métier existants (VMs manuelles…), jamais à leur place |
+| Bouton « Modifier » des **fiches** (et « + Ajouter » / « Supprimer » d'une section de fiche) | `update` / `create` / `delete` de la collection | `FormBase.footer(edit, collection)` et `FormBase.canEditCollection` & co. |
+| Outils d'**édition** de la barre d'outils Datacenter (placement libre, éditer la salle/l'étage, cases inaccessibles) | `dc.site:update` | `DatacenterHost.canEditSpace` — la navigation, les filtres, la localisation et la mesure restent entiers |
+
+**Administration** — permissions **méta** (§ 3) :
+
+| Geste | Permission |
+|---|---|
+| Créer / verrouiller / supprimer un document (sélecteur + « Nouveau » de la topbar) | `documents:manage` |
+| ★ document par défaut de l'instance | `settings:manage` — sans lui l'étoile reste un **repère**, elle cesse d'être un bouton |
+| Importer un `.json` dans un nouveau document | `documents:manage` **et** `snapshot:write` |
+| Réglages ▸ Maintenance (purge des binaires, compactage) | `maintenance:run` |
+| Providers VM / Wifi (jetons) · synchro VM / Wifi | `vm.providers:manage` / `wifi.providers:manage` · `vm:sync` / `wifi:sync` |
+| Page Notifications : canaux, abonnements, rappels, test d'envoi | `notify:manage` (la lecture reste `notify:read`) |
+
+### 10.3 Écran « aucun accès »
+
+`authorized` vaut désormais « `me.permissions` **non vide** » (`AccessState.isEmpty()`) — exactement
+l'invariant que la garde globale applique en 403 (§ 6.1). L'écran existant s'affiche sinon, avec son
+bouton de connexion inchangé, et ses libellés ne nomment **plus aucun rôle** : dire « SUPER_ADMIN »
+envoyait l'utilisateur réclamer un droit qui n'existe plus.
+
+### 10.4 Un 403 **en vol**
+
+La politique est relue à chaud (§ 5) : un rôle peut être retiré alors que l'interface a été bâtie avec
+les droits d'avant. Un 403 sur une requête en cours de session produit donc, et seulement :
+
+1. une **notification non bloquante** nommant la permission manquante (le corps du 403 la porte, § 9),
+   **dédupliquée par permission** sur une courte fenêtre (`core/AccessDenial`) — une vue en cours de
+   rendu tire plusieurs requêtes, et une rafale de 403 identiques noierait l'écran ;
+2. une **relecture de `GET /me`**, sérialisée, qui réinstalle l'`AccessState` : le gating se resserre
+   tout seul, l'onglet actif se repliant au besoin. Un `/me` injoignable ne touche à rien — écraser les
+   droits par du vide sur une panne réseau masquerait l'application à un utilisateur légitime.
+
+🚨 **Jamais de retour au login.** Le 401 et le 403 sortent de la même garde mais n'ont rien en commun :
+le 401 pose une question d'**identité** et déclenche une action **terminale** (verrou `SessionExpiry`,
+inchangé) ; le 403 dit « je sais qui vous êtes, et non » — se reconnecter n'y changerait rien, et le
+refus doit pouvoir se re-signaler plus tard. D'où deux modules, et deux sémantiques.
+
+### 10.5 Ce que le client ne gate PAS (v1 assumée)
+
+Le grain reste coarse là où il n'existe pas de point commun ; ces gestes restent visibles et échouent
+en 403 avec leur toast — jamais une écriture qui passe :
+
+- les **menus contextuels et le glisser-déposer** des vues 2D/3D (déplacer une baie, poser un
+  équipement, éditer une porte, tracer une route) : leurs affordances sont dispersées dans
+  `DcInteract` ; seul le bloc d'outils d'édition de la barre d'outils est gaté ;
+- les **écritures des pages Certificats et Interventions** (`certs:write`/`certs:pki`,
+  `interventions:write`, `tracker:push`) : la **visibilité** de ces pages est gatée, pas leurs boutons
+  internes ;
+- les **actions de la palette** Ctrl+F (« Nouvel équipement… ») et le **champ de renommage** du
+  document en topbar ;
+- les **clients de feature** (certs, notify, interventions, vm, wifi, tracker) n'acheminent pas encore
+  leur 403 vers le toast commun : seul le chemin `RestProtocol` (cœur documentaire) le fait.
+
+## 11. Rétrocompatibilité
 
 Un déploiement existant se comporte **exactement** comme avant. Ces deux règles vivent dans le
 `RoleProvider`, parce qu'elles sont une politique et non une propriété de l'authentification :
@@ -406,9 +532,11 @@ fichier reste lisible et éditable hors de l'application. Le client en mode fich
 sans restriction (équivalent `admin`), **par construction** : même logique que les écarts déjà
 documentés des modules serveur (VMs, wifi, PKI).
 
-Le `PermissionSet` vit quand même dans `src-shared/` : le mode fichier l'instancie « tout permis »
-(`PermissionSet.ALL`), le mode API le remplit depuis `/me` — patron d'**injection nulle** identique à
-`HydrationState` (un état inerte plutôt qu'un `if (mode === …)` disséminé dans les vues).
+Le `PermissionSet` vit quand même dans `src-shared/` : le client l'enveloppe dans un `AccessState`
+(§ 10.1) que le mode fichier instancie « tout permis » (`AccessState.ALL`) et que le mode API remplit
+depuis `/me` — patron d'**injection nulle** identique à `HydrationState` (un état inerte plutôt qu'un
+`if (mode === …)` disséminé dans les vues). C'est ce qui garantit que **le mode fichier ne change pas
+d'un pixel** : les gardes d'interface existent, mais répondent oui à tout.
 
 ## Procédures
 

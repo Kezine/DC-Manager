@@ -39,6 +39,8 @@ import { HydrationState } from "../core/HydrationState";   // état d'hydratatio
 import { LAZY_COLLECTIONS_API } from "../core/LazyCollections";   // LA liste des collections chargées paresseusement (vague 1 : contacts)
 import { TargetLabelResolution } from "../core/TargetLabelResolution";   // résolution GROUPÉE des libellés de cibles d'intervention (vague 4)
 import { Prefs } from "../core/Prefs";
+import { AccessState } from "../core/AccessState";   // état d'AUTORISATION du client (lot 2 auth/ACL — `ALL` en mode fichier : injection nulle)
+import { ViewAccess } from "../core/ViewAccess";     // vues NON-listing → leur permission de lecture (les listings, eux, dérivent de leur collection)
 import { SessionExpiry } from "../core/SessionExpiry";   // verrou idempotent « session expirée → retour au login » (mode API)
 import { Log } from "../core/Log";
 import { Format } from "../core/Format";   // taille lisible des pièces jointes purgées (toast de maintenance)
@@ -183,6 +185,28 @@ async function boot(): Promise<void> {
   const session = new SaveState();      // suivi dirty/save (révision modèle vs dernière sauvegarde + meta/images)
   let booted = false;                   // garde : ne suit pas la révision pendant le chargement initial
 
+  /* ---- AUTORISATION (lot 2 auth/ACL, cf. docs/auth.md § « Gating côté client ») ----------------------
+     ÉTAT COURANT de ce que l'utilisateur a le droit de faire. Il vit ICI, dans la racine de composition,
+     et DESCEND partout par des PRÉDICATS (jamais par un import d'un état global depuis une vue) :
+       · le Shell reçoit `visible` / `canAdd` par vue ;
+       · les listings reçoivent leurs raffinements d'action de ligne ;
+       · les fiches lisent `FormBase.access` (chaîne statique — même accroche que `FormBase.images`) ;
+       · la vue Datacenter reçoit `canEditSpace` par son hôte.
+     Les prédicats relisent la variable à CHAQUE évaluation → un changement de droits à chaud (403 en vol
+     → relecture de `/me`) se propage sans reconstruire quoi que ce soit.
+     🚨 MODE FICHIER / VISUALISEUR : `AccessState.ALL`, donc tous ces prédicats rendent VRAI par
+     construction — c'est l'injection nulle (patron `HydrationState`), et c'est ce qui garantit que le
+     mode fichier ne change pas d'un pixel. C'est l'UNIQUE test de mode de tout le gating.
+     MODE API : `NONE` jusqu'à la réponse de `GET /me` (le bootstrap REST l'installe) — on n'affiche pas
+     d'onglet avant de savoir, plutôt que d'en afficher puis d'en retirer. */
+  let access: AccessState = REST_MODE ? AccessState.NONE : AccessState.ALL;
+  /** Une VUE NON-LISTING est-elle lisible ? Sa permission vient de la carte `ViewAccess` (verrouillée par
+      test : une vue déclarée sans entrée casse la suite). Vue hors carte ⇒ visible (elle n'est pas gatée). */
+  const canSeeView = (name: string): boolean => {
+    const permission = ViewAccess.readPermissionOf(name);
+    return !permission || access.has(permission);
+  };
+
   const tabChannel = new TabChannel({
     enabled: HAS_FS_API && !REST_MODE,   // verrou inter-onglets = concept FICHIER ; en mode API le serveur arbitre (cf. P3)
     onConflict: () => Notify.toast(I18n.t("app.main.tabConflict"), "err"),
@@ -311,7 +335,16 @@ async function boot(): Promise<void> {
      boot (lien rapide bookmarkable) ou choisi par l'utilisateur — au lieu de forcer « equipements » (ce qui
      écrasait systématiquement le fragment au load/reload : le boot restaurait le bon onglet, puis
      documentOpened re-switchait). Seul un document NEUF (menu « Nouveau ») ramène à l'onglet par défaut. */
-  const viewAfterOpen = (): string => (shell.current && shell.hasView(shell.current)) ? shell.current : "equipements";
+  /* ⚠ En mode API, l'onglet BOOKMARKÉ ne peut pas être activé au boot : les droits ne sont connus qu'après
+     `GET /me`, donc AUCUNE vue n'est encore visible à ce moment-là et `shell.current` reste null. On garde
+     donc l'intention (`bookmarkedView`, déclaré plus bas — fermeture évaluée bien après le boot) comme repli
+     avant l'onglet par défaut, sinon un lien profond serait perdu à chaque ouverture de document serveur.
+     `switchView` se replie de lui-même si la cible n'est pas lisible. */
+  const viewAfterOpen = (): string => {
+    if (shell.current && shell.hasView(shell.current)) return shell.current;
+    if (bookmarkedView && shell.hasView(bookmarkedView)) return bookmarkedView;
+    return "equipements";
+  };
 
   /* ---- documents FICHIER : cycle de vie EXTRAIT dans `FileDocumentController` (ouvrir/enregistrer/rouvrir,
      mode dossier, compagnon .nmfb, exports) ; ici, seule l'adhérence à la boucle applicative. Les closures de
@@ -366,6 +399,10 @@ async function boot(): Promise<void> {
       setDisplayName: (name) => { files.name = name; },
       invalidate3D: () => dcView.invalidate3D(),
       setUser: (user) => shell.setUser(user),
+      // Nouveaux droits (bootstrap, relecture après un 403, expiration de session) → on remplace l'état et on
+      // rejoue le gating. `applyAccess` est déclaré PLUS BAS (il a besoin de `shell`) : légal, l'appel est
+      // asynchrone — même montage que les autres fermetures de cet hôte.
+      setAccess: (next) => applyAccess(next),
       showAccessDenied: (opts) => shell.showAccessDenied(opts),
       // Session expirée (401) : ferme toute la pile de modales avant de basculer sur l'écran d'accueil (même
       // instance `modal` que formHost.locate) — sinon fiches/formulaires resteraient par-dessus le login.
@@ -554,6 +591,25 @@ async function boot(): Promise<void> {
 
   const shell = new Shell(root, shellHost);
 
+  /** Installe un nouvel état d'autorisation et REJOUE tout le gating d'un coup. Les prédicats posés sur les
+      vues/actions relisent `access` d'eux-mêmes, il suffit donc de redemander une évaluation
+      (`refreshCounts` : visibilité des onglets + pastilles + actions conditionnelles + repli de l'onglet
+      actif) ; restent les quelques contrôles de CHROME qui ne passent pas par une définition de vue. */
+  const applyAccess = (next: AccessState): void => {
+    access = next;
+    shell.setGlobalSearchAllowed(access.hasAnyDocumentRead());   // même règle que la garde serveur de GET /search
+    shell.setNewDocumentAllowed(access.has("documents:manage"));
+    shell.setMaintenanceAllowed(access.has("maintenance:run"));
+    shell.refreshCounts();
+  };
+  // Les FICHES sont une chaîne de méthodes STATIQUES : elles lisent l'autorisation par le point d'accroche
+  // de `FormBase` (comme `FormBase.images`), et la fonction relit l'état COURANT à chaque ouverture.
+  FormBase.access = {
+    canCreateCollection: (collection) => access.canCreateCollection(collection),
+    canUpdateCollection: (collection) => access.canUpdateCollection(collection),
+    canDeleteCollection: (collection) => access.canDeleteCollection(collection),
+  };
+
   // RACCOURCI d'ergonomie (2026-07-31), PROBABLEMENT TEMPORAIRE — pose l'accroche qui fait apparaître, dans
   // l'en-tête des modales, une bascule « Modales en plein écran ». On NE duplique PAS le chemin d'écriture :
   // `toggle()` rejoue EXACTEMENT le geste du toggle des Réglages (`onModalFullscreen`), qui écrit la pref,
@@ -620,9 +676,23 @@ async function boot(): Promise<void> {
     const cfg = configFn(store);
     const formFn = opts.form;
     let view: ListView | null = null;
+    /* AUTORISATION d'un onglet de LISTE — POINT COMMUN de tous les listings (lot 2 auth/ACL). La permission
+       n'est écrite NULLE PART : elle se DÉRIVE de `cfg.collection` par la carte PARTAGÉE
+       `Permissions.COLLECTION_DOMAINS` (via `AccessState`). Conséquences voulues :
+         · un onglet de liste ajouté demain est gaté SANS que personne y pense — il n'y a aucune table à
+           tenir en phase, donc rien à oublier ;
+         · le client ne peut pas diverger de la garde serveur de la même route générique, elles lisent la
+           MÊME carte.
+       Les prédicats sont réévalués au rendu (`shell.refreshCounts`), donc ils suivent un changement de
+       droits à chaud. En mode fichier, `access` vaut ALL : tous rendent vrai, rien ne bouge. */
+    const canReadTab = () => access.canReadCollection(cfg.collection);
+    const canCreateRow = () => access.canCreateCollection(cfg.collection);
+    const canUpdateRow = () => access.canUpdateCollection(cfg.collection);
+    const canDeleteRow = () => access.canDeleteCollection(cfg.collection);
     const container = shell.addView({
       name, label, title: opts.title, subtitle: opts.subtitle, kind: opts.kind || "primary", parent: opts.parent, links: opts.links,
       icon: opts.icon,   // icône d'onglet (barre desktop = icône seule ; menus = icône + libellé)
+      visible: canReadTab,   // onglet masqué sans le droit de LECTURE de sa collection (carte partagée)
       extraActions: opts.extraActions,   // boutons secondaires d'en-tête (ex. « Réseaux virtuels… » sur l'onglet VMs)
       // G6 — pastille de comptage : `store.all(c).length` MENT dès que la collection est chargée
       // paresseusement (il ne compte que ce qui a été absorbé). `store.countHint` rend la longueur
@@ -631,6 +701,7 @@ async function boot(): Promise<void> {
       // L'arrivée de la valeur repasse par `store.onCountResolved` → `shell.refreshCounts()`.
       count: () => store.countHint(cfg.collection),
       addLabel: (VIEWER || opts.noAdd) ? undefined : opts.addLabel, onAdd: (VIEWER || opts.noAdd) ? undefined : (opts.onAdd || (formFn ? () => formFn(null, () => shell.refreshActive()) : undefined)),   // viewer / noAdd : pas de création
+      canAdd: canCreateRow,   // « + créer » masqué sans le droit de CRÉATION du domaine de la collection
       onShow: () => {
         if (!view) {
           const reRender = () => view!.render();
@@ -650,12 +721,25 @@ async function boot(): Promise<void> {
             : opts.locate === "cable" ? (id: string) => store.cableLocatable(id)
             : null;
           const canLocate = isLocatable ? (id: string) => { const target = locateTargetOf(id); return !!target && isLocatable(target); } : undefined;
+          // Raffinements d'action de LIGNE existants (ex. VMs : seules les MANUELLES s'éditent/se
+          // suppriment) : l'autorisation s'y COMPOSE, elle ne les remplace pas — les deux doivent être
+          // satisfaits. Écrit ici, une fois, pour TOUS les listings.
+          const cfgActions: NonNullable<ListOptions["actions"]> = cfg.actions || {};
+          const andCan = (allowed: () => boolean, refine?: (id: string) => boolean) => (id: string) => allowed() && (!refine || refine(id));
           view = new ListView(store, container, {
             ...cfg,
             remoteList: listRemoteReader,   // mode API : recherche/filtres serveur-pilotés (null en mode fichier)
             actions: VIEWER
               ? { view: true, locate: !!opts.locate, canLocate }   // viewer : consultation + localisation seulement (pas d'édition/clone/suppression)
-              : { ...(cfg.actions || { view: true, edit: !!formFn, clone: true, del: true }), ...(opts.locate ? { locate: true, canLocate } : {}), ...(opts.manage ? { manage: true } : {}) },
+              : {
+                  ...(cfg.actions || { view: true, edit: !!formFn, clone: true, del: true }),
+                  ...(opts.locate ? { locate: true, canLocate } : {}), ...(opts.manage ? { manage: true } : {}),
+                  // Gestes d'ÉCRITURE de la ligne, gatés par le verbe correspondant du domaine.
+                  canEdit: andCan(canUpdateRow, cfgActions.canEdit),
+                  canDel: andCan(canDeleteRow, cfgActions.canDel),
+                  canClone: andCan(canCreateRow, cfgActions.canClone),   // dupliquer = créer
+                  canManage: andCan(canUpdateRow, cfgActions.canManage), // ▦ Contenu de baie = mettre à jour
+                },
             onAction: async (act, id) => {
               if (act === "locate" && opts.locate) {
                 const target = locateTargetOf(id);
@@ -742,12 +826,19 @@ async function boot(): Promise<void> {
       « aucun document ouvert »). Appelé à chaque ouverture de document en mode API. */
   const resetVmProvidersProbe = (): void => { vmProvidersProbeStarted = false; vmConfiguredProviderIds = null; };
   const vmExtraActions: NonNullable<TabOpts["extraActions"]> = VIEWER ? [] : [
-    { label: I18n.t("app.vm.netMapping"), title: I18n.t("app.vm.netMappingTitle"), onClick: () => VmForms.netMapping(store, formHost) },
+    // « Réseaux virtuels… » écrit le mapping bridge/tag dans la MÉTA du document → `dc.site:update`.
+    { label: I18n.t("app.vm.netMapping"), title: I18n.t("app.vm.netMappingTitle"), visible: () => access.canUpdate("dc.site"), onClick: () => VmForms.netMapping(store, formHost) },
     // « Purger… » : les DEUX modes (fichier et API), hors viewer. Visible seulement s'il y a matière —
     // au moins une orpheline, ou (config connue) au moins une VM d'un provider disparu.
     {
       label: I18n.t("app.vm.purge"), title: I18n.t("app.vm.purgeTitle"),
-      visible: () => { probeVmProviders(); return VmPurge.hasPurgeable(store.all("vms"), vmConfiguredProviderIds); },
+      // Suppression de MASSE : au prédicat métier (« y a-t-il de la matière ? ») s'ajoute le DROIT de
+      // supprimer — testé EN PREMIER, pour ne pas sonder les providers d'un document qu'on ne purgera pas.
+      visible: () => {
+        if (!access.canDeleteCollection("vms")) return false;
+        probeVmProviders();
+        return VmPurge.hasPurgeable(store.all("vms"), vmConfiguredProviderIds);
+      },
       onClick: () => VmPurgeForm.open(store, formHost, vmSyncClient, { onDone: () => shell.refreshActive() }),
     },
   ];
@@ -757,7 +848,7 @@ async function boot(): Promise<void> {
     // MÉMOIRE serveur, sans push SSE → on retire à la main). « Statut de synchro… » a été RETIRÉ : redondant avec
     // le sous-onglet Clusters (qui affiche désormais l'état de synchro PAR provider, cf. cadrage 2026-07-13).
     vmExtraActions.push(
-      { label: I18n.t("app.vm.sync"), title: I18n.t("app.vm.syncTitle"), onClick: (btn) => { void VmForms.sync(client, btn, () => { void clustersView?.reload(); }); } },
+      { label: I18n.t("app.vm.sync"), title: I18n.t("app.vm.syncTitle"), visible: () => access.has("vm:sync"), onClick: (btn) => { void VmForms.sync(client, btn, () => { void clustersView?.reload(); }); } },
     );
   }
   // L'onglet VMs expose le lien « Clusters » vers son sous-onglet — MODE API uniquement (masqué en mode fichier/viewer).
@@ -785,11 +876,12 @@ async function boot(): Promise<void> {
     // En-tête du sous-onglet : « Providers… » (gestion CRUD, NON-VIEWER seulement) avant « Actualiser ».
     // Après toute écriture, la modale rappelle `onChanged` → on recharge l'état des clusters (config à chaud).
     const clustersActions: NonNullable<TabOpts["extraActions"]> = [];
-    if (!VIEWER) clustersActions.push({ label: I18n.t("app.vm.providers"), title: I18n.t("app.vm.providersTitle"), onClick: () => VmProvidersForm.open(formHost, client, () => { void clustersView?.reload(); }) });
+    if (!VIEWER) clustersActions.push({ label: I18n.t("app.vm.providers"), title: I18n.t("app.vm.providersTitle"), visible: () => access.has("vm.providers:manage"), onClick: () => VmProvidersForm.open(formHost, client, () => { void clustersView?.reload(); }) });
     clustersActions.push({ label: I18n.t("app.vm.refresh"), title: I18n.t("app.vm.refreshTitle"), onClick: () => { void clustersView?.reload(); } });
     const clustersContainer = shell.addView({
       name: "clusters", label: I18n.t("tabs.clusters.label"), kind: "secondary", parent: "vms",
       icon: Icons.NETWORK,
+      visible: () => canSeeView("clusters"),
       title: I18n.t("tabs.clusters.label"), subtitle: I18n.t("tabs.clusters.subtitle"),
       extraActions: clustersActions,
       onShow: () => clustersView?.show(),
@@ -814,8 +906,8 @@ async function boot(): Promise<void> {
   const wifiExtraActions: NonNullable<TabOpts["extraActions"]> = [];
   if (REST_MODE && wifiSyncClient) {
     const client = wifiSyncClient;   // const → non-null capturé dans les closures (garde REST_MODE ci-dessus)
-    wifiExtraActions.push({ label: I18n.t("app.wifi.sync"), title: I18n.t("app.wifi.syncTitle"), onClick: (btn) => { void WifiForms.sync(client, btn); } });
-    if (!VIEWER) wifiExtraActions.push({ label: I18n.t("app.wifi.providers"), title: I18n.t("app.wifi.providersTitle"), onClick: () => WifiProvidersForm.open(formHost, client, () => shell.refreshActive()) });
+    wifiExtraActions.push({ label: I18n.t("app.wifi.sync"), title: I18n.t("app.wifi.syncTitle"), visible: () => access.has("wifi:sync"), onClick: (btn) => { void WifiForms.sync(client, btn); } });
+    if (!VIEWER) wifiExtraActions.push({ label: I18n.t("app.wifi.providers"), title: I18n.t("app.wifi.providersTitle"), visible: () => access.has("wifi.providers:manage"), onClick: () => WifiProvidersForm.open(formHost, client, () => shell.refreshActive()) });
   }
   // « Localiser en 3D » sur une ligne : un client wifi n'est PAS un objet de la scène — on localise
   // son POINT D'ACCÈS. Version SOBRE (comme les VMs) : le prédicat PARTAGÉ `WifiLocate.apEquipmentId`
@@ -850,7 +942,7 @@ async function boot(): Promise<void> {
 
   // Netmap (GraphView) — « Netmap » est un NOM DE FONCTIONNALITÉ, conservé tel quel dans les deux langues (cf. catalogues).
   let graph: GraphView;
-  const graphContainer = shell.addView({ name: "graph", label: I18n.t("tabs.graph.label"), subtitle: I18n.t("tabs.graph.subtitle"), icon: Icons.GRAPH, onShow: () => graph.show() });
+  const graphContainer = shell.addView({ name: "graph", label: I18n.t("tabs.graph.label"), subtitle: I18n.t("tabs.graph.subtitle"), icon: Icons.GRAPH, visible: () => canSeeView("graph"), onShow: () => graph.show() });
   const stage = document.createElement("div");
   stage.className = "graph-stage";
   stage.style.cssText = "position:relative;flex:1 1 auto;min-height:560px;background:var(--bg-2);overflow:hidden";
@@ -873,12 +965,16 @@ async function boot(): Promise<void> {
 
   // Datacenters (vue 3D — tranche-pilote : caméra orbitale + salle/baies)
   let dcView: DatacenterView;
-  const dcContainer = shell.addView({ name: "datacenter", label: I18n.t("tabs.datacenter.label"), subtitle: I18n.t("tabs.datacenter.subtitle"), icon: Icons.DATACENTER, links: ["salles", "etages", "sites"], onShow: () => dcView.show() });
+  const dcContainer = shell.addView({ name: "datacenter", label: I18n.t("tabs.datacenter.label"), subtitle: I18n.t("tabs.datacenter.subtitle"), icon: Icons.DATACENTER, links: ["salles", "etages", "sites"], visible: () => canSeeView("datacenter"), onShow: () => dcView.show() });
   const dcStage = document.createElement("div");
   dcStage.className = "dc-stage";
   dcStage.style.cssText = "position:relative;flex:1 1 auto;min-height:560px;background:var(--bg-2);overflow:hidden";
   dcContainer.appendChild(dcStage);
   dcView = new DatacenterView(store, dcStage, {
+    // Outils d'ÉDITION de la barre d'outils 2D (placement libre, édition salle/étage, cases inaccessibles) :
+    // masqués sans le droit d'écrire la donnée spatiale. La NAVIGATION (modes de vue, filtres, localisation,
+    // mesure) reste entière — voir une salle et la modifier sont deux droits distincts.
+    canEditSpace: () => access.canUpdate("dc.site"),
     setDirty: () => { refreshChrome(); },
     openRackForm: (id) => Forms.rack(store, formHost, id, () => shell.refreshActive()),
     openRackDetail: (id) => Forms.rackDetail(store, formHost, id, () => shell.refreshActive()),
@@ -981,11 +1077,15 @@ async function boot(): Promise<void> {
       name: "faceimages", label: I18n.t("tabs.faceimages.label"), subtitle: I18n.t("tabs.faceimages.subtitle"),
       kind: "secondary", parent: "equipements", links: [], icon: Icons.IMAGE,
       count: () => imageStore.count(),
+      // Les images de façade sont la pseudo-collection `images`, rattachée à `dc.site` par la carte
+      // partagée : la LECTURE ouvre la page, la MISE À JOUR autorise l'ajout et l'import.
+      visible: () => canSeeView("faceimages"),
+      canAdd: () => access.canUpdate("dc.site"),
       extraActions: [
-        { label: I18n.t("app.faces.import"), title: I18n.t("app.faces.importTitle"), onClick: () => files.importFacesLibrary() },
+        { label: I18n.t("app.faces.import"), title: I18n.t("app.faces.importTitle"), visible: () => access.canUpdate("dc.site"), onClick: () => files.importFacesLibrary() },
         { label: I18n.t("app.faces.export"), title: I18n.t("app.faces.exportTitle"), onClick: () => files.exportFacesLibrary() },
         // Compagnon (mode fichier uniquement) : .nmfb APPARIÉ au document, rechargé/enregistré automatiquement à côté du .json.
-        ...(REST_MODE ? [] : [{ label: I18n.t("app.faces.openCompanion"), title: I18n.t("app.faces.openCompanionTitle"), onClick: () => files.openFacesFile() }]),
+        ...(REST_MODE ? [] : [{ label: I18n.t("app.faces.openCompanion"), title: I18n.t("app.faces.openCompanionTitle"), onClick: () => files.openFacesFile() }]),   // mode FICHIER seulement : rien à gater (tout permis)
       ],
       addLabel: I18n.t("app.add.image"), onAdd: () => Forms.faceImage(imageStore, store, formHost, null, () => shell.refreshActive()),
       onShow: () => {
@@ -993,7 +1093,13 @@ async function boot(): Promise<void> {
           const reRender = () => view!.render();
           view = new ListView(store, container, {
             ...cfg, items: () => imageStore.list(),
-            actions: { view: false, edit: true, clone: true, del: true, download: true },
+            // Les images vivent hors du Store (ImageStore), mais leurs routes serveur sont gardées par
+            // `dc.site:update` (PUT/DELETE `/images/:id`) : même verbe pour éditer, dupliquer et supprimer.
+            // Le téléchargement, lui, est une LECTURE — il suit la visibilité de la page.
+            actions: {
+              view: false, edit: true, clone: true, del: true, download: true,
+              canEdit: () => access.canUpdate("dc.site"), canClone: () => access.canUpdate("dc.site"), canDel: () => access.canUpdate("dc.site"),
+            },
             onAction: async (act, id) => {
               if (act === "edit") { Forms.faceImage(imageStore, store, formHost, id, reRender); return; }
               if (act === "download") { const fi: any = imageStore.get(id); if (fi && fi.url) { const blob = await (await fetch(fi.url)).blob(); Download.blob(ImageStore.downloadName(fi.name, blob.type || fi.type), blob); } return; }
@@ -1089,6 +1195,7 @@ async function boot(): Promise<void> {
   const notifyContainer = shell.addView({
     name: "notifications", label: I18n.t("tabs.notifications.label"), kind: "secondary", parent: "parametres",
     icon: Icons.NOTIFICATION,
+    visible: () => canSeeView("notifications"),
     title: I18n.t("tabs.notifications.label"), subtitle: I18n.t("tabs.notifications.subtitle"),
     onShow: () => notificationsView.show(),
   });
@@ -1102,7 +1209,9 @@ async function boot(): Promise<void> {
     label: (contact: any) => contact.name || I18n.t("lists.ph.noName"),   // même règle de nommage que la table des abonnements
     sortColumn: "name",
   }, entitySearchReader);
-  notificationsView = new NotificationsAdminView(store, notifyContainer, notifyClient, formHost, contactPickerSource);   // formulaires dans LA modale de l'app (principe n°11)
+  // Écritures de la page (canaux, abonnements, rappels, test d'envoi) : permission MÉTA `notify:manage` —
+  // la LECTURE, elle, est déjà gardée par la visibilité de l'onglet (`notify:read`, cf. ViewAccess).
+  notificationsView = new NotificationsAdminView(store, notifyContainer, notifyClient, formHost, contactPickerSource, () => access.has("notify:manage"));   // formulaires dans LA modale de l'app (principe n°11)
   // INTERVENTIONS : page d'ADMINISTRATION du suivi des incidents & interventions (liés aux équipements/VMs/
   // spares). ONGLET PRINCIPAL (décision de cadrage), enregistré JUSTE AVANT « Certificats ». Vue custom
   // TOUJOURS enregistrée : `interventionsClient` est null hors mode API → la vue affiche « mode API requis »
@@ -1202,6 +1311,7 @@ async function boot(): Promise<void> {
   const interventionsContainer = shell.addView({
     name: "interventions", label: I18n.t("tabs.interventions.label"), kind: "primary",
     icon: Icons.INTERVENTION,
+    visible: () => canSeeView("interventions"),
     title: I18n.t("tabs.interventions.label"), subtitle: I18n.t("tabs.interventions.subtitle"),
     count: REST_MODE ? () => interventionsOpenCount : undefined,   // badge en mode API uniquement (masqué à 0)
     countClass: REST_MODE ? () => (interventionsCriticalOpen ? "err" : null) : undefined,   // ≥ 1 ouverte critique → alerte rouge
@@ -1307,6 +1417,7 @@ async function boot(): Promise<void> {
   const certsContainer = shell.addView({
     name: "certificats", label: I18n.t("tabs.certificats.label"), kind: "primary",
     icon: Icons.CERTIFICATE,
+    visible: () => canSeeView("certificats"),
     title: I18n.t("tabs.certificats.label"), subtitle: I18n.t("tabs.certificats.subtitle"),
     count: REST_MODE ? () => certsExpiringCount + certsExpiredCount : undefined,   // badge = alerte d'échéance (masqué à 0)
     countClass: REST_MODE ? () => (certsExpiredCount > 0 ? "err" : (certsExpiringCount > 0 ? "warn" : null)) : undefined,   // expiré → rouge, expirant → orange
@@ -1376,6 +1487,10 @@ async function boot(): Promise<void> {
   shell.setModalFullscreen(prefs.modalFullscreen);
   shell.setAutocompleteMax(prefs.autocompleteMaxResults);
   shell.setRestMode(REST_MODE);   // mode API : masque les contrôles fichier
+  // GATING INITIAL. Mode fichier/visualiseur : `AccessState.ALL` → l'appel est inerte, tout reste visible
+  // (injection nulle). Mode API : `NONE` tant que `GET /me` n'a pas répondu — on n'affiche aucun onglet
+  // avant de savoir ce qui est permis ; `RestDocumentController.bootstrap` rappellera `applyAccess`.
+  applyAccess(access);
   // (l'auth SSO + la pastille utilisateur sont gérées par restBootstrap, au boot)
 
   // ---- état save-state ----

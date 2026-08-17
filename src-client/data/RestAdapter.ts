@@ -39,6 +39,8 @@ export class RestAdapter extends DataAdapter {
   set onValidationError(fn: RestProtocol["onValidationError"]) { this.protocol.onValidationError = fn; }
   get onAuthExpired(): RestProtocol["onAuthExpired"] { return this.protocol.onAuthExpired; }
   set onAuthExpired(fn: RestProtocol["onAuthExpired"]) { this.protocol.onAuthExpired = fn; }
+  get onForbidden(): RestProtocol["onForbidden"] { return this.protocol.onForbidden; }
+  set onForbidden(fn: RestProtocol["onForbidden"]) { this.protocol.onForbidden = fn; }
 
   /** URL du flux SSE du document courant (ou "" si aucun document). */
   get eventsUrl(): string { return this.docId ? (this.apiRoot + "/documents/" + encodeURIComponent(this.docId) + "/events") : ""; }

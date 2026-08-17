@@ -316,8 +316,17 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   AVANT le 503) ; 🚨 **verrou d'EXHAUSTIVITÉ** — un test relit les SOURCES des routeurs et nomme toute
   route sans garde ; `/transact` vérifié opération par opération (refus atomique), **cascade suivie SANS
   re-vérification** (intégrité référentielle, décision justifiée), `search` à ASSIETTE restreinte,
-  `/me` ADDITIF (`permissions`), sémantique 401/403 conservée ; section « Mode local » — ACL serveur
-  seulement, `PermissionSet.ALL` par construction en mode fichier).
+  `/me` ADDITIF (`permissions`), sémantique 401/403 conservée ; **CLIENT** — le serveur DÉCIDE, le client
+  ANTICIPE : `core/AccessState` enveloppe le `PermissionSet` partagé et ne porte AUCUNE règle propre,
+  🚨 `ALL` en mode fichier/visualiseur = **injection nulle** (patron `HydrationState` : rien ne bouge sans
+  serveur, un SEUL test de mode dans `main.ts`), état injecté par PRÉDICATS (onglets `ShellView.visible`,
+  « + créer » `canAdd`, actions de ligne `ListActions.can*`, fiches `FormBase.access`, outils spatiaux
+  `DatacenterHost.canEditSpace`) ; gating COARSE — vues par permission de LECTURE (listings DÉRIVÉS de leur
+  collection via la carte partagée, vues custom dans `core/ViewAccess` + **verrou de test sur les sources
+  de `main.ts`**), gestes d'écriture par verbe de domaine, sections d'admin par permission méta ; écran
+  « aucun accès » = `isEmpty()` sans aucun nom de rôle ; **403 en vol** = toast dédupliqué par permission
+  (`core/AccessDenial`) + re-fetch de `/me`, JAMAIS de retour au login (le latch 401 `SessionExpiry` est
+  intouché) ; section « Mode local » — ACL serveur seulement ; § 10.5 liste ce qui n'est PAS gaté en v1).
 - [`user-resolver.md`](docs/user-resolver.md) — **annuaire utilisateurs** (service CORE interface-driven
   `UserResolver` : id canonique `String(id)` SSO sinon login → profil affichable ; impl v1
   `AuthCacheUserResolver` = cache d'auth capturé par puits injecté `ProfileSink` + snapshot SQLite

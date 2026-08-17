@@ -80,6 +80,11 @@ export class NotificationsAdminView {
         main.ts : la vue ne connaît ni le lecteur serveur ni la construction de la source
         (principe n°2, même découplage que `client`/`host`). */
     private readonly contactPicker: EntityPickerCandidates,
+    /** L'utilisateur peut-il ÉCRIRE la configuration de notification (permission `notify:manage`) ? La
+        LECTURE de la page, elle, est gardée en amont par la visibilité de l'onglet (`notify:read`).
+        Prédicat INJECTÉ et relu à chaque rendu — la vue ne connaît ni l'état d'autorisation ni le nom de
+        la permission. Absent = aucune restriction (mode fichier/visualiseur, tests). */
+    private readonly canManage: () => boolean = () => true,
   ) {}
 
   /** Activation de la sous-page (onShow) : (re)construit l'ossature puis charge l'onglet courant. */
@@ -122,7 +127,9 @@ export class NotificationsAdminView {
     testBtn.textContent = I18n.t("notify.admin.sendTest");
     testBtn.title = I18n.t("notify.admin.sendTestTitle");
     testBtn.onclick = () => void this.runRoutedTest(testBtn);
-    actions.append(refresh, testBtn);
+    // « Envoyer un test » ÉCRIT (il déclenche un envoi réel par les canaux configurés) : même permission
+    // que la configuration elle-même. « Actualiser », lui, est une lecture — toujours offert.
+    if (this.canManage()) actions.append(refresh, testBtn); else actions.append(refresh);
 
     bar.append(seg, actions);
     this.container.appendChild(bar);
@@ -201,7 +208,7 @@ export class NotificationsAdminView {
 
     const add = document.createElement("button"); add.type = "button"; add.className = "btn btn-primary btn-sm"; add.style.marginTop = "12px";
     add.textContent = I18n.t("notify.canaux.add"); add.onclick = () => this.canalModal(null);
-    this.content.appendChild(add);
+    if (this.canManage()) this.content.appendChild(add);
   }
 
   /** Création/édition d'un canal — dans la MODALE de l'app (même UX que les autres formulaires).
@@ -394,7 +401,7 @@ export class NotificationsAdminView {
 
     const add = document.createElement("button"); add.type = "button"; add.className = "btn btn-primary btn-sm"; add.style.marginTop = "12px";
     add.textContent = I18n.t("notify.abonnements.add"); add.onclick = () => this.abonnementModal(null, instances);
-    this.content.appendChild(add);
+    if (this.canManage()) this.content.appendChild(add);
   }
 
   /** Création/édition d'un abonnement — dans la MODALE de l'app. Suppression = action de liste. */
@@ -517,7 +524,7 @@ export class NotificationsAdminView {
 
     const add = document.createElement("button"); add.type = "button"; add.className = "btn btn-primary btn-sm"; add.style.marginTop = "12px";
     add.textContent = I18n.t("notify.rappels.add"); add.onclick = () => this.rappelModal(null);
-    this.content.appendChild(add);
+    if (this.canManage()) this.content.appendChild(add);
   }
 
   /** Création/édition d'un réglage de rappel — dans la MODALE de l'app. Réinitialisation = action de liste. */
@@ -778,6 +785,12 @@ export class NotificationsAdminView {
   /** Table compacte injectée DANS le contenu (cellules = HTML déjà échappé). Renvoie le conteneur (liaison d'événements). */
   private table(headers: string[], rows: string[][]): HTMLElement {
     const tw = this.buildTable(headers, rows);
+    // POINT COMMUN des actions de LIGNE de cette page : toutes les tables de contenu passent par ici, et
+    // leurs boutons d'écriture se reconnaissent à leur marqueur (`data-edit` / `data-del` / `data-test`).
+    // Les gater ICI, une fois, évite de reprendre chacun des builders de lignes — et surtout d'en oublier
+    // un au prochain ajout. Le RETRAIT (et non le masquage) est volontaire : ces boutons sont recablés par
+    // `querySelectorAll` juste après, un noeud simplement caché resterait activable au clavier.
+    if (!this.canManage()) tw.querySelectorAll("[data-edit],[data-del],[data-test]").forEach((el) => el.remove());
     this.content.appendChild(tw);
     return tw;
   }

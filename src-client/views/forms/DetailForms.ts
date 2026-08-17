@@ -176,7 +176,7 @@ export class DetailForms extends IpamForms {
     // (doctrine §6.32). Une extrémité posée sur un ÉTAGE compte désormais, comme partout ailleurs.
     const footerActions: HTMLElement[] = [];
     if (host.locate && store.cableLocatable(c)) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>${I18n.t("lists.chrome.rowLocate")}`; locBtn.onclick = () => host.locate!("cable", c.id, () => this.cableDetail(store, host, id, onChanged)); footerActions.push(locBtn); }
-    if (!this.isViewer()) { const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-primary"; b.textContent = I18n.t("lists.chrome.rowEdit"); b.onclick = () => this.cable(store, host, id, onChanged); footerActions.push(b); }
+    if (this.canEditCollection("cables")) { const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-primary"; b.textContent = I18n.t("lists.chrome.rowEdit"); b.onclick = () => this.cable(store, host, id, onChanged); footerActions.push(b); }
     host.openModal({ title: I18n.t("detail.cable.title"), subtitle: Html.escape(c.name || ""), body: root, footerActions, stackKey: "detail:cables/" + id, onResume: () => this.cableDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
@@ -236,7 +236,7 @@ export class DetailForms extends IpamForms {
     tw?.querySelectorAll("[data-port-loc]").forEach((el) => { (el as HTMLElement).onclick = () => host.locate?.("port", (el as HTMLElement).dataset.portLoc!, () => this.cableBundleDetail(store, host, id, onChanged)); });
 
     AuditLine.attach(root, b, host.userDirectory);   // « Créé/Modifié par » (mode API)
-    const footerActions = this.footer(() => this.cableBundle(store, host, id, onChanged));
+    const footerActions = this.footer(() => this.cableBundle(store, host, id, onChanged), "cableBundles");
     host.openModal({ title: I18n.t("detail.bundle.title"), subtitle: Html.escape(b.name || ""), body: root, footerActions, stackKey: "detail:cableBundles/" + id, onResume: () => this.cableBundleDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
@@ -283,7 +283,7 @@ export class DetailForms extends IpamForms {
     if (cables.length > 50) { const m = document.createElement("div"); m.className = "form-hint"; m.textContent = I18n.t("detail.common.andMore", { count: cables.length - 50 }); root.appendChild(m); }
 
     AuditLine.attach(root, n, host.userDirectory);   // « Créé/Modifié par » (mode API)
-    const footerActions = this.footer(() => this.network(store, host, id, onChanged));
+    const footerActions = this.footer(() => this.network(store, host, id, onChanged), "networks");
     host.openModal({ title: I18n.t("detail.network.title"), subtitle: Html.escape(n.label || ""), body: root, footerActions, stackKey: "detail:networks/" + id, onResume: () => this.networkDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
@@ -334,7 +334,7 @@ export class DetailForms extends IpamForms {
       }), ""); }
 
     AuditLine.attach(root, ipn, host.userDirectory);   // « Créé/Modifié par » (mode API)
-    const footerActions = this.footer(() => this.ipNetwork(store, host, id, onChanged));
+    const footerActions = this.footer(() => this.ipNetwork(store, host, id, onChanged), "ipNetworks");
     host.openModal({ title: I18n.t("detail.ipNet.title"), subtitle: Html.escape(ipn.label || ipn.cidr || ""), body: root, footerActions, stackKey: "detail:ipNetworks/" + id, onResume: () => this.ipNetworkDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
@@ -365,7 +365,7 @@ export class DetailForms extends IpamForms {
     );
     root.appendChild(this.grid(pairs));
     AuditLine.attach(root, a, host.userDirectory);   // « Créé/Modifié par » (mode API)
-    const footerActions = this.footer(() => this.ipAddress(store, host, id, onChanged));
+    const footerActions = this.footer(() => this.ipAddress(store, host, id, onChanged), "ipAddresses");
     host.openModal({ title: I18n.t("detail.ipAddr.title"), subtitle: Html.escape(a.address || ""), body: root, footerActions, stackKey: "detail:ipAddresses/" + id, onResume: () => this.ipAddressDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
@@ -387,7 +387,7 @@ export class DetailForms extends IpamForms {
       [I18n.t("detail.common.updated"), Html.escape(Format.dateTime(rg.updated_date))],
     ]));
     AuditLine.attach(root, rg, host.userDirectory);   // « Créé/Modifié par » (mode API)
-    const footerActions = this.footer(() => this.dhcpRange(store, host, id, onChanged));
+    const footerActions = this.footer(() => this.dhcpRange(store, host, id, onChanged), "dhcpRanges");
     host.openModal({ title: I18n.t("detail.dhcp.title"), subtitle: ipn ? Html.escape(ipn.label || ipn.cidr || "") : "", body: root, footerActions, stackKey: "detail:dhcpRanges/" + id, onResume: () => this.dhcpRangeDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
@@ -424,7 +424,7 @@ export class DetailForms extends IpamForms {
     ]));
 
     AuditLine.attach(root, dc, host.userDirectory);   // « Créé/Modifié par » (mode API)
-    const footerActions = this.footer(() => this.datacenter(store, host, id, onChanged));
+    const footerActions = this.footer(() => this.datacenter(store, host, id, onChanged), "datacenters");
     host.openModal({ title: I18n.t("detail.dc.title"), subtitle: Html.escape(dc.name || ""), body: root, footerActions, stackKey: "detail:datacenters/" + id, onResume: () => this.datacenterDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
@@ -452,7 +452,7 @@ export class DetailForms extends IpamForms {
     ]), I18n.t("detail.site.roomsEmpty"));
     tw?.querySelectorAll("[data-dc-view]").forEach((el) => { (el as HTMLElement).onclick = () => this.datacenterDetail(store, host, (el as HTMLElement).dataset.dcView!, onChanged); });
     AuditLine.attach(root, site, host.userDirectory);   // « Créé/Modifié par » (mode API)
-    const footerActions = this.footer(() => this.site(store, host, id, onChanged));
+    const footerActions = this.footer(() => this.site(store, host, id, onChanged), "sites");
     host.openModal({ title: I18n.t("detail.site.title"), subtitle: Html.escape(site.name || ""), body: root, footerActions, stackKey: "detail:sites/" + id, onResume: () => this.siteDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
@@ -482,7 +482,7 @@ export class DetailForms extends IpamForms {
     const subEqs = store.subEquipmentsOfGroup(id);
     if (subEqs.length) SubEquipmentForms.attachSection(store, host, root, subEqs);
     AuditLine.attach(root, g, host.userDirectory);   // « Créé/Modifié par » (mode API)
-    const footerActions = this.footer(() => this.group(store, host, id, onChanged));
+    const footerActions = this.footer(() => this.group(store, host, id, onChanged), "groups");
     host.openModal({ title: I18n.t("detail.group.title"), subtitle: Html.escape(g.label || ""), body: root, footerActions, stackKey: "detail:groups/" + id, onResume: () => this.groupDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
@@ -510,7 +510,7 @@ export class DetailForms extends IpamForms {
     ]), I18n.t("detail.floor.roomsEmpty"));
     tw?.querySelectorAll("[data-dc-view]").forEach((el) => { (el as HTMLElement).onclick = () => this.datacenterDetail(store, host, (el as HTMLElement).dataset.dcView!, onChanged); });
     AuditLine.attach(root, f, host.userDirectory);   // « Créé/Modifié par » (mode API)
-    const footerActions = this.footer(() => this.floor(store, host, f.location || "", String(f.floor || ""), {}));
+    const footerActions = this.footer(() => this.floor(store, host, f.location || "", String(f.floor || ""), {}), "floors");
     host.openModal({ title: I18n.t("detail.floor.title"), subtitle: Html.escape(I18n.t("detail.floor.subtitle", { site: store.siteLabel(f.location || ""), floor: f.floor || "" })), body: root, footerActions, stackKey: "detail:floors/" + id, onResume: () => this.floorDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
@@ -540,7 +540,7 @@ export class DetailForms extends IpamForms {
     // Intégration « fiches » : badge d'interventions ouvertes + « Déclarer une intervention » (no-op hors mode API).
     InterventionFicheRow.attach(root, host.interventionHooks, { kind: "spare", id, label: (sp.displayName ? sp.displayName() : (sp.name || "")) }, () => host.closeModal?.());
     AuditLine.attach(root, sp, host.userDirectory);   // « Créé/Modifié par » (mode API)
-    const footerActions = this.footer(() => this.spare(store, host, id, onChanged));
+    const footerActions = this.footer(() => this.spare(store, host, id, onChanged), "spares");
     host.openModal({ title: I18n.t("detail.spare.title"), subtitle: Html.escape(sp.displayName ? sp.displayName() : (sp.name || "")), body: root, footerActions, stackKey: "detail:spares/" + id, onResume: () => this.spareDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
@@ -562,7 +562,7 @@ export class DetailForms extends IpamForms {
       [I18n.t("detail.common.updated"), Html.escape(Format.dateTime(c.updated_date))],
     ]));
     AuditLine.attach(root, c, host.userDirectory);   // « Créé/Modifié par » (mode API)
-    const footerActions = this.footer(() => this.contact(store, host, id, onChanged));
+    const footerActions = this.footer(() => this.contact(store, host, id, onChanged), "contacts");
     host.openModal({ title: I18n.t("detail.contact.title"), subtitle: Html.escape(c.name || ""), body: root, footerActions, stackKey: "detail:contacts/" + id, onResume: () => this.contactDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
@@ -600,7 +600,7 @@ export class DetailForms extends IpamForms {
     // Intégration « fiches » : badge d'interventions ouvertes + « Déclarer une intervention » (no-op hors mode API).
     InterventionFicheRow.attach(root, host.interventionHooks, { kind: "application", id, label: (app.name || "") }, () => host.closeModal?.());
     AuditLine.attach(root, app, host.userDirectory);   // « Créé/Modifié par » (mode API)
-    const footerActions = this.footer(() => this.application(store, host, id, onChanged));
+    const footerActions = this.footer(() => this.application(store, host, id, onChanged), "applications");
     host.openModal({ title: I18n.t("detail.application.title"), subtitle: Html.escape(app.name || ""), body: root, footerActions, stackKey: "detail:applications/" + id, onResume: () => this.applicationDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
@@ -650,7 +650,7 @@ export class DetailForms extends IpamForms {
     const dlBtn = document.createElement("button"); dlBtn.type = "button"; dlBtn.className = "btn btn-ghost";
     dlBtn.innerHTML = `<span class="gi">${Icons.EXPORT}</span>${I18n.t("lists.chrome.rowDownload")}`;
     dlBtn.onclick = () => { void AttachmentUi.download(host, att); };
-    footerActions.push(dlBtn, ...this.footer(() => this.attachment(store, host, id, onChanged)));
+    footerActions.push(dlBtn, ...this.footer(() => this.attachment(store, host, id, onChanged), "attachments"));
     host.openModal({ title: I18n.t("detail.attachment.title"), subtitle: Html.escape(att.name || ""), body: root, footerActions, stackKey: "detail:attachments/" + id, onResume: () => this.attachmentDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 
@@ -749,7 +749,9 @@ export class DetailForms extends IpamForms {
     //    n'apparaissant que s'il y a des propositions : sa seule raison d'être est le bouton « Rattacher » (aucune
     //    action en mode visualiseur → rien à afficher). La logique de correspondance/conflit vit dans le module PUR
     //    VmIpMatch (testé) ; ici on ne fait que rendre les propositions et câbler le clic. --
-    if (!this.isViewer()) {
+    //    Le « Rattacher » ÉCRIT une adresse IPAM : sans le droit de mise à jour de `ipAddresses`, le bloc n'a
+    //    plus de raison d'être (même logique que le mode visualiseur).
+    if (this.canEditCollection("ipAddresses")) {
       const suggestions = VmIpMatch.suggestions(vm, store.all("ipAddresses"));
       if (suggestions.length) {
         this.sect(root, I18n.t("detail.vm.suggestSection", { count: suggestions.length }));
@@ -852,7 +854,7 @@ export class DetailForms extends IpamForms {
     // Actions dans le PIED FIXE de la modale (footerActions) — plus au bas du corps défilant. Le pied garde
     // son alignement à droite : les boutons (suppression orpheline · Localiser · Modifier) y sont groupés.
     const footerActions: HTMLElement[] = [];
-    if (vm.orphan && !this.isViewer()) {
+    if (vm.orphan && this.canDeleteInCollection("vms")) {
       const delBtn = document.createElement("button"); delBtn.type = "button"; delBtn.className = "btn btn-danger";
       delBtn.textContent = I18n.t("detail.vm.deleteOrphan");
       delBtn.onclick = async () => {
@@ -883,7 +885,7 @@ export class DetailForms extends IpamForms {
       locBtn.onclick = () => host.locate!("equipment", hostToLocate, () => this.vmDetail(store, host, id, onChanged));
       footerActions.push(locBtn);
     }
-    if (!this.isViewer()) {
+    if (this.canEditCollection("vms")) {
       const editBtn = document.createElement("button"); editBtn.type = "button"; editBtn.className = "btn btn-primary";
       editBtn.textContent = I18n.t("lists.chrome.rowEdit");
       // MANUELLE → formulaire COMPLET (`manual`, tous les champs saisis) ; SYNCHRONISÉE → enrichissements locaux
@@ -966,7 +968,7 @@ export class DetailForms extends IpamForms {
       locBtn.onclick = () => host.locate!("equipment", apToLocate, () => this.wifiClientDetail(store, host, id, onChanged));
       footerActions.push(locBtn);
     }
-    if (!this.isViewer()) {
+    if (this.canEditCollection("wifiClients")) {
       const editBtn = document.createElement("button"); editBtn.type = "button"; editBtn.className = "btn btn-primary";
       editBtn.textContent = I18n.t("lists.chrome.rowEdit"); editBtn.onclick = () => WifiForms.edit(store, host, id, onChanged);
       footerActions.push(editBtn);

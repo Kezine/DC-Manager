@@ -27,10 +27,23 @@ export interface ShellView {
   icon?: string;
   /** Noms de sous-vues exposées comme boutons-liens dans l'en-tête de CETTE vue. */
   links?: string[];
+  /** Prédicat de VISIBILITÉ de la vue — droit de LECTURE (cf. docs/auth.md § « Gating côté client »).
+      Faux ⇒ l'onglet de la topbar, l'entrée du menu responsive, l'entrée du menu de groupe ET les
+      boutons-liens d'en-tête qui y mènent DISPARAISSENT, et `switchView` refuse d'y aller (repli sur
+      la première vue visible). Réévalué à chaque `refreshCounts()` — exactement comme les pastilles de
+      comptage et les `extraActions[].visible`, donc à chaque changement d'onglet, à chaque
+      rafraîchissement de vue et à chaque changement de droits.
+      ABSENT = toujours visible. En mode FICHIER/visualiseur, l'état d'autorisation est « tout permis »
+      par construction : le prédicat rend vrai de lui-même, et RIEN ne bouge (injection nulle). */
+  visible?: () => boolean;
   /** Libellé du bouton primaire « + … » de l'en-tête (si action de création). */
   addLabel?: string;
   /** Action du bouton primaire. */
   onAdd?: () => void;
+  /** Prédicat de visibilité du bouton primaire « + … » — droit de CRÉATION du domaine de la vue.
+      Même moment d'évaluation que `extraActions[].visible` (elles partagent le même registre).
+      Absent = bouton affiché dès que `onAdd` existe (comportement historique). */
+  canAdd?: () => boolean;
   /** Boutons secondaires (ghost) de l'en-tête, avant le bouton primaire.
       `onClick` reçoit le bouton rendu → un handler asynchrone peut le désactiver / changer son
       libellé le temps d'un appel (ex. « Synchroniser » → « Synchronisation… » sur l'onglet VMs).
@@ -135,10 +148,12 @@ export class Shell {
   private uiScaleSel!: HTMLSelectElement;          // échelle d'interface (taille du texte)
   private modalFsChk!: HTMLInputElement;           // bascule « modales en plein écran » (préférence desktop)
   private acMaxSel!: HTMLSelectElement;            // nb max de suggestions d'autocomplétion (formulaires)
+  private searchBtn!: HTMLButtonElement;          // loupe « Recherche globale » (Ctrl+F) — masquée sans aucune lecture documentaire
   private newBtn!: HTMLButtonElement;             // « Nouveau » (fichier ou document serveur)
   private openBtn!: HTMLButtonElement;            // « Ouvrir » (fichier ou sélecteur de documents)
   private fileActionsEl!: HTMLElement;            // Enregistrer/Enregistrer-sous (masqués en mode API)
   private fileOnlySections: HTMLElement[] = [];   // sections de réglages propres au mode fichier (auto-save, accès fichiers)
+  private maintenanceSection: HTMLElement | null = null;   // section « Maintenance » des réglages (permission `maintenance:run`)
   private userChip!: HTMLElement;                 // pastille « connecté en tant que … » (mode API)
   private autosaveChk!: HTMLInputElement;
   private autosaveIntervalSel!: HTMLSelectElement;
@@ -161,9 +176,21 @@ export class Shell {
   private tabDropdowns: HTMLElement[] = [];            // TOUS les menus déroulants d'onglets (responsive + groupes)
   private tabGroupEls: HTMLElement[] = [];             // wrappers .tab-group insérés en topbar (retirés/reconstruits par build)
   private countBadges: Array<{ name: string; el: HTMLElement }> = [];
-  /** Boutons d'en-tête à visibilité CONDITIONNELLE (`ViewDef.extraActions[].visible`) — réévalués
-      par `refreshCounts()`, exactement comme les pastilles de comptage. Reconstruit par `build()`. */
+  /** Boutons d'en-tête à visibilité CONDITIONNELLE (`ViewDef.extraActions[].visible`, `ViewDef.canAdd`) —
+      réévalués par `refreshCounts()`, exactement comme les pastilles de comptage. Reconstruit par `build()`. */
   private conditionalActions: Array<{ el: HTMLElement; visible: () => boolean }> = [];
+  /** TOUS les éléments de NAVIGATION vers une vue (onglet topbar, entrée du menu responsive, entrée d'un
+      menu de groupe, bouton-lien d'en-tête) : masqués ENSEMBLE quand `ViewDef.visible` rend faux. Un
+      registre plutôt qu'une requête DOM parce que le même nom de vue est atteignable par PLUSIEURS
+      chemins — en oublier un laisserait une porte ouverte sur une vue censée être invisible.
+      Reconstruit par `build()`. */
+  private viewNavEls: Array<{ name: string; el: HTMLElement }> = [];
+  /** Repères de GROUPE (bouton d'onglet déroulant, en-tête du menu responsive) : masqués quand AUCUN de
+      leurs enfants n'est visible — un groupe vide n'est pas une navigation, c'est un cul-de-sac. */
+  private groupNavEls: Array<{ children: string[]; el: HTMLElement }> = [];
+  /** Garde de ré-entrance du REPLI (`switchView` rappelle `refreshCounts`, qui re-teste la visibilité).
+      Le repli converge de lui-même — cette garde protège d'un prédicat non déterministe, pas du cas normal. */
+  private fallbackInProgress = false;
   private host: ShellHost;
   current: string | null = null;
 
@@ -196,7 +223,8 @@ export class Shell {
     // large de la maquette : dans une topbar déjà dense, un faux champ prend la place des onglets et
     // LAISSE CROIRE qu'on peut y taper). Première de la rangée — action de LECTURE, avant les actions
     // de fichier. Le raccourci (Ctrl+F, annoncé dans le tooltip) est enregistré par le bootstrap.
-    actions.appendChild(iconBtn(I18n.t("shell.topbar.globalSearch"), '<circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/>', () => this.host.onGlobalSearch?.()));
+    this.searchBtn = iconBtn(I18n.t("shell.topbar.globalSearch"), '<circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/>', () => this.host.onGlobalSearch?.());
+    actions.appendChild(this.searchBtn);
     // Nouveau / Ouvrir : utiles dans LES DEUX modes (fichier → fichier ; API → document serveur). Toujours visibles.
     this.newBtn = iconBtn(I18n.t("shell.topbar.new"), '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>', () => this.host.onNew?.());
     this.openBtn = iconBtn(I18n.t("shell.topbar.open"), '<path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', () => this.host.onOpen?.());
@@ -386,6 +414,7 @@ export class Shell {
     const expNote = document.createElement("div"); expNote.className = "settings-row-note"; expNote.textContent = I18n.t("shell.settings.exportNote"); exp.appendChild(expNote);
     // -- Maintenance (tous modes) : purge des images de façade non utilisées (+ compactage serveur en mode API) --
     const mnt = section(I18n.t("shell.settings.maintenance"));
+    this.maintenanceSection = mnt;   // masquée sans la permission `maintenance:run` (mode API) — cf. setMaintenanceAllowed
     const purgeBtn = document.createElement("button"); purgeBtn.type = "button"; purgeBtn.className = "btn btn-ghost btn-sm"; purgeBtn.style.width = "100%"; purgeBtn.textContent = I18n.t("shell.settings.cleanImages");
     purgeBtn.onclick = () => this.host.onPurgeImages?.(); mnt.appendChild(purgeBtn);
     const mntNote = document.createElement("div"); mntNote.className = "settings-row-note"; mntNote.textContent = I18n.t("shell.settings.maintenanceNote"); mnt.appendChild(mntNote);
@@ -532,6 +561,7 @@ export class Shell {
     this.tabsEl.innerHTML = "";
     this.countBadges = [];
     this.conditionalActions = [];                        // réenregistrés par buildHeader (les anciens boutons partent avec l'en-tête)
+    this.viewNavEls = []; this.groupNavEls = [];         // idem : le registre de VISIBILITÉ suit les nœuds qu'on reconstruit
     this.tabDropdowns = [];                              // réinitialisé : le listener de clic extérieur lit ce tableau
     this.tabGroupEls.forEach((el) => el.remove()); this.tabGroupEls = [];   // purge d'un éventuel build précédent
     // onglets principaux (vues non secondaires, hors GROUPES), dans l'ordre d'enregistrement
@@ -551,6 +581,7 @@ export class Shell {
       if (v.def.count) { const badge = document.createElement("span"); badge.className = "tab-count"; btn.appendChild(badge); this.countBadges.push({ name: nm, el: badge }); }
       btn.onclick = () => this.switchView(nm);
       v.tabBtn = btn; this.tabsEl.appendChild(btn);
+      this.viewNavEls.push({ name: nm, el: btn });   // masquable par `ViewDef.visible` (droit de lecture)
     });
     this.buildTabsDropdown();   // version « menu déroulant » des mêmes onglets + enfants de groupes (affichée en responsive)
     this.buildTabGroups();      // boutons d'onglet GROUPE (déroulants) — insérés en topbar, hors du clip de .tabs
@@ -573,7 +604,9 @@ export class Shell {
     const menu = document.createElement("div"); menu.className = "tabs-dd-menu"; menu.setAttribute("role", "menu");
     ShellNav.responsiveMenu(this.orderedDecls()).forEach((e) => {
       if (e.role === "group") {   // en-tête de groupe : repère non navigable (le groupe n'est pas une vue)
-        const head = document.createElement("div"); head.className = "tabs-dd-group"; head.textContent = e.label; menu.appendChild(head); return;
+        const head = document.createElement("div"); head.className = "tabs-dd-group"; head.textContent = e.label; menu.appendChild(head);
+        this.groupNavEls.push({ children: this.groups.get(e.name)?.def.children || [], el: head });   // en-tête masqué si tous ses enfants le sont
+        return;
       }
       const it = document.createElement("button"); it.type = "button"; it.className = "tabs-dd-item" + (e.depth ? " tabs-dd-item--child" : ""); it.dataset.view = e.name; it.setAttribute("role", "menuitem");
       const src = this.views.get(e.name);   // source de l'icône ET du badge de comptage (recollé par nom)
@@ -582,6 +615,7 @@ export class Shell {
       if (src && src.def.count) { const badge = document.createElement("span"); badge.className = "tab-count"; it.appendChild(badge); this.countBadges.push({ name: e.name, el: badge }); }
       it.onclick = () => { dd.classList.remove("open"); this.switchView(e.name); };
       menu.appendChild(it);
+      this.viewNavEls.push({ name: e.name, el: it });   // même masquage que l'onglet desktop correspondant
     });
     trigger.onclick = (e) => { e.stopPropagation(); this.closeOtherDropdowns(dd); dd.classList.toggle("open"); };
     dd.append(trigger, menu);
@@ -617,6 +651,7 @@ export class Shell {
         if (cv.def.count) { const badge = document.createElement("span"); badge.className = "tab-count"; it.appendChild(badge); this.countBadges.push({ name: childName, el: badge }); }
         it.onclick = () => { wrap.classList.remove("open"); this.switchView(childName); };
         menu.appendChild(it);
+        this.viewNavEls.push({ name: childName, el: it });   // enfant de groupe : masqué comme partout ailleurs
       });
       // toggle : ferme les AUTRES menus puis bascule le sien ; stopPropagation évite la fermeture immédiate par le
       // listener document (piège ③ — sinon le clic du bouton refermerait aussitôt le menu qu'il vient d'ouvrir).
@@ -625,6 +660,7 @@ export class Shell {
       anchor.insertAdjacentElement("afterend", wrap); anchor = wrap;
       g.tabBtn = btn; g.ddEl = wrap;
       this.tabDropdowns.push(wrap); this.tabGroupEls.push(wrap);
+      this.groupNavEls.push({ children: g.def.children || [], el: wrap });   // onglet-groupe masqué si aucun enfant n'est lisible
     });
   }
 
@@ -656,6 +692,7 @@ export class Shell {
       b.appendChild(document.createTextNode(target.def.label + " "));
       if (target.def.count) { const badge = document.createElement("span"); badge.className = "tab-count"; b.appendChild(badge); this.countBadges.push({ name: ln, el: badge }); }
       b.onclick = () => this.switchView(ln); acts.appendChild(b);
+      this.viewNavEls.push({ name: ln, el: b });   // lien d'en-tête : c'est AUSSI une navigation vers la sous-vue
     });
     // boutons secondaires (ghost) — ex. « Ouvrir un fichier de faces »
     (def.extraActions || []).forEach((a) => {
@@ -664,14 +701,65 @@ export class Shell {
       // Bouton CONDITIONNEL : enregistré pour être réévalué à chaque `refreshCounts()` (cf. ViewDef.extraActions).
       if (a.visible) this.conditionalActions.push({ el: b, visible: a.visible });
     });
-    // bouton primaire « + … »
-    if (def.onAdd) { const add = document.createElement("button"); add.type = "button"; add.className = "btn btn-primary"; add.textContent = def.addLabel || I18n.t("shell.header.addDefault"); add.onclick = () => def.onAdd!(); acts.appendChild(add); }
+    // bouton primaire « + … » — masquable par `canAdd` (droit de CRÉATION), via le MÊME registre que les
+    // `extraActions` conditionnelles : un seul moment d'évaluation pour toutes les actions d'en-tête.
+    if (def.onAdd) {
+      const add = document.createElement("button"); add.type = "button"; add.className = "btn btn-primary"; add.textContent = def.addLabel || I18n.t("shell.header.addDefault"); add.onclick = () => def.onAdd!(); acts.appendChild(add);
+      if (def.canAdd) this.conditionalActions.push({ el: add, visible: def.canAdd });
+    }
     v.header.append(left, acts);
     if (!acts.children.length) v.header.style.alignItems = "center";
   }
 
+  /** Cette vue est-elle ACCESSIBLE (prédicat `ViewDef.visible`) ? Une vue inconnue ne l'est pas. Un
+      prédicat qui JETTE répond NON : le repli d'une garde d'accès se fait toujours du côté fermé
+      (même politique que les `extraActions` conditionnelles, journalisée). */
+  isViewVisible(name: string): boolean {
+    const v = this.views.get(name);
+    if (!v) return false;
+    if (!v.def.visible) return true;
+    try { return !!v.def.visible(); } catch (e) { console.error(e); return false; }
+  }
+
+  /** Première vue ACCESSIBLE dans l'ordre des onglets — cible du repli. Les onglets PRINCIPAUX priment
+      (c'est une barre de navigation, pas une sous-page) ; à défaut, n'importe quelle vue visible fait
+      l'affaire — un utilisateur qui n'a le droit de lire qu'une sous-page doit tout de même la voir. */
+  private firstVisibleView(): string | null {
+    const registered = this.order.filter((nm) => this.views.has(nm));
+    const primary = registered.find((nm) => this.views.get(nm)!.def.kind !== "secondary" && this.isViewVisible(nm));
+    return primary || registered.find((nm) => this.isViewVisible(nm)) || null;
+  }
+
+  /** Applique la visibilité de TOUS les chemins de navigation (onglets, menus, liens d'en-tête) puis des
+      repères de groupe. Appelée par `refreshCounts()`, donc à chaque changement d'onglet, de vue et de
+      droits — aucun point d'appel supplémentaire à retenir. */
+  private applyViewVisibility(): void {
+    this.viewNavEls.forEach(({ name, el }) => { el.style.display = this.isViewVisible(name) ? "" : "none"; });
+    this.groupNavEls.forEach(({ children, el }) => { el.style.display = children.some((c) => this.isViewVisible(c)) ? "" : "none"; });
+  }
+
+  /** REPLI : l'onglet actif vient d'être masqué (droits retirés à chaud, ou bascule de politique) → on
+      bascule sur la première vue accessible. Aucune vue accessible ⇒ on ne fait RIEN : c'est l'écran
+      « aucun accès » (overlay d'accueil) qui couvre alors l'application. */
+  private fallbackIfHidden(): void {
+    if (this.fallbackInProgress || !this.current || this.isViewVisible(this.current)) return;
+    const fallback = this.firstVisibleView();
+    if (!fallback || fallback === this.current) return;
+    this.fallbackInProgress = true;
+    try { this.switchView(fallback); } finally { this.fallbackInProgress = false; }
+  }
+
   switchView(name: string): void {
     if (!this.views.has(name)) return;   // seules les VUES naviguent ; un groupe (kind:"group") n'est pas dans this.views (piège ①)
+    // Vue MASQUÉE (droit de lecture absent) : on ne l'affiche pas — on se replie sur la première vue
+    // accessible. Le cas se produit aussi bien sur un #hash bookmarké que sur une navigation
+    // programmatique (« Localiser » vers le Datacenter, retour après ouverture d'un document). Aucune
+    // vue accessible ⇒ on n'active RIEN (l'écran « aucun accès » couvre l'app).
+    if (!this.isViewVisible(name)) {
+      const fallback = this.firstVisibleView();
+      if (!fallback || fallback === name) return;
+      name = fallback;
+    }
     this.current = name;
     const active = this.views.get(name)!;
     const activeTab = ShellNav.activeTab(active.def);
@@ -708,6 +796,9 @@ export class Shell {
   /** Met à jour tous les badges de comptage (onglets topbar + liens d'en-tête) : valeur, teinte d'alerte
       (warn/err) et VISIBILITÉ (masqué à 0 — pas de pastille « 0 »). */
   refreshCounts(): void {
+    // VISIBILITÉ des vues (droits de LECTURE) d'abord : les pastilles et actions qui suivent portent
+    // sur des chemins de navigation dont on vient de fixer l'affichage. Voir `applyViewVisibility`.
+    this.applyViewVisibility();
     this.countBadges.forEach(({ name, el }) => {
       const v = this.views.get(name); if (!v || !v.def.count) return;
       const n = v.def.count();
@@ -724,6 +815,7 @@ export class Shell {
       try { on = !!visible(); } catch (e) { console.error(e); }
       el.style.display = on ? "" : "none";
     });
+    this.fallbackIfHidden();   // l'onglet actif vient-il d'être masqué ? (droits retirés à chaud)
   }
 
   /* ---- chrome : statut / nom de document / undo-redo ---- */
@@ -790,6 +882,18 @@ export class Shell {
     if (on && this.dataSourceSwitch) this.dataSourceSwitch.checked = true;
     this.updateApiUrlVisibility();
   }
+  /** Loupe de RECHERCHE GLOBALE : visible dès qu'il existe AU MOINS UNE lecture documentaire — la même règle
+      que la garde serveur de `GET /search`, dont l'assiette est de toute façon restreinte à ce que l'appelant
+      a le droit de lire (docs/auth.md § 8.3). Sans aucune lecture, la palette ne trouverait rien. */
+  setGlobalSearchAllowed(on: boolean): void { if (this.searchBtn) this.searchBtn.style.display = on ? "" : "none"; }
+  /** Bouton « Nouveau » de la topbar : en mode API il CRÉE un document serveur (`documents:manage`) ; en mode
+      fichier il repart d'un document local, et l'état « tout permis » le laisse visible (injection nulle). */
+  setNewDocumentAllowed(on: boolean): void { if (this.newBtn) this.newBtn.style.display = on ? "" : "none"; }
+  /** Section « Maintenance » du panneau Réglages (purge des binaires orphelins + compactage) : geste
+      d'ADMINISTRATION, masqué sans la permission `maintenance:run` (cf. docs/auth.md § « Gating côté client »). En mode
+      FICHIER la purge est purement locale et l'état d'autorisation « tout permis » la laisse visible —
+      injection nulle, aucun test de mode ici. */
+  setMaintenanceAllowed(on: boolean): void { if (this.maintenanceSection) this.maintenanceSection.style.display = on ? "" : "none"; }
   /** Reflète l'état auto-save dans le popover (case + fréquence). */
   setAutosave(on: boolean, interval: number): void { this.autosaveChk.checked = on; this.autosaveIntervalSel.value = String(interval); }
   setAutosaveStatus(html: string): void { this.autosaveStatusEl.innerHTML = html; }

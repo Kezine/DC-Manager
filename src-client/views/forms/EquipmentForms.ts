@@ -154,7 +154,7 @@ export class EquipmentForms extends FormBase {
     const denseBtn = document.createElement("button"); denseBtn.type = "button";
     denseBtn.title = I18n.t("equipment.detail.denseTitle");
     dFbtns.appendChild(denseBtn);
-    if (!this.isViewer()) {   // viewer (lecture seule) : pas d'édition de façade
+    if (this.canEditCollection("equipments")) {   // viewer / lecture seule (droit de mise à jour absent) : pas d'édition de façade
       const editFaceBtn = document.createElement("button"); editFaceBtn.type = "button"; editFaceBtn.className = "btn btn-ghost btn-sm"; editFaceBtn.textContent = I18n.t("equipment.detail.editFace");
       // onSaved : l'éditeur écrit dans le store (pas de brouillon ici) puis on RECONSTRUIT la fiche détail —
       // ses aperçus de façade lisent l'objet `eq` capturé à l'ouverture, donc figés sans ce re-rendu.
@@ -255,7 +255,7 @@ export class EquipmentForms extends FormBase {
     // miroir des refus de locateEquipment) — un équipement d'inventaire pur ou dans une baie non placée n'aurait
     // qu'un toast d'erreur (parité avec le listing, cf. ListActions.canLocate).
     if (host.locate && store.equipmentLocatable(eq.id)) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>${I18n.t("lists.chrome.rowLocate")}`; locBtn.onclick = () => host.locate!("equipment", eq.id, () => this.equipmentDetail(store, host, eq.id, onChanged)); footerActions.push(locBtn); }
-    if (!this.isViewer()) {   // viewer : pas de bouton « Modifier »
+    if (this.canEditCollection("equipments")) {   // viewer / droit de mise à jour absent : pas de bouton « Modifier »
       const editBtn = document.createElement("button"); editBtn.type = "button"; editBtn.className = "btn btn-primary"; editBtn.textContent = I18n.t("lists.chrome.rowEdit");
       editBtn.onclick = () => this.equipment(store, host, eq.id, onChanged);
       footerActions.push(editBtn);

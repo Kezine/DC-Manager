@@ -38,7 +38,10 @@ export abstract class DcPanels extends DcViews2D {
     const spacer = document.createElement("div"); spacer.style.flex = "1 1 auto"; this.toolbarEl.appendChild(spacer);
 
     // ORDRE INVERSÉ : bascules d'édition (déplacement/exclusion, plans 2D) À GAUCHE · modes de vue À DROITE.
-    if (this.view === "top" || this.view === "floor") {
+    // Le bloc ENTIER disparaît sans le droit d'écrire la donnée spatiale (cf. `DatacenterHost.canEditSpace`) :
+    // ces trois bascules n'existent que pour MODIFIER, et la vue reste parfaitement utilisable en lecture.
+    // Hôte sans le prédicat (mode fichier/visualiseur, tests) ⇒ comportement historique, rien ne bouge.
+    if ((this.view === "top" || this.view === "floor") && (!this.host.canEditSpace || this.host.canEditSpace())) {
       const edits = document.createElement("div"); edits.className = "dc-subviews"; edits.style.cssText = "display:flex;gap:4px";
       const bFree = this.btn(I18n.t("dc.panels.freePlace"), () => { this.freePlace = !this.freePlace; bFree.classList.toggle("active", this.freePlace); bFree.setAttribute("aria-pressed", String(this.freePlace)); }, I18n.t("dc.panels.freePlaceTitle"));
       bFree.classList.toggle("active", this.freePlace); bFree.setAttribute("aria-pressed", String(this.freePlace));   // état PERSISTANT (session) → exposé aux lecteurs d'écran
