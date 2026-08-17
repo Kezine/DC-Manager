@@ -14,9 +14,15 @@
    - `LegacySsoAuthProvider` : le contrat SSO maison (cookie proxifié).
    - `ForwardHeaderAuthProvider` : en-têtes d'un reverse-proxy *identity-aware*
      (Authelia, Authentik, oauth2-proxy, Cloudflare Access, Tailscale…).
-   - à venir : provider OIDC. Le contrat ne bouge pas — c'est tout l'intérêt de
-     l'avoir posé (le provider d'en-têtes n'a demandé qu'UN élargissement
-     délibéré de `AuthRequestView`, cf. plus bas).
+   - `OidcAuthProvider` : l'application est elle-même le RP d'un OP OIDC
+     (cookie de session → table mémoire, cf. `auth/OidcSessionStore`).
+
+   ✅ Le contrat n'a PAS bougé pour les accueillir — c'est tout l'intérêt de
+   l'avoir posé. Le provider d'en-têtes n'a demandé qu'UN élargissement délibéré
+   d'`AuthRequestView` (cf. plus bas) ; le mode OIDC, le plus gros des cinq,
+   n'a demandé RIEN DU TOUT : son flux (`auth/OidcRoutes`) vit à côté du
+   contrat, pas dedans, parce que « établir une identité à partir d'une
+   requête » et « conduire un flux d'autorisation » sont deux responsabilités.
 
    ── Pourquoi ce fichier n'importe PAS Express ─────────────────────────────
    Il déclare sa propre vue MINIMALE de la requête (`AuthRequestView`), dont le
@@ -36,7 +42,14 @@
     client et l'annuaire la consomment déjà (cf. `users/UserResolver.RawUserProfile`, qui en est
     un sous-ensemble structurel). L'index de signature autorise le PASSTHROUGH : un SSO qui
     renvoie des champs que nous ne connaissons pas les voit traverser jusqu'à `/me`. */
-export interface SsoUser { id?: number; login?: string; nom?: string; prenom?: string; eMail?: string; domain?: string; [k: string]: any }
+/** ⚠ `id` est `number | string`, et l'élargissement est DÉLIBÉRÉ (arrivée du mode OIDC).
+    Le SSO maison rend un identifiant NUMÉRIQUE ; le `sub` d'un OP est une chaîne opaque (souvent
+    un UUID) et c'est la seule revendication qu'un IdP garantit stable — en faire un nombre serait
+    faux. Les deux consommateurs de ce champ le lisaient DÉJÀ dans les deux types
+    (`users/UserResolver.RawUserProfile`, `access/AccessControl.AccessSession`) et la clé canonique
+    passe de toute façon par `String(id)` (`users/UserProfiles.canonicalId`) : le contrat était
+    simplement plus étroit que ses propres consommateurs. */
+export interface SsoUser { id?: number | string; login?: string; nom?: string; prenom?: string; eMail?: string; domain?: string; [k: string]: any }
 
 /** SESSION authentifiée — le « principal » de l'application, et le SEUL modèle d'identité.
 

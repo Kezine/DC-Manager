@@ -190,10 +190,10 @@ par défaut — `.open <base>.db` pour changer (chemins relatifs à `/data/docum
 | `PORT` | `3000` | port d'écoute |
 | `API_BASE` | `/api` | préfixe des endpoints REST |
 | `DOCS_DIR` | `/data/documents` | dossier des documents (registre + 1 `.db`/doc) |
-| `AUTH_MODE` | *(vide)* | **mode d'authentification EXPLICITE** : `dev` \| `basic` \| `sso` \| `forward`. Vide → inférence historique (`BASIC_AUTH` → basic, sinon `SSO_URL` → sso, sinon dev). 🚨 valeur inconnue ou incohérente (`oidc`, coquille, `sso` sans `SSO_URL`, `basic` sans `BASIC_AUTH`) → **le serveur refuse de démarrer** (jamais de repli sur le mode dev) |
+| `AUTH_MODE` | *(vide)* | **mode d'authentification EXPLICITE** : `dev` \| `basic` \| `sso` \| `forward` \| `oidc`. Vide → inférence historique (`BASIC_AUTH` → basic, sinon `SSO_URL` → sso, sinon dev) ; `forward` et `oidc` ne sont **jamais** inférés. 🚨 valeur inconnue ou incohérente (coquille, `sso` sans `SSO_URL`, `basic` sans `BASIC_AUTH`, `oidc` sans `OIDC_ISSUER`/`OIDC_CLIENT_ID`/`OIDC_REDIRECT_URL`) → **le serveur refuse de démarrer** (jamais de repli sur le mode dev) |
 | `SSO_URL` | *(vide)* | endpoint SSO externe qui valide la session (cf. ci-dessous). **vide → mode dev** |
 | `COOKIE_NAME` | *(vide)* | nom du cookie contenant le jeton à proxifier au SSO (`""` = en-tête `Cookie` complet) |
-| `SSO_LOGIN_URL` | *(vide)* | URL de connexion SSO du bouton « Connexion » (écran d'accueil, si non authentifié) ; macro `${clbkUrl}` → URL courante encodée. Vide = pas de bouton |
+| `SSO_LOGIN_URL` | *(vide)* | URL de connexion SSO du bouton « Connexion » (écran d'accueil, si non authentifié) ; macro `${clbkUrl}` → URL courante encodée. Vide = pas de bouton — **sauf en mode `oidc`**, où elle se défaut sur `auth/login` (bouton fonctionnel sans configuration) |
 | `DEV_USER` | `dev` | nom de l'utilisateur factice en mode dev |
 | `AUTH_FORWARD_USER_HEADER` | `Remote-User` | mode `forward` : en-tête portant le **login** (requis — absent/vide ⇒ anonyme) |
 | `AUTH_FORWARD_EMAIL_HEADER` | `Remote-Email` | mode `forward` : en-tête de l'e-mail |
@@ -201,6 +201,12 @@ par défaut — `.open <base>.db` pour changer (chemins relatifs à `/data/docum
 | `AUTH_FORWARD_GROUPS_HEADER` | `Remote-Groups` | mode `forward` : en-tête des **groupes** (virgules) → table `groups` de `ROLES_FILE` |
 | `AUTH_FORWARD_SECRET` | *(vide)* | 🚨 mode `forward` : **secret partagé** proxy↔app (temps constant). Absent → le mode marche mais le boot **avertit** : l'app doit être joignable **uniquement** par le proxy |
 | `AUTH_FORWARD_SECRET_HEADER` | `X-Auth-Secret` | mode `forward` : en-tête portant ce secret |
+| `OIDC_ISSUER` | *(vide)* | mode `oidc` : **émetteur** de l'IdP (`https://keycloak.exemple/realms/infra`), servi en **HTTPS**. **Requis** |
+| `OIDC_CLIENT_ID` | *(vide)* | mode `oidc` : identifiant du client chez l'IdP. **Requis** |
+| `OIDC_REDIRECT_URL` | *(vide)* | 🚨 mode `oidc` : **URL publique absolue** du callback (`https://…/auth/callback`), déclarée à l'identique chez l'IdP. **Requise** — elle ne se devine pas derrière un reverse-proxy |
+| `OIDC_CLIENT_SECRET` | *(vide)* | mode `oidc` : secret d'un client confidentiel. Vide = client **public** (PKCE seul) |
+| `OIDC_SCOPES` | `openid profile email groups` | mode `oidc` : scopes demandés (`openid` forcé s'il manque). Réduire si l'IdP refuse `groups` |
+| `OIDC_COOKIE_SECURE` | `1` | mode `oidc` : attribut `Secure` des cookies. `0` = dev HTTP local **seulement** (WARN de boot) |
 | `ROLES_FILE` | `<DOCS_DIR>/roles.json` | **politique d'AUTORISATION** (rôles/permissions), fichier JSON relu **à chaud** ; **fail-closed** : absent/illisible → personne n'a de rôle, 403 partout sauf `GET /me` (cf. ci-dessous et `docs/auth.md`) |
 | `BOOTSTRAP_ADMIN_IDS` | *(vide)* | ids canoniques ou logins séparés par des **virgules** → rôle `admin`, **en plus** du fichier. Amorçage d'un déploiement neuf (sans lui, le premier administrateur serait verrouillé dehors) |
 | `DCMANAGER_SECRETS_KEY` | *(vide)* | passphrase de chiffrement des secrets stockés en base (coffre `SecretBox` **partagé**), **≥ 16 caractères**. Consommée par les modules **VM/Proxmox**, **clients wifi**, **réplication des interventions vers un tracker** et **notifications** ; absente → ces modules sont inactifs et leurs routes répondent **503 actionnable**, le serveur démarre quand même (les interventions, elles, restent pleinement fonctionnelles). La générer p. ex. par `openssl rand -base64 32` (cf. `README.md` § 4) |
@@ -208,8 +214,9 @@ par défaut — `.open <base>.db` pour changer (chemins relatifs à `/data/docum
 
 ### Authentification
 
-Quatre modes, sélectionnés par **`AUTH_MODE`** (`dev` | `basic` | `sso` | `forward`). Variable
+Cinq modes, sélectionnés par **`AUTH_MODE`** (`dev` | `basic` | `sso` | `forward` | `oidc`). Variable
 **absente** → inférence historique : `BASIC_AUTH` → basic, sinon `SSO_URL` → sso, sinon dev.
+`forward` et `oidc` ne sont **jamais** inférés : ils exigent une configuration délibérée.
 
 🚨 **Une `AUTH_MODE` inconnue ou incohérente empêche le démarrage** (erreur explicite dans les logs,
 scope `[auth]`). C'est voulu : le seul repli possible serait le mode dev, qui n'authentifie personne —
@@ -221,9 +228,11 @@ correction attendue.
 > spécifique (proxifier un cookie de session vers un endpoint qui renvoie `{ logged, adminRight,
 > expireDate }`, accès réservé à `adminRight = "SUPER_ADMIN"`). Elle n'est **probablement pas
 > pertinente pour la plupart des déploiements**. Pour un déploiement réel, privilégiez
-> **`AUTH_MODE=forward`** derrière un reverse-proxy *identity-aware* (section suivante) ; à défaut, la
-> **Basic Auth** (`BASIC_AUTH=user:pass`) protège un serveur sans infrastructure, et le mode dev
-> convient à un réseau de confiance. Un provider **OIDC** natif reste à venir.
+> **`AUTH_MODE=forward`** derrière un reverse-proxy *identity-aware* (section suivante), ou
+> **`AUTH_MODE=oidc`** si vous n'avez pas de proxy de ce type — l'application parle alors elle-même
+> OpenID Connect à votre IdP (section « Mode `oidc` »). À défaut, la **Basic Auth**
+> (`BASIC_AUTH=user:pass`) protège un serveur sans infrastructure, et le mode dev convient à un
+> réseau de confiance.
 
 L'app **ne gère pas l'auth** : le serveur **proxifie le jeton** (cookie `COOKIE_NAME`)
 au SSO externe (`SSO_URL`) qui renvoie l'utilisateur
@@ -247,6 +256,7 @@ Le refus est distingué par le **code HTTP**, car le client agit différemment :
   de votre SSO) et, si besoin, `COOKIE_NAME` (nom du cookie portant le jeton ; vide =
   en-tête `Cookie` complet). Ex. `SSO_URL: https://sso.example.com/validate`.
 - **Reverse-proxy identity-aware** (recommandé) : `AUTH_MODE=forward` — section suivante.
+- **OIDC natif** (pas de proxy identity-aware) : `AUTH_MODE=oidc` — section « Mode `oidc` ».
 
 Après modif du compose : `docker compose up -d` (recrée le conteneur).
 
@@ -327,6 +337,56 @@ curl -s -H "X-Auth-Secret: …" -H "Remote-User: jdupont" -H "Remote-Groups: grp
 
 Sans le bon `X-Auth-Secret`, la même requête renvoie `logged: false` : c'est le comportement
 attendu, et la preuve que le secret est bien exigé.
+
+### Mode `oidc` : l'application parle elle-même à votre IdP
+
+Pour les déploiements **sans** proxy *identity-aware*. L'application devient le *Relying Party* d'un
+OP (Keycloak, Entra ID, Authelia en mode OP, Authentik…) en flux **Authorization Code + PKCE**, et
+sert trois routes publiques : `/auth/login`, `/auth/callback`, `/auth/logout`.
+
+**Exemple minimal — Keycloak.** Dans le realm, créer un client :
+
+| Réglage Keycloak | Valeur |
+|---|---|
+| *Client ID* | `dcmanager` |
+| *Client authentication* | **Off** = client public (PKCE seul) · **On** = confidentiel (donne un secret) |
+| *Valid redirect URIs* | `https://dcmanager.exemple/auth/callback` — **exactement** `OIDC_REDIRECT_URL` |
+| *Valid post logout redirect URIs* | `https://dcmanager.exemple/` (la racine de l'app) |
+| *Client scopes* | ajouter un scope `groups` (mappeur *Group Membership*) si vous voulez les groupes |
+
+Puis, dans `docker-compose.yml` :
+
+```yaml
+environment:
+  AUTH_MODE: oidc
+  OIDC_ISSUER: https://keycloak.exemple/realms/infra
+  OIDC_CLIENT_ID: dcmanager
+  OIDC_REDIRECT_URL: https://dcmanager.exemple/auth/callback
+  # OIDC_CLIENT_SECRET: …            # seulement si le client est CONFIDENTIEL
+  # OIDC_SCOPES: openid profile email  # si l'IdP refuse le scope `groups` du défaut
+  BOOTSTRAP_ADMIN_IDS: "<le `sub` ou le login de votre compte>"   # amorçage du 1er administrateur
+```
+
+Les **groupes** de l'IdP se traduisent en rôles par la table `groups` de `ROLES_FILE`, exactement
+comme en mode `forward` (section « Autorisation » ci-dessous). Le bouton « Connexion » de l'écran
+d'accueil fonctionne **sans** `SSO_LOGIN_URL` : elle se défaut sur `auth/login`.
+
+**Ce qu'il faut savoir avant de déployer** :
+
+- 🚨 `OIDC_REDIRECT_URL` est **requise** et n'est pas devinée. Derrière un reverse-proxy à
+  sous-chemin, l'application ne connaît pas son URL publique ; une valeur fausse donne un
+  `redirect_uri_mismatch` côté IdP. Elle doit se terminer par `/auth/callback` (sinon : WARN de boot).
+- L'**émetteur doit être en HTTPS** — la découverte refuse un émetteur HTTP.
+- **Un redémarrage du serveur déconnecte tout le monde** : les sessions sont en mémoire (limite v1
+  assumée, cf. `docs/auth.md`). En pratique, le navigateur revient authentifié sans rien retaper, la
+  session de l'IdP survivant à la nôtre. **Plusieurs instances** derrière un répartiteur exigent des
+  sessions **collantes**, ou le mode `forward`.
+- **Pas de rafraîchissement de jeton** : la session vaut la durée de l'`id_token`, plafonnée à 12 h.
+- **IdP injoignable au démarrage ? Le serveur démarre quand même.** La découverte est réessayée en
+  tâche de fond ; en attendant, `/auth/login` répond **503 avec un message actionnable** (il nomme
+  `OIDC_ISSUER` et la dernière erreur) et `/api/me` répond « anonyme ». C'est le comportement voulu :
+  un IdP qui monte après nous ne doit pas empêcher le service de démarrer.
+- `OIDC_COOKIE_SECURE=0` n'est **que** pour du HTTP local — le boot l'avertit.
 
 ### Autorisation (rôles & permissions)
 

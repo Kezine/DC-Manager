@@ -1,4 +1,5 @@
 import { SecretCompare } from "./SecretCompare.js";   // comparaison à TEMPS CONSTANT du secret partagé (helper du dossier)
+import { GroupList } from "./GroupList.js";           // nettoyage des groupes — helper SORTI d'ici quand le mode oidc lui a donné un 2e consommateur
 import type { AuthProvider, AuthRequestView, SsoResult, SsoUser } from "./AuthProvider.js";
 
 /* =============================================================================
@@ -165,14 +166,17 @@ export class ForwardHeaderAuthProvider implements AuthProvider {
     return SecretCompare.equals(this.headerValue(req, this.secretHeader), this.secret);
   }
 
-  /** Groupes bruts de l'IdP : découpe sur la VIRGULE, valeurs rognées, vides écartées, doublons
-      fondus (mêmes règles que `FileRoleProvider.parseBootstrap` — une liste séparée par des
-      virgules se lit partout pareil dans ce dépôt, principe n°3). Aucun tri : l'ordre du proxy est
-      conservé, la politique n'en dépend pas et le cache de permissions trie de son côté. */
+  /** Groupes bruts de l'IdP, nettoyés par le helper PARTAGÉ `GroupList` (découpe sur la virgule,
+      rognage, vides écartées, doublons fondus, ordre conservé).
+
+      ⚠ La règle vivait ICI jusqu'à ce que le mode `oidc` en devienne le SECOND consommateur —
+      exactement le geste qui avait sorti `SecretCompare` du provider basic quand ce mode-ci est
+      arrivé. Elle ne pouvait pas rester dupliquée : les groupes deviennent des rôles par une
+      correspondance EXACTE et sensible à la casse (cf. `access/RolesConfig`), et deux nettoyages
+      qui divergeraient d'un rognage donneraient des droits différents selon le mode
+      d'authentification, sans que rien ne l'affiche. */
   private groupsOf(req: AuthRequestView): string[] {
-    const raw = this.headerValue(req, this.groupsHeader);
-    if (raw === "") return [];
-    return [...new Set(raw.split(",").map((g) => g.trim()).filter((g) => g !== ""))];
+    return GroupList.normalize(this.headerValue(req, this.groupsHeader));
   }
 
   /** Lecture d'un en-tête par son nom CONFIGURÉ — le SEUL point qui touche `req.headers`.

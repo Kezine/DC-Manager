@@ -297,8 +297,8 @@ module.exports = async () => {
 
     // -- Constantes exposées (citées par les messages et la doc). --
     ck.eq(AuthModeResolution.ENV_VAR, "AUTH_MODE", "nom de la variable d'environnement");
-    ck.eq([...AuthModeResolution.MODES].join(","), "dev,basic,sso,forward", "modes servis aujourd'hui");
-    ck.eq([...AuthModeResolution.PLANNED_MODES].join(","), "oidc", "modes PRÉVUS mais pas encore servis (message distinct d'une coquille)");
+    ck.eq([...AuthModeResolution.MODES].join(","), "dev,basic,sso,forward,oidc", "modes servis aujourd'hui (les CINQ — `oidc` livré au lot 5)");
+    ck.eq([...AuthModeResolution.PLANNED_MODES].join(","), "", "plus aucun mode « à venir » : `oidc`, son unique occupant, est servi (mécanisme conservé pour le suivant)");
 
     // -- ABSENTE : l'inférence historique, à l'identique (basic > sso > dev). --
     ck.eq(decide().mode, "dev", "rien de configuré → dev (défaut historique)");
@@ -326,7 +326,7 @@ module.exports = async () => {
     const refused = [
       ["frobnique", "valeur inconnue", { authMode: "frobnique" }],
       ["forwrad", "coquille sur un mode réel", { authMode: "forwrad" }],
-      ["oidc", "mode prévu, pas encore implémenté", { authMode: "oidc" }],
+      ["oidc", "oidc sans AUCUNE de ses trois variables", { authMode: "oidc" }],
       ["sso", "sso sans SSO_URL", { authMode: "sso" }],
       ["basic", "basic sans BASIC_AUTH exploitable", { authMode: "basic" }],
     ];
@@ -336,15 +336,45 @@ module.exports = async () => {
       ck(typeof decision.error === "string" && decision.error.length > 20, "REFUS (" + why + ") : un motif est donné");
       ck(decision.error.includes("AUTH_MODE"), "REFUS (" + why + ") : le message NOMME la variable fautive");
     }
-    ck(decide({ authMode: "oidc" }).error.includes("pas encore implémenté"), "message : « oidc » est annoncé comme À VENIR, pas comme une faute de frappe");
     ck(decide({ authMode: "frobnique" }).error.includes("inconnue"), "message : une valeur hors liste est annoncée comme inconnue");
-    ck(decide({ authMode: "frobnique" }).error.includes("dev, basic, sso, forward"), "message : les valeurs admises sont ÉNUMÉRÉES (message actionnable)");
+    ck(decide({ authMode: "frobnique" }).error.includes("dev, basic, sso, forward, oidc"), "message : les valeurs admises sont ÉNUMÉRÉES (message actionnable)");
     ck(decide({ authMode: "sso" }).error.includes("SSO_URL"), "message : la variable MANQUANTE est nommée (sso)");
     ck(decide({ authMode: "basic" }).error.includes("BASIC_AUTH"), "message : la variable MANQUANTE est nommée (basic)");
     ck(decide({ authMode: "frobnique" }).error.includes("Aucun repli sur le mode dev"), "message : la DOCTRINE est rappelée (sinon on « retire juste la variable »)");
     // Et surtout : une coquille NE profite PAS de l'inférence, même quand elle aurait de quoi.
     ck.eq(decide({ authMode: "frobnique", hasBasicCredentials: true, hasSsoUrl: true }).mode, null,
       "🚨 coquille + configuration complète → REFUS quand même (aucune retombée silencieuse sur l'inférence)");
+
+    /* -- MODE OIDC (lot 5) : trois exigences, refusées UNE À UNE.
+       Le refus séparé n'est pas un luxe de message : c'est presque toujours OIDC_REDIRECT_URL qu'on
+       oublie (elle n'a d'équivalent dans aucun autre mode), et un « configuration OIDC incomplète »
+       global ferait chercher dans trois variables à la fois. -- */
+    const oidcFull = { authMode: "oidc", hasOidcIssuer: true, hasOidcClientId: true, hasOidcRedirectUrl: true };
+    ck.eq(decide(oidcFull).mode, "oidc", "AUTH_MODE=oidc + les trois variables → mode oidc");
+    ck.eq(decide(oidcFull).error, null, "…et aucune erreur");
+    ck.eq(decide({ ...oidcFull, authMode: " OIDC " }).mode, "oidc", "rognage + casse tolérés, comme pour les autres modes");
+
+    const oidcMissing = [
+      ["OIDC_ISSUER", { ...oidcFull, hasOidcIssuer: false }],
+      ["OIDC_CLIENT_ID", { ...oidcFull, hasOidcClientId: false }],
+      ["OIDC_REDIRECT_URL", { ...oidcFull, hasOidcRedirectUrl: false }],
+    ];
+    for (const [variable, input] of oidcMissing) {
+      const decision = decide(input);
+      ck.eq(decision.mode, null, "🚨 oidc sans " + variable + " → REFUS de démarrer (aucun repli)");
+      ck(decision.error.includes(variable), "message : la variable MANQUANTE est nommée — " + variable);
+    }
+    // Ordre du diagnostic : la PREMIÈRE manquante est celle qu'on nomme (sinon le message parle
+    // d'une variable que l'exploitant a peut-être déjà renseignée).
+    ck(decide({ authMode: "oidc" }).error.includes("OIDC_ISSUER"), "aucune des trois → le message commence par OIDC_ISSUER");
+    ck(decide({ authMode: "oidc", hasOidcIssuer: true }).error.includes("OIDC_CLIENT_ID"), "issuer seul → le message réclame OIDC_CLIENT_ID");
+    // La redirection est le piège du mode : le message doit DIRE pourquoi elle ne peut pas être devinée.
+    const noRedirect = decide({ ...oidcFull, hasOidcRedirectUrl: false }).error;
+    ck(noRedirect.includes("devinée") || noRedirect.includes("deviner"), "message : dit que l'URL publique ne peut pas être DEVINÉE (reverse-proxy)");
+    ck(noRedirect.includes("IdP"), "message : rappelle qu'elle doit être déclarée à l'identique chez l'IdP");
+    // 🚨 Et jamais d'inférence vers oidc : le mode exige une configuration délibérée, comme forward.
+    ck.eq(decide({ hasOidcIssuer: true, hasOidcClientId: true, hasOidcRedirectUrl: true }).mode, "dev",
+      "🚨 les trois variables OIDC SANS AUTH_MODE → dev (oidc n'est JAMAIS inféré, comme forward)");
   });
 
   /* ==========================================================================

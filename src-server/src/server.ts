@@ -4,6 +4,7 @@ import fs from "node:fs";
 import { Api, type ApiExtension } from "./api.js";
 import { DocumentStore } from "./documents.js";
 import { Auth } from "./auth.js";
+import { OidcRoutes } from "./auth/OidcRoutes.js";   // POUR SES CHEMINS — le flux lui-même ne connaît pas Express (cf. mountOidcRoutes)
 import { LiveBus } from "./live.js";
 import { Logger } from "./logger.js";
 import type { UserResolver } from "./users/UserResolver.js";   // annuaire utilisateurs (service CORE injecté dans Api)
@@ -29,12 +30,34 @@ export class Server {
     if (opts.auth.mode === "basic") this.app.use(this.basicGate);   // gate Basic Auth (dev) sur TOUT (sauf /healthz)
     this.app.use(express.json({ limit: "128mb" }));   // /snapshot et /transact peuvent être volumineux
     this.app.get("/healthz", (_req, res) => { res.json({ ok: true }); });
+    this.mountOidcRoutes();
     this.app.use(opts.apiBase, new Api(opts.docs, opts.auth, opts.live, opts.resolver, opts.access, opts.extensions || []).router());
     this.app.use(opts.apiBase, (_req, res) => { res.status(404).json({ error: "endpoint inconnu" }); });   // 404 API
     this.app.get(["/", "/dc-manager.html", "/index.html"], this.serveClient);
     this.app.use(express.static(opts.clientDir, { index: false }));   // assets éventuels (build multi-fichiers en dev)
     this.app.get("*", this.serveClient);                              // fallback SPA → HTML client
     this.app.use(this.errorHandler);                                  // exceptions non gérées → 500 + log
+  }
+
+  /** Monte le flux OIDC (`/auth/login`, `/auth/callback`, `/auth/logout`) quand c'est le mode
+      retenu — sinon rien du tout, et ces chemins retombent sur le fallback SPA comme avant.
+
+      🚨 HORS de la garde d'API, et AVANT elle, exactement comme `/healthz` : ces routes doivent
+      être joignables par quelqu'un qui n'est PAS authentifié — une route de connexion derrière une
+      garde d'authentification serait un verrou dont la clé est à l'intérieur. Elles sont donc aussi
+      hors du champ du verrou d'exhaustivité des gardes (`Tests/modules/test-access.js`), qui relit
+      `api.ts` et les routeurs de modules ; c'est documenté dans docs/auth.md § 6.3.
+
+      Le BRANCHEMENT seul vit ici (l'idiome des « fins branchements » du principe n°2) : tout le
+      flux — génération de state/nonce/PKCE, vérifications, cookies — est dans `auth/OidcRoutes`,
+      qui ne connaît pas Express et reste donc testable sans monter de serveur. */
+  private mountOidcRoutes(): void {
+    const routes = this.opts.auth.oidcRoutes;
+    if (!routes) return;
+    this.app.get(OidcRoutes.PATH_LOGIN, (req, res) => { void routes.login(req, res); });
+    this.app.get(OidcRoutes.PATH_CALLBACK, (req, res) => { void routes.callback(req, res); });
+    this.app.get(OidcRoutes.PATH_LOGOUT, (req, res) => { void routes.logout(req, res); });
+    this.log.info("auth", "flux OIDC monté :", [OidcRoutes.PATH_LOGIN, OidcRoutes.PATH_CALLBACK, OidcRoutes.PATH_LOGOUT].join(" "));
   }
 
   /** Log une ligne par requête à la fin (méthode, URL, code, durée). Niveau selon le statut ; healthcheck en trace. */

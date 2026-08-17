@@ -7,11 +7,16 @@ import { DevAuthProvider } from "./auth/DevAuthProvider.js";
 import { BasicAuthProvider } from "./auth/BasicAuthProvider.js";
 import { LegacySsoAuthProvider } from "./auth/LegacySsoAuthProvider.js";
 import { ForwardHeaderAuthProvider, type ForwardHeaderOptions } from "./auth/ForwardHeaderAuthProvider.js";
+import { OidcAuthProvider } from "./auth/OidcAuthProvider.js";
+import { OidcSessionStore } from "./auth/OidcSessionStore.js";
+import { OidcRoutes } from "./auth/OidcRoutes.js";
+import type { OidcOptions } from "./auth/OidcConfig.js";
+import type { OidcClaims, OidcClientFactory } from "./auth/OidcClientPort.js";
 
 /* AUTHENTIFICATION — ORCHESTRATEUR.
 
    Cette classe ne SAIT PAS authentifier : elle CHOISIT au boot le provider qui sait
-   (`auth/AuthProvider` — dev, basic, SSO maison, en-têtes de proxy, et demain OIDC), puis lui
+   (`auth/AuthProvider` — dev, basic, SSO maison, en-têtes de proxy, OIDC), puis lui
    ajoute les trois services transverses qui ne dépendent d'AUCUN mode :
    1. le CACHE de session (clé = hash du jeton présenté, durée = `expireDate`), qui évite un
       appel sortant par requête HTTP ;
@@ -38,9 +43,10 @@ export type { SsoUser, SsoResult } from "./auth/AuthProvider.js";
 export type { AuthMode } from "./auth/AuthModeResolution.js";
 
 export interface AuthOptions {
-  /** Mode EXPLICITE (`AUTH_MODE`) : `dev` | `basic` | `sso` | `forward`. Absent/vide → INFÉRENCE
-      historique (basic > sso > dev). Une valeur inconnue ou incohérente fait JETER le constructeur
-      — jamais de repli silencieux sur le mode dev (cf. `auth/AuthModeResolution`). */
+  /** Mode EXPLICITE (`AUTH_MODE`) : `dev` | `basic` | `sso` | `forward` | `oidc`. Absent/vide →
+      INFÉRENCE historique (basic > sso > dev ; `forward` et `oidc` ne sont JAMAIS inférés — ils
+      exigent une configuration délibérée). Une valeur inconnue ou incohérente fait JETER le
+      constructeur — jamais de repli silencieux sur le mode dev (cf. `auth/AuthModeResolution`). */
   authMode?: string | null;
   ssoUrl?: string;
   cookieName?: string;
@@ -49,6 +55,17 @@ export interface AuthOptions {
   /** Configuration du mode `forward` (noms d'en-têtes + secret partagé) — lue de l'environnement par
       `ForwardHeaderAuthProvider.optionsFromEnv`, qui possède les noms de variables. */
   forward?: ForwardHeaderOptions;
+  /** Configuration du mode `oidc` — lue de l'environnement par `OidcConfig.optionsFromEnv`, qui
+      possède les six noms de variables. */
+  oidc?: OidcOptions;
+  /** Fabrique de la couche `openid-client`, INJECTÉE par le bootstrap.
+
+      🚨 Elle est injectée, et non importée ici, pour une raison structurelle : `openid-client` est
+      ESM pur et absent des `node_modules` de la RACINE, où le programme de test compile `auth.ts`
+      en CommonJS. Un import direct sortirait l'orchestrateur du champ des tests — précisément ce
+      qu'on veut continuer d'éprouver. Même geste que le driver SQLite injecté dans `DocumentStore`.
+      En test, un bouchon la remplace et aucun réseau n'est touché. */
+  oidcClientFactory?: OidcClientFactory;
   /** `fetch` du provider SSO — point d'injection de TEST (aucune variable d'environnement ne le
       pilote), patron `notify/WebhookNotifier`. Absent = le `fetch` global. */
   ssoFetch?: typeof fetch;
@@ -70,6 +87,12 @@ export class Auth {
   private readonly basicProvider: BasicAuthProvider | null;
   readonly mode: AuthMode;
 
+  /** Routes du flux OIDC quand c'est le mode retenu, `null` sinon. `server.ts` les monte HORS de la
+      garde d'API (comme `/healthz`) : une route de connexion derrière une garde d'authentification
+      serait un verrou dont la clé est à l'intérieur. Exposées en lecture — le serveur BRANCHE, il
+      ne décide pas ; c'est l'orchestrateur qui sait s'il y a un flux à servir. */
+  readonly oidcRoutes: OidcRoutes | null = null;
+
   /** @param sink  Puits de profils OPTIONNEL (annuaire) : Auth y pousse chaque profil authentifié
       (`remember`) sans connaître l'implémentation, câblée au bootstrap (index.ts). Découplage
       total — cf. ProfileSink.
@@ -84,7 +107,18 @@ export class Auth {
     const basic = BasicAuthProvider.fromSpec(opts.basicAuth);
     // MODE : `AUTH_MODE` si elle est renseignée, sinon l'inférence historique (basic > sso > dev).
     // La décision est PURE et testée à part ; ici on ne fait qu'en tirer les conséquences.
-    const decision = AuthModeResolution.resolve({ authMode: opts.authMode, hasBasicCredentials: basic !== null, hasSsoUrl: ssoUrl !== "" });
+    const oidc = opts.oidc;
+    const decision = AuthModeResolution.resolve({
+      authMode: opts.authMode,
+      hasBasicCredentials: basic !== null,
+      hasSsoUrl: ssoUrl !== "",
+      // Les trois exigences du mode OIDC. `OidcConfig` a déjà rogné : « renseignée » se réduit donc
+      // ici à « non vide », et la règle de FORMAT reste chez celui qui la connaît (même partage que
+      // `BasicAuthProvider.fromSpec` ⇄ `hasBasicCredentials`).
+      hasOidcIssuer: !!oidc && oidc.issuer !== "",
+      hasOidcClientId: !!oidc && oidc.clientId !== "",
+      hasOidcRedirectUrl: !!oidc && oidc.redirectUrl !== "",
+    });
     if (!decision.mode) throw new Error(decision.error || "mode d'authentification indéterminable");
     this.mode = decision.mode;
     this.basicProvider = this.mode === "basic" ? basic : null;
@@ -112,6 +146,38 @@ export class Auth {
           this.log.warn("auth", "⚠ mode FORWARD sans " + ForwardHeaderAuthProvider.ENV_SECRET
             + " : les en-têtes d'identité sont crus SANS preuve — l'application doit être joignable UNIQUEMENT par le proxy"
             + " (bind localhost / réseau privé), sinon tout client direct peut se déclarer administrateur.");
+        }
+        break;
+      }
+      case "oidc": {
+        // INATTEIGNABLE : la résolution refuse « oidc » sans issuer/client/redirect. Dit tout de
+        // même, plutôt qu'un `!` de complaisance — même forme que la branche basic ci-dessus.
+        if (!oidc) throw new Error("mode oidc sélectionné sans configuration exploitable (OIDC_ISSUER / OIDC_CLIENT_ID / OIDC_REDIRECT_URL)");
+        // 🚨 FAIL-CLOSED : sans couche `openid-client` injectée, il n'y a pas de flux possible. On
+        // REFUSE de construire plutôt que de monter un mode oidc muet — qui n'authentifierait
+        // personne tout en annonçant qu'il protège l'instance (même doctrine que le refus de repli
+        // sur le mode dev). Seul un câblage fautif peut produire ce cas : `index.ts` l'injecte
+        // toujours, et les tests fournissent un bouchon.
+        if (!opts.oidcClientFactory) throw new Error("mode oidc sélectionné sans couche openid-client injectée (oidcClientFactory) — câblage du bootstrap incomplet");
+        // Le store est PARTAGÉ entre le provider (qui lit) et les routes (qui créent et détruisent) :
+        // c'est la seule chose qu'ils ont en commun, et elle est injectée dans les deux plutôt
+        // qu'importée par l'un chez l'autre.
+        const sessions = new OidcSessionStore<OidcClaims>();
+        this.provider = new OidcAuthProvider(sessions);
+        const oidcClient = opts.oidcClientFactory({
+          issuer: oidc.issuer, clientId: oidc.clientId, clientSecret: oidc.clientSecret,
+          scopes: oidc.scopes, redirectUrl: oidc.redirectUrl,
+        });
+        this.oidcRoutes = new OidcRoutes(oidcClient, sessions, { redirectUrl: oidc.redirectUrl, cookieSecure: oidc.cookieSecure }, log);
+        this.log.info("auth", "OIDC : émetteur " + oidc.issuer + ", client " + oidc.clientId
+          + (oidc.clientSecret ? " (confidentiel)" : " (PUBLIC — PKCE seul, aucun secret client)")
+          + ", callback " + oidc.redirectUrl + ", scopes « " + oidc.scopes + " »");
+        // Le cookie de session est un PORTEUR D'IDENTITÉ. Sans `Secure`, il circule en clair et
+        // s'intercepte sur le réseau : le dire aussi fort que le WARN du mode forward sans secret,
+        // parce que c'est le même genre de trou — et parce que le défaut, lui, est sûr (`1`).
+        if (!oidc.cookieSecure) {
+          this.log.warn("auth", "⚠ OIDC_COOKIE_SECURE=0 : le cookie de session est posé SANS l'attribut Secure"
+            + " — il circulera en clair et pourra être intercepté. Réservé au développement en HTTP local.");
         }
         break;
       }

@@ -5,6 +5,9 @@ import { type SqliteCtor } from "./db.js";
 import { DocumentStore } from "./documents.js";
 import { Auth } from "./auth.js";
 import { ForwardHeaderAuthProvider } from "./auth/ForwardHeaderAuthProvider.js";   // mode forward : le provider POSSÈDE les noms de ses variables (optionsFromEnv)
+import { OidcConfig } from "./auth/OidcConfig.js";   // mode oidc : idem — les SIX noms de variables OIDC n'existent que là
+import { OidcRoutes } from "./auth/OidcRoutes.js";   // POUR SA VALEUR DE `loginUrl` par défaut (le module possède ses chemins)
+import { OpenIdClientAdapter } from "./auth/OpenIdClientAdapter.js";   // SEUL importeur d'`openid-client` — injecté dans Auth, jamais importé par elle
 import { LiveBus } from "./live.js";
 import { Server } from "./server.js";
 import { Logger } from "./logger.js";
@@ -45,6 +48,12 @@ const BASIC_AUTH = process.env.BASIC_AUTH || null;                // "user:pass"
 // _GROUPS_HEADER (défauts Remote-*) + secret partagé AUTH_FORWARD_SECRET (+ _SECRET_HEADER). Les six
 // noms vivent DANS le provider (source unique) : le bootstrap ne fait que lui passer l'environnement.
 const FORWARD_OPTIONS = ForwardHeaderAuthProvider.optionsFromEnv(process.env);
+// Mode OIDC (AUTH_MODE=oidc) : l'application est elle-même le RP d'un OP (Keycloak, Entra ID,
+// Authelia en mode OP…) en flux Authorization Code + PKCE. OIDC_ISSUER / OIDC_CLIENT_ID /
+// OIDC_REDIRECT_URL sont REQUIS (refus de démarrer sinon) ; OIDC_CLIENT_SECRET est optionnel
+// (client public + PKCE) ; OIDC_SCOPES et OIDC_COOKIE_SECURE ont des défauts. Les six noms vivent
+// DANS OidcConfig (source unique) : le bootstrap ne fait que lui passer l'environnement.
+const OIDC_OPTIONS = OidcConfig.optionsFromEnv(process.env);
 
 const log = Logger.fromEnv();
 // Annuaire utilisateurs (service CORE, aucune clé d'environnement requise) : snapshot « dernier profil vu »
@@ -62,9 +71,19 @@ const userResolver = new AuthCacheUserResolver(usersDb, log.child("users"));
 // le mode dev — qui n'authentifie personne. Mieux vaut un service qui ne monte pas qu'un service
 // grand ouvert que l'exploitant croit protégé (anti fail-open). Le message est ACTIONNABLE : il
 // nomme la variable et la correction attendue.
+// La couche `openid-client` est CONSTRUITE ICI et injectée : `auth.ts` n'importe donc jamais le
+// paquet (ESM pur, absent des node_modules de la racine où le programme de test compile en
+// CommonJS) et reste testable. La fabrique n'est appelée QUE dans la branche `oidc` d'`Auth` — un
+// déploiement dans les quatre autres modes ne construit rien et ne touche aucun réseau.
+// La référence est retenue pour l'ARRÊT PROPRE (minuteurs de réessai de découverte, plus bas).
+let oidcAdapter: OpenIdClientAdapter | null = null;
 function buildAuth(): Auth {
   try {
-    return new Auth(log.child("auth"), { authMode: AUTH_MODE, ssoUrl: SSO_URL, cookieName: COOKIE_NAME, devUser: DEV_USER, basicAuth: BASIC_AUTH, forward: FORWARD_OPTIONS }, userResolver);
+    return new Auth(log.child("auth"), {
+      authMode: AUTH_MODE, ssoUrl: SSO_URL, cookieName: COOKIE_NAME, devUser: DEV_USER, basicAuth: BASIC_AUTH,
+      forward: FORWARD_OPTIONS, oidc: OIDC_OPTIONS,
+      oidcClientFactory: (options) => (oidcAdapter = new OpenIdClientAdapter(options, log.child("auth"))),
+    }, userResolver);
   } catch (e) {
     log.child("auth").error("configuration d'AUTHENTIFICATION invalide — le serveur NE DÉMARRE PAS", e instanceof Error ? e.message : String(e));
     process.exit(1);
@@ -171,7 +190,16 @@ const interventions = InterventionsModule.create({ docs, live, dataDir: DOCS_DIR
 const trackerModule = TrackerModule.create({ docs, interventions, live, dataDir: DOCS_DIR, sqlite: Database as unknown as SqliteCtor, access, log: log.child("tracker"),
   problems: { raise: (k, e) => notify.raise(k, e), resolve: (k) => notify.resolve(k) } });
 tracker = trackerModule;
-new Server({ docs, auth, live, resolver: userResolver, access, clientDir: CLIENT_DIR, apiBase: API_BASE, loginUrl: SSO_LOGIN_URL, log, extensions: [vm.extension(), wifi.extension(), notify.extension(), certs.extension(), interventions.extension(), trackerModule.extension()] }).listen(PORT);
+// BOUTON « Connexion » de l'écran d'accueil : le client l'affiche dès qu'une `loginUrl` lui est
+// injectée. En mode OIDC, l'application SAIT où est sa propre route de connexion — exiger en plus
+// que l'exploitant recopie SSO_LOGIN_URL serait une configuration redondante, et une occasion de
+// se tromper. On défaut donc sur la route servie, en valeur RELATIVE (« auth/login », sans slash
+// initial) : les URLs du client sont ancrées sur le <base> du HTML, exactement comme `apiBaseUrl`
+// que server.ts dérive de la même façon — c'est ce qui fait marcher le déploiement en sous-dossier
+// (cf. docs/reverse-proxy.md). SSO_LOGIN_URL, si elle est renseignée, reste PRIORITAIRE : un
+// exploitant qui veut passer par une page intermédiaire garde la main.
+const LOGIN_URL = SSO_LOGIN_URL || (auth.mode === "oidc" ? OidcRoutes.DEFAULT_CLIENT_LOGIN_URL : "");
+new Server({ docs, auth, live, resolver: userResolver, access, clientDir: CLIENT_DIR, apiBase: API_BASE, loginUrl: LOGIN_URL, log, extensions: [vm.extension(), wifi.extension(), notify.extension(), certs.extension(), interventions.extension(), trackerModule.extension()] }).listen(PORT);
 vm.start();   // synchros périodiques (interval_sec > 0) — après l'écoute : le serveur répond pendant une 1re synchro lente
 wifi.start();   // synchros périodiques des clients wifi — même raison que vm.start()
 notify.start();   // timer de rappels (tick 60 s, unref) — après l'écoute, comme vm
@@ -196,6 +224,9 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
     try { interventions.stop(); } catch (e) { log.warn("interventions.stop a échoué", (e as any) && (e as any).message); }
     try { trackerModule.stop(); } catch (e) { log.warn("tracker.stop a échoué", (e as any) && (e as any).message); }
     try { roleProvider.stop(); } catch (e) { log.warn("roleProvider.stop a échoué", (e as any) && (e as any).message); }
+    // Minuteurs de réessai de la découverte OIDC (déjà `unref`és — ceinture et bretelles, comme
+    // pour les autres modules : l'arrêt propre ne doit dépendre d'aucun réglage de minuteur).
+    try { oidcAdapter?.stop(); } catch (e) { log.warn("oidcAdapter.stop a échoué", (e as any) && (e as any).message); }
     try { usersDb?.close(); } catch (e) { log.warn("usersDb.close a échoué", (e as any) && (e as any).message); }
     try { docs.closeAll(); } catch (e) { log.warn("closeAll a échoué", (e as any) && (e as any).message); }
     process.exit(0);

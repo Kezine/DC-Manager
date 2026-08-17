@@ -167,6 +167,23 @@
     "src-server/src/auth/LegacySsoAuthProvider.ts",
     "src-server/src/auth/ForwardHeaderAuthProvider.ts",
     "src-server/src/auth/SecretCompare.ts",
+    // Mode OIDC (lot 5) — l'application est elle-même le RP d'un OP. Les CINQ fichiers ci-dessous
+    // sont testables sans réseau ET sans le paquet `openid-client` : le flux ne parle à la
+    // librairie qu'à travers le contrat `auth/OidcClientPort` (types seuls, tiré transitivement),
+    // qu'un BOUCHON remplace en test. `OidcRoutes` suit pour cela la doctrine d'`AccessControl` —
+    // il déclare ses propres vues minimales de requête/réponse et n'importe pas Express.
+    // 🚨 `auth/OpenIdClientAdapter.ts` est le SEUL fichier de `auth/` ABSENT de cette liste, et il
+    // doit le rester : il importe `openid-client`, paquet ESM PUR qui n'est pas installé à la
+    // racine — l'ajouter ici casserait la compilation du programme de test (CommonJS).
+    "src-server/src/auth/OidcConfig.ts",
+    "src-server/src/auth/OidcSessionStore.ts",
+    "src-server/src/auth/OidcAuthProvider.ts",
+    "src-server/src/auth/OidcRoutes.ts",
+    // Helpers du dossier, chacun SORTI d'un provider le jour où un second consommateur est apparu
+    // (même geste que `SecretCompare` au lot 4) : nettoyage des groupes (forward + oidc) et
+    // composition/lecture des en-têtes de cookie (provider + routes oidc).
+    "src-server/src/auth/GroupList.ts",
+    "src-server/src/auth/CookieHeader.ts",
     // CONTRÔLE D'ACCÈS (service CORE, lot 1 auth/ACL) — testable SANS Express : `access/` déclare ses
     // propres vues minimales de la requête/réponse (cf. AccessControl), donc aucune dépendance runtime
     // n'entre ici. `RolesConfig` est PUR (JSON → politique) ; `FileRoleProvider` touche `node:fs`

@@ -17,10 +17,11 @@
 
    ── 🚨 Pourquoi une valeur douteuse REFUSE de démarrer ────────────────────
    Le mode `dev` n'authentifie PERSONNE (tout appelant y est SUPER_ADMIN). Si
-   une coquille (`AUTH_MODE=forwrad`), un mode pas encore implémenté
-   (`AUTH_MODE=oidc`) ou une configuration incomplète (`AUTH_MODE=sso` sans
-   `SSO_URL`) retombait EN SILENCE sur l'inférence, un déploiement se croirait
-   protégé et serait grand ouvert : c'est exactement l'anti-pattern FAIL-OPEN.
+   une coquille (`AUTH_MODE=forwrad`), un mode pas encore implémenté (la liste
+   `PLANNED_MODES`, vide depuis l'arrivée d'`oidc`) ou une configuration
+   incomplète (`AUTH_MODE=sso` sans `SSO_URL`, `AUTH_MODE=oidc` sans
+   `OIDC_ISSUER`) retombait EN SILENCE sur l'inférence, un déploiement se
+   croirait protégé et serait grand ouvert : c'est l'anti-pattern FAIL-OPEN.
    D'où la forme du résultat : `mode: null` quand la configuration est
    incohérente — il n'existe alors AUCUN mode, et pas « le mode par défaut ».
    L'appelant n'a structurellement rien à monter, il ne peut que s'arrêter.
@@ -29,14 +30,17 @@
    le WARN de l'orchestrateur le crie comme aujourd'hui.
    ============================================================================= */
 
-/** Modes d'authentification servis par un provider de `auth/`. `oidc` viendra (cf. `PLANNED_MODES`). */
-export type AuthMode = "dev" | "basic" | "sso" | "forward";
+/** Modes d'authentification servis par un provider de `auth/` — les CINQ sont implémentés. */
+export type AuthMode = "dev" | "basic" | "sso" | "forward" | "oidc";
 
-/** Les trois faits d'environnement dont la décision dépend — et rien d'autre.
+/** Les faits d'environnement dont la décision dépend — et rien d'autre.
 
     ⚠ On ne passe PAS ici la valeur brute de `BASIC_AUTH` : la règle de FORMAT d'un couple
     `user:pass` appartient à `BasicAuthProvider.fromSpec` (« la valeur ne décrit pas un couple » et
-    « pas de mode basic » y sont la même réponse). La dupliquer ici la ferait dériver. */
+    « pas de mode basic » y sont la même réponse). La dupliquer ici la ferait dériver. Même
+    discipline pour OIDC : on ne reçoit que des DRAPEAUX « cette valeur est-elle renseignée ? »,
+    la normalisation (rognage, défauts, scopes) restant chez `OidcConfig`. Cette décision doit
+    pouvoir se tester sans rien construire — c'est toute sa raison d'être. */
 export interface AuthModeInput {
   /** Valeur BRUTE de `AUTH_MODE` (rognée et mise en minuscules ici). Vide/absente → inférence. */
   authMode?: string | null;
@@ -44,6 +48,13 @@ export interface AuthModeInput {
   hasBasicCredentials?: boolean;
   /** `SSO_URL` est-elle renseignée (déjà rognée par l'appelant) ? */
   hasSsoUrl?: boolean;
+  /** `OIDC_ISSUER` est-elle renseignée ? */
+  hasOidcIssuer?: boolean;
+  /** `OIDC_CLIENT_ID` est-elle renseignée ? */
+  hasOidcClientId?: boolean;
+  /** `OIDC_REDIRECT_URL` est-elle renseignée ? Elle est REQUISE et ne se devine pas (l'URL publique
+      derrière un reverse-proxy à sous-chemin nous est inconnue — cf. `OidcConfig`). */
+  hasOidcRedirectUrl?: boolean;
 }
 
 /** Décision de configuration. `mode: null` ⇔ `error` renseignée : les deux ne se croisent jamais. */
@@ -59,12 +70,17 @@ export class AuthModeResolution {
   static readonly ENV_VAR = "AUTH_MODE";
 
   /** Modes ACCEPTÉS aujourd'hui, dans l'ordre où on les présente à l'exploitant. */
-  static readonly MODES: readonly AuthMode[] = ["dev", "basic", "sso", "forward"];
+  static readonly MODES: readonly AuthMode[] = ["dev", "basic", "sso", "forward", "oidc"];
 
   /** Modes PRÉVUS mais pas encore servis par un provider. Les distinguer d'une faute de frappe n'est
       pas cosmétique : le message dit « pas encore implémenté » au lieu de « inconnu », donc
-      l'exploitant qui a lu la feuille de route ne cherche pas une coquille inexistante. */
-  static readonly PLANNED_MODES: readonly string[] = ["oidc"];
+      l'exploitant qui a lu la feuille de route ne cherche pas une coquille inexistante.
+
+      ⚠ VIDE depuis la livraison du mode `oidc`, son unique occupant — et le mécanisme est CONSERVÉ
+      délibérément : c'est le point d'accroche du prochain mode annoncé avant d'être servi, et le
+      remettre coûterait plus cher que de le laisser (il est couvert par un test qui vaut aussi
+      contrôle de non-régression sur le message « inconnu »). */
+  static readonly PLANNED_MODES: readonly string[] = [];
 
   /** Décide du mode à monter. Ne jette JAMAIS : l'appelant reçoit soit un mode, soit un motif. */
   static resolve(input: AuthModeInput = {}): AuthModeDecision {
@@ -87,6 +103,19 @@ export class AuthModeResolution {
     }
     if (asked === "sso" && !input.hasSsoUrl) {
       return AuthModeResolution.refuse('« sso » exige SSO_URL (endpoint de validation de la session)');
+    }
+    // OIDC : TROIS valeurs sans lesquelles le mode ne peut pas fonctionner, refusées UNE À UNE pour
+    // que le message nomme celle qui manque. Un refus groupé (« configuration OIDC incomplète »)
+    // ferait chercher l'exploitant dans trois variables à la fois — or c'est presque toujours la
+    // troisième qu'on oublie, l'URL de redirection n'ayant aucun équivalent dans les autres modes.
+    if (asked === "oidc") {
+      if (!input.hasOidcIssuer) return AuthModeResolution.refuse('« oidc » exige OIDC_ISSUER (émetteur de l\'IdP, ex. https://keycloak.exemple/realms/infra)');
+      if (!input.hasOidcClientId) return AuthModeResolution.refuse('« oidc » exige OIDC_CLIENT_ID (identifiant du client déclaré chez l\'IdP)');
+      if (!input.hasOidcRedirectUrl) {
+        return AuthModeResolution.refuse('« oidc » exige OIDC_REDIRECT_URL (URL PUBLIQUE ABSOLUE du callback, ex.'
+          + ' https://dcmanager.exemple/auth/callback — elle ne peut pas être devinée derrière un reverse-proxy'
+          + ' et doit être déclarée à l\'identique chez l\'IdP)');
+      }
     }
     return { mode: asked as AuthMode, error: null };
   }

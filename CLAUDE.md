@@ -310,13 +310,31 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   `Auth` (`auth.ts` : cache par hash de jeton via `sessionKey?` du provider, capture annuaire, annonce du
   mode) + UN provider PAR mode dans `auth/` — `Dev`/`Basic`/`LegacySso`/`ForwardHeader`, contrat
   `AuthProvider` à vue MINIMALE de requête sans Express (testables en isolation), le type de session RESTE
-  `SsoResult` (passthrough `/me`, champ `groups?` rempli par le provider d'en-têtes) ; **`AUTH_MODE`**
-  explicite `dev|basic|sso|forward` — absente = inférence historique inchangée, 🚨 valeur inconnue ou
-  incohérente = **REFUS DE DÉMARRER** (jamais de repli sur le mode dev, qui n'authentifie personne :
-  anti fail-open), décision PURE `auth/AuthModeResolution` ; **mode FORWARD** = reverse-proxy
+  `SsoResult` (passthrough `/me`, champ `groups?` rempli par les providers d'en-têtes et OIDC) ; **`AUTH_MODE`**
+  explicite `dev|basic|sso|forward|oidc` — absente = inférence historique inchangée (`forward` et `oidc` ne sont
+  JAMAIS inférés), 🚨 valeur inconnue ou incohérente = **REFUS DE DÉMARRER** (jamais de repli sur le mode dev,
+  qui n'authentifie personne : anti fail-open), décision PURE `auth/AuthModeResolution` ;
+  **mode OIDC** = l'application est elle-même le RP d'un OP (Keycloak/Entra/Authelia — flux *Authorization
+  Code + PKCE*, UNE dépendance npm `openid-client` dans `src-server/`) : TROIS responsabilités —
+  `auth/OidcSessionStore` (sessions EN MÉMOIRE, id 32 o, TTL/purge/plafond, `nowMs` injectable ; 🚨 redémarrage
+  = déconnexion + multi-instances exige des sessions collantes, limites ASSUMÉES), `auth/OidcAuthProvider`
+  (cookie `dcm_oidc_session` → store → `SsoResult`, `user.id = String(sub)`, ni `sessionKey` — une session
+  DÉTRUITE ne doit pas survivre — ni `adminRight`), `auth/OidcRoutes` (login/callback/logout, `state`+`nonce`+PKCE
+  en cookie de transaction court, 🚨 `state` comparé à TEMPS CONSTANT AVANT tout appel sortant, cookies
+  HttpOnly/SameSite=Lax/Secure aux MÊMES attributs à la pose et à l'effacement) ; la librairie vit derrière le
+  port INJECTABLE `auth/OidcClientPort` dont `auth/OpenIdClientAdapter` est la SEULE implémentation et le SEUL
+  fichier de `auth/` hors `tsconfig.node.json` (paquet ESM PUR absent de la racine) — d'où un flux TESTABLE par
+  bouchon, sans réseau ; routes montées par `server.ts` HORS garde d'API comme `/healthz` (donc hors du verrou
+  d'exhaustivité, documenté § 6.3) ; `OIDC_REDIRECT_URL` PUBLIQUE ABSOLUE REQUISE (ne se devine pas derrière un
+  proxy à sous-chemin ; aucun en-tête réseau n'entre dans l'URL de callback) ; OP injoignable au boot = serveur
+  DÉMARRE + 503 actionnable (patron des modules à clé absente), déconnexion locale INCONDITIONNELLE ;
+  `SSO_LOGIN_URL` vide en mode oidc se défaut sur `auth/login` (RELATIF, ancré sur le `<base>`) ; PAS de refresh
+  en v1 (rotation + concurrence = fragile, arbitrage documenté) ; **mode FORWARD** = reverse-proxy
   *identity-aware* (Authelia/Authentik/oauth2-proxy/Cloudflare/Tailscale), en-têtes configurables
   (défauts `Remote-*`), 🚨 secret partagé `AUTH_FORWARD_SECRET` comparé à TEMPS CONSTANT
-  (`auth/SecretCompare`, partagé avec basic) — secret refusé ⇒ anonyme SANS lire le moindre autre
+  (`auth/SecretCompare`, partagé avec basic et le `state` OIDC ; les groupes le sont par `auth/GroupList`,
+  extrait quand oidc a donné un 2e consommateur à forward — MÊME règle de nettoyage des deux côtés, sans quoi
+  un même utilisateur n'aurait pas les mêmes rôles selon son mode) — secret refusé ⇒ anonyme SANS lire le moindre autre
   en-tête, secret absent ⇒ WARN de boot (l'app doit être joignable UNIQUEMENT par le proxy), ni
   `adminRight` ni `expireDate` ni `sessionKey` ;
   **AUTORISATION** = RBAC à permissions atomiques

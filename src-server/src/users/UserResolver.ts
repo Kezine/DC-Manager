@@ -46,9 +46,10 @@ export interface UserResolver {
 
 /** Profil BRUT à normaliser — sous-ensemble STRUCTUREL de `SsoUser` (auth.ts), défini ICI
     volontairement : le service annuaire ne dépend PAS du type auth (découplage, principe n°2)
-    et reste compilable sans Express. `SsoUser` (dont l'`id` est un `number`) reste assignable
-    à ce type. Les noms de champs suivent la convention SSO (prenom/nom/eMail) — le mapping vers
-    `ResolvedUser` est centralisé dans `UserProfiles.fromSsoUser`. */
+    et reste compilable sans Express. `SsoUser` reste assignable à ce type : son `id` est
+    `number | string` — numérique pour le SSO maison, chaîne pour le `sub` d'un OP OIDC — et c'est
+    précisément ce que ce champ acceptait déjà. Les noms de champs suivent la convention SSO
+    (prenom/nom/eMail) — le mapping vers `ResolvedUser` est centralisé dans `UserProfiles.fromSsoUser`. */
 export interface RawUserProfile {
   id?: number | string;
   login?: string;

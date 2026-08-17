@@ -2,11 +2,13 @@
 
 Deux questions **orthogonales**, deux mécanismes qu'on ne fusionne pas :
 
-- **QUI est l'appelant ?** — l'*authentification*. L'application ne gère pas le login : elle
-  proxifie un cookie de session à un SSO externe, ou se contente d'un mode dev / d'un challenge
-  Basic. C'est un **orchestrateur** (`src-server/src/auth.ts`, `Auth`) et **un provider par mode**
-  (`src-server/src/auth/`) — décrits à la section suivante ; le mode d'emploi côté exploitation
-  vit dans `README.md` § 4 et [`../src-server/RUN.md`](../src-server/RUN.md) § « Authentification ».
+- **QUI est l'appelant ?** — l'*authentification*. Cinq modes, dont **un seul** conduit lui-même un
+  login : `oidc`, où l'application est le *Relying Party* d'un OP. Les quatre autres délèguent —
+  cookie proxifié à un SSO maison, en-têtes d'un reverse-proxy *identity-aware*, challenge Basic,
+  ou mode dev. C'est un **orchestrateur** (`src-server/src/auth.ts`, `Auth`) et **un provider par
+  mode** (`src-server/src/auth/`) — décrits à la section suivante ; le mode d'emploi côté
+  exploitation vit dans `README.md` § 4 et [`../src-server/RUN.md`](../src-server/RUN.md)
+  § « Authentification ».
 - **CE QU'IL PEUT** — l'*autorisation*, objet de ce document. Un **RBAC à permissions atomiques** :
   un catalogue de permissions, des rôles qui les regroupent, une politique qui associe des rôles à
   des utilisateurs, et des **gardes** posées sur chaque route.
@@ -58,10 +60,15 @@ sélectionnée au câblage / injection* déjà tenu par [`UserResolver`](user-re
          ├── auth/BasicAuthProvider.ts         (BASIC_AUTH)          ─┐ secret comparé à temps
          ├── auth/LegacySsoAuthProvider.ts     (SSO_URL + COOKIE_NAME, │ constant par le helper
          │                                      `fetch` injecté)      │ auth/SecretCompare.ts
-         └── auth/ForwardHeaderAuthProvider.ts (en-têtes de proxy)   ─┘
+         ├── auth/ForwardHeaderAuthProvider.ts (en-têtes de proxy)   ─┘ groupes nettoyés par
+         │                                                             le helper auth/GroupList.ts
+         └── auth/OidcAuthProvider.ts          (cookie → session mémoire)  ─┘ (même helper)
+               └── le FLUX vit à côté : auth/OidcRoutes.ts (login/callback/logout),
+                   auth/OidcSessionStore.ts, auth/OidcConfig.ts, et la couche
+                   auth/OpenIdClientAdapter.ts derrière le contrat auth/OidcClientPort.ts
 ```
 
-**Les quatre modes** :
+**Les cinq modes** :
 
 | Mode | Sélection | Ce que le provider rend |
 |---|---|---|
@@ -69,6 +76,10 @@ sélectionnée au câblage / injection* déjà tenu par [`UserResolver`](user-re
 | `sso` | `SSO_URL` (sinon) | le **JSON du SSO, tel quel** (cf. passthrough ci-dessous) |
 | `dev` | aucun des deux (défaut) | l'utilisateur factice `DEV_USER` (défaut `dev`), `SUPER_ADMIN` + `dev: true` |
 | `forward` | `AUTH_MODE=forward` **uniquement** — jamais inféré | l'identité lue dans les en-têtes du reverse-proxy, avec ses **groupes** (§ « Forward-auth ») |
+| `oidc` | `AUTH_MODE=oidc` **uniquement** — jamais inféré | l'identité de la **session locale** ouverte par le flux OIDC, avec ses **groupes** (§ « OIDC ») |
+
+Les deux derniers ne s'infèrent jamais : ils exigent une configuration délibérée, et une instance ne
+doit pas basculer de mode d'authentification parce qu'une variable a été ajoutée à côté.
 
 La règle de format de `BASIC_AUTH` vit **chez le provider basic** (`fromSpec`) : « la valeur ne
 décrit pas un couple » et « pas de mode basic » sont la même réponse, et l'orchestrateur n'a pas à
@@ -76,14 +87,16 @@ connaître le format d'un secret qui ne le concerne pas.
 
 ### `AUTH_MODE` — la sélection explicite, et son refus de démarrer
 
-`AUTH_MODE` (`dev | basic | sso | forward`) **fait loi** quand elle est renseignée. Absente, c'est
-l'**inférence historique** qui s'applique, inchangée : `BASIC_AUTH` → basic, sinon `SSO_URL` → sso,
-sinon dev (avec son WARN). Un déploiement existant ne voit donc rien changer, et le mode `forward`
-— qui n'a aucune variable obligatoire — ne peut pas s'activer par accident.
+`AUTH_MODE` (`dev | basic | sso | forward | oidc`) **fait loi** quand elle est renseignée. Absente,
+c'est l'**inférence historique** qui s'applique, inchangée : `BASIC_AUTH` → basic, sinon `SSO_URL` →
+sso, sinon dev (avec son WARN). Un déploiement existant ne voit donc rien changer, et les modes
+`forward` et `oidc` ne peuvent pas s'activer par accident.
 
-🚨 **Une valeur inconnue ou incohérente NE DÉMARRE PAS.** `AUTH_MODE=oidc` (pas encore implémenté),
-`AUTH_MODE=forwrad` (coquille), `AUTH_MODE=sso` sans `SSO_URL`, `AUTH_MODE=basic` sans `BASIC_AUTH` :
-`log.error` nommant la variable et la correction attendue, puis arrêt du process. C'est le point
+🚨 **Une valeur inconnue ou incohérente NE DÉMARRE PAS.** `AUTH_MODE=frobnique` (valeur inconnue),
+`AUTH_MODE=forwrad` (coquille), `AUTH_MODE=sso` sans `SSO_URL`, `AUTH_MODE=basic` sans `BASIC_AUTH`,
+`AUTH_MODE=oidc` sans `OIDC_ISSUER` / `OIDC_CLIENT_ID` / `OIDC_REDIRECT_URL` (refusées **une à une**,
+pour que le message nomme *celle* qui manque) : `log.error` nommant la variable et la correction
+attendue, puis arrêt du process. C'est le point
 important du mécanisme, pas un détail d'ergonomie — le seul repli possible serait le mode `dev`, qui
 n'authentifie personne : une coquille retombant en silence sur lui laisserait un déploiement se
 croire protégé et grand ouvert (**fail-open**). `AUTH_MODE=dev` **écrit explicitement** reste permis,
@@ -223,6 +236,189 @@ cru que dans la mesure où l'on sait d'où il vient.
 
 Exemple de configuration (Authelia + nginx) : [`../src-server/RUN.md`](../src-server/RUN.md) § 6.
 
+### OIDC — l'application est elle-même le *Relying Party*
+
+Là où le mode `forward` délègue **tout** à un proxy *identity-aware*, le mode `oidc` s'adresse aux
+déploiements qui n'en ont pas : l'application parle elle-même OpenID Connect à un OP (Keycloak,
+Entra ID, Authelia en mode OP, Authentik…), en flux **Authorization Code + PKCE**.
+
+> **Lequel choisir ?** `forward` si un proxy *identity-aware* est déjà en place — il reste le plus
+> simple, l'application ne gérant alors ni cookie ni expiration. `oidc` sinon : il ne demande aucune
+> brique d'infrastructure supplémentaire, au prix d'un flux et d'une session à tenir. Les deux
+> mappent les **groupes** de l'IdP vers des rôles par la même table `groups` de `roles.json` (§ 5),
+> et par la même règle de nettoyage (`auth/GroupList`, helper partagé — extrait le jour où le mode
+> `oidc` a donné un second consommateur au mode `forward`, comme `SecretCompare` avant lui).
+
+**La cryptographie du protocole n'est pas écrite ici.** C'est la seule dépendance npm que ce mode
+introduit : **`openid-client`** (panva), dans `src-server/package.json`. Elle porte la découverte
+`.well-known`, le JWKS et sa rotation, la vérification de signature de l'`id_token`, les contrôles
+`iss`/`aud`/`exp`/`nonce`/`state`, la génération du verifier PKCE et l'échange du code. Réécrire
+cela à la main aurait été une faute (principe n°12).
+
+#### Les trois responsabilités, et la frontière de la librairie
+
+```
+  GET /auth/login ─► OidcRoutes ─► OidcClientPort.beginAuthorization()
+                        │              (state + nonce + PKCE : c'est la LIBRAIRIE qui les fabrique)
+                        ├─ cookie de TRANSACTION court (dcm_oidc_tx, 10 min, HttpOnly)
+                        └─ 302 vers l'OP
+  GET /auth/callback ─► OidcRoutes  ① error= de l'OP ?      → page sobre 401
+                        │            ② cookie de transaction → absent = page sobre 400
+                        │            ③ 🚨 state comparé (TEMPS CONSTANT) → faux = 400, AVANT tout appel sortant
+                        │            ④ OidcClientPort.completeAuthorization()  (canal ARRIÈRE + PKCE)
+                        ├─ OidcSessionStore.create(claims, exp, idToken) → id aléatoire 32 o
+                        ├─ cookie de SESSION (dcm_oidc_session) + effacement de la transaction
+                        └─ 302 vers la racine de l'application
+  GET /auth/logout  ─► OidcSessionStore.destroy + effacement du cookie (INCONDITIONNEL)
+                        └─ 302 vers end_session_endpoint (RP-initiated) si l'OP en annonce un, sinon l'app
+
+  TOUTE REQUÊTE API ─► OidcAuthProvider : cookie → OidcSessionStore.get → SsoResult
+                        (aucune E/S, aucun appel sortant : la validation a eu lieu UNE fois)
+```
+
+| Fichier | Responsabilité |
+|---|---|
+| `auth/OidcConfig.ts` | les **six** variables d'environnement (source unique), scopes normalisés, drapeau `Secure` |
+| `auth/OidcSessionStore.ts` | sessions **en mémoire** : id aléatoire, TTL, purge, plafond, `nowMs` injectable |
+| `auth/OidcAuthProvider.ts` | cookie → session → `SsoResult` (implémente `AuthProvider`) |
+| `auth/OidcRoutes.ts` | **le flux** — et il ne connaît **pas** Express (vues minimales, cf. plus bas) |
+| `auth/OidcClientPort.ts` | le **contrat** de la couche `openid-client` (types seuls, aucun import) |
+| `auth/OpenIdClientAdapter.ts` | la **seule** implémentation, et le **seul** fichier du dépôt qui importe `openid-client` |
+
+🚨 **Pourquoi la librairie est derrière un port.** Trois raisons, dont une décisive : le flux doit
+être **testable**. Un flux OIDC de bout en bout exige un OP réel — hors du périmètre de preuve des
+tests — mais les propriétés qui comptent (*un state faux est refusé et le code n'est même pas
+échangé*, *le cookie posé est HttpOnly/Secure/SameSite=Lax*, *la déconnexion efface le cookie*) se
+vérifient avec un **bouchon** du port, sans réseau. Les deux autres raisons sont structurelles :
+`openid-client` est **ESM pur** et n'est pas installé à la racine du dépôt, où le programme de test
+compile en CommonJS — un import depuis les routes les rendrait incompilables. `OpenIdClientAdapter`
+est donc le seul fichier de `auth/` absent de `tsconfig.node.json`, et il doit le rester ; corollaire
+à tenir : il **traduit**, il ne décide pas — toute règle qui y apparaîtrait serait, par construction,
+non testée.
+
+Comme `AccessControl` et `AuthProvider`, `OidcRoutes` déclare ses propres **vues minimales** de la
+requête et de la réponse, dont les types d'Express sont des sur-ensembles structurels. `server.ts` ne
+garde donc que le **branchement** — trois `app.get`, montés **hors de la garde d'API et avant elle**,
+comme `/healthz` : une route de connexion derrière une garde d'authentification serait un verrou dont
+la clé est à l'intérieur.
+
+#### Variables d'environnement
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `OIDC_ISSUER` | *(requis)* | émetteur de l'OP (`https://keycloak.exemple/realms/infra`) — la découverte en dérive les endpoints |
+| `OIDC_CLIENT_ID` | *(requis)* | identifiant du client déclaré chez l'OP |
+| `OIDC_REDIRECT_URL` | *(requis)* | **URL publique absolue** du callback, `…/auth/callback` |
+| `OIDC_CLIENT_SECRET` | *(vide)* | secret du client **confidentiel**. Vide = client **public** (PKCE seul) |
+| `OIDC_SCOPES` | `openid profile email groups` | scopes demandés — `openid` est **forcé** en tête s'il manque |
+| `OIDC_COOKIE_SECURE` | `1` | attribut `Secure` des cookies. `0` = **développement en HTTP local uniquement** (WARN de boot) |
+
+🚨 **`OIDC_REDIRECT_URL` est requise et ne se devine pas.** Derrière un reverse-proxy à sous-chemin
+([`reverse-proxy.md`](reverse-proxy.md)), l'application ne connaît ni le schéma, ni l'hôte, ni le
+préfixe publics — au mieux des en-têtes `X-Forwarded-*` que rien n'oblige le proxy à poser
+correctement. La deviner produirait une URL qui « marche en local et casse en production », avec pour
+seul symptôme un `redirect_uri_mismatch` opaque côté OP. C'est aussi pourquoi l'URL remise à la
+librairie au callback est la valeur **configurée** + la chaîne de requête reçue : **aucun en-tête
+réseau n'entre dans sa composition** (anti-empoisonnement d'hôte). Cette même URL sert à déduire la
+racine de l'application (`new URL("../", redirectUrl)`) — destination après connexion et
+`post_logout_redirect_uri` —, donc cohérente avec ce qui est déclaré chez l'OP par construction. Une
+URL qui ne se termine pas par `/auth/callback` produit un **WARN** de boot, sans refus (un proxy peut
+légitimement réécrire le chemin).
+
+**Client public ou confidentiel ?** Les deux sont servis, et **PKCE est employé dans les deux cas**
+(il protège l'échange du code, pas le client). Sans `OIDC_CLIENT_SECRET`, l'authentification cliente
+est explicitement `none` ; avec, c'est `client_secret_post`. Le secret n'apparaît dans **aucun** log.
+
+> `groups` n'est pas un scope universel : Keycloak l'offre via un *client scope* dédié, Entra ID ne
+> le connaît pas et passe les groupes autrement. C'est le défaut le plus utile pour la cible
+> principale, et il se **remplace** par `OIDC_SCOPES` quand l'OP refuse un scope inconnu.
+
+#### Cookies, session, et ce que le provider rend
+
+Deux cookies, tous deux `HttpOnly` + `Path=/` + `SameSite=Lax`, `Secure` selon `OIDC_COOKIE_SECURE` :
+`dcm_oidc_tx` (transaction, 10 min, porte `state`/`nonce`/verifier PKCE) et `dcm_oidc_session`
+(session, durée alignée sur celle de la session serveur). **`SameSite=Lax` est un choix, pas un
+défaut** : `Strict` retiendrait le cookie de transaction au *retour* de l'OP et casserait le
+callback. La **pose et l'effacement portent exactement les mêmes attributs** — s'ils diffèrent, le
+navigateur y voit deux cookies distincts et **garde l'ancien** (une déconnexion qui ne déconnecte
+pas). C'est un invariant testé.
+
+La session rendue est, comme celle du mode forward, volontairement pauvre : `logged: true`,
+`user.id = String(sub)`, `user.login` (`preferred_username`, à défaut l'e-mail), `user.eMail`,
+`user.nom` (nom **complet**, jamais découpé), `user.domain = "oidc"`, `groups`, et `expireDate`
+(échéance de la **session**, en millisecondes). Et rien d'autre :
+
+- **pas d'`adminRight`** — l'autorisation passe par les rôles ; poser `SUPER_ADMIN` ferait de tout
+  utilisateur de l'IdP un administrateur ;
+- **pas de `sessionKey`**, donc aucune mise en cache par l'orchestrateur. Ici la raison diffère de
+  celle des autres modes : ce n'est pas qu'il n'y a rien à mettre en cache (la résolution est un
+  `Map.get`, un cache n'économiserait rien), c'est qu'il y a quelque chose à **ne pas** faire
+  survivre — une session **détruite** par une déconnexion resterait valide le temps du cache.
+
+`user.id` est `String(sub)` parce que `sub` est la seule revendication qu'un OP garantit stable et
+unique : ni l'e-mail (qui change) ni le login (qui se réattribue) ne peuvent servir de clé canonique
+à l'annuaire et à l'audit. C'est ce qui a élargi `SsoUser.id` à `number | string` — les deux
+consommateurs (`users/UserResolver`, `access/AccessControl`) le lisaient **déjà** dans les deux
+types, et `UserProfiles.canonicalId` passe de toute façon par `String(id)` : le contrat était
+simplement plus étroit que ses propres consommateurs.
+
+#### L'OP injoignable au boot ne fait pas tomber le serveur
+
+Un IdP qui démarre après nous (même `docker compose`), un DNS pas encore prêt : la découverte est
+lancée en **tâche de fond**, réessayée avec un dos d'âne borné (5 s → 5 min, minuteurs `unref`és), et
+le serveur **démarre normalement**. Tant qu'elle n'a pas abouti, `/auth/login` et `/auth/callback`
+répondent **503 avec un message actionnable** — il nomme `OIDC_ISSUER`, la dernière erreur et les
+deux causes les plus fréquentes (émetteur injoignable, émetteur en HTTP alors que la découverte
+exige HTTPS). C'est le patron des modules à clé absente (cf. `VmModule`) : un prérequis externe
+manquant rend **une** fonctionnalité indisponible, jamais le service entier. Toute requête sur
+`/auth/*` **relance** en outre une tentative, pour que la reprise ne dépende pas du seul minuteur.
+
+`/auth/logout`, lui, réussit **toujours** : la déconnexion locale (destruction de session +
+effacement du cookie) est inconditionnelle. Répondre 503 laisserait une session ouverte sur une
+instance en difficulté — l'inverse exact de ce que demande l'utilisateur qui clique.
+
+Toute erreur de flux rend une **page sobre** avec un lien « réessayer », et **jamais une
+redirection** : une redirection sur échec de connexion produit des boucles login → erreur → login que
+rien n'arrête côté navigateur. Le texte venu de l'OP y est échappé. Les messages internes de la
+librairie sont **journalisés** mais pas servis à un appelant non authentifié.
+
+#### Le bouton « Connexion » ne demande aucune configuration
+
+Le client affiche le bouton de l'écran d'accueil dès qu'une `loginUrl` lui est injectée. En mode
+`oidc`, si `SSO_LOGIN_URL` est vide, `index.ts` la défaut sur la route servie, en valeur **relative
+sans slash initial** (`auth/login`) — exactement comme `apiBaseUrl` que `server.ts` dérive de la même
+façon (`"/api"` → `"api"`). Les URLs du client étant ancrées sur le `<base>` du HTML, c'est cette
+forme, et elle seule, qui fonctionne aussi en **sous-dossier**. `SSO_LOGIN_URL` reste prioritaire si
+elle est renseignée : un exploitant qui veut passer par une page intermédiaire garde la main.
+
+#### 🚨 Limites assumées de la v1
+
+- **Sessions en mémoire : un redémarrage déconnecte tout le monde.** C'est une décision, pas un
+  oubli. Persister exigerait d'écrire des `id_token` sur disque, donc un chiffrement au repos, donc
+  une clé, une base dédiée et son cycle de vie — un chantier entier pour une gêne dont le coût réel
+  est un aller-retour vers l'IdP, généralement **invisible** (la session de l'OP survit, le
+  navigateur revient authentifié sans rien retaper).
+- **Corollaire multi-instances** : sans session partagée, deux répliques derrière un répartiteur ne
+  se reconnaissent pas. Il faut des sessions **collantes**, ou le mode `forward` (dont le proxy porte
+  la session).
+- **Pas de rafraîchissement de jeton.** La session vaut la durée annoncée par l'`id_token`, plafonnée
+  à 12 h (constante `OidcSessionStore.DEFAULT_TTL_MS` — aucune variable d'environnement de plus). Un
+  rafraîchissement correct suppose de gérer la **rotation** des *refresh tokens* (Keycloak la fait
+  par défaut) et donc les rafraîchissements **concurrents** — N requêtes parallèles qui rafraîchissent
+  en même temps invalident la session. On préfère simple et juste à complet et fragile. À l'échéance,
+  le client reçoit un 401 et repart par son flux de connexion habituel, qui existe déjà. Le champ
+  `refreshToken?` du store est la **couture** prévue : il n'est pas alimenté en v1, parce que
+  conserver un secret dont personne ne se sert n'ajouterait qu'une surface d'exposition.
+- **Déconnexion RP-initiated seulement si l'OP annonce un `end_session_endpoint`.** Sinon la session
+  de l'OP survit à la nôtre, et une reconnexion sera silencieusement ré-authentifiée. Limite du
+  protocole, pas du code. L'`id_token` est conservé en session pour servir d'`id_token_hint` — sans
+  lui, un OP comme Keycloak affiche une page de confirmation.
+- **Le cookie de transaction n'est pas signé.** Il est `HttpOnly` (illisible en JS) et `Secure` ; un
+  attaquant capable d'y **écrire** pourrait monter un CSRF de connexion, mais cela suppose une
+  compromission déjà bien plus large. C'est la forme retenue par la plupart des RP sans état.
+- **Émetteur en HTTPS obligatoire** : la découverte refuse un émetteur HTTP (règle de la librairie,
+  non contournée ici). Un OP de développement doit donc être servi en HTTPS.
+
 ### Le challenge Basic n'est pas une identité
 
 Deux rôles à ne pas confondre : renvoyer `401 WWW-Authenticate: Basic` pour que le **navigateur**
@@ -238,6 +434,14 @@ rien à opposer (`true`). L'**identité**, elle, passe par `Auth.validate` dans 
 > d'`Auth`, documenter ses variables d'environnement (README § 4 + RUN.md + `.env.example`, principe
 > n°13) et lui donner une section dans `test-auth-providers.js`. Rien d'autre ne bouge : ni `api.ts`,
 > ni `access/`, ni le client.
+>
+> Le mode `oidc` l'a vérifié en grand : **le contrat n'a pas bougé d'une ligne** pour l'accueillir,
+> alors que c'est le plus gros des cinq. Ce qu'il a demandé en plus, c'est ce qu'aucun contrat
+> d'authentification n'a à porter — un **flux** (`auth/OidcRoutes`, branché par `server.ts` hors de
+> la garde d'API), un **état de session** (`auth/OidcSessionStore`) et une **dépendance** isolée
+> derrière un port (`auth/OidcClientPort`). Un mode qui a besoin de ses propres routes les fabrique à
+> côté et les expose sur `Auth` ; il n'élargit pas `AuthProvider`, dont la question reste « qui est
+> l'appelant ? ».
 
 ## 1. Le modèle : permissions atomiques, grants à jokers
 
@@ -544,6 +748,13 @@ contrôle de **discrimination** qui prouve que son détecteur voit bien ce qu'il
 La liste des routes est **découverte**, jamais déclarée — c'est le point : un manifeste écrit à la
 main serait aveugle au cas visé, puisqu'une route oubliée y manquerait aussi. Une seule route est en
 liste blanche, `GET /me`, et le test échoue si cette entrée devient périmée.
+
+**Portée du verrou** : `api.ts` et les routeurs de modules. `server.ts` est **hors champ**, et il n'a
+pas bougé avec le mode OIDC : il ne monte que des routes délibérément **publiques** — `/healthz`, le
+HTML du client et ses assets, et désormais `/auth/login`, `/auth/callback`, `/auth/logout`. Ces
+trois-là *doivent* être joignables sans être authentifié (une route de connexion derrière une garde
+d'authentification serait un verrou dont la clé est à l'intérieur) ; elles n'exposent aucune donnée
+du modèle et ne consomment que des jetons de flux qu'elles ont elles-mêmes émis.
 
 ## 7. `GET /me`
 
