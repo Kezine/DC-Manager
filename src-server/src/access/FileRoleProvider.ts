@@ -14,9 +14,15 @@ import type { AccessIdentity, RoleProvider } from "./RoleProvider.js";
    corrige sans base ni écran d'administration.
 
        {
-         "users": { "jdupont": ["dc-editor"], "42": ["cert-manager"] },
-         "roles": { "cabliste-nuit": ["dc.cabling:*", "dc.rack:read"] }
+         "users":  { "jdupont": ["dc-editor"], "42": ["cert-manager"] },
+         "groups": { "grp-infra": ["dc-editor"] },     // GROUPES de l'IdP (mode forward, OIDC)
+         "roles":  { "cabliste-nuit": ["dc.cabling:*", "dc.rack:read"] }
        }
+
+   La table `groups` est ce qui rend forward-auth (et demain OIDC) PAYANT : la
+   gestion des personnes retourne dans l'IdP, et ce fichier ne décrit plus que
+   la traduction « groupe d'entreprise → rôle applicatif ». Un nouvel arrivant
+   du bon groupe a ses droits sans qu'on touche à `roles.json`.
 
    ── FAIL-CLOSED, sans exception ───────────────────────────────────────────
    Fichier absent, illisible, JSON invalide : PERSONNE n'a de rôle. Jamais de
@@ -120,7 +126,10 @@ export class FileRoleProvider implements RoleProvider {
       Asynchrone par CONTRAT seulement — la réponse est un accès mémoire, aucune E/S sur le chemin
       chaud d'une requête (le fichier n'est relu que sur signal du sondage). */
   async rolesOf(identity: AccessIdentity): Promise<string[]> {
-    const roles = new Set<string>(RolesConfig.rolesFor(this.config, identity.id, identity.login));
+    // Les GROUPES de l'identité (mode forward, OIDC demain) traversent jusqu'à la table `groups` du
+    // fichier : c'est la seule ligne qui a changé au lot 4 côté provider — la v2 de la politique est
+    // entièrement dans l'analyse (`RolesConfig`), pas ici.
+    const roles = new Set<string>(RolesConfig.rolesFor(this.config, identity.id, identity.login, identity.groups));
     if (this.isBootstrapAdmin(identity)) roles.add("admin");
     if (identity.dev) roles.add("admin");                          // modes dev/basic : comportement historique
     if (identity.adminRight === "SUPER_ADMIN") roles.add("admin"); // SSO maison : l'unique droit d'avant l'ACL
@@ -202,7 +211,7 @@ export class FileRoleProvider implements RoleProvider {
     }
     const parsed = RolesConfig.parse(document);
     for (const warning of parsed.warnings) this.log.warn("roles.json —", warning);
-    this.adopt(parsed, "politique de rôles chargée (" + parsed.users.size + " utilisateur(s), " + parsed.roles.size + " rôle(s) custom)");
+    this.adopt(parsed, "politique de rôles chargée (" + parsed.users.size + " utilisateur(s), " + parsed.groups.size + " groupe(s), " + parsed.roles.size + " rôle(s) custom)");
   }
 
   /** Adopte une politique : elle devient la courante et la GÉNÉRATION change (invalidation du cache). */

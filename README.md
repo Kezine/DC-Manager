@@ -183,18 +183,30 @@ Lues par le serveur au démarrage — cœur dans [`src-server/src/index.ts`](src
 | `CLIENT_DIR` | `../../dist` | Dossier du client buildé à servir (dans l'image : `/client-dist`). |
 | `DOCS_DIR` | `../data/documents` | Dossier des bases SQLite (dans l'image : `/data/documents`). |
 | `LOG_LEVEL` | `info` | `error` \| `warn` \| `info` \| `debug` \| `trace`. |
+| `AUTH_MODE` | *(vide)* | **Mode d'authentification EXPLICITE** : `dev` \| `basic` \| `sso` \| `forward`. Vide/absente → **inférence historique** (`BASIC_AUTH` → basic, sinon `SSO_URL` → sso, sinon dev). 🚨 Une valeur **inconnue ou incohérente** (`oidc` — pas encore implémenté —, faute de frappe, `sso` sans `SSO_URL`, `basic` sans `BASIC_AUTH`) **empêche le démarrage** avec une erreur explicite : jamais de repli silencieux sur le mode dev, qui n'authentifie personne. |
 | `SSO_URL` | *(vide)* | URL du SSO externe à proxifier. **`""` (vide) → mode dev** (utilisateur factice). |
 | `COOKIE_NAME` | *(vide)* | Cookie du jeton à transmettre au SSO (`""` = en-tête `Cookie` complet). |
 | `SSO_LOGIN_URL` | *(vide)* | URL de connexion SSO du bouton « Connexion » (écran d'accueil, si non authentifié). Macro `${clbkUrl}` → URL courante encodée (retour après login). Vide = pas de bouton. |
 | `DEV_USER` | — | Nom de l'utilisateur factice (mode dev). |
 | `BASIC_AUTH` | — | `"user:pass"` → impose une Basic Auth navigateur (dev). Prioritaire sur le SSO. |
-| `ROLES_FILE` | `<DOCS_DIR>/roles.json` | **Politique d'AUTORISATION** (RBAC) : fichier JSON `{ "users": { "<id-ou-login>": ["rôle"] }, "roles": { "<rôle custom>": ["grants"] } }`, relu **à chaud**. **Fail-closed** : absent/illisible → personne n'a de rôle (403 partout sauf `GET /me`). Cf. [`docs/auth.md`](docs/auth.md). |
+| `AUTH_FORWARD_USER_HEADER` | `Remote-User` | **Mode `forward`** (reverse-proxy *identity-aware* : Authelia, Authentik, oauth2-proxy, Cloudflare Access, Tailscale…) : en-tête portant le **login**. Requis à l'exécution — absent/vide ⇒ appelant anonyme. |
+| `AUTH_FORWARD_EMAIL_HEADER` | `Remote-Email` | Mode `forward` : en-tête de l'adresse e-mail. |
+| `AUTH_FORWARD_NAME_HEADER` | `Remote-Name` | Mode `forward` : en-tête du nom d'**affichage complet**. |
+| `AUTH_FORWARD_GROUPS_HEADER` | `Remote-Groups` | Mode `forward` : en-tête des **groupes** de l'IdP, séparés par des virgules → mappés vers des rôles par la table `groups` de `ROLES_FILE`. |
+| `AUTH_FORWARD_SECRET` | *(vide)* | 🚨 Mode `forward` : **secret partagé** proxy↔app, comparé à **temps constant**. Configuré → toute requête dont l'en-tête ne correspond pas est **anonyme** (aucun autre en-tête n'est même lu). Absent → le mode fonctionne mais le boot **avertit** : l'app doit alors être joignable **uniquement** par le proxy (bind localhost / réseau privé), sinon tout client direct peut forger son identité. Cf. [`docs/auth.md`](docs/auth.md). |
+| `AUTH_FORWARD_SECRET_HEADER` | `X-Auth-Secret` | Mode `forward` : en-tête portant le secret partagé. |
+| `ROLES_FILE` | `<DOCS_DIR>/roles.json` | **Politique d'AUTORISATION** (RBAC) : fichier JSON `{ "users": { "<id-ou-login>": ["rôle"] }, "groups": { "<groupe IdP>": ["rôle"] }, "roles": { "<rôle custom>": ["grants"] } }`, relu **à chaud**. La table `groups` mappe les **groupes** fournis par l'IdP (mode `forward`) : la gestion des utilisateurs vit alors dans l'IdP. **Fail-closed** : absent/illisible → personne n'a de rôle (403 partout sauf `GET /me`). Cf. [`docs/auth.md`](docs/auth.md). |
 | `BOOTSTRAP_ADMIN_IDS` | *(vide)* | Ids canoniques ou logins (séparés par des **virgules**) promus rôle `admin`, **en plus** de `ROLES_FILE`. Amorçage d'un déploiement neuf : sans elle, le premier administrateur serait verrouillé dehors par la politique qu'il doit écrire. |
 | `DCMANAGER_SECRETS_KEY` | — | **Clé de chiffrement** des secrets serveur (coffre `SecretBox` partagé, lu par les modules — pas par `index.ts`). Requise par les modules **VM/Proxmox** (jetons des providers), **clients wifi** (clés d'API des contrôleurs), **réplication des interventions vers un tracker** (jetons d'API des trackers — jetons en **ÉCRITURE**, cf. `docs/jira-interventions.md`) et **notifications** (jetons de webhook) : absente → ces modules se désactivent et le signalent (**503 explicite**) ; le serveur démarre quand même. **Doit être un secret LONG et ALÉATOIRE (≥ 16 caractères** — refusé au démarrage du module sinon, car la clé en est un simple SHA-256 sans sel : une passphrase courte rendrait un backup de la base force-brutable hors ligne). La générer, p. ex. `openssl rand -base64 32`. **Seule variable lue** pour ce coffre : aucun autre nom n'est reconnu. La PKI/certs est *zéro-connaissance* (chiffrement navigateur) et **n'en dépend pas**. |
 | `JIRA_BASE_URL` | *(vide)* | **Base d'URL Jira** (module **interventions**) pour fabriquer un lien vers un ticket depuis une clé saisie à la main (ex. `https://monorg.atlassian.net/browse/`). Trimmée ; vide/absente → le client masque le lien. Exposée par `GET …/interventions/meta` ; simple RÉFÉRENCE (aucun appel Jira côté serveur). ⚠ **Sans rapport avec le pont de réplication** (`docs/jira-interventions.md`), qui PERSISTE le lien de chaque ticket au moment de la synchro et n'a donc aucune variable d'environnement propre. |
 
-**Authentification.** L'app **ne gère pas le login** : elle transmet les cookies de
-session au backend, qui valide via un SSO externe (ou le proxifie).
+**Authentification.** L'app **ne gère pas le login**. Quatre modes, sélectionnés par `AUTH_MODE`
+(ou, à défaut, inférés) : **dev** (aucun contrôle — défaut), **basic** (challenge HTTP Basic),
+**sso** (cookie de session proxifié à un SSO maison) et **forward** (un reverse-proxy
+*identity-aware* authentifie en amont et transmet l'identité dans des en-têtes — Authelia,
+Authentik, oauth2-proxy, Cloudflare Access, Tailscale…). Le mode `forward` est **recommandé** pour un
+déploiement réel, et se sécurise par un secret partagé (`AUTH_FORWARD_SECRET`) ; détail du modèle de
+confiance : [`docs/auth.md`](docs/auth.md).
 
 **Autorisation (rôles / permissions).** *Qui est l'appelant* et *ce qu'il peut* sont deux questions
 distinctes. Une fois authentifié, l'accès est réglé par un **RBAC à permissions atomiques**
@@ -204,12 +216,14 @@ n'a **aucune** permission et reçoit 403 partout sauf `GET /me`. Les déploiemen
 pas de comportement : modes dev/basic et SSO `adminRight = "SUPER_ADMIN"` valent le rôle `admin`.
 Modèle complet, catalogue, format du fichier et procédures : [`docs/auth.md`](docs/auth.md).
 
-> ⚠️ L'intégration SSO actuelle répond à un **besoin personnel** (contrat spécifique : cookie de
-> session proxifié vers un endpoint renvoyant `{ logged, adminRight, expireDate }`, accès réservé à
-> `SUPER_ADMIN`) et n'est **probablement pas adaptée à la plupart des usages**. En attendant une
-> implémentation plus standard (OIDC / OAuth2, gestion d'utilisateurs), **utilisez de préférence la
-> Basic Auth** (`BASIC_AUTH=user:pass`) pour protéger le serveur. Pour quand même brancher le SSO,
-> renseigner `SSO_URL` / `COOKIE_NAME` (cf. `docker-compose.yml`).
+> ⚠️ L'intégration **SSO maison** (`SSO_URL`) répond à un **besoin personnel** (contrat spécifique :
+> cookie de session proxifié vers un endpoint renvoyant `{ logged, adminRight, expireDate }`) et n'est
+> **probablement pas adaptée à la plupart des usages**. Pour un déploiement réel, préférer
+> **`AUTH_MODE=forward`** derrière un reverse-proxy *identity-aware* (Authelia, Authentik,
+> oauth2-proxy, Cloudflare Access, Tailscale) : l'IdP gère les comptes, les groupes deviennent des
+> rôles, et l'app n'a aucun flux OAuth à porter. À défaut, la **Basic Auth**
+> (`BASIC_AUTH=user:pass`) protège un serveur sans infrastructure. Un provider **OIDC** natif reste à
+> venir, pour les déploiements sans proxy identity-aware.
 
 ---
 

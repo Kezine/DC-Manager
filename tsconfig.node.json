@@ -155,10 +155,18 @@
     // (`AuthRequestView`, dont le `Request` d'Express est un sur-ensemble structurel), et le provider
     // SSO reçoit son `fetch` INJECTÉ — donc aucun réseau en test. `auth/AuthProvider.ts` (types + la
     // session anonyme, sans AUCUN import) est tiré transitivement. api.ts/server.ts restent HORS test.
+    // Le mode FORWARD (lot 4) et la RÉSOLUTION du mode (`AUTH_MODE`) s'éprouvent pour eux-mêmes :
+    // la première est une logique PURE (options d'environnement → { mode, error }), le second ne lit
+    // que des en-têtes — dont la vue minimale du contrat, donc sans Express ni réseau. `SecretCompare`
+    // (comparaison à temps constant, node:crypto) est tiré transitivement par les deux providers qui
+    // l'emploient, et testé à travers eux comme pour lui-même.
     "src-server/src/auth.ts",
+    "src-server/src/auth/AuthModeResolution.ts",
     "src-server/src/auth/DevAuthProvider.ts",
     "src-server/src/auth/BasicAuthProvider.ts",
     "src-server/src/auth/LegacySsoAuthProvider.ts",
+    "src-server/src/auth/ForwardHeaderAuthProvider.ts",
+    "src-server/src/auth/SecretCompare.ts",
     // CONTRÔLE D'ACCÈS (service CORE, lot 1 auth/ACL) — testable SANS Express : `access/` déclare ses
     // propres vues minimales de la requête/réponse (cf. AccessControl), donc aucune dépendance runtime
     // n'entre ici. `RolesConfig` est PUR (JSON → politique) ; `FileRoleProvider` touche `node:fs`

@@ -1,17 +1,21 @@
-/* Tests modules — AUTORISATION (lot 1 du chantier auth/ACL).
+/* Tests modules — AUTORISATION (lot 1 du chantier auth/ACL ; politique v2 « groupes → rôles » au lot 4).
 
    Cinq sections, du modèle partagé jusqu'au verrou d'exhaustivité :
    1. `src-shared/Permissions` — la CARTE collections → domaines (invariant qui CASSE à
       l'ajout d'une collection non mappée), le catalogue, le matching des jokers (cas
       positifs ET négatifs), la cohérence des presets, les permissions d'un lot d'écriture ;
    2. `access/RolesConfig` — analyse PURE d'un `roles.json` : tolérance de forme, refus de
-      deviner, avertissements, union id ⇄ login ;
+      deviner, avertissements, union id ⇄ login, et la table `groups` (mapping des groupes
+      d'un IdP vers des rôles — union users ∪ groups, correspondance exacte) ;
    3. `access/FileRoleProvider` — fail-closed sur fichier absent/illisible, amorçage,
-      rétrocompatibilité SUPER_ADMIN/dev, génération (fichiers RÉELS, os.tmpdir) ;
+      rétrocompatibilité SUPER_ADMIN/dev, groupes de l'identité, génération (fichiers RÉELS,
+      os.tmpdir) ;
    4. `access/AccessControl` — 401 vs 403, refus des ensembles vides, gardes taguées,
-      résolution collection → domaine, lot d'écriture, invalidation par génération. Le
-      service ne dépend PAS d'Express (il déclare ses propres vues de req/res) : on
-      l'éprouve avec des objets factices, sans monter de serveur ;
+      résolution collection → domaine, lot d'écriture, invalidation par génération, et 🚨 la
+      clé du cache de permissions qui INTÈGRE les groupes (sans quoi deux appartenances du
+      même login partageraient un ensemble de droits). Le service ne dépend PAS d'Express
+      (il déclare ses propres vues de req/res) : on l'éprouve avec des objets factices, sans
+      monter de serveur ;
    5. EXHAUSTIVITÉ des gardes — un verrou qui relit les SOURCES des routeurs et échoue en
       NOMMANT toute route terminale sans garde. Cf. l'en-tête de la section pour le choix
       de mécanisme et son contrôle de discrimination.
@@ -156,10 +160,45 @@ module.exports = async () => {
     ck.eq(ok.roles.get("cabliste-nuit").join(","), "dc.cabling:*", "parse : rôle CUSTOM");
     ck.eq(ok.warnings.join(" | "), "", "parse : configuration saine → aucun avertissement");
 
-    // TOLÉRANCE de forme : une clé inconnue (ex. `groups`, à venir) ne doit pas invalider le fichier.
-    const tolerant = RolesConfig.parse({ users: { a: ["admin"] }, groups: { "grp-infra": ["dc-editor"] } });
+    // TOLÉRANCE de forme : une clé inconnue ne doit pas invalider le fichier. C'est cette tolérance
+    // qui a permis d'ajouter la table `groups` (lot 4) sans casser les fichiers écrits avant elle.
+    const tolerant = RolesConfig.parse({ users: { a: ["admin"] }, frobnique: { x: ["dc-editor"] } });
     ck.eq(tolerant.users.get("a").join(","), "admin", "tolérance : une clé inconnue n'invalide pas le reste");
-    ck(tolerant.warnings.some((w) => w.includes("groups")), "tolérance : la clé inconnue est SIGNALÉE, pas subie");
+    ck(tolerant.warnings.some((w) => w.includes("frobnique")), "tolérance : la clé inconnue est SIGNALÉE, pas subie");
+
+    /* -- GROUPES → RÔLES (politique v2, avec le mode forward / OIDC demain) -------------------- */
+    ck.eq([...RolesConfig.KNOWN_KEYS].join(","), "users,groups,roles", "clés de premier niveau reconnues : `groups` en fait désormais partie");
+    const withGroups = RolesConfig.parse({
+      users: { jdupont: ["cert-viewer"] },
+      groups: { "grp-infra": ["dc-editor"], "grp-noc": ["vm-viewer", "wifi-viewer"], "Infra": ["admin"] },
+    });
+    ck.eq(withGroups.warnings.join(" | "), "", "groups : table RECONNUE → plus aucun avertissement « clé inconnue » (il disparaît de lui-même)");
+    ck.eq(withGroups.groups.get("grp-infra").join(","), "dc-editor", "groups : rôles d'un groupe");
+    ck.eq(withGroups.groups.get("grp-noc").join(","), "vm-viewer,wifi-viewer", "groups : plusieurs rôles pour un groupe");
+    ck.eq(RolesConfig.empty().groups.size, 0, "politique VIDE : la table des groupes existe et est vide (fail-closed)");
+
+    // UNION users ∪ groups : la composition est purement ADDITIVE (aucun deny dans ce modèle), donc
+    // l'ordre des clés est indifférent et rien ne se « masque ».
+    ck.eq(RolesConfig.rolesFor(withGroups, "jdupont", "jdupont", ["grp-infra"]).sort().join(","), "cert-viewer,dc-editor",
+      "lookup : UNION du rôle nominatif et du rôle de groupe");
+    ck.eq(RolesConfig.rolesFor(withGroups, "", "inconnu", ["grp-infra", "grp-noc"]).sort().join(","), "dc-editor,vm-viewer,wifi-viewer",
+      "lookup : un utilisateur ABSENT du fichier obtient les rôles de TOUS ses groupes (la gestion des personnes vit dans l'IdP)");
+    ck.eq(RolesConfig.rolesFor(withGroups, "", "inconnu", ["grp-absent"]).join(","), "",
+      "lookup : un groupe non déclaré n'accorde rien (opt-in strict, groupes compris)");
+    ck.eq(RolesConfig.rolesFor(withGroups, "", "inconnu", []).join(","), "", "lookup : aucun groupe → aucun rôle");
+    ck.eq(RolesConfig.rolesFor(withGroups, "jdupont", "jdupont").join(","), "cert-viewer",
+      "lookup : groupes OMIS → défaut vide, ce qui ne peut que RESTREINDRE (jamais élargir) le résultat");
+    ck.eq(RolesConfig.rolesFor(withGroups, "", "", ["infra"]).join(","), "",
+      "lookup : correspondance de groupe EXACTE, sensible à la casse (`Infra` est déclaré, `infra` ne l'est pas)");
+    ck.eq(RolesConfig.rolesFor(withGroups, "", "", ["Infra"]).join(","), "admin", "…et la graphie exacte, elle, accorde bien son rôle");
+    ck.eq(RolesConfig.rolesFor(withGroups, "", "", ["grp-infra", "grp-infra"]).join(","), "dc-editor", "lookup : un groupe répété n'accorde pas deux fois (ensemble)");
+    ck.eq(RolesConfig.rolesFor(RolesConfig.parse({ groups: {} }), "", "", ["constructor"]).join(","), "",
+      "lookup : aucune clé héritée d'Object ne peut se faire passer pour un GROUPE (Map, pas objet nu)");
+    // Même refus de deviner que pour `users` : la table des groupes passe par le MÊME `readTable`.
+    const sloppyGroups = RolesConfig.parse({ groups: { "grp-a": "dc-editor", "grp-b": ["dc-viewer", 7] } });
+    ck.eq(sloppyGroups.groups.has("grp-a"), false, "groups : une chaîne au lieu d'un tableau n'accorde RIEN");
+    ck.eq(sloppyGroups.groups.get("grp-b").join(","), "dc-viewer", "groups : entrées non textuelles écartées");
+    ck(sloppyGroups.warnings.some((w) => w.includes("groups")), "groups : chaque écart est signalé sous le nom de la section");
 
     // On ne DEVINE jamais : une valeur mal typée n'accorde rien.
     const sloppy = RolesConfig.parse({ users: { a: "dc-editor", b: ["dc-viewer", 7, ""], "": ["admin"] }, roles: [] });
@@ -197,7 +236,7 @@ module.exports = async () => {
     const quiet = new Logger("error", "test");   // le provider journalise beaucoup : on tait tout sauf les erreurs
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dcm-roles-"));
     const file = path.join(dir, "roles.json");
-    const identity = (over) => Object.assign({ id: "", login: "", adminRight: "", dev: false }, over || {});
+    const identity = (over) => Object.assign({ id: "", login: "", adminRight: "", dev: false, groups: [] }, over || {});
 
     try {
       // -- Découpe de BOOTSTRAP_ADMIN_IDS --
@@ -223,6 +262,20 @@ module.exports = async () => {
       ck.eq(absent.grantsOfRole("nuit").join(","), "dc.cabling:*", "fichier chargé : le rôle CUSTOM est exposé");
       ck.eq(absent.grantsOfRole("dc-viewer"), null, "rôle non défini localement → null (le preset partagé prendra le relais)");
       ck(absent.generation() > genBefore, "génération : incrémentée à chaque politique adoptée (clé d'invalidation du cache)");
+
+      // -- GROUPES de l'IdP (mode forward / OIDC) : le provider les passe à la politique. Fichier
+      // DÉDIÉ, pour ne pas perturber l'état de la politique éprouvée ci-dessus et ci-dessous.
+      const groupsFile = path.join(dir, "groupes.json");
+      fs.writeFileSync(groupsFile, JSON.stringify({ users: { jdupont: ["cert-viewer"] }, groups: { "grp-infra": ["dc-editor"] } }), "utf8");
+      const byGroups = new FileRoleProvider(groupsFile, [], quiet);
+      ck.eq((await byGroups.rolesOf(identity({ id: "amartin", login: "amartin", groups: ["grp-infra"] }))).join(","), "dc-editor",
+        "groupes : un utilisateur ABSENT du fichier obtient le rôle de son groupe (les personnes vivent dans l'IdP)");
+      ck.eq((await byGroups.rolesOf(identity({ id: "jdupont", login: "jdupont", groups: ["grp-infra"] }))).sort().join(","), "cert-viewer,dc-editor",
+        "groupes : UNION avec le rôle nominatif");
+      ck.eq((await byGroups.rolesOf(identity({ id: "amartin", login: "amartin", groups: ["grp-autre"] }))).join(","), "",
+        "groupes : un groupe non déclaré n'accorde rien (opt-in strict)");
+      ck.eq((await byGroups.rolesOf(identity({ id: "amartin", login: "amartin" }))).join(","), "",
+        "groupes : identité SANS groupes (mode dev/basic/sso) → comportement inchangé");
 
       // -- Fichier ILLISIBLE après coup : on CONSERVE la dernière politique valide --
       const genValid = absent.generation();
@@ -299,6 +352,15 @@ module.exports = async () => {
     const id = AccessControl.identityOf({ logged: true, adminRight: "SUPER_ADMIN", user: { id: 42, login: "jdupont" } });
     ck.eq(id.id + "/" + id.login + "/" + id.adminRight, "42/jdupont/SUPER_ADMIN", "identité : id canonique (String(id) SSO) + login + adminRight");
     ck.eq(AccessControl.identityOf({ logged: true, user: { login: "sanId" } }).id, "sanId", "identité : sans id SSO, la clé canonique est le login");
+
+    // GROUPES : lus de la session (mode forward, passthrough SSO), et FILTRÉS ici — c'est la frontière
+    // par laquelle une donnée d'annuaire non maîtrisée entre dans la politique.
+    ck.eq(JSON.stringify(AccessControl.identityOf({ logged: true, user: { login: "a" }, groups: ["infra", "noc"] }).groups), '["infra","noc"]',
+      "identité : les groupes de la session traversent jusqu'à la politique");
+    ck.eq(JSON.stringify(AccessControl.identityOf({ logged: true, user: { login: "a" } }).groups), "[]", "identité : session sans groupes → tableau vide (jamais `undefined`)");
+    ck.eq(JSON.stringify(AccessControl.identityOf({ logged: true, user: { login: "a" }, groups: "infra" }).groups), "[]", "identité : `groups` non tableau → ignoré (jamais coercé)");
+    ck.eq(JSON.stringify(AccessControl.identityOf({ logged: true, user: { login: "a" }, groups: [" infra ", "", null, 42, "noc"] }).groups), '["infra","noc"]',
+      "identité : groupes rognés, vides et non textuels ÉCARTÉS (un SSO peut renvoyer n'importe quoi)");
 
     // -- requireAuth : 401 (pas authentifié) ≠ 403 (pas autorisé) --
     session = { logged: false, adminRight: "NONE" };
@@ -406,6 +468,39 @@ module.exports = async () => {
     gen++;                     // rechargement à chaud
     const reloaded = await access.setFor(session);
     ck(!reloaded.has("dc.rack:read") && reloaded.has("certs:read"), "cache : le changement de GÉNÉRATION invalide la mémoïsation (rechargement à chaud effectif)");
+
+    /* -- 🚨 CACHE et GROUPES : la clé DOIT les intégrer -----------------------------------------
+       Deux requêtes du MÊME login avec des groupes DIFFÉRENTS n'ont pas les mêmes rôles. Si la clé
+       de mémoïsation ignorait les groupes, la première réponse figerait les droits de la seconde —
+       dans un sens (escalade) comme dans l'autre (perte d'accès). Le provider bouchon ci-dessous
+       répond en fonction des GROUPES de l'identité reçue, à génération CONSTANTE : sans les groupes
+       dans la clé, le second appel rendrait l'ensemble du premier. */
+    const byGroup = { "grp-infra": ["dc-editor"], "grp-noc": ["vm-viewer"] };
+    const groupAware = new AccessControl({
+      session: async () => session,
+      roles: { rolesOf: async (identity) => identity.groups.flatMap((g) => byGroup[g] || []), generation: () => 7 },
+      log: quiet,
+    });
+    const sessionOf = (groups) => ({ logged: true, adminRight: "USER", user: { id: 42, login: "jdupont" }, groups });
+    const infraSet = await groupAware.setFor(sessionOf(["grp-infra"]));
+    ck(infraSet.has("dc.rack:update") && !infraSet.has("vm:read"), "cache/groupes : premier appel — les rôles du groupe `grp-infra`");
+    const nocSet = await groupAware.setFor(sessionOf(["grp-noc"]));
+    ck(nocSet.has("vm:read") && !nocSet.has("dc.rack:update"),
+      "🚨 cache/groupes : MÊME login, groupes DIFFÉRENTS → ensemble RECALCULÉ (la clé intègre les groupes)");
+    const noGroupSet = await groupAware.setFor(sessionOf([]));
+    ck(noGroupSet.isEmpty(), "cache/groupes : le même login SANS groupe n'hérite d'aucune entrée précédente");
+    ck((await groupAware.setFor(sessionOf(["grp-infra"]))).has("dc.rack:update"), "cache/groupes : retour aux groupes d'origine → ensemble d'origine");
+    // L'ORDRE des groupes n'a aucune signification pour la politique : deux ordres du même ensemble
+    // doivent PARTAGER l'entrée de cache (les groupes sont triés dans la clé), pas la dupliquer.
+    let calls = 0;
+    const counting = new AccessControl({
+      session: async () => session,
+      roles: { rolesOf: async () => { calls++; return ["dc-viewer"]; }, generation: () => 3 },
+      log: quiet,
+    });
+    await counting.setFor(sessionOf(["a", "b"]));
+    await counting.setFor(sessionOf(["b", "a"]));
+    ck.eq(calls, 1, "cache/groupes : l'ORDRE des groupes ne crée pas une seconde entrée (clé triée)");
 
     // -- Session non authentifiée : rien à calculer --
     ck((await access.setFor({ logged: false })).isEmpty(), "setFor : session non authentifiée → ensemble vide");

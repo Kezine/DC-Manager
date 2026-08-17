@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { SecretCompare } from "./SecretCompare.js";   // comparaison à TEMPS CONSTANT — helper du dossier (2 consommateurs depuis le mode forward)
 import type { AuthProvider, AuthRequestView, SsoResult } from "./AuthProvider.js";
 
 /* =============================================================================
@@ -52,8 +52,8 @@ export class BasicAuthProvider implements AuthProvider {
     const pass = cut >= 0 ? decoded.slice(cut + 1) : "";
     // Les DEUX comparaisons sont évaluées avant le `&&` (pas de court-circuit qui distinguerait
     // « login faux » de « mot de passe faux » au temps de réponse), chacune à temps constant.
-    const okUser = BasicAuthProvider.safeEq(user, this.login);
-    const okPass = BasicAuthProvider.safeEq(pass, this.password);
+    const okUser = SecretCompare.equals(user, this.login);
+    const okPass = SecretCompare.equals(pass, this.password);
     return okUser && okPass;
   }
 
@@ -63,20 +63,5 @@ export class BasicAuthProvider implements AuthProvider {
   async authenticate(req: AuthRequestView): Promise<SsoResult | null> {
     if (!this.accepts(req)) return null;
     return { user: { login: this.login || BasicAuthProvider.FALLBACK_LOGIN }, logged: true, adminRight: "SUPER_ADMIN", dev: true };
-  }
-
-  /** Comparaison à TEMPS CONSTANT (anti-timing-attack). On hash les deux chaînes en SHA-256 → deux buffers de MÊME
-      taille (32 o), condition requise par `timingSafeEqual`, ce qui évite AUSSI de fuiter la longueur du secret par
-      la durée. Contrairement à `===` (court-circuit au 1er caractère divergent), le temps ne dépend plus du nombre
-      de caractères de tête corrects → un attaquant ne peut plus deviner le secret caractère par caractère au chrono.
-
-      ⚠ PRIVÉE ET LOCALE tant qu'elle n'a qu'un consommateur. Le jour où un second provider a un
-      secret à comparer (le secret partagé proxy↔app d'un provider d'en-têtes, par exemple), elle
-      sort dans un helper du dossier — pas avant : un point d'extension que personne n'utilise
-      coûte plus qu'il ne rend. */
-  private static safeEq(a: string, b: string): boolean {
-    const ha = createHash("sha256").update(a).digest();
-    const hb = createHash("sha256").update(b).digest();
-    return timingSafeEqual(ha, hb);
   }
 }

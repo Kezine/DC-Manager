@@ -1,6 +1,6 @@
-/* Tests modules — AUTHENTIFICATION : orchestrateur + providers (lot 3 du chantier auth/ACL).
+/* Tests modules — AUTHENTIFICATION : orchestrateur + providers (lots 3 et 4 du chantier auth/ACL).
 
-   Quatre sections, une par classe, dans l'ordre de la découpe :
+   Sept sections, une par classe, dans l'ordre de la découpe :
    1. `auth/DevAuthProvider` — l'identité factice du mode par défaut (et le fait qu'elle ne
       présente AUCUNE clé de session, donc n'est jamais mise en cache) ;
    2. `auth/BasicAuthProvider` — l'analyse de `BASIC_AUTH` (qui EST l'inférence de mode), le
@@ -10,9 +10,19 @@
    3. `auth/LegacySsoAuthProvider` — extraction du jeton (cookie nommé / en-tête complet / absent /
       nom à métacaractères), PASSTHROUGH intégral du JSON, replis fail-closed d'un SSO en erreur ou
       injoignable, et l'invariant « le jeton n'apparaît jamais dans un log » ;
-   4. `auth.ts` (`Auth`) — l'ORCHESTRATEUR : sélection du provider (inférence de mode inchangée),
-      annonce de boot, `checkBasic` du gate de transport, cache par hash de jeton (réservé au SSO)
-      et capture d'annuaire (jamais un non-loggé).
+   4. `auth/SecretCompare` — le helper de comparaison à TEMPS CONSTANT, sorti du provider basic
+      quand le mode forward lui a donné un second consommateur ;
+   5. `auth/AuthModeResolution` — la décision de CONFIGURATION : inférence historique quand
+      `AUTH_MODE` est absente, mode explicite quand elle est là, et 🚨 REFUS (mode `null`) sur
+      valeur inconnue/incohérente — jamais de repli sur le mode dev, qui n'authentifie personne ;
+   6. `auth/ForwardHeaderAuthProvider` — l'identité lue dans les en-têtes d'un reverse-proxy
+      *identity-aware* : en-têtes configurables, groupes, `string[]`, et surtout le SECRET PARTAGÉ
+      (mauvais secret ⇒ anonyme SANS lire le moindre autre en-tête — PROUVÉ en comptant les
+      lectures, pas en relisant le commentaire) ;
+   7. `auth.ts` (`Auth`) — l'ORCHESTRATEUR : sélection du provider (inférence inchangée + modes
+      explicites), refus de construction sur configuration douteuse, annonce de boot (dont le WARN
+      « forward sans secret »), `checkBasic` du gate de transport, cache par hash de jeton (réservé
+      au SSO) et capture d'annuaire (jamais un non-loggé).
 
    Aucun serveur, aucun réseau : le contrat `auth/AuthProvider` déclare sa propre vue minimale de
    la requête (Express n'entre pas), et le provider SSO reçoit son `fetch` INJECTÉ.
@@ -46,6 +56,18 @@ const httpFail = (status) => ({ ok: false, status, json: async () => ({}) });
 
 /** En-tête `Authorization: Basic` d'un couple. */
 const basicHeader = (user, pass) => ({ headers: { authorization: "Basic " + Buffer.from(user + ":" + pass).toString("base64") } });
+
+/** En-têtes ESPIONNÉS : mémorise CHAQUE nom d'en-tête réellement lu par le provider.
+    Sert la preuve la plus importante du mode forward — « secret faux ⇒ on ne lit RIEN d'autre » est
+    une propriété de sécurité, pas un commentaire : on la vérifie en observant les accès, comme la
+    non-fuite du mode basic se vérifie en comptant les hachages. */
+const spyHeaders = (values) => {
+  const reads = [];
+  const headers = new Proxy(Object.assign({}, values), {
+    get(target, key) { if (typeof key === "string") reads.push(key); return target[key]; },
+  });
+  return { reads, headers };
+};
 
 module.exports = async () => {
 
@@ -233,7 +255,241 @@ module.exports = async () => {
   });
 
   /* ==========================================================================
-     4. Auth — l'ORCHESTRATEUR
+     4. SecretCompare — le helper de comparaison à temps constant
+     ========================================================================== */
+  await section("Serveur : auth — SecretCompare (temps constant : égalité, divergence, longueurs différentes, vide)", async () => {
+    const { SecretCompare } = SERVER("auth/SecretCompare.js");
+
+    ck(SecretCompare.equals("s3cret-partage", "s3cret-partage"), "chaînes identiques → vrai");
+    ck(!SecretCompare.equals("s3cret-partage", "s3cret-partagE"), "un seul caractère de différence → faux");
+    ck(!SecretCompare.equals("s3cret-partage", "s3cret-partage "), "espace en trop → faux (aucune tolérance sur un secret)");
+    // Le hachage préalable existe POUR ce cas : `timingSafeEqual` jette sur deux buffers de tailles
+    // différentes, et comparer les chaînes brutes ferait fuiter la LONGUEUR du secret par la durée.
+    ck(!SecretCompare.equals("court", "beaucoup-plus-long-que-l-autre"), "longueurs DIFFÉRENTES → faux, sans exception (le SHA-256 égalise les tailles)");
+    ck(SecretCompare.equals("", ""), "deux vides → vrai (« pas de secret configuré » est une décision de l'appelant, pas d'ici)");
+    ck(!SecretCompare.equals("", "s3cret"), "vide contre secret → faux (c'est le cas de l'en-tête ABSENT côté forward)");
+    ck(SecretCompare.equals("clé-é⚡", "clé-é⚡"), "unicode : comparaison sur les octets UTF-8, sans surprise");
+
+    // Coût CONSTANT : exactement 2 hachages par comparaison, quel que soit le résultat.
+    const crypto = require("node:crypto");
+    const realCreateHash = crypto.createHash;
+    let hashCalls = 0;
+    const counting = (...args) => { hashCalls++; return realCreateHash.apply(crypto, args); };
+    let patched = false;
+    try { crypto.createHash = counting; patched = crypto.createHash === counting; } catch (_) { patched = false; }
+    if (!patched) { ck(true, "createHash non instrumentable dans cet environnement → contrôle du coût sauté"); }
+    else {
+      try {
+        hashCalls = 0; SecretCompare.equals("a", "a");
+        ck.eq(hashCalls, 2, "égalité → 2 hachages (un par opérande)");
+        hashCalls = 0; SecretCompare.equals("a", "zzzzzzzzzzzz");
+        ck.eq(hashCalls, 2, "divergence dès le 1er caractère → 2 hachages AUSSI (aucun court-circuit)");
+      } finally { crypto.createHash = realCreateHash; }
+    }
+  });
+
+  /* ==========================================================================
+     5. AuthModeResolution — la décision de configuration
+     ========================================================================== */
+  await section("Serveur : auth — AuthModeResolution (AUTH_MODE absente → inférence historique ; explicite → fait loi ; 🚨 inconnue/incohérente → REFUS sans repli dev)", async () => {
+    const { AuthModeResolution } = SERVER("auth/AuthModeResolution.js");
+    const decide = (over) => AuthModeResolution.resolve(over || {});
+
+    // -- Constantes exposées (citées par les messages et la doc). --
+    ck.eq(AuthModeResolution.ENV_VAR, "AUTH_MODE", "nom de la variable d'environnement");
+    ck.eq([...AuthModeResolution.MODES].join(","), "dev,basic,sso,forward", "modes servis aujourd'hui");
+    ck.eq([...AuthModeResolution.PLANNED_MODES].join(","), "oidc", "modes PRÉVUS mais pas encore servis (message distinct d'une coquille)");
+
+    // -- ABSENTE : l'inférence historique, à l'identique (basic > sso > dev). --
+    ck.eq(decide().mode, "dev", "rien de configuré → dev (défaut historique)");
+    ck.eq(decide().error, null, "…et aucune erreur : c'est un mode légitime, le WARN de l'orchestrateur suffit");
+    ck.eq(decide({ hasSsoUrl: true }).mode, "sso", "SSO_URL seule → sso");
+    ck.eq(decide({ hasBasicCredentials: true }).mode, "basic", "BASIC_AUTH seule → basic");
+    ck.eq(decide({ hasBasicCredentials: true, hasSsoUrl: true }).mode, "basic", "les deux → basic PRIORITAIRE (inférence inchangée au bit près)");
+    ck.eq(decide({ authMode: "" }).mode, "dev", "AUTH_MODE vide = absente");
+    ck.eq(decide({ authMode: "   " }).mode, "dev", "AUTH_MODE blanche = absente");
+    ck.eq(decide({ authMode: null, hasSsoUrl: true }).mode, "sso", "AUTH_MODE nulle = absente (inférence)");
+    ck.eq(AuthModeResolution.resolve().mode, "dev", "aucun argument = aucun fait configuré");
+
+    // -- EXPLICITE : elle fait loi, l'inférence ne s'applique plus. --
+    ck.eq(decide({ authMode: "dev", hasBasicCredentials: true, hasSsoUrl: true }).mode, "dev",
+      "AUTH_MODE=dev explicite → dev MALGRÉ BASIC_AUTH et SSO_URL (le choix écrit fait loi)");
+    ck.eq(decide({ authMode: "basic", hasBasicCredentials: true, hasSsoUrl: true }).mode, "basic", "AUTH_MODE=basic honorée");
+    ck.eq(decide({ authMode: "sso", hasBasicCredentials: true, hasSsoUrl: true }).mode, "sso",
+      "AUTH_MODE=sso l'emporte sur BASIC_AUTH — l'INVERSE de l'inférence, et c'est bien le but d'une variable explicite");
+    ck.eq(decide({ authMode: "forward" }).mode, "forward", "AUTH_MODE=forward → forward (aucune autre variable requise : les en-têtes ont des défauts)");
+    ck.eq(decide({ authMode: " Forward " }).mode, "forward", "rognage + casse tolérés (une variable recopiée traîne un blanc ; le mode reste EXPLICITE)");
+    ck.eq(decide({ authMode: "FORWARD" }).error, null, "…et sans avertissement : tolérer la casse n'ouvre rien");
+
+    // -- 🚨 REFUS. Le point capital : `mode: null`, et JAMAIS « dev » — une coquille qui retomberait
+    // en silence sur un mode qui n'authentifie personne ouvrirait l'instance (anti fail-open).
+    const refused = [
+      ["frobnique", "valeur inconnue", { authMode: "frobnique" }],
+      ["forwrad", "coquille sur un mode réel", { authMode: "forwrad" }],
+      ["oidc", "mode prévu, pas encore implémenté", { authMode: "oidc" }],
+      ["sso", "sso sans SSO_URL", { authMode: "sso" }],
+      ["basic", "basic sans BASIC_AUTH exploitable", { authMode: "basic" }],
+    ];
+    for (const [label, why, input] of refused) {
+      const decision = decide(input);
+      ck.eq(decision.mode, null, "REFUS (" + why + ") : aucun mode — « " + label + " »");
+      ck(typeof decision.error === "string" && decision.error.length > 20, "REFUS (" + why + ") : un motif est donné");
+      ck(decision.error.includes("AUTH_MODE"), "REFUS (" + why + ") : le message NOMME la variable fautive");
+    }
+    ck(decide({ authMode: "oidc" }).error.includes("pas encore implémenté"), "message : « oidc » est annoncé comme À VENIR, pas comme une faute de frappe");
+    ck(decide({ authMode: "frobnique" }).error.includes("inconnue"), "message : une valeur hors liste est annoncée comme inconnue");
+    ck(decide({ authMode: "frobnique" }).error.includes("dev, basic, sso, forward"), "message : les valeurs admises sont ÉNUMÉRÉES (message actionnable)");
+    ck(decide({ authMode: "sso" }).error.includes("SSO_URL"), "message : la variable MANQUANTE est nommée (sso)");
+    ck(decide({ authMode: "basic" }).error.includes("BASIC_AUTH"), "message : la variable MANQUANTE est nommée (basic)");
+    ck(decide({ authMode: "frobnique" }).error.includes("Aucun repli sur le mode dev"), "message : la DOCTRINE est rappelée (sinon on « retire juste la variable »)");
+    // Et surtout : une coquille NE profite PAS de l'inférence, même quand elle aurait de quoi.
+    ck.eq(decide({ authMode: "frobnique", hasBasicCredentials: true, hasSsoUrl: true }).mode, null,
+      "🚨 coquille + configuration complète → REFUS quand même (aucune retombée silencieuse sur l'inférence)");
+  });
+
+  /* ==========================================================================
+     6. ForwardHeaderAuthProvider
+     ========================================================================== */
+  await section("Serveur : auth — ForwardHeaderAuthProvider (en-têtes configurables, groupes, string[], 🚨 secret partagé à temps constant : faux secret ⇒ AUCUN autre en-tête lu)", async () => {
+    const { ForwardHeaderAuthProvider } = SERVER("auth/ForwardHeaderAuthProvider.js");
+    const provider = new ForwardHeaderAuthProvider();
+
+    // -- Défauts : la famille Remote-* (Authelia/Authentik). --
+    ck.eq(provider.userHeader, "Remote-User", "défaut : en-tête utilisateur");
+    ck.eq(provider.emailHeader, "Remote-Email", "défaut : en-tête e-mail");
+    ck.eq(provider.nameHeader, "Remote-Name", "défaut : en-tête nom d'affichage");
+    ck.eq(provider.groupsHeader, "Remote-Groups", "défaut : en-tête groupes");
+    ck.eq(provider.secretHeader, "X-Auth-Secret", "défaut : en-tête du secret partagé");
+    ck.eq(provider.secretConfigured, false, "aucun secret configuré par défaut (le boot le signale en WARN)");
+    ck.eq(new ForwardHeaderAuthProvider({ userHeader: "   " }).userHeader, "Remote-User", "nom d'en-tête blanc → défaut (tolérance de forme)");
+    ck.eq(new ForwardHeaderAuthProvider({ userHeader: " X-Forwarded-User " }).userHeader, "X-Forwarded-User", "nom d'en-tête rogné");
+
+    // -- SESSION produite. Node met les noms d'en-têtes en minuscules : c'est la forme réelle. --
+    const full = await provider.authenticate({ headers: {
+      "remote-user": "amartin", "remote-email": "alice@corp.tld", "remote-name": "Alice Martin", "remote-groups": "infra,noc",
+    } });
+    ck.eq(full.logged, true, "utilisateur présent → session AUTHENTIFIÉE");
+    ck.eq(full.user.login, "amartin", "…login = en-tête utilisateur");
+    ck.eq(full.user.eMail, "alice@corp.tld", "…e-mail repris");
+    ck.eq(full.user.nom, "Alice Martin", "…nom COMPLET tel quel (un proxy ne fournit qu'un libellé d'affichage)");
+    ck.eq(full.user.prenom, undefined, "…`prenom` ABSENT : découper à l'espace inventerait une structure fausse (noms composés)");
+    ck.eq(full.user.domain, "forward", "…domaine « forward » (d'où vient l'identité, en un mot)");
+    ck.eq(ForwardHeaderAuthProvider.DOMAIN, "forward", "…et ce domaine est nommé sur la classe");
+    ck.eq(JSON.stringify(full.groups), '["infra","noc"]', "…groupes découpés sur la virgule, dans l'ordre du proxy");
+    ck.eq(full.adminRight, undefined, "🚨 AUCUN adminRight : l'autorisation passe par les RÔLES (sinon tout utilisateur du proxy serait administrateur)");
+    ck.eq(full.dev, undefined, "aucun marqueur `dev` : ce mode authentifie réellement (via le proxy)");
+    ck.eq(full.expireDate, undefined, "aucune `expireDate` : la session appartient au proxy — annoncer une échéance qu'on ne tient pas serait mentir");
+    ck.eq(typeof provider.sessionKey, "undefined", "aucune `sessionKey` → jamais mis en cache (lire des en-têtes ne coûte aucune E/S)");
+
+    // -- Utilisateur REQUIS : pas d'en-tête, pas d'identité (jamais d'utilisateur par défaut). --
+    ck.eq(await provider.authenticate({ headers: {} }), null, "aucun en-tête → null (anonyme)");
+    ck.eq(await provider.authenticate({ headers: { "remote-user": "" } }), null, "en-tête utilisateur VIDE → null");
+    ck.eq(await provider.authenticate({ headers: { "remote-user": "   " } }), null, "en-tête utilisateur blanc → null");
+    ck.eq(await provider.authenticate({ headers: { "remote-email": "a@b.c", "remote-groups": "infra" } }), null,
+      "e-mail et groupes SANS utilisateur → null (le login est la clé de la politique)");
+    const minimal = await provider.authenticate({ headers: { "remote-user": " amartin " } });
+    ck.eq(minimal.user.login, "amartin", "valeur d'en-tête rognée");
+    ck.eq(minimal.user.eMail, undefined, "e-mail absent → champ ABSENT (pas de chaîne vide qui polluerait /me et l'annuaire)");
+    ck.eq(minimal.user.nom, undefined, "nom absent → champ absent");
+    ck.eq(JSON.stringify(minimal.groups), "[]", "aucun groupe → tableau VIDE (≠ absent : ce provider FOURNIT des groupes, l'IdP n'en a donné aucun)");
+
+    // -- En-têtes CUSTOM (oauth2-proxy, Tailscale… : l'exploitant renomme, pas de profils par marque). --
+    const oauth2 = new ForwardHeaderAuthProvider({ userHeader: "X-Forwarded-User", emailHeader: "X-Forwarded-Email", groupsHeader: "X-Forwarded-Groups" });
+    const custom = await oauth2.authenticate({ headers: { "x-forwarded-user": "zoe", "x-forwarded-email": "zoe@corp.tld", "x-forwarded-groups": "dev", "remote-user": "IGNORÉ" } });
+    ck.eq(custom.user.login, "zoe", "en-têtes custom honorés");
+    ck.eq(JSON.stringify(custom.groups), '["dev"]', "…groupes custom aussi");
+    ck.eq(await oauth2.authenticate({ headers: { "remote-user": "amartin" } }), null, "…et les défauts ne sont PLUS lus (aucun cumul de conventions)");
+
+    // -- GROUPES : découpe, rognage, vides écartées, doublons fondus. --
+    const groupsOf = async (raw) => JSON.stringify((await provider.authenticate({ headers: { "remote-user": "u", "remote-groups": raw } })).groups);
+    ck.eq(await groupsOf("infra, noc ,,  admin "), '["infra","noc","admin"]', "groupes : rognés, vides écartées");
+    ck.eq(await groupsOf("infra,infra,noc"), '["infra","noc"]', "groupes : doublons fondus");
+    ck.eq(await groupsOf(""), "[]", "groupes : en-tête vide → aucun groupe");
+    ck.eq(await groupsOf(" , , "), "[]", "groupes : que des séparateurs → aucun groupe");
+    ck.eq(await groupsOf("Infra"), '["Infra"]', "groupes : casse CONSERVÉE (la politique compare exactement — `Infra` ≠ `infra`)");
+    ck.eq(await groupsOf("grp avec espaces"), '["grp avec espaces"]', "groupes : les espaces INTERNES sont légitimes (un nom de groupe d'annuaire en contient)");
+
+    // -- En-tête RÉPÉTÉ → Node donne un `string[]` : on retient la PREMIÈRE valeur, en UN point. --
+    const repeated = await provider.authenticate({ headers: { "remote-user": ["amartin", "usurpateur"], "remote-groups": ["infra,noc", "admin"] } });
+    ck.eq(repeated.user.login, "amartin", "en-tête répété (string[]) → PREMIÈRE valeur (jamais de concaténation de deux affirmations contradictoires)");
+    ck.eq(JSON.stringify(repeated.groups), '["infra","noc"]', "…même normalisation pour les groupes");
+    ck.eq(await provider.authenticate({ headers: { "remote-user": [] } }), null, "tableau VIDE → aucune valeur → anonyme");
+    ck.eq(await provider.authenticate({ headers: { "remote-user": 42 } }), null, "valeur non textuelle → ignorée (anonyme), jamais coercée");
+
+    // -- CASSE du nom : Node minuscule les en-têtes reçus, mais la vue minimale du contrat ne le
+    // GARANTIT pas (test, futur adaptateur) — la lecture accepte donc aussi le nom tel qu'écrit.
+    ck.eq((await provider.authenticate({ headers: { "Remote-User": "amartin" } })).user.login, "amartin", "nom d'en-tête en casse CANONIQUE également reconnu");
+
+    /* ---- 🚨 SECRET PARTAGÉ — le cœur du mode ---- */
+    const secured = new ForwardHeaderAuthProvider({ secret: "  s3cret-du-proxy  " });
+    ck.eq(secured.secretConfigured, true, "secret configuré (valeur rognée, comme toute variable d'environnement)");
+
+    const ok = await secured.authenticate({ headers: { "remote-user": "amartin", "remote-groups": "infra", "x-auth-secret": "s3cret-du-proxy" } });
+    ck.eq(ok.user.login, "amartin", "BON secret → identité lue normalement");
+    ck.eq(await secured.authenticate({ headers: { "remote-user": "amartin", "x-auth-secret": "MAUVAIS" } }), null, "MAUVAIS secret → anonyme");
+    ck.eq(await secured.authenticate({ headers: { "remote-user": "amartin" } }), null, "secret ABSENT de la requête → anonyme (un en-tête d'identité nu ne vaut rien)");
+    ck.eq(await secured.authenticate({ headers: { "remote-user": "amartin", "x-auth-secret": "" } }), null, "secret vide → anonyme");
+    ck.eq(await secured.authenticate({ headers: { "remote-user": "amartin", "x-auth-secret": "s3cret-du-proxy" + "0" } }), null,
+      "secret presque bon (un caractère de plus) → anonyme");
+    ck.eq((await secured.authenticate({ headers: { "remote-user": "amartin", "x-auth-secret": "  s3cret-du-proxy  " } })).user.login, "amartin",
+      "espaces AUTOUR de la valeur d'en-tête : rognés des DEUX côtés (le transport HTTP les retire de toute façon)");
+
+    // La PREUVE : sur secret refusé, aucun autre en-tête n'est même consulté. Un provider qui lirait
+    // « juste pour journaliser » ouvrirait une brèche invisible à la relecture.
+    const spy = spyHeaders({ "remote-user": "usurpateur", "remote-email": "x@y.z", "remote-groups": "admin", "x-auth-secret": "MAUVAIS" });
+    ck.eq(await secured.authenticate({ headers: spy.headers }), null, "secret refusé → anonyme (requête pourtant complète)");
+    ck(spy.reads.includes("x-auth-secret"), "…l'en-tête du SECRET a bien été consulté");
+    ck(!spy.reads.includes("remote-user") && !spy.reads.includes("remote-email") && !spy.reads.includes("remote-groups"),
+      "🚨 …et AUCUN en-tête d'identité n'a été lu (" + spy.reads.join(", ") + ")");
+
+    // Secret configuré + requête valide : on lit bien les autres en-têtes (contre-preuve de l'espion).
+    const spyOk = spyHeaders({ "remote-user": "amartin", "x-auth-secret": "s3cret-du-proxy" });
+    await secured.authenticate({ headers: spyOk.headers });
+    ck(spyOk.reads.includes("remote-user"), "contre-preuve : secret accepté → les en-têtes d'identité SONT lus (l'espion voit bien ce qu'il prétend voir)");
+
+    // Comparaison à TEMPS CONSTANT : c'est le helper partagé qui l'assure (2 hachages par appel).
+    const crypto = require("node:crypto");
+    const realCreateHash = crypto.createHash;
+    let hashCalls = 0;
+    const counting = (...args) => { hashCalls++; return realCreateHash.apply(crypto, args); };
+    let patched = false;
+    try { crypto.createHash = counting; patched = crypto.createHash === counting; } catch (_) { patched = false; }
+    if (!patched) { ck(true, "createHash non instrumentable → contrôle du temps constant sauté"); }
+    else {
+      try {
+        hashCalls = 0; await secured.authenticate({ headers: { "remote-user": "u", "x-auth-secret": "MAUVAIS" } });
+        ck.eq(hashCalls, 2, "secret vérifié par comparaison HACHÉE (temps constant, SecretCompare) — pas par ===");
+        hashCalls = 0; await provider.authenticate({ headers: { "remote-user": "u" } });
+        ck.eq(hashCalls, 0, "aucun secret configuré → aucune comparaison (rien à vérifier)");
+      } finally { crypto.createHash = realCreateHash; }
+    }
+
+    // -- Sans secret configuré : le provider FONCTIONNE (le réseau est la seule protection, et le
+    // boot le crie — cf. la section de l'orchestrateur). --
+    ck.eq((await provider.authenticate({ headers: { "remote-user": "amartin", "x-auth-secret": "n'importe quoi" } })).user.login, "amartin",
+      "aucun secret configuré → l'en-tête de secret est ignoré, l'identité est crue");
+
+    // -- optionsFromEnv : le provider POSSÈDE les noms de ses variables (le bootstrap n'en connaît aucun). --
+    ck.eq(ForwardHeaderAuthProvider.ENV_USER_HEADER, "AUTH_FORWARD_USER_HEADER", "variable : en-tête utilisateur");
+    ck.eq(ForwardHeaderAuthProvider.ENV_EMAIL_HEADER, "AUTH_FORWARD_EMAIL_HEADER", "variable : en-tête e-mail");
+    ck.eq(ForwardHeaderAuthProvider.ENV_NAME_HEADER, "AUTH_FORWARD_NAME_HEADER", "variable : en-tête nom");
+    ck.eq(ForwardHeaderAuthProvider.ENV_GROUPS_HEADER, "AUTH_FORWARD_GROUPS_HEADER", "variable : en-tête groupes");
+    ck.eq(ForwardHeaderAuthProvider.ENV_SECRET, "AUTH_FORWARD_SECRET", "variable : secret partagé");
+    ck.eq(ForwardHeaderAuthProvider.ENV_SECRET_HEADER, "AUTH_FORWARD_SECRET_HEADER", "variable : en-tête du secret");
+    const fromEnv = new ForwardHeaderAuthProvider(ForwardHeaderAuthProvider.optionsFromEnv({
+      AUTH_FORWARD_USER_HEADER: "Tailscale-User-Login", AUTH_FORWARD_NAME_HEADER: "Tailscale-User-Name",
+      AUTH_FORWARD_SECRET: "s3cret", AUTH_FORWARD_SECRET_HEADER: "X-Proxy-Proof",
+    }));
+    ck.eq(fromEnv.userHeader, "Tailscale-User-Login", "optionsFromEnv : en-tête utilisateur lu de l'environnement");
+    ck.eq(fromEnv.nameHeader, "Tailscale-User-Name", "optionsFromEnv : en-tête nom lu de l'environnement");
+    ck.eq(fromEnv.groupsHeader, "Remote-Groups", "optionsFromEnv : variable absente → défaut conservé");
+    ck.eq(fromEnv.secretHeader, "X-Proxy-Proof", "optionsFromEnv : en-tête du secret configurable");
+    ck.eq(fromEnv.secretConfigured, true, "optionsFromEnv : secret pris en compte");
+    ck.eq(new ForwardHeaderAuthProvider(ForwardHeaderAuthProvider.optionsFromEnv({})).userHeader, "Remote-User", "optionsFromEnv : environnement VIERGE → tous les défauts");
+  });
+
+  /* ==========================================================================
+     7. Auth — l'ORCHESTRATEUR
      ========================================================================== */
   await section("Serveur : auth — Auth orchestrateur (inférence de mode, annonce de boot, checkBasic du gate, cache par hash de jeton, capture d'annuaire)", async () => {
     const { Auth } = SERVER("auth.js");
@@ -248,6 +504,29 @@ module.exports = async () => {
     ck.eq(new Auth(log, { basicAuth: "u:p", ssoUrl: "https://sso.test/v" }).mode, "basic", "les deux configurés → basic PRIORITAIRE sur sso");
     ck.eq(new Auth(log, { basicAuth: "sansdeuxpoints", ssoUrl: "https://sso.test/v" }).mode, "sso", "BASIC_AUTH malformé → ignoré, on retombe sur le sso");
     ck.eq(new Auth(log, { basicAuth: ":motdepasse" }).mode, "basic", "BASIC_AUTH sans utilisateur → mode basic tout de même");
+
+    // -- MODE EXPLICITE (`AUTH_MODE`) : il fait loi, et il ouvre le mode forward. --
+    ck.eq(new Auth(log, { authMode: "forward" }).mode, "forward", "AUTH_MODE=forward → mode forward");
+    ck.eq(new Auth(log, { authMode: "dev", basicAuth: "u:p", ssoUrl: "https://sso.test/v" }).mode, "dev",
+      "AUTH_MODE=dev explicite → dev malgré BASIC_AUTH et SSO_URL");
+    ck.eq(new Auth(log, { authMode: "sso", basicAuth: "u:p", ssoUrl: "https://sso.test/v" }).mode, "sso",
+      "AUTH_MODE=sso explicite → sso malgré BASIC_AUTH (l'inverse de l'inférence)");
+    ck.eq(new Auth(log, { authMode: "basic", basicAuth: "u:p" }).mode, "basic", "AUTH_MODE=basic explicite honorée");
+
+    // 🚨 REFUS DE CONSTRUCTION sur configuration douteuse : un `Auth` ne peut pas exister dans un état
+    // où le seul repli serait le mode dev. Le bootstrap (index.ts) journalise et arrête le process.
+    const throwsOn = (opts, label) => {
+      let caught = null;
+      try { new Auth(makeLog(), opts); } catch (e) { caught = e; }
+      ck(caught instanceof Error, "REFUS : " + label + " → le constructeur JETTE (aucun objet Auth en état douteux)");
+      if (caught) ck(caught.message.includes("AUTH_MODE"), "REFUS : " + label + " → le message nomme AUTH_MODE");
+      return caught;
+    };
+    throwsOn({ authMode: "frobnique" }, "valeur inconnue");
+    throwsOn({ authMode: "oidc" }, "mode pas encore implémenté");
+    throwsOn({ authMode: "sso" }, "sso sans SSO_URL");
+    throwsOn({ authMode: "basic" }, "basic sans BASIC_AUTH");
+    throwsOn({ authMode: "frobnique", basicAuth: "u:p", ssoUrl: "https://sso.test/v" }, "coquille malgré une configuration complète");
 
     // Le champ `mode` reste EXPOSÉ : `server.ts` monte le gate de transport dessus.
     ck.eq(typeof new Auth(log, {}).mode, "string", "`mode` exposé (le gate basic de server.ts s'y accroche)");
@@ -264,6 +543,20 @@ module.exports = async () => {
     const logSsoWhole = makeLog(); new Auth(logSsoWhole, { ssoUrl: "https://sso.test/v" });
     ck(logSsoWhole.lines.some((l) => l === "info auth SSO https://sso.test/v (Cookie complet)"), "boot sso sans COOKIE_NAME → INFO « Cookie complet »");
 
+    // -- Boot FORWARD : INFO nommant les en-têtes, et 🚨 WARN quand rien ne prouve l'origine des requêtes. --
+    const logFwd = makeLog(); new Auth(logFwd, { authMode: "forward" });
+    ck(logFwd.lines.some((l) => l === "info auth Forward auth : en-têtes Remote-User / Remote-Groups"), "boot forward → INFO nommant les en-têtes lus");
+    ck(logFwd.lines.some((l) => /^warn auth ⚠ mode FORWARD sans AUTH_FORWARD_SECRET/.test(l)),
+      "🚨 boot forward SANS secret → WARN : les en-têtes sont crus sans preuve, l'app doit être joignable UNIQUEMENT par le proxy");
+    ck(logFwd.lines.some((l) => l.includes("bind localhost")), "…et le WARN dit QUOI FAIRE (consigne réseau : le code ne peut pas la vérifier)");
+    const logFwdSecret = makeLog(); new Auth(logFwdSecret, { authMode: "forward", forward: { secret: "s3cret", secretHeader: "X-Proxy-Proof" } });
+    ck(logFwdSecret.lines.some((l) => l === "info auth Forward auth : en-têtes Remote-User / Remote-Groups (secret partagé attendu dans X-Proxy-Proof)"),
+      "boot forward AVEC secret → INFO nommant l'en-tête du secret");
+    ck(!logFwdSecret.lines.some((l) => l.includes("mode FORWARD sans")), "…et AUCUN warn : la configuration est complète");
+    ck(!logFwdSecret.lines.join("|").includes("s3cret"), "🚨 le SECRET n'apparaît dans AUCUN log (c'est un secret d'infrastructure)");
+    const logFwdCustom = makeLog(); new Auth(logFwdCustom, { authMode: "forward", forward: { userHeader: "X-Forwarded-User", groupsHeader: "X-Forwarded-Groups" } });
+    ck(logFwdCustom.lines.some((l) => l === "info auth Forward auth : en-têtes X-Forwarded-User / X-Forwarded-Groups"), "boot forward → l'INFO reflète les en-têtes CONFIGURÉS");
+
     // -- checkBasic : le GATE DE TRANSPORT, pas une identification. --
     ck.eq(new Auth(log, {}).checkBasic({ headers: {} }), true, "hors mode basic → checkBasic ne s'oppose à rien (aucun challenge à opposer)");
     ck.eq(new Auth(log, { ssoUrl: "https://sso.test/v" }).checkBasic({ headers: {} }), true, "…mode sso compris");
@@ -271,6 +564,11 @@ module.exports = async () => {
     ck.eq(gated.checkBasic({ headers: {} }), false, "mode basic sans en-tête → le gate challenge");
     ck.eq(gated.checkBasic(basicHeader("expl", "faux")), false, "mode basic, mauvais secret → le gate challenge");
     ck.eq(gated.checkBasic(basicHeader("expl", "s")), true, "mode basic, bons identifiants → passe");
+    // ⚠ Depuis AUTH_MODE, un BASIC_AUTH oublié dans l'environnement ne doit PAS faire challenger un
+    // déploiement qui a demandé un autre mode : le provider basic n'est retenu que si le mode l'est.
+    ck.eq(new Auth(log, { authMode: "forward", basicAuth: "expl:s" }).checkBasic({ headers: {} }), true,
+      "mode forward avec un BASIC_AUTH résiduel → AUCUN challenge (le gate ne se monte que pour le mode basic)");
+    ck.eq(new Auth(log, { authMode: "dev", basicAuth: "expl:s" }).checkBasic({ headers: {} }), true, "…idem en mode dev explicite");
 
     // -- validate : dev et basic. --
     const devSession = await new Auth(log, {}).validate({ headers: {} });
@@ -278,6 +576,14 @@ module.exports = async () => {
     const refused = await new Auth(log, { basicAuth: "expl:s" }).validate({ headers: {} });
     ck(refused.logged === false && refused.adminRight === "NONE" && refused.user.login === "anonymous", "validate basic refusé → session ANONYME (le `null` du provider y est substitué)");
     ck.eq((await new Auth(log, { basicAuth: "expl:s" }).validate(basicHeader("expl", "s"))).user.login, "expl", "validate basic accepté → session au login configuré");
+
+    // -- validate FORWARD : l'identité du proxy traverse l'orchestrateur telle quelle, groupes compris. --
+    const fwdAuth = new Auth(log, { authMode: "forward", forward: { secret: "s3cret" } });
+    const fwdSession = await fwdAuth.validate({ headers: { "remote-user": "amartin", "remote-groups": "infra,noc", "x-auth-secret": "s3cret" } });
+    ck(fwdSession.logged === true && fwdSession.user.login === "amartin" && fwdSession.user.domain === "forward", "validate forward → session lue dans les en-têtes");
+    ck.eq(JSON.stringify(fwdSession.groups), '["infra","noc"]', "…avec les GROUPES, que la politique de rôles mappera (table `groups` de roles.json)");
+    const fwdRefused = await fwdAuth.validate({ headers: { "remote-user": "usurpateur" } });
+    ck(fwdRefused.logged === false && fwdRefused.adminRight === "NONE", "validate forward sans le secret → session ANONYME (le `null` du provider y est substitué)");
 
     // -- CACHE par hash de jeton : réservé au sso (seul provider à nommer la session présentée). --
     const loggedPayload = () => jsonOk({ logged: true, adminRight: "SUPER_ADMIN", expireDate: Date.now() + 3_600_000, user: { id: 1, login: "amartin" } });
@@ -336,6 +642,11 @@ module.exports = async () => {
     const okBasicSink = sinkOf();
     await new Auth(log, { basicAuth: "expl:s" }, okBasicSink).validate(basicHeader("expl", "s"));
     ck.eq(okBasicSink.seen.join(","), "expl", "…tandis qu'une authentification basic RÉUSSIE est capturée");
+    const fwdSink = sinkOf();
+    const fwdCapture = new Auth(log, { authMode: "forward", forward: { secret: "s3cret" } }, fwdSink);
+    await fwdCapture.validate({ headers: { "remote-user": "amartin", "x-auth-secret": "s3cret" } });
+    await fwdCapture.validate({ headers: { "remote-user": "usurpateur" } });
+    ck.eq(fwdSink.seen.join(","), "amartin", "mode forward : l'identité du proxy alimente l'annuaire, et le refus de secret n'y entre PAS");
     // Puits ABSENT : la capture est optionnelle, rien ne doit lever.
     ck((await new Auth(log, {}).validate({ headers: {} })).logged === true, "aucun puits injecté → validation inchangée (capture optionnelle)");
   });

@@ -2,15 +2,17 @@ import { createHash } from "node:crypto";
 import { Logger } from "./logger.js";
 import type { ProfileSink } from "./users/UserResolver.js";   // TYPE seul (annuaire) — Auth ignore l'impl : injection (principe n°2)
 import { ANONYMOUS_SESSION, type AuthProvider, type AuthRequestView, type SsoResult } from "./auth/AuthProvider.js";
+import { AuthModeResolution, type AuthMode } from "./auth/AuthModeResolution.js";   // décision de CONFIGURATION, pure et testée
 import { DevAuthProvider } from "./auth/DevAuthProvider.js";
 import { BasicAuthProvider } from "./auth/BasicAuthProvider.js";
 import { LegacySsoAuthProvider } from "./auth/LegacySsoAuthProvider.js";
+import { ForwardHeaderAuthProvider, type ForwardHeaderOptions } from "./auth/ForwardHeaderAuthProvider.js";
 
 /* AUTHENTIFICATION — ORCHESTRATEUR.
 
    Cette classe ne SAIT PAS authentifier : elle CHOISIT au boot le provider qui sait
-   (`auth/AuthProvider` — dev, basic, SSO maison, et demain proxy/OIDC), puis lui ajoute les
-   trois services transverses qui ne dépendent d'AUCUN mode :
+   (`auth/AuthProvider` — dev, basic, SSO maison, en-têtes de proxy, et demain OIDC), puis lui
+   ajoute les trois services transverses qui ne dépendent d'AUCUN mode :
    1. le CACHE de session (clé = hash du jeton présenté, durée = `expireDate`), qui évite un
       appel sortant par requête HTTP ;
    2. la CAPTURE d'annuaire (`ProfileSink`), invariant : jamais un profil non authentifié ;
@@ -31,12 +33,22 @@ import { LegacySsoAuthProvider } from "./auth/LegacySsoAuthProvider.js";
     aucune raison de leur faire changer de chemin. */
 export type { SsoUser, SsoResult } from "./auth/AuthProvider.js";
 
-export type AuthMode = "basic" | "sso" | "dev";
+/** Le type de MODE vit avec la logique qui le décide (`auth/AuthModeResolution`) ; il est ré-exporté
+    ici pour la même raison que `SsoResult` — les consommateurs historiques l'importent de ce module. */
+export type { AuthMode } from "./auth/AuthModeResolution.js";
+
 export interface AuthOptions {
+  /** Mode EXPLICITE (`AUTH_MODE`) : `dev` | `basic` | `sso` | `forward`. Absent/vide → INFÉRENCE
+      historique (basic > sso > dev). Une valeur inconnue ou incohérente fait JETER le constructeur
+      — jamais de repli silencieux sur le mode dev (cf. `auth/AuthModeResolution`). */
+  authMode?: string | null;
   ssoUrl?: string;
   cookieName?: string;
   devUser?: string | null;
   basicAuth?: string | null;
+  /** Configuration du mode `forward` (noms d'en-têtes + secret partagé) — lue de l'environnement par
+      `ForwardHeaderAuthProvider.optionsFromEnv`, qui possède les noms de variables. */
+  forward?: ForwardHeaderOptions;
   /** `fetch` du provider SSO — point d'injection de TEST (aucune variable d'environnement ne le
       pilote), patron `notify/WebhookNotifier`. Absent = le `fetch` global. */
   ssoFetch?: typeof fetch;
@@ -50,30 +62,66 @@ export class Auth {
   private readonly provider: AuthProvider;
   /** Le provider basic, TYPÉ, quand c'est le mode retenu — `null` sinon. Le gate de transport de
       `server.ts` a besoin de lui poser une question que le contrat général n'a pas à porter
-      (« ces identifiants sont-ils bons ? », sans construire de session), cf. `checkBasic`. */
+      (« ces identifiants sont-ils bons ? », sans construire de session), cf. `checkBasic`.
+      ⚠ Conditionné au MODE, et pas à la simple présence de `BASIC_AUTH` : depuis `AUTH_MODE`, un
+      déploiement peut demander `forward` alors qu'un vieux `BASIC_AUTH` traîne dans son
+      environnement — le gate ne doit alors challenger personne. Sous l'inférence, les deux
+      conditions coïncident (mode basic ⇔ identifiants exploitables) : rien ne change. */
   private readonly basicProvider: BasicAuthProvider | null;
   readonly mode: AuthMode;
 
   /** @param sink  Puits de profils OPTIONNEL (annuaire) : Auth y pousse chaque profil authentifié
       (`remember`) sans connaître l'implémentation, câblée au bootstrap (index.ts). Découplage
-      total — cf. ProfileSink. */
+      total — cf. ProfileSink.
+      @throws Error  Quand `AUTH_MODE` est inconnue ou incohérente. 🚨 Un objet `Auth` ne peut PAS
+      exister dans un état de configuration douteux : le seul repli possible serait le mode dev, qui
+      n'authentifie personne — le bootstrap (`index.ts`) journalise et ARRÊTE le process. */
   constructor(private readonly log: Logger, opts: AuthOptions = {}, private readonly sink: ProfileSink | null = null) {
     const ssoUrl = (opts.ssoUrl || "").trim();
     const cookieName = (opts.cookieName || "").trim();
-    // INFÉRENCE du mode (inchangée) : un couple `user:pass` l'emporte sur le SSO, un SSO l'emporte
-    // sur le mode dev. La règle de FORMAT de `BASIC_AUTH` appartient au provider qui la connaît —
-    // « la valeur ne décrit pas un couple » et « pas de mode basic » sont la même réponse.
+    // La règle de FORMAT de `BASIC_AUTH` appartient au provider qui la connaît — « la valeur ne
+    // décrit pas un couple » et « pas de mode basic » sont la même réponse.
     const basic = BasicAuthProvider.fromSpec(opts.basicAuth);
-    this.basicProvider = basic;
-    this.mode = basic ? "basic" : (ssoUrl ? "sso" : "dev");
-    this.provider = basic ? basic
-      : (ssoUrl ? new LegacySsoAuthProvider(log, ssoUrl, cookieName, opts.ssoFetch) : new DevAuthProvider(opts.devUser ?? null));
-    // Mode dev = AUCUNE authentification (tout appelant est SUPER_ADMIN, lecture/écriture/suppression comprises).
-    // C'est le DÉFAUT quand ni SSO_URL ni BASIC_AUTH ne sont configurés → un déploiement réel démarré sans ces
-    // variables serait grand ouvert : on le signale en WARN bien visible au boot, pas en simple info.
-    if (this.mode === "dev") this.log.warn("auth", "⚠ mode DEV : AUCUNE authentification — tout appelant est SUPER_ADMIN. Configurer SSO_URL ou BASIC_AUTH pour un déploiement réel.");
-    else this.log.info("auth", basic ? ("Basic Auth dev (user " + basic.login + ")")
-      : ("SSO " + ssoUrl + (cookieName ? " (cookie " + cookieName + ")" : " (Cookie complet)")));
+    // MODE : `AUTH_MODE` si elle est renseignée, sinon l'inférence historique (basic > sso > dev).
+    // La décision est PURE et testée à part ; ici on ne fait qu'en tirer les conséquences.
+    const decision = AuthModeResolution.resolve({ authMode: opts.authMode, hasBasicCredentials: basic !== null, hasSsoUrl: ssoUrl !== "" });
+    if (!decision.mode) throw new Error(decision.error || "mode d'authentification indéterminable");
+    this.mode = decision.mode;
+    this.basicProvider = this.mode === "basic" ? basic : null;
+    switch (this.mode) {
+      case "basic":
+        // INATTEIGNABLE : la résolution refuse « basic » sans identifiants exploitables. On le dit
+        // tout de même, plutôt que d'écrire un `!` de complaisance ou de retomber sur le mode dev.
+        if (!basic) throw new Error("mode basic sélectionné sans identifiants exploitables (BASIC_AUTH)");
+        this.provider = basic;
+        this.log.info("auth", "Basic Auth dev (user " + basic.login + ")");
+        break;
+      case "sso":
+        this.provider = new LegacySsoAuthProvider(log, ssoUrl, cookieName, opts.ssoFetch);
+        this.log.info("auth", "SSO " + ssoUrl + (cookieName ? " (cookie " + cookieName + ")" : " (Cookie complet)"));
+        break;
+      case "forward": {
+        const forward = new ForwardHeaderAuthProvider(opts.forward || {});
+        this.provider = forward;
+        this.log.info("auth", "Forward auth : en-têtes " + forward.userHeader + " / " + forward.groupsHeader
+          + (forward.secretConfigured ? " (secret partagé attendu dans " + forward.secretHeader + ")" : ""));
+        // 🚨 Sans secret partagé, la SEULE protection est le réseau — et le code ne peut pas la
+        // vérifier. Un déploiement qui expose l'app en direct laisse alors n'importe qui forger son
+        // identité : même ton que le WARN du mode dev, parce que c'est le même genre de trou.
+        if (!forward.secretConfigured) {
+          this.log.warn("auth", "⚠ mode FORWARD sans " + ForwardHeaderAuthProvider.ENV_SECRET
+            + " : les en-têtes d'identité sont crus SANS preuve — l'application doit être joignable UNIQUEMENT par le proxy"
+            + " (bind localhost / réseau privé), sinon tout client direct peut se déclarer administrateur.");
+        }
+        break;
+      }
+      default:
+        // Mode dev = AUCUNE authentification (tout appelant est SUPER_ADMIN, lecture/écriture/suppression comprises).
+        // C'est le DÉFAUT quand ni SSO_URL ni BASIC_AUTH ne sont configurés → un déploiement réel démarré sans ces
+        // variables serait grand ouvert : on le signale en WARN bien visible au boot, pas en simple info.
+        this.provider = new DevAuthProvider(opts.devUser ?? null);
+        this.log.warn("auth", "⚠ mode DEV : AUCUNE authentification — tout appelant est SUPER_ADMIN. Configurer SSO_URL ou BASIC_AUTH pour un déploiement réel.");
+    }
   }
 
   /** Vérifie l'en-tête `Authorization: Basic` pour le GATE DE TRANSPORT (`server.ts`) — hors mode

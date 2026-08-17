@@ -45,38 +45,72 @@ sélectionnée au câblage / injection* déjà tenu par [`UserResolver`](user-re
   auth.ts  ── Auth (ORCHESTRATEUR)
    │   ① cache de session : clé = SHA-256 du jeton présenté, durée = expireDate
    │   ② capture d'annuaire : ProfileSink.remember (jamais un non-loggé)
-   │   ③ annonce du mode au boot (WARN quand rien n'est configuré)
+   │   ③ annonce du mode au boot (WARN quand rien ne contrôle l'accès)
    │   ④ `mode` exposé — server.ts y accroche le gate de transport Basic
+   │
+   ├── auth/AuthModeResolution.ts  ── quel mode monter ? (PUR : AUTH_MODE ou inférence)
    │
    └── auth/AuthProvider.ts  ── CONTRAT (types seuls, aucun import)
          authenticate(req: AuthRequestView): Promise<SsoResult | null>   // null = anonyme
          sessionKey?(req): string | null                                  // OPTIONNEL — cf. plus bas
          │
-         ├── auth/DevAuthProvider.ts         (défaut)
-         ├── auth/BasicAuthProvider.ts       (BASIC_AUTH)
-         └── auth/LegacySsoAuthProvider.ts   (SSO_URL + COOKIE_NAME, `fetch` injecté)
+         ├── auth/DevAuthProvider.ts           (défaut)
+         ├── auth/BasicAuthProvider.ts         (BASIC_AUTH)          ─┐ secret comparé à temps
+         ├── auth/LegacySsoAuthProvider.ts     (SSO_URL + COOKIE_NAME, │ constant par le helper
+         │                                      `fetch` injecté)      │ auth/SecretCompare.ts
+         └── auth/ForwardHeaderAuthProvider.ts (en-têtes de proxy)   ─┘
 ```
 
-**Les trois modes**, et l'inférence qui les sélectionne — *inchangée* :
+**Les quatre modes** :
 
 | Mode | Sélection | Ce que le provider rend |
 |---|---|---|
-| `basic` | `BASIC_AUTH="user:pass"` — **prioritaire** | session `SUPER_ADMIN` + `dev: true` si les identifiants sont bons, sinon anonyme |
+| `basic` | `BASIC_AUTH="user:pass"` — **prioritaire** dans l'inférence | session `SUPER_ADMIN` + `dev: true` si les identifiants sont bons, sinon anonyme |
 | `sso` | `SSO_URL` (sinon) | le **JSON du SSO, tel quel** (cf. passthrough ci-dessous) |
 | `dev` | aucun des deux (défaut) | l'utilisateur factice `DEV_USER` (défaut `dev`), `SUPER_ADMIN` + `dev: true` |
+| `forward` | `AUTH_MODE=forward` **uniquement** — jamais inféré | l'identité lue dans les en-têtes du reverse-proxy, avec ses **groupes** (§ « Forward-auth ») |
 
 La règle de format de `BASIC_AUTH` vit **chez le provider basic** (`fromSpec`) : « la valeur ne
 décrit pas un couple » et « pas de mode basic » sont la même réponse, et l'orchestrateur n'a pas à
 connaître le format d'un secret qui ne le concerne pas.
 
+### `AUTH_MODE` — la sélection explicite, et son refus de démarrer
+
+`AUTH_MODE` (`dev | basic | sso | forward`) **fait loi** quand elle est renseignée. Absente, c'est
+l'**inférence historique** qui s'applique, inchangée : `BASIC_AUTH` → basic, sinon `SSO_URL` → sso,
+sinon dev (avec son WARN). Un déploiement existant ne voit donc rien changer, et le mode `forward`
+— qui n'a aucune variable obligatoire — ne peut pas s'activer par accident.
+
+🚨 **Une valeur inconnue ou incohérente NE DÉMARRE PAS.** `AUTH_MODE=oidc` (pas encore implémenté),
+`AUTH_MODE=forwrad` (coquille), `AUTH_MODE=sso` sans `SSO_URL`, `AUTH_MODE=basic` sans `BASIC_AUTH` :
+`log.error` nommant la variable et la correction attendue, puis arrêt du process. C'est le point
+important du mécanisme, pas un détail d'ergonomie — le seul repli possible serait le mode `dev`, qui
+n'authentifie personne : une coquille retombant en silence sur lui laisserait un déploiement se
+croire protégé et grand ouvert (**fail-open**). `AUTH_MODE=dev` **écrit explicitement** reste permis,
+avec le même WARN qu'un mode dev par défaut.
+
+La décision est une logique **pure** (`auth/AuthModeResolution` : faits d'environnement →
+`{ mode, error }`, `mode: null` quand la configuration est douteuse — il n'existe alors *aucun* mode,
+et pas « le mode par défaut »). L'orchestrateur la consomme et **jette** ; le bootstrap
+(`index.ts`) journalise et sort. Un objet `Auth` ne peut donc pas exister dans un état de
+configuration ambigu. Corollaire tenu au passage : le provider basic n'est retenu que si le mode
+`basic` l'est — un `BASIC_AUTH` oublié dans l'environnement d'un déploiement `forward` ne fait plus
+challenger personne (sous l'inférence, les deux conditions coïncident).
+
 **Express n'entre pas dans le contrat.** Un provider ne voit qu'une vue minimale de la requête —
-`AuthRequestView { headers: { cookie?, authorization? } }` — dont le `Request` d'Express est un
-sur-ensemble **structurel**. Même doctrine que l'`AccessRequest` d'`access/AccessControl`, et mêmes
-bénéfices : les providers sont **testables sans monter de serveur**
+`AuthRequestView { headers: { cookie?, authorization?, [nom]: string | string[] } }` — dont le
+`Request` d'Express est un sur-ensemble **structurel**. Même doctrine que l'`AccessRequest`
+d'`access/AccessControl`, et mêmes bénéfices : les providers sont **testables sans monter de serveur**
 (`Tests/modules/test-auth-providers.js`), et ils ne dépendent pas d'une version d'Express (le
 programme de test du dépôt n'en résout pas la même que le serveur). Un provider qui aurait besoin
 d'autre chose que des en-têtes ferait plus que « lire l'identité présentée » : l'élargissement doit
 rester un geste délibéré sur le contrat.
+
+> L'**index de signature** des en-têtes est précisément un de ces gestes délibérés : le mode forward
+> lit des en-têtes dont les **noms sont configurables** (`Remote-User` par défaut, renommés pour
+> oauth2-proxy ou Tailscale), donc non énumérables dans le type. Le contrat reste borné aux en-têtes
+> — ni chemin, ni corps, ni IP. Un en-tête **répété** arrivant en `string[]`, la normalisation
+> (première valeur) est faite en **un** point (`ForwardHeaderAuthProvider.headerValue`).
 
 ### Ce que l'orchestrateur garde, et pourquoi
 
@@ -115,6 +149,80 @@ déploiement peut en dépendre — ne rien normaliser là n'est pas une paresse.
 **anonyme** (`ANONYMOUS_SESSION`, définie une seule fois avec le type). Le jeton, lui, n'apparaît
 dans **aucun** log : les messages nomment l'URL et le code, jamais le secret de session.
 
+### Forward-auth — l'identité vient du reverse-proxy
+
+Un proxy *identity-aware* (Authelia, Authentik, oauth2-proxy, Pomerium, Cloudflare Access,
+Tailscale…) authentifie en amont — login, MFA, session, déconnexion — puis **passe** l'identité à
+l'application dans des en-têtes. L'app ne gère alors **aucun** flux OAuth, aucun cookie, aucune
+expiration : elle lit. C'est le mode qui colle au déploiement réel (l'app est déjà derrière un proxy,
+cf. [`reverse-proxy.md`](reverse-proxy.md)) et celui qui rend l'**IdP maître des utilisateurs**, la
+table `groups` de `roles.json` traduisant ses groupes en rôles (§ 5).
+
+**En-têtes configurables**, défauts = famille `Remote-*` :
+
+| Variable | Défaut | Contenu attendu |
+|---|---|---|
+| `AUTH_FORWARD_USER_HEADER` | `Remote-User` | **login** — requis : absent ou vide ⇒ appelant **anonyme** |
+| `AUTH_FORWARD_EMAIL_HEADER` | `Remote-Email` | adresse e-mail (`user.eMail`) |
+| `AUTH_FORWARD_NAME_HEADER` | `Remote-Name` | nom d'**affichage complet** (`user.nom`) |
+| `AUTH_FORWARD_GROUPS_HEADER` | `Remote-Groups` | groupes séparés par des **virgules** (rognés, vides écartées, doublons fondus) |
+| `AUTH_FORWARD_SECRET` | *(vide)* | **secret partagé** proxy↔app — cf. le modèle de confiance ci-dessous |
+| `AUTH_FORWARD_SECRET_HEADER` | `X-Auth-Secret` | en-tête portant ce secret |
+
+Pour un autre outil, l'exploitant **renomme** les en-têtes ; il n'y a volontairement pas de
+« profils » par marque, qui vieilliraient mal et masqueraient la seule chose qui compte — quels
+en-têtes le proxy pose réellement.
+
+| Outil | Utilisateur | Groupes |
+|---|---|---|
+| Authelia / Authentik | `Remote-User` | `Remote-Groups` |
+| oauth2-proxy | `X-Forwarded-User` (ou `X-Forwarded-Preferred-Username`) | `X-Forwarded-Groups` |
+| Cloudflare Access | `Cf-Access-Authenticated-User-Email` | *(néant — l'appartenance vit dans les politiques Access)* |
+| Tailscale (`tailscale serve`) | `Tailscale-User-Login` | *(néant)* |
+
+La session produite est **volontairement pauvre** : `logged: true`, `user.login`, `user.eMail`,
+`user.nom`, `user.domain = "forward"`, `groups`. Et rien d'autre :
+
+- **pas d'`adminRight`** — l'autorisation passe par les rôles. Poser `SUPER_ADMIN` ferait de tout
+  utilisateur du proxy un administrateur ; la rétrocompatibilité du SSO maison (§ 11) est une règle
+  de *politique*, pas un modèle à copier ;
+- **pas d'`expireDate`** — la session appartient au proxy, qui la coupe quand il veut ; annoncer une
+  échéance que nous ne tenons pas serait mentir au client ;
+- **pas de `sessionKey`**, donc aucune mise en cache : lire des en-têtes ne coûte aucune E/S, et un
+  cache n'ajouterait qu'une fenêtre de rémanence après une déconnexion côté proxy ;
+- **pas de `prenom`** — le contrat maison sépare nom et prénom (héritage du SSO) mais un proxy ne
+  fournit qu'un seul libellé d'affichage (« Alice Martin ») : le découper à l'espace inventerait une
+  structure fausse pour tous les noms composés. `user.nom` porte donc le nom **complet**, tel quel.
+
+#### 🚨 Modèle de confiance — le point capital
+
+Un en-tête est **trivial à forger**. Qui peut joindre l'application directement peut se déclarer
+n'importe qui, administrateur compris. Deux protections, et la première n'est pas optionnelle :
+
+1. **l'application n'est joignable que par le proxy** — bind sur localhost, réseau Docker privé,
+   règle de pare-feu. C'est une consigne de *déploiement* : le code ne peut pas la vérifier ;
+2. un **secret partagé** `AUTH_FORWARD_SECRET`, que le proxy pose dans `AUTH_FORWARD_SECRET_HEADER`.
+   Configuré, il est **exigé** : toute requête dont l'en-tête ne correspond pas est **anonyme**, et
+   le provider ne lit alors **aucun autre en-tête** — pas même le nom d'utilisateur. La comparaison
+   est à **temps constant** (`auth/SecretCompare`, le même helper que le mode basic) : c'est un
+   secret, pas un identifiant. Un test le prouve en **observant les lectures d'en-têtes**, pas en
+   relisant le commentaire.
+
+Secret **non configuré** : le mode fonctionne, mais le boot émet un **WARN explicite** rappelant la
+consigne réseau et ce qu'un client direct pourrait faire. Même ton que le WARN du mode dev, parce que
+c'est le même genre de trou. Le secret, lui, n'apparaît dans **aucun** log — comme le jeton SSO.
+
+Même discipline que `X-Forwarded-Prefix` ([`reverse-proxy.md`](reverse-proxy.md)) : un en-tête n'est
+cru que dans la mesure où l'on sait d'où il vient.
+
+> **Consigne de déploiement.** Dans le proxy, **effacer** les quatre en-têtes d'identité venus du
+> client avant de les repositionner soi-même (`proxy_set_header Remote-User $user;` sous nginx,
+> `RequestHeader unset` puis `set` sous Apache) : sans cela, un client qui envoie son propre
+> `Remote-User` peut le voir traverser. Le secret partagé rend cette faute inoffensive — raison de
+> plus pour le configurer.
+
+Exemple de configuration (Authelia + nginx) : [`../src-server/RUN.md`](../src-server/RUN.md) § 6.
+
 ### Le challenge Basic n'est pas une identité
 
 Deux rôles à ne pas confondre : renvoyer `401 WWW-Authenticate: Basic` pour que le **navigateur**
@@ -124,10 +232,12 @@ demande si les identifiants présentés sont bons, sans rien savoir de plus, et 
 rien à opposer (`true`). L'**identité**, elle, passe par `Auth.validate` dans tous les modes.
 
 > **Ajouter un mode d'authentification.** Écrire une classe de `auth/` implémentant `AuthProvider`
-> (plus `sessionKey` si le mode présente un jeton qu'il vaut la peine de mettre en cache), la
-> sélectionner dans le constructeur d'`Auth`, documenter ses variables d'environnement (README § 4 +
-> RUN.md, principe n°13) et lui donner une section dans `test-auth-providers.js`. Rien d'autre ne
-> bouge : ni `api.ts`, ni `access/`, ni le client.
+> (plus `sessionKey` si le mode présente un jeton qu'il vaut la peine de mettre en cache), l'ajouter
+> à `AuthModeResolution.MODES` (et le retirer de `PLANNED_MODES` s'il y figurait) avec sa règle de
+> **cohérence** si le mode exige une configuration, le sélectionner dans le `switch` du constructeur
+> d'`Auth`, documenter ses variables d'environnement (README § 4 + RUN.md + `.env.example`, principe
+> n°13) et lui donner une section dans `test-auth-providers.js`. Rien d'autre ne bouge : ni `api.ts`,
+> ni `access/`, ni le client.
 
 ## 1. Le modèle : permissions atomiques, grants à jokers
 
@@ -258,6 +368,10 @@ se sauvegarde, se versionne et se corrige sans base ni écran d'administration.
     "42": ["cert-manager", "vm-viewer"], // …ou id CANONIQUE (String(id) SSO)
     "zoe": ["cabliste-nuit"]
   },
+  "groups": {                            // GROUPES de l'IdP (mode forward, OIDC demain)
+    "grp-infra": ["dc-editor"],
+    "grp-noc": ["vm-viewer", "wifi-viewer"]
+  },
   "roles": {                             // rôles CUSTOM, optionnels — en plus des presets
     "cabliste-nuit": ["dc.cabling:*", "dc.rack:read"]
   }
@@ -268,13 +382,40 @@ se sauvegarde, se versionne et se corrige sans base ni écran d'administration.
   ce sont deux graphies de la même personne, un exploitant qui a écrit les deux doit obtenir la
   somme. La correspondance est **exacte, sensible à la casse** — prévisible et testable ; au besoin,
   déclarer les deux graphies.
-- **Pas de bucket `default`** : l'opt-in est strict. Un utilisateur absent du fichier n'a aucun rôle.
+- **Pas de bucket `default`** : l'opt-in est strict. Un utilisateur absent du fichier — et dont aucun
+  **groupe** n'y figure — n'a aucun rôle.
 - **Tolérant en forme, strict en droit.** Une clé de premier niveau inconnue est **ignorée et
   signalée** (le fichier reste exploitable) ; une valeur mal typée n'accorde **rien** (jamais de
   coercition) ; un grant hors catalogue est signalé comme la coquille qu'il est presque toujours —
   il ne correspondrait à aucune vérification, et l'exploitant croirait avoir donné un droit.
 - Une définition locale qui porte le nom d'un preset le **masque** : le fichier est l'autorité du
   déploiement (un avertissement le rappelle au chargement).
+
+### La table `groups` — la gestion des utilisateurs retourne dans l'IdP
+
+`groups` associe un **groupe de l'annuaire** à des rôles. C'est ce qui rend forward-auth (et demain
+OIDC) payant : le fichier ne décrit plus des personnes mais la **traduction** « groupe d'entreprise →
+rôle applicatif », et un nouvel arrivant du bon groupe a ses droits sans qu'on touche à `roles.json`.
+
+Les rôles effectifs sont l'**union** de `users[id]`, `users[login]` et de `groups[g]` pour chacun des
+groupes de l'identité. Union, et pas priorité : la composition du modèle est purement additive (§ 1,
+aucun deny), donc l'ordre est indifférent et rien ne se masque. Même correspondance **exacte et
+sensible à la casse** que pour les utilisateurs — un nom de groupe d'IdP est une chaîne opaque, où
+`Infra` et `infra` peuvent parfaitement coexister.
+
+D'où viennent ces groupes : de `SsoResult.groups`, rempli par le provider d'en-têtes de proxy (§
+Forward-auth) ou par le passthrough du SSO maison quand celui-ci en renvoie. Les modes dev et basic
+n'ont pas d'annuaire, donc pas de groupes — leur comportement est strictement inchangé.
+`AccessControl.identityOf` **filtre** au passage (chaînes non vides, rognées) : c'est la frontière par
+laquelle une donnée d'annuaire non maîtrisée entre dans la politique.
+
+🚨 **La clé du cache de permissions intègre les groupes, triés.** Deux requêtes du même login avec des
+appartenances différentes n'ont pas les mêmes rôles : sans les groupes dans la clé, la première
+réponse figerait les droits de la seconde — escalade dans un sens, perte d'accès dans l'autre. Le tri
+garantit au passage que deux ordres du même ensemble **partagent** l'entrée au lieu de la dupliquer
+(l'ordre du proxy n'a aucune signification pour la politique). Le séparateur est le caractère NUL,
+groupes compris : avec une virgule, `["a,b"]` et `["a", "b"]` produiraient la même clé pour des rôles
+différents.
 
 ### Fail-closed, et la nuance « absent » ≠ « illisible »
 
@@ -307,6 +448,10 @@ premier administrateur d'un déploiement neuf serait verrouillé dehors par la r
 écrire. C'est la seule ouverture qui ne vienne pas du fichier de politique.
 
 ### Variables d'environnement
+
+De la **politique** (l'authentification a les siennes : `AUTH_MODE` ci-dessus, `SSO_URL`,
+`BASIC_AUTH`, `AUTH_FORWARD_*` — liste complète dans `README.md` § 4 et
+[`../src-server/RUN.md`](../src-server/RUN.md) § 6) :
 
 | Variable | Défaut | Rôle |
 |---|---|---|
@@ -619,6 +764,11 @@ Un déploiement existant se comporte **exactement** comme avant. Ces deux règle
 Toute autre valeur d'`adminRight` ne donne rien : un utilisateur SSO valide mais non déclaré voit
 `/me` et rien d'autre — c'est l'opt-in strict.
 
+Le mode **forward** n'a, lui, aucune règle de rétrocompatibilité : il est nouveau, personne n'en
+dépend, et il ne pose pas d'`adminRight`. Un utilisateur authentifié par le proxy mais absent de
+`users` **et** dont aucun groupe ne figure dans `groups` n'a donc aucune permission — même opt-in
+strict, sans exception à écrire.
+
 ## Mode local (fichier) — principe n°15
 
 **L'authentification et les ACL sont serveur uniquement.** Écart assumé, et pour une raison de fond :
@@ -657,6 +807,13 @@ Lui donner un domaine dans `Permissions.COLLECTION_DOMAINS` — l'invariant de t
 
 Un preset partagé (`Permissions.ROLE_PRESETS`, s'il a du sens pour tout déploiement) ou un rôle local
 dans la section `roles` de `roles.json` (s'il est propre à un déploiement).
+
+### Donner des droits à un groupe de l'IdP
+
+Ajouter une entrée à la section `groups` de `roles.json` — le nom du groupe **exactement** comme
+l'IdP l'écrit. Pour savoir ce que le serveur reçoit vraiment, appeler `GET <API_BASE>/me` : la
+réponse porte `groups` (et les `permissions` qui en découlent). Rien à redémarrer : le fichier est
+relu à chaud.
 
 ### Écrire une nouvelle implémentation de politique
 

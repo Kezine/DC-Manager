@@ -190,23 +190,40 @@ par défaut — `.open <base>.db` pour changer (chemins relatifs à `/data/docum
 | `PORT` | `3000` | port d'écoute |
 | `API_BASE` | `/api` | préfixe des endpoints REST |
 | `DOCS_DIR` | `/data/documents` | dossier des documents (registre + 1 `.db`/doc) |
+| `AUTH_MODE` | *(vide)* | **mode d'authentification EXPLICITE** : `dev` \| `basic` \| `sso` \| `forward`. Vide → inférence historique (`BASIC_AUTH` → basic, sinon `SSO_URL` → sso, sinon dev). 🚨 valeur inconnue ou incohérente (`oidc`, coquille, `sso` sans `SSO_URL`, `basic` sans `BASIC_AUTH`) → **le serveur refuse de démarrer** (jamais de repli sur le mode dev) |
 | `SSO_URL` | *(vide)* | endpoint SSO externe qui valide la session (cf. ci-dessous). **vide → mode dev** |
 | `COOKIE_NAME` | *(vide)* | nom du cookie contenant le jeton à proxifier au SSO (`""` = en-tête `Cookie` complet) |
 | `SSO_LOGIN_URL` | *(vide)* | URL de connexion SSO du bouton « Connexion » (écran d'accueil, si non authentifié) ; macro `${clbkUrl}` → URL courante encodée. Vide = pas de bouton |
 | `DEV_USER` | `dev` | nom de l'utilisateur factice en mode dev |
+| `AUTH_FORWARD_USER_HEADER` | `Remote-User` | mode `forward` : en-tête portant le **login** (requis — absent/vide ⇒ anonyme) |
+| `AUTH_FORWARD_EMAIL_HEADER` | `Remote-Email` | mode `forward` : en-tête de l'e-mail |
+| `AUTH_FORWARD_NAME_HEADER` | `Remote-Name` | mode `forward` : en-tête du nom d'affichage complet |
+| `AUTH_FORWARD_GROUPS_HEADER` | `Remote-Groups` | mode `forward` : en-tête des **groupes** (virgules) → table `groups` de `ROLES_FILE` |
+| `AUTH_FORWARD_SECRET` | *(vide)* | 🚨 mode `forward` : **secret partagé** proxy↔app (temps constant). Absent → le mode marche mais le boot **avertit** : l'app doit être joignable **uniquement** par le proxy |
+| `AUTH_FORWARD_SECRET_HEADER` | `X-Auth-Secret` | mode `forward` : en-tête portant ce secret |
 | `ROLES_FILE` | `<DOCS_DIR>/roles.json` | **politique d'AUTORISATION** (rôles/permissions), fichier JSON relu **à chaud** ; **fail-closed** : absent/illisible → personne n'a de rôle, 403 partout sauf `GET /me` (cf. ci-dessous et `docs/auth.md`) |
 | `BOOTSTRAP_ADMIN_IDS` | *(vide)* | ids canoniques ou logins séparés par des **virgules** → rôle `admin`, **en plus** du fichier. Amorçage d'un déploiement neuf (sans lui, le premier administrateur serait verrouillé dehors) |
 | `DCMANAGER_SECRETS_KEY` | *(vide)* | passphrase de chiffrement des secrets stockés en base (coffre `SecretBox` **partagé**), **≥ 16 caractères**. Consommée par les modules **VM/Proxmox**, **clients wifi**, **réplication des interventions vers un tracker** et **notifications** ; absente → ces modules sont inactifs et leurs routes répondent **503 actionnable**, le serveur démarre quand même (les interventions, elles, restent pleinement fonctionnelles). La générer p. ex. par `openssl rand -base64 32` (cf. `README.md` § 4) |
 | `JIRA_BASE_URL` | *(vide)* | base d'URL Jira du module **interventions** (ex. `https://monorg.atlassian.net/browse/`) pour lier une clé **saisie à la main** à son ticket ; vide/absente → pas de lien. Simple référence, aucun appel Jira (cf. `docs/interventions.md`). ⚠ **Sans rapport avec le pont de réplication** (`docs/jira-interventions.md`), qui persiste le lien de chaque ticket au moment de la synchro et n'a donc aucune variable d'environnement propre |
 
-### Authentification (SSO)
+### Authentification
 
-> ⚠️ **L'implémentation SSO actuelle répond à un besoin PERSONNEL** et attend un contrat très
+Quatre modes, sélectionnés par **`AUTH_MODE`** (`dev` | `basic` | `sso` | `forward`). Variable
+**absente** → inférence historique : `BASIC_AUTH` → basic, sinon `SSO_URL` → sso, sinon dev.
+
+🚨 **Une `AUTH_MODE` inconnue ou incohérente empêche le démarrage** (erreur explicite dans les logs,
+scope `[auth]`). C'est voulu : le seul repli possible serait le mode dev, qui n'authentifie personne —
+une coquille laisserait un déploiement se croire protégé et grand ouvert. Si le conteneur redémarre en
+boucle après un changement, **lire la dernière ligne du log** : elle nomme la variable et la
+correction attendue.
+
+> ⚠️ **L'implémentation SSO maison (`SSO_URL`) répond à un besoin PERSONNEL** et attend un contrat très
 > spécifique (proxifier un cookie de session vers un endpoint qui renvoie `{ logged, adminRight,
 > expireDate }`, accès réservé à `adminRight = "SUPER_ADMIN"`). Elle n'est **probablement pas
-> pertinente pour la plupart des déploiements**. En attendant une intégration plus standard
-> (OIDC / OAuth2, vraie gestion d'utilisateurs), **privilégiez la Basic Auth** (`BASIC_AUTH=user:pass`,
-> voir ci-dessous) pour protéger le serveur — ou le mode dev en réseau de confiance.
+> pertinente pour la plupart des déploiements**. Pour un déploiement réel, privilégiez
+> **`AUTH_MODE=forward`** derrière un reverse-proxy *identity-aware* (section suivante) ; à défaut, la
+> **Basic Auth** (`BASIC_AUTH=user:pass`) protège un serveur sans infrastructure, et le mode dev
+> convient à un réseau de confiance. Un provider **OIDC** natif reste à venir.
 
 L'app **ne gère pas l'auth** : le serveur **proxifie le jeton** (cookie `COOKIE_NAME`)
 au SSO externe (`SSO_URL`) qui renvoie l'utilisateur
@@ -229,8 +246,87 @@ Le refus est distingué par le **code HTTP**, car le client agit différemment :
 - **SSO réel** : dans `docker-compose.yml`, renseigner `SSO_URL` (endpoint de validation
   de votre SSO) et, si besoin, `COOKIE_NAME` (nom du cookie portant le jeton ; vide =
   en-tête `Cookie` complet). Ex. `SSO_URL: https://sso.example.com/validate`.
+- **Reverse-proxy identity-aware** (recommandé) : `AUTH_MODE=forward` — section suivante.
 
 Après modif du compose : `docker compose up -d` (recrée le conteneur).
+
+### Mode `forward` : le proxy authentifie, l'app lit des en-têtes
+
+Un proxy *identity-aware* (Authelia, Authentik, oauth2-proxy, Pomerium, Cloudflare Access,
+Tailscale…) fait le login, la MFA et la session, puis transmet l'identité dans des en-têtes.
+L'application n'a **aucun** flux OAuth à porter, et les **groupes** de l'annuaire deviennent des
+rôles (table `groups` de `roles.json`, section suivante) : les comptes se gèrent dans l'IdP.
+
+🚨 **Un en-tête est trivial à forger** : qui peut joindre l'app directement peut se déclarer
+administrateur. Deux protections, et la première n'est pas optionnelle.
+
+1. **L'app n'est joignable QUE par le proxy** — ne publiez pas son port (`expose:` et non `ports:`
+   dans le compose, ou bind sur `127.0.0.1`). Le code ne peut pas le vérifier : c'est votre travail.
+2. **Un secret partagé** `AUTH_FORWARD_SECRET`, que le proxy pose dans `X-Auth-Secret`. Configuré, il
+   est **exigé** : sans lui, la requête est anonyme. Sans secret configuré, le boot **avertit** —
+   surveillez ce WARN, il signale un déploiement dont la seule barrière est le réseau.
+
+**Exemple minimal — Authelia + nginx.** Côté DC Manager (`docker-compose.yml`) :
+
+```yaml
+services:
+  dc-manager:
+    expose: ["3000"]           # PAS `ports:` — seul le proxy doit pouvoir joindre l'app
+    environment:
+      AUTH_MODE: forward
+      AUTH_FORWARD_SECRET: "collez-ici-un-secret-long-et-aleatoire"   # openssl rand -base64 32
+      # En-têtes par défaut (Remote-User / Remote-Email / Remote-Name / Remote-Groups) :
+      # rien à déclarer avec Authelia ou Authentik.
+      BOOTSTRAP_ADMIN_IDS: "jdupont"   # le temps d'écrire roles.json
+```
+
+Côté nginx (le bloc `location` de l'app, en plus des réglages du § « reverse proxy ») :
+
+```nginx
+location / {
+    # 1. délégation de l'authentification à Authelia
+    auth_request     /internal/authelia;
+    auth_request_set $user   $upstream_http_remote_user;
+    auth_request_set $email  $upstream_http_remote_email;
+    auth_request_set $name   $upstream_http_remote_name;
+    auth_request_set $groups $upstream_http_remote_groups;
+
+    # 2. ⚠ on REPOSE les en-têtes nous-mêmes : `proxy_set_header` ÉCRASE ce que le client
+    #    aurait envoyé sous le même nom — sans cela, un `Remote-User` forgé traverserait.
+    proxy_set_header Remote-User   $user;
+    proxy_set_header Remote-Email  $email;
+    proxy_set_header Remote-Name   $name;
+    proxy_set_header Remote-Groups $groups;
+
+    # 3. la PREUVE que la requête vient bien de ce proxy (même valeur que AUTH_FORWARD_SECRET)
+    proxy_set_header X-Auth-Secret "collez-ici-un-secret-long-et-aleatoire";
+
+    proxy_pass http://dc-manager:3000;
+}
+# Sous-requête interne vers Authelia (redirection de login gérée par `error_page 401`).
+location = /internal/authelia {
+    internal;
+    proxy_pass_request_body off;
+    proxy_set_header Content-Length "";
+    proxy_pass http://authelia:9091/api/verify;
+}
+```
+
+Pour **oauth2-proxy** ou **Tailscale**, mêmes principes avec d'autres noms d'en-têtes : renseigner
+`AUTH_FORWARD_USER_HEADER` (`X-Forwarded-User`, `Tailscale-User-Login`…) et, s'il y en a,
+`AUTH_FORWARD_GROUPS_HEADER`. Tableau complet des conventions par outil : `../docs/auth.md`.
+
+**Vérifier** (depuis le réseau du proxy, avec le secret) :
+
+```bash
+curl -s -H "X-Auth-Secret: …" -H "Remote-User: jdupont" -H "Remote-Groups: grp-infra" \
+     http://dc-manager:3000/api/me
+# → { "logged": true, "user": { "login": "jdupont", "domain": "forward" },
+#     "groups": ["grp-infra"], "permissions": [ … ] }
+```
+
+Sans le bon `X-Auth-Secret`, la même requête renvoie `logged: false` : c'est le comportement
+attendu, et la preuve que le secret est bien exigé.
 
 ### Autorisation (rôles & permissions)
 
@@ -252,11 +348,22 @@ Pour donner des droits **fins**, créer `roles.json` dans `DOCS_DIR` (ou pointer
     "jdupont": ["dc-editor"],             // clé = login BRUT, ou id canonique SSO ("42")
     "42": ["cert-manager", "vm-viewer"]
   },
+  "groups": {                             // GROUPES de l'IdP (mode forward) → rôles
+    "grp-infra": ["dc-editor"],
+    "grp-noc": ["vm-viewer", "wifi-viewer"]
+  },
   "roles": {                              // rôles CUSTOM optionnels (en plus des presets)
     "cabliste-nuit": ["dc.cabling:*", "dc.rack:read"]
   }
 }
 ```
+
+**La table `groups`** est ce qui rend le mode `forward` payant : les comptes se gèrent dans l'IdP, et
+ce fichier ne décrit plus que la traduction « groupe d'entreprise → rôle applicatif ». Un nouvel
+arrivant du bon groupe a ses droits **sans** qu'on touche à `roles.json`. Les rôles effectifs sont
+l'**union** du nominatif et des groupes (composition additive : rien ne se masque). Écrire le nom du
+groupe **exactement** comme l'IdP l'envoie — la correspondance est sensible à la casse ;
+`GET <API_BASE>/me` affiche ce que le serveur reçoit vraiment (`groups`).
 
 Rôles fournis : `admin`, `dc-viewer`, `dc-editor`, `dc-connector`, `vm-viewer`, `vm-operator`,
 `wifi-viewer`, `wifi-operator`, `cert-viewer`, `cert-manager`, `intervention-viewer`,
@@ -271,9 +378,13 @@ Rôles fournis : `admin`, `dc-viewer`, `dc-editor`, `dc-connector`, `vm-viewer`,
   une faute de frappe ne déconnecte pas l'équipe. Vérifier les logs après chaque édition.
 - **Amorçage** : `BOOTSTRAP_ADMIN_IDS=42,jdupont` promeut ces ids/logins `admin` en plus du fichier —
   indispensable sur un déploiement neuf, et utile comme filet si le fichier est cassé.
-- La correspondance id/login est **exacte** (sensible à la casse) ; au besoin, déclarer les deux
-  graphies. Pour connaître l'identité vue par le serveur, appeler `GET <API_BASE>/me` : il renvoie
-  `user` et, désormais, la liste `permissions` effective.
+- La correspondance id/login/**groupe** est **exacte** (sensible à la casse) ; au besoin, déclarer les
+  deux graphies. Pour connaître l'identité vue par le serveur, appeler `GET <API_BASE>/me` : il renvoie
+  `user`, ses `groups` et la liste `permissions` effective.
+- **Rétrocompatibilité, et le mode `forward`** : dev, Basic Auth et SSO `SUPER_ADMIN` valent `admin`,
+  mais le mode `forward` n'a **aucune** règle de ce genre. Un utilisateur authentifié par le proxy et
+  absent de `users` **comme** de `groups` n'a donc aucune permission (403 partout sauf `/me`) — c'est
+  l'opt-in strict : prévoir `BOOTSTRAP_ADMIN_IDS` ou une entrée `groups` **avant** de basculer.
 
 ---
 

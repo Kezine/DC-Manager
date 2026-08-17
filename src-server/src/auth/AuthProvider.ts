@@ -12,8 +12,11 @@
    - `DevAuthProvider` : aucun contrôle, tout appelant est SUPER_ADMIN (défaut).
    - `BasicAuthProvider` : challenge HTTP Basic (déploiement de dépannage).
    - `LegacySsoAuthProvider` : le contrat SSO maison (cookie proxifié).
-   - à venir : provider d'en-têtes de reverse-proxy *identity-aware*, provider
-     OIDC. Le contrat ne bouge pas — c'est tout l'intérêt de l'avoir posé.
+   - `ForwardHeaderAuthProvider` : en-têtes d'un reverse-proxy *identity-aware*
+     (Authelia, Authentik, oauth2-proxy, Cloudflare Access, Tailscale…).
+   - à venir : provider OIDC. Le contrat ne bouge pas — c'est tout l'intérêt de
+     l'avoir posé (le provider d'en-têtes n'a demandé qu'UN élargissement
+     délibéré de `AuthRequestView`, cf. plus bas).
 
    ── Pourquoi ce fichier n'importe PAS Express ─────────────────────────────
    Il déclare sa propre vue MINIMALE de la requête (`AuthRequestView`), dont le
@@ -54,11 +57,11 @@ export interface SsoResult {
   /** Session issue d'un mode SANS authentification réelle (dev / basic). */
   dev?: boolean;
   /** GROUPES bruts de l'annuaire d'entreprise, tels que l'IdP les fournit — jamais calculés par
-      l'application. VIDE (ou absent) partout aujourd'hui : aucun des trois providers actuels n'a
-      de groupes à donner. Le champ est déclaré ICI, et pas plus tard, parce qu'il est la moitié
-      manquante de la frontière auth ⇄ autorisation : les providers d'en-têtes de proxy et OIDC le
-      rempliront, et la politique de rôles s'en servira pour mapper « groupe → rôles » sans qu'on
-      touche ni au type de session, ni au contrat. */
+      l'application. RENSEIGNÉ par `ForwardHeaderAuthProvider` (en-tête de groupes du proxy) et par
+      le passthrough du SSO maison quand celui-ci en renvoie ; absent des modes dev et basic, qui
+      n'ont pas d'annuaire. La politique de rôles les mappe vers des rôles (table `groups` de
+      `roles.json`, cf. `access/RolesConfig` et docs/auth.md § 5) — sans que le type de session ni
+      le contrat aient eu à bouger, ce qui était précisément l'intention de sa déclaration. */
   groups?: string[];
   [k: string]: any;
 }
@@ -80,13 +83,27 @@ export const ANONYMOUS_SESSION: SsoResult = { user: { login: "anonymous", domain
 
     Volontairement pauvre : un provider qui aurait besoin d'autre chose (chemin, corps, IP)
     signalerait qu'il fait plus que « lire l'identité présentée » — on préfère que l'ajout soit
-    un geste DÉLIBÉRÉ sur ce contrat plutôt qu'une dérive invisible. */
+    un geste DÉLIBÉRÉ sur ce contrat plutôt qu'une dérive invisible.
+
+    ── ÉLARGISSEMENT DÉLIBÉRÉ (mode forward) ──────────────────────────────────────────────────
+    L'index de signature a été ajouté pour `ForwardHeaderAuthProvider`, dont l'identité vit dans
+    des en-têtes **dont les noms sont configurables** (`Remote-User` par défaut, mais l'exploitant
+    les renomme pour oauth2-proxy ou Tailscale) : ils ne peuvent donc pas être énumérés ici. C'est
+    exactement le geste que le paragraphe ci-dessus réclamait — explicite, motivé, et borné aux
+    en-têtes (le contrat ne voit toujours ni chemin, ni corps, ni IP). `IncomingHttpHeaders` de Node
+    (donc le `Request` d'Express) reste un sur-ensemble structurel de cette forme.
+
+    ⚠ `string[]` n'est pas une coquetterie de typage : un en-tête RÉPÉTÉ arrive en tableau côté
+    Node. Un provider doit donc normaliser (première valeur) — en UN point, cf.
+    `ForwardHeaderAuthProvider.headerValue`. */
 export interface AuthRequestView {
   headers: {
     /** En-tête `Cookie` COMPLET, tel que reçu (le découpage par nom de cookie appartient au provider). */
     cookie?: string;
     /** En-tête `Authorization` (`Basic …`, `Bearer …`). */
     authorization?: string;
+    /** Tout autre en-tête, lu par NOM CONFIGURÉ (mode forward). Clés en minuscules côté Node. */
+    [name: string]: string | string[] | undefined;
   };
 }
 

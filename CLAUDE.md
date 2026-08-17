@@ -308,14 +308,27 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   reload assumé, pilote = libellés d'onglets, test de complétude fr⇄en, phase 2 = codes serveur).
 - [`auth.md`](docs/auth.md) — **authentification & AUTORISATION** (**AUTHENTIFICATION** = orchestrateur
   `Auth` (`auth.ts` : cache par hash de jeton via `sessionKey?` du provider, capture annuaire, annonce du
-  mode) + UN provider PAR mode dans `auth/` — `Dev`/`Basic`/`LegacySso`, contrat `AuthProvider` à vue
-  MINIMALE de requête sans Express (testables en isolation), le type de session RESTE `SsoResult`
-  (passthrough `/me`, champ `groups?` réservé aux providers IdP du futur — proxy identity-aware, OIDC) ;
+  mode) + UN provider PAR mode dans `auth/` — `Dev`/`Basic`/`LegacySso`/`ForwardHeader`, contrat
+  `AuthProvider` à vue MINIMALE de requête sans Express (testables en isolation), le type de session RESTE
+  `SsoResult` (passthrough `/me`, champ `groups?` rempli par le provider d'en-têtes) ; **`AUTH_MODE`**
+  explicite `dev|basic|sso|forward` — absente = inférence historique inchangée, 🚨 valeur inconnue ou
+  incohérente = **REFUS DE DÉMARRER** (jamais de repli sur le mode dev, qui n'authentifie personne :
+  anti fail-open), décision PURE `auth/AuthModeResolution` ; **mode FORWARD** = reverse-proxy
+  *identity-aware* (Authelia/Authentik/oauth2-proxy/Cloudflare/Tailscale), en-têtes configurables
+  (défauts `Remote-*`), 🚨 secret partagé `AUTH_FORWARD_SECRET` comparé à TEMPS CONSTANT
+  (`auth/SecretCompare`, partagé avec basic) — secret refusé ⇒ anonyme SANS lire le moindre autre
+  en-tête, secret absent ⇒ WARN de boot (l'app doit être joignable UNIQUEMENT par le proxy), ni
+  `adminRight` ni `expireDate` ni `sessionKey` ;
   **AUTORISATION** = RBAC à permissions atomiques
   `domaine:action`, grants à JOKERS et checks atomiques — `src-shared/Permissions` partagé front⇄back,
   carte des 25 collections → 10 domaines verrouillée par invariant, rôles presets + rôles CUSTOM ;
   politique `roles.json` relue à chaud (`ROLES_FILE`), FAIL-CLOSED — « absent » (adopté) ≠ « illisible »
-  (dernière config valide conservée) —, amorçage `BOOTSTRAP_ADMIN_IDS`, rétrocompat SUPER_ADMIN/dev/basic ;
+  (dernière config valide conservée) —, amorçage `BOOTSTRAP_ADMIN_IDS`, rétrocompat SUPER_ADMIN/dev/basic
+  (le mode forward, lui, n'en a AUCUNE : opt-in strict) ; **politique v2 GROUPES → rôles** — table
+  `groups` du MÊME fichier (union `users[id]` ∪ `users[login]` ∪ `groups[g]`, correspondance exacte
+  sensible à la casse, composition additive), `AccessIdentity.groups` filtré à la frontière, 🚨 la clé
+  du cache de permissions INTÈGRE les groupes TRIÉS (sinon deux appartenances du même login
+  partageraient un ensemble de droits) ;
   enforcement = garde GLOBALE `requireAuth` (401 si non loggé, **403 si 0 permission**) + gardes TAGUÉES
   par route, INJECTÉES dans les modules par typage structurel (contrat `ApiExtension` inchangé, garde
   AVANT le 503) ; 🚨 **verrou d'EXHAUSTIVITÉ** — un test relit les SOURCES des routeurs et nomme toute

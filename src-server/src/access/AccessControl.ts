@@ -84,6 +84,9 @@ export interface AccessSession {
   adminRight?: string;
   /** Session issue d'un mode SANS authentification réelle (dev / basic). */
   dev?: boolean;
+  /** GROUPES bruts de l'IdP (mode forward, passthrough SSO) — mappés vers des rôles par la
+      politique. Absent = aucun groupe : les modes dev/basic n'ont pas d'annuaire. */
+  groups?: string[];
   user?: { id?: number | string; login?: string };
 }
 
@@ -128,14 +131,24 @@ export class AccessControl {
      -------------------------------------------------------------------------- */
 
   /** Identité soumise à la politique — la clé canonique est celle de l'audit et de l'annuaire
-      (`UserProfiles.canonicalId`), jamais une variante locale (principe n°3). */
+      (`UserProfiles.canonicalId`), jamais une variante locale (principe n°3).
+
+      Les GROUPES sont filtrés ici, et c'est le bon endroit : c'est la FRONTIÈRE par laquelle une
+      donnée d'annuaire non maîtrisée (en-tête de proxy, passthrough d'un SSO qui rendrait
+      `groups: [null, 42]`) entre dans la politique. On ne garde que des chaînes non vides — un
+      groupe qui n'est pas un nom ne peut correspondre à aucune entrée écrite à la main, et laisser
+      passer une valeur non textuelle ferait échouer le tri de la clé de cache plus bas. */
   static identityOf(session: AccessSession): AccessIdentity {
     const user = session.user || {};
+    const groups = Array.isArray(session.groups)
+      ? session.groups.filter((g): g is string => typeof g === "string" && g.trim() !== "").map((g) => g.trim())
+      : [];
     return {
       id: UserProfiles.canonicalId(user),
       login: String(user.login || ""),
       adminRight: String(session.adminRight || ""),
       dev: session.dev === true,
+      groups,
     };
   }
 
@@ -148,7 +161,7 @@ export class AccessControl {
     if (!session || !session.logged) return PermissionSet.EMPTY;
     const identity = AccessControl.identityOf(session);
     const generation = this.roles.generation ? this.roles.generation() : 0;
-    const key = identity.id + " " + identity.login + " " + identity.adminRight + " " + (identity.dev ? "1" : "0");
+    const key = AccessControl.cacheKeyOf(identity);
     const hit = this.cache.get(key);
     if (hit && hit.generation === generation) return hit.set;
     let set: PermissionSet;
@@ -163,6 +176,26 @@ export class AccessControl {
     if (this.cache.size >= AccessControl.CACHE_CAP) this.cache.clear();
     this.cache.set(key, { generation, set });
     return set;
+  }
+
+  /** Clé de mémoïsation d'une identité — TOUT ce dont les rôles dépendent, et rien d'autre.
+
+      🚨 Les GROUPES en font partie, et l'oubli serait une faille, pas une imprécision : deux
+      requêtes du MÊME login avec des groupes DIFFÉRENTS (l'IdP a changé son appartenance entre-temps,
+      ou un proxy mal configuré envoie des groupes variables) partageraient sinon la même entrée —
+      la première réponse figerait les droits de l'autre, dans un sens comme dans l'autre. Ils sont
+      TRIÉS (copie : `identity.groups` appartient à l'appelant) parce que l'ordre du proxy n'a aucune
+      signification pour la politique, et que deux ordres du même ensemble doivent partager le cache.
+
+      Le séparateur est le caractère NUL, y compris ENTRE les groupes : il ne peut apparaître ni dans
+      un login ni dans un nom de groupe venus d'un en-tête HTTP, donc aucune concaténation ne peut se
+      faire passer pour une autre — avec une virgule, l'identité aux groupes `["a,b"]` et celle aux
+      groupes `["a", "b"]` produiraient la MÊME clé alors qu'elles n'ont pas les mêmes rôles.
+      Il est écrit `\u0000` et non posé littéralement dans la source : un octet nul rend le fichier
+      « binaire » pour les outils de recherche du dépôt, et se confond visuellement avec une espace. */
+  private static cacheKeyOf(identity: AccessIdentity): string {
+    const SEP = "\u0000";
+    return [identity.id, identity.login, identity.adminRight, identity.dev ? "1" : "0", ...[...identity.groups].sort()].join(SEP);
   }
 
   /** Rôles → ensemble de permissions. Une définition LOCALE (section `roles` du fichier) l'emporte

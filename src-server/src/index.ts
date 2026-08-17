@@ -4,6 +4,7 @@ import Database from "better-sqlite3";
 import { type SqliteCtor } from "./db.js";
 import { DocumentStore } from "./documents.js";
 import { Auth } from "./auth.js";
+import { ForwardHeaderAuthProvider } from "./auth/ForwardHeaderAuthProvider.js";   // mode forward : le provider POSSÈDE les noms de ses variables (optionsFromEnv)
 import { LiveBus } from "./live.js";
 import { Server } from "./server.js";
 import { Logger } from "./logger.js";
@@ -29,11 +30,21 @@ const API_BASE = process.env.API_BASE || "/api";
 // URL de connexion SSO injectée au client (bouton « Connexion » du welcome quand non authentifié). Vide = pas de
 // bouton. La macro ${clbkUrl} y est remplacée côté client par l'URL courante encodée (retour après connexion).
 const SSO_LOGIN_URL = process.env.SSO_LOGIN_URL || "";
+// MODE d'authentification EXPLICITE : dev | basic | sso | forward. ABSENTE → inférence historique
+// (BASIC_AUTH → basic, sinon SSO_URL → sso, sinon dev + WARN). 🚨 Une valeur inconnue ou incohérente
+// ARRÊTE le démarrage (cf. le try/catch plus bas) : un repli silencieux sur le mode dev, qui
+// n'authentifie personne, ouvrirait l'instance. Cf. auth/AuthModeResolution et docs/auth.md.
+const AUTH_MODE = process.env.AUTH_MODE ?? "";
 // SSO externe : configurer SSO_URL (+ COOKIE_NAME) via l'environnement. Défaut VIDE → mode dev (utilisateur factice SUPER_ADMIN).
 const SSO_URL = process.env.SSO_URL ?? "";
 const COOKIE_NAME = process.env.COOKIE_NAME ?? "";   // cookie du jeton à proxifier au SSO ("" = en-tête Cookie complet)
 const DEV_USER = process.env.DEV_USER ?? null;
 const BASIC_AUTH = process.env.BASIC_AUTH || null;                // "user:pass" → gate Basic Auth (dev), PRIORITAIRE sur le SSO
+// Mode FORWARD (reverse-proxy identity-aware : Authelia, Authentik, oauth2-proxy, Cloudflare Access,
+// Tailscale…) : noms d'en-têtes AUTH_FORWARD_USER_HEADER / _EMAIL_HEADER / _NAME_HEADER /
+// _GROUPS_HEADER (défauts Remote-*) + secret partagé AUTH_FORWARD_SECRET (+ _SECRET_HEADER). Les six
+// noms vivent DANS le provider (source unique) : le bootstrap ne fait que lui passer l'environnement.
+const FORWARD_OPTIONS = ForwardHeaderAuthProvider.optionsFromEnv(process.env);
 
 const log = Logger.fromEnv();
 // Annuaire utilisateurs (service CORE, aucune clé d'environnement requise) : snapshot « dernier profil vu »
@@ -46,7 +57,20 @@ catch (e) { log.child("users").error("snapshot users.db indisponible — annuair
 const userResolver = new AuthCacheUserResolver(usersDb, log.child("users"));
 // Auth reçoit l'annuaire comme PUITS de profils (ProfileSink) : chaque authentification réussie y est capturée,
 // sans qu'Auth connaisse l'implémentation (découplage — principe n°2).
-const auth = new Auth(log.child("auth"), { ssoUrl: SSO_URL, cookieName: COOKIE_NAME, devUser: DEV_USER, basicAuth: BASIC_AUTH }, userResolver);
+// 🚨 REFUS DE DÉMARRER sur configuration d'authentification douteuse (AUTH_MODE inconnue, mode
+// explicite dont la configuration manque) : le constructeur JETTE, et le seul repli possible serait
+// le mode dev — qui n'authentifie personne. Mieux vaut un service qui ne monte pas qu'un service
+// grand ouvert que l'exploitant croit protégé (anti fail-open). Le message est ACTIONNABLE : il
+// nomme la variable et la correction attendue.
+function buildAuth(): Auth {
+  try {
+    return new Auth(log.child("auth"), { authMode: AUTH_MODE, ssoUrl: SSO_URL, cookieName: COOKIE_NAME, devUser: DEV_USER, basicAuth: BASIC_AUTH, forward: FORWARD_OPTIONS }, userResolver);
+  } catch (e) {
+    log.child("auth").error("configuration d'AUTHENTIFICATION invalide — le serveur NE DÉMARRE PAS", e instanceof Error ? e.message : String(e));
+    process.exit(1);
+  }
+}
+const auth = buildAuth();
 // AUTORISATION (service CORE, cf. docs/auth.md) — orthogonale à l'authentification ci-dessus :
 // `Auth` dit QUI est l'appelant, `AccessControl` dit CE QU'IL PEUT. La POLITIQUE (utilisateur →
 // rôles) vit dans un provider sélectionné ici : v1 = un `roles.json` relu à chaud (ROLES_FILE,

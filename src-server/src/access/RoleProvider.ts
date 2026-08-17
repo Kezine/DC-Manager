@@ -13,8 +13,11 @@
    l'implémentation est SÉLECTIONNÉE au câblage (index.ts).
    - v1 `FileRoleProvider` : un `roles.json` relu à chaud, plus une liste
      d'administrateurs d'amorçage venue de l'environnement.
-   - à venir : mapping GROUPES de l'IdP → rôles (le jour où l'identité apporte
-     des groupes), puis provider enfichable. Le contrat ne bouge pas.
+   - v2 (même implémentation) : mapping GROUPES de l'IdP → rôles, dès lors que
+     l'identité apporte des groupes (mode forward, OIDC demain). Le contrat n'a
+     bougé que d'un champ sur l'IDENTITÉ — la table `groups` de `roles.json` est
+     une affaire de politique, invisible d'ici.
+   - à venir : provider enfichable. Le contrat ne bouge pas.
 
    Ce fichier ne contient QUE des types (aucun import) → il reste compilable en
    isolation et n'entraîne aucune dépendance chez ses consommateurs.
@@ -34,6 +37,11 @@ export interface AccessIdentity {
   /** Login BRUT tel que fourni par l'authentification — deuxième clé de recherche, car un
       exploitant écrit plus volontiers un login qu'un id numérique dans un fichier de politique. */
   login: string;
+  /** GROUPES bruts de l'IdP, tels que l'authentification les a reçus (`SsoResult.groups`) — jamais
+      calculés ici. C'est ce qui permet à la politique de mapper « groupe → rôles » et donc de
+      laisser la gestion des utilisateurs vivre dans l'IdP : un nouvel arrivant du bon groupe a ses
+      droits sans qu'on touche à `roles.json`. Vide en modes dev/basic (aucun annuaire). */
+  groups: string[];
   /** Droit hérité du contrat SSO maison (`"SUPER_ADMIN"` = administrateur historique). */
   adminRight: string;
   /** Session issue d'un mode SANS véritable authentification (dev / basic) — cf. `SsoResult.dev`. */
