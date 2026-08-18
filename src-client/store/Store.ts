@@ -55,6 +55,18 @@ export interface StoreMeta {
   [k: string]: any;
 }
 
+/** ASSIETTE DE LECTURE autorisée, vue par le Store (correctif « droits partiels », cf.
+    `docs/auth.md` § 10.6). Port INJECTÉ, volontairement réduit à la seule question que le Store se
+    pose : « ai-je le droit de lire cette collection ? ». Le Store ne connaît donc ni les permissions,
+    ni les rôles, ni `AccessState` — c'est l'hôte (`app/main.ts`) qui traduit, exactement comme il le
+    fait déjà pour les vues et les fiches (`FormBase.access`).
+    INJECTION NULLE : `null` = tout est lisible. C'est le mode FICHIER et le VISUALISEUR — il n'y a
+    ni identité ni frontière de confiance en local (principe n°15), donc pas une ligne du chargement
+    n'y change, PAR CONSTRUCTION et non par convention. */
+export interface CollectionReadAccess {
+  canReadCollection(collection: string): boolean;
+}
+
 export interface ListStoreOptions {
   page?: number;
   pageSize?: number;
@@ -101,6 +113,10 @@ export class Store {
       (`init`), parce que `_hydrate` re-marque tout `full` : c'est le contrat du lot 0. Vide en mode
       fichier/visualiseur PAR CONSTRUCTION (cf. constructeur). */
   private readonly lazyCollections: readonly string[];
+  /** ASSIETTE DE LECTURE autorisée (auth/ACL) — injectée par l'hôte, `null` = tout lisible (mode
+      fichier/visualiseur : injection nulle, cf. `CollectionReadAccess`). Lue à chaque `init()`, donc
+      sur les droits COURANTS du document qu'on ouvre. */
+  private readonly readAccess: CollectionReadAccess | null;
   /** COMPTES de collection relevés en ASYNC et mémoïsés (garde G6) — cf. `countOf`/`countHint`. */
   private readonly _counts: CollectionCountCache;
   /** Notifié quand un COMPTE relevé en async vient d'arriver : l'hôte repeint ce qui l'affiche
@@ -123,8 +139,11 @@ export class Store {
       pas encore créé) N'est PAS mémoïsée — sinon elle polluerait chaque composante avec le réseau de l'autre. */
   private _netCache = new Map<string, { ids: string[]; primary: string | null; primaryPort: string | null }>();
 
-  constructor(adapter: DataAdapter, hydration: HydrationState | null = null, lazyCollections: readonly string[] = []) {
+  constructor(adapter: DataAdapter, hydration: HydrationState | null = null, lazyCollections: readonly string[] = [], readAccess: CollectionReadAccess | null = null) {
     this.adapter = adapter;
+    // Assiette de lecture : `null` = tout lisible. Aucune garde de mode ici non plus — le mode
+    // fichier n'injecte simplement rien (cf. `CollectionReadAccess`).
+    this.readAccess = readAccess;
     // Injection NULLE (forme du projet, cf. main.ts) : sans état injecté, l'état INERTE — mode fichier et
     // visualiseur restent « tout full » PAR CONSTRUCTION, aucun `if (mode)` ici ni ailleurs.
     this.hydration = hydration || HydrationState.alwaysFull();
@@ -165,6 +184,7 @@ export class Store {
       `COUNT(*)` serveur, MÉMOÏSÉ (les demandes concurrentes partagent une seule requête) jusqu'à la
       prochaine invalidation (écriture locale, rechargement, SSE sauté par G3). */
   async countOf(collection: string): Promise<number> {
+    if (this.hydration.isForbidden(collection)) return 0;   // interdite : 0 SANS requête (cf. countHint)
     if (this.hydration.isHydrated(collection)) return this.data[collection] ? this.data[collection].length : 0;
     return this._counts.request(collection);
   }
@@ -175,6 +195,13 @@ export class Store {
       `onCountResolved` pour que l'hôte repeigne. C'est le patron du badge « Interventions », rendu
       générique : une valeur asservie au réseau, servie sans faire attendre le rendu. */
   countHint(collection: string): number {
+    // 🚨 SYMPTÔME S2 du correctif « droits partiels », et sa correction. Ce compteur est l'accesseur des
+    // PASTILLES d'onglet, et `refreshCounts()` les repeint TOUTES — y compris celles des onglets MASQUÉS,
+    // qui n'ont pourtant aucun spectateur. Sur une collection interdite, chaque repeinte partait donc en
+    // `COUNT(*)` serveur → 403 → toast « droit manquant (wifi:read) » ; un échec n'étant (à raison) pas
+    // mémoïsé, le relevé repartait à la repeinte suivante. Mesuré AVANT correctif : 257 requêtes 403 en
+    // 9 s de navigation nominale. La pastille d'un onglet qu'on ne voit pas vaut 0, et ne coûte rien.
+    if (this.hydration.isForbidden(collection)) return 0;
     if (this.hydration.isHydrated(collection)) return this.data[collection] ? this.data[collection].length : 0;
     return this._counts.value(collection);
   }
@@ -205,6 +232,9 @@ export class Store {
       par le `valueOf` de la colonne, parfois différent du champ brut). Cette branche n'en est pas moins le
       contrat : tout appelant obtient une réponse JUSTE dans les deux modes, sans écrire de test de mode. */
   facetValues(collection: string, field: string): string[] {
+    // Interdite : aucune option, et surtout aucun `SELECT DISTINCT` (403). Le listing qui les afficherait
+    // n'existe pas — son onglet est masqué —, mais la garde vit ICI, au point commun, et non chez lui.
+    if (this.hydration.isForbidden(collection)) return [];
     if (this.hydration.isHydrated(collection)) {
       const rows = this.data[collection] || [];
       return CollectionFacetCache.normalize(rows.map((o: any) => String(o[field] == null ? "" : o[field])));
@@ -333,13 +363,31 @@ export class Store {
     return this.data[collection].filter((o) => FieldIndex.valueMatches(o[field], value));
   }
 
+  /** 🚨 Collections que l'utilisateur COURANT n'a PAS le droit de lire (correctif « droits partiels »,
+      cf. docs/auth.md § 10.6). Sans assiette injectée (mode fichier/visualiseur), la liste est VIDE
+      par construction : le chargement local ne change pas d'une requête. */
+  private _forbiddenCollections(): string[] {
+    if (!this.readAccess) return [];
+    const access = this.readAccess;
+    return COLLECTIONS.filter((c) => !access.canReadCollection(c));
+  }
+
   /* ---- init : charge depuis l'adapter. NE sème PAS si vide. ---- */
   async init(): Promise<this> {
     // Les collections LAZY ne sont PAS tirées par le chargement initial (mode API) : l'adaptateur les
     // saute, ce qui est tout le gain du chantier. La liste part d'ici — le Store est le seul à connaître
     // sa politique d'hydratation, l'adaptateur ne fait qu'obéir (et l'adaptateur FICHIER l'ignore : il
     // n'y a pas de « collection » à sauter dans un document qui EST un fichier).
-    const raw = await this.adapter.load({ skipCollections: this.lazyCollections });
+    // 🚨 S'Y AJOUTENT LES COLLECTIONS INTERDITES (correctif « droits partiels »). Le chargement tirait
+    // TOUTE collection non-lazy sans regarder les droits : un `dc-viewer` sans `vm:read` prenait un 403
+    // sur `GET /vms`, le `Promise.all` de `RestAdapter.load` rejetait, et c'est le document ENTIER qui
+    // ne se chargeait pas (symptôme S1 — l'app s'ouvrait vide). L'assiette de chargement est donc
+    // INTERSECTÉE avec le lisible, ICI, au point COMMUN de toute ouverture : aucune requête n'est même
+    // émise pour une collection interdite — strictement la même doctrine que l'assiette de la recherche
+    // transverse côté serveur (docs/auth.md § 8.3), qui ne post-filtre pas non plus.
+    const forbidden = this._forbiddenCollections();
+    const skipCollections = [...new Set([...this.lazyCollections, ...forbidden])];
+    const raw = await this.adapter.load({ skipCollections });
     if (raw) {
       this._hydrate(raw);
       // 🚨 CONTRAT du lot 0 : `_hydrate` vient de re-marquer TOUT `full`. Comme le chargement a SAUTÉ
@@ -349,6 +397,10 @@ export class Store {
       // re-déclaration ici, plutôt que sur chacun de ces appelants, rend structurellement impossible
       // d'en oublier un (cf. docs/hydratation.md § « Vague 1 — contacts »).
       this.hydration.declareLazy(this.lazyCollections);
+      // … et les INTERDITES, dans la foulée et APRÈS les lazy (`forbidden` prime, cf. `declareLazy`).
+      // Leur cache est vide, mais ce vide-là n'est PAS « la collection est vide » : G1 doit continuer de
+      // refuser tout snapshot dérivé de ce corpus, et rien ne doit jamais tenter de les charger.
+      this.hydration.declareForbidden(forbidden);
       this.restored = true;
       // Réconcilie les catalogues (types de port/câble — le CODE est la source de vérité) sur le document CHARGÉ,
       // pas seulement sur un document neuf : sinon les entrées AJOUTÉES au code n'apparaissent jamais dans un
@@ -367,7 +419,17 @@ export class Store {
         // boot-là se termine avec un corpus intégralement hydraté — on ne re-déclare donc RIEN ensuite,
         // l'état DIT la vérité (tout est en cache) et le lazy reprend au boot suivant.
         await this.hydrateAll();
-        await this._persistAll();
+        // 🚨 DROITS PARTIELS — `hydrateAll` ne peut plus, par construction, rendre le corpus complet
+        // quand une collection est INTERDITE : la pousser en snapshot l'EFFACERAIT côté serveur, et
+        // c'est exactement ce que G1 refuse. Ici on ne veut pas d'un refus BRUYANT : `init()` est le
+        // chemin d'OUVERTURE du document, une exception y tue tout le chargement (symptôme S3 mesuré —
+        // le boot mourait sur `GET /wifiClients` dès que le catalogue du code avait bougé, et comme le
+        // snapshot n'était jamais écrit, il remourait à CHAQUE F5). On teste donc la MÊME condition que
+        // G1 au lieu de la subir, et on renonce simplement à persister : la réconciliation reste EN
+        // MÉMOIRE (les selects de la session sont justes), rien n'est perdu — le catalogue du code est
+        // ré-appliqué à chaque ouverture, et un utilisateur qui peut tout lire la persistera pour tous.
+        if (this.hydration.isFullyHydrated()) await this._persistAll();
+        else Log.d("store", "catalogues réconciliés EN MÉMOIRE seulement : corpus incomplet (collections interdites)", this.hydration.forbiddenCollections());
       }
     }
     else { this._hydrate(null); this.restored = false; }
@@ -440,7 +502,10 @@ export class Store {
       Renvoie les collections effectivement rechargées (trace / tests). Un échec réseau REJETTE : mieux
       vaut une modale qui ne s'ouvre pas qu'un select silencieusement amputé. */
   async hydrate(collections: readonly string[]): Promise<string[]> {
-    const missing = collections.filter((c, i, a) => COLLECTIONS.indexOf(c) !== -1 && a.indexOf(c) === i && !this.hydration.isHydrated(c));
+    // 🚨 Les collections INTERDITES sont écartées ICI, au point d'entrée COMMUN de toute hydratation
+    // (à la demande comme totale) : les demander ne rendrait pas un corpus plus complet, seulement un
+    // 403 — et, l'appelant ne s'y attendant pas, une modale qui ne s'ouvre pas ou un boot qui meurt.
+    const missing = collections.filter((c, i, a) => COLLECTIONS.indexOf(c) !== -1 && a.indexOf(c) === i && !this.hydration.isHydrated(c) && !this.hydration.isForbidden(c));
     if (!missing.length) return [];
     Log.d("store", "hydrate : hydratation à la demande", missing);
     await this._refetchWhole(missing);
@@ -455,7 +520,11 @@ export class Store {
       corpus lazy, c'est le prix assumé d'un document complet. Un échec réseau REJETTE (l'opération n'a
       pas lieu — jamais un fichier tronqué). Renvoie les collections rechargées (trace/tests). */
   async hydrateAll(): Promise<string[]> {
-    const missing = this.hydration.notFullCollections();
+    // `hydratableCollections` et non `notFullCollections` : les INTERDITES sont non-full mais ne se
+    // rechargent pas (403). Conséquence ASSUMÉE et documentée : sous droits partiels, « hydrater tout »
+    // ne rend PAS le corpus complet — c'est pourquoi les EXPORTS sont MASQUÉS dans ce cas
+    // (`AccessState.hasFullDocumentRead`, docs/auth.md § 10.6) plutôt que d'exporter un document amputé.
+    const missing = this.hydration.hydratableCollections();
     if (!missing.length) return [];
     Log.d("store", "hydrateAll : hydratation complète (G2 export / réconciliation des catalogues)", missing);
     // DÉLÉGUÉ à l'hydratation ciblée : « tout hydrater » n'est que « hydrater la liste des non-full »
@@ -915,6 +984,10 @@ export class Store {
     for (const u of updates) {
       const c = u && u.collection, id = u && u.id;
       if (!c || !id || !this.data[c]) continue;   // collection inconnue du client : rien à rafraîchir
+      // … ni une collection INTERDITE : la cascade serveur a pu toucher des `wifiClients` qu'on n'a
+      // pas le droit de lire — les refetcher ne rafraîchirait rien (rien n'est en cache), seulement
+      // un 403 en marge d'une écriture par ailleurs réussie.
+      if (this.hydration.isForbidden(c)) continue;
       (idsByCollection.get(c) || idsByCollection.set(c, new Set()).get(c)!).add(id);
     }
     if (!idsByCollection.size) return;
@@ -1176,6 +1249,10 @@ export class Store {
       d'une pièce ainsi listée s'ouvre donc normalement, `store.get` la trouve). C'est l'ÉTAT qui
       décide, jamais une liste de noms : une collection lazy redevenue `full` reprend le chemin local. */
   private async _sectionRows(collection: string, field: string, value: string): Promise<any[]> {
+    // Collection INTERDITE : section vide, sans `fetchBy`. La fiche la masquera comme une relation
+    // vide — c'est la bonne lecture : ce que l'utilisateur n'a pas le droit de voir n'existe pas pour
+    // lui, et un « Chargement impossible » l'inviterait à réessayer un geste voué au 403.
+    if (this.hydration.isForbidden(collection)) return [];
     const rows = this.hydration.isHydrated(collection)
       ? this._byFk(collection, field, value)
       : await this.fetchBy(collection, field, value);

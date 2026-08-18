@@ -112,6 +112,10 @@ export class StoreListRowSource implements ListRowSource {
          double, et deux découpes concurrentes se disputeraient le pager. */
   isServerPaged(request: ListRowRequest): boolean {
     if (!this.reader || !this.reader.page) return false;
+    // 🚨 Collection INTERDITE (droits) : jamais de page serveur — elle vaudrait un 403 par clic de
+    // pager. On retombe sur `local()`, donc sur le cache VIDE : l'onglet est de toute façon masqué,
+    // et si un chemin détourné y menait, mieux vaut un listing vide qu'une rafale de refus.
+    if (this.store.hydration.isForbidden(request.collection)) return false;
     if (this.store.hydration.isHydrated(request.collection)) return false;
     return !ListRowEngine.isActive(request);
   }
@@ -141,6 +145,10 @@ export class StoreListRowSource implements ListRowSource {
   facetOptions(collection: string, field: string): string[] | null {
     if (!this.reader) return null;
     if (this.store.hydration.isHydrated(collection)) return null;
+    // Collection INTERDITE : options locales (donc vides), et surtout aucun `SELECT DISTINCT`.
+    // `Store.facetValues` le garantit déjà ; on court-circuite ici pour la même raison que le pager —
+    // la source est le point où le régime SERVEUR se décide, la garde s'y lit.
+    if (this.store.hydration.isForbidden(collection)) return null;
     return this.store.facetValues(collection, field);
   }
 }

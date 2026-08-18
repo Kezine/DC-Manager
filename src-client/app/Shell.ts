@@ -154,6 +154,7 @@ export class Shell {
   private fileActionsEl!: HTMLElement;            // Enregistrer/Enregistrer-sous (masqués en mode API)
   private fileOnlySections: HTMLElement[] = [];   // sections de réglages propres au mode fichier (auto-save, accès fichiers)
   private maintenanceSection: HTMLElement | null = null;   // section « Maintenance » des réglages (permission `maintenance:run`)
+  private exportSection: HTMLElement | null = null;        // section « Export » des réglages (lecture de TOUTES les collections)
   private userChip!: HTMLElement;                 // pastille « connecté en tant que … » (mode API)
   private autosaveChk!: HTMLInputElement;
   private autosaveIntervalSel!: HTMLSelectElement;
@@ -406,6 +407,7 @@ export class Shell {
     resetBtn.onclick = () => this.host.onResetViewPrefs?.(); v3d.appendChild(resetBtn);
     // -- Export (tous modes, y compris API) : JSON autonome + visualiseur HTML hors-ligne --
     const exp = section(I18n.t("shell.settings.export"));
+    this.exportSection = exp;   // masquée sans la lecture de TOUTES les collections (mode API) — cf. setExportAllowed
     const expJsonBtn = document.createElement("button"); expJsonBtn.type = "button"; expJsonBtn.className = "btn btn-ghost btn-sm"; expJsonBtn.style.width = "100%"; expJsonBtn.textContent = I18n.t("shell.settings.exportJson");
     expJsonBtn.onclick = () => this.host.onExportJson?.();
     const expHtmlBtn = document.createElement("button"); expHtmlBtn.type = "button"; expHtmlBtn.className = "btn btn-ghost btn-sm"; expHtmlBtn.style.cssText = "width:100%;margin-top:8px"; expHtmlBtn.textContent = I18n.t("shell.settings.exportStandalone");
@@ -723,8 +725,10 @@ export class Shell {
 
   /** Première vue ACCESSIBLE dans l'ordre des onglets — cible du repli. Les onglets PRINCIPAUX priment
       (c'est une barre de navigation, pas une sous-page) ; à défaut, n'importe quelle vue visible fait
-      l'affaire — un utilisateur qui n'a le droit de lire qu'une sous-page doit tout de même la voir. */
-  private firstVisibleView(): string | null {
+      l'affaire — un utilisateur qui n'a le droit de lire qu'une sous-page doit tout de même la voir.
+      PUBLIQUE depuis le correctif « droits partiels » : l'hôte s'en sert pour la restauration de vue
+      d'après-droits (`core/ViewRestoration`), qui pose la MÊME question que le repli interne. */
+  firstVisibleView(): string | null {
     const registered = this.order.filter((nm) => this.views.has(nm));
     const primary = registered.find((nm) => this.views.get(nm)!.def.kind !== "secondary" && this.isViewVisible(nm));
     return primary || registered.find((nm) => this.isViewVisible(nm)) || null;
@@ -894,6 +898,12 @@ export class Shell {
       FICHIER la purge est purement locale et l'état d'autorisation « tout permis » la laisse visible —
       injection nulle, aucun test de mode ici. */
   setMaintenanceAllowed(on: boolean): void { if (this.maintenanceSection) this.maintenanceSection.style.display = on ? "" : "none"; }
+  /** Section « Export » du panneau Réglages (JSON autonome + visualiseur HTML) : les deux portent le
+      document ENTIER, et sous droits partiels le cache ne le contient PLUS (l'assiette de chargement est
+      intersectée avec le lisible, cf. docs/auth.md § 10.6). Un export y serait une copie silencieusement
+      AMPUTÉE — donc masqué, jamais proposé puis tronqué. En mode FICHIER, « tout permis » le laisse
+      visible : injection nulle, aucun test de mode ici. */
+  setExportAllowed(on: boolean): void { if (this.exportSection) this.exportSection.style.display = on ? "" : "none"; }
   /** Reflète l'état auto-save dans le popover (case + fréquence). */
   setAutosave(on: boolean, interval: number): void { this.autosaveChk.checked = on; this.autosaveIntervalSel.value = String(interval); }
   setAutosaveStatus(html: string): void { this.autosaveStatusEl.innerHTML = html; }

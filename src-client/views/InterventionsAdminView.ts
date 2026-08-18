@@ -160,6 +160,13 @@ export class InterventionsAdminView {
     /** Client du PONT de réplication — null = pont non branché (mode fichier/viewer) : aucune action
         d'en-tête, aucun bloc « Ticket », aucune pastille. La feature est amovible SANS toucher la vue. */
     private readonly tracker: TrackerSyncClient | null = null,
+    /** Le PONT est-il LISIBLE par l'utilisateur courant (`tracker:read`) ? Prédicat relu à chaque
+        appel — même forme que `ViewDef.visible` du Shell. Le pont a sa PROPRE permission, distincte de
+        `interventions:read` qui ouvre cette page : sans cette garde, un lecteur d'interventions sans
+        droit sur le tracker déclenchait un 403 (et son toast) au premier affichage de la page.
+        Défaut « oui » = injection nulle : le mode fichier/visualiseur, où `tracker` est de toute façon
+        null, n'a rien à déclarer. */
+    private readonly canReadTracker: () => boolean = () => true,
   ) {}
 
   /** Activation de l'onglet (onShow) : messages d'indisponibilité, sinon (re)charge la page courante. */
@@ -197,7 +204,7 @@ export class InterventionsAdminView {
       indisponibilité ne doit ni casser le listing ni masquer les interventions. La conséquence d'une
       liste vide est bénigne (aucun sélecteur de provider proposé, le serveur tranche). */
   private async ensureTrackerProviders(): Promise<void> {
-    if (!this.tracker || this.trackerProvidersLoaded) return;
+    if (!this.tracker || this.trackerProvidersLoaded || !this.canReadTracker()) return;
     this.trackerProvidersLoaded = true;
     try { this.trackerProviders = await this.tracker.providers(); } catch (_) { this.trackerProviders = []; }
   }

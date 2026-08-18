@@ -80,6 +80,12 @@ export interface SearchAction {
   sub?: string;
   /** Termes annexes (synonymes : « thème », « dark »…). */
   terms?: readonly unknown[];
+  /** Prédicat de DISPONIBILITÉ, réévalué à CHAQUE ouverture de la palette (jamais figé au boot) —
+      même forme et même moment d'évaluation que `ViewDef.extraActions[].visible` du Shell. Absent =
+      toujours proposée. Sert au gating d'autorisation : une action qui rejoue un geste masqué
+      ailleurs (l'EXPORT du document complet sous droits partiels) ne doit pas rester atteignable par
+      la palette — ce serait la porte de service du gating. */
+  visible?: () => boolean;
   run: () => void;
 }
 
@@ -131,6 +137,11 @@ export class GlobalSearchPalette {
   private countEl!: HTMLElement;
 
   private corpus: GlobalSearchItem[] = [];
+  /** Actions RÉELLEMENT proposées pour CETTE ouverture — les injectées, moins celles dont le prédicat
+      `visible` rend faux (autorisation, cf. `SearchAction.visible`). Recalculée à chaque `open()`, au
+      même instant que le snapshot du corpus : portée, pastille, préfixe « > » et activation lisent
+      TOUTES cette liste, sans quoi une action masquée resterait exécutable au clavier. */
+  private activeActions: readonly SearchAction[] = [];
   private scope = "all";
   private sel = 0;
   /** Résultats À PLAT dans l'ordre affiché (les groupes ne sont qu'un habillage) — cible de ↑/↓/Entrée. */
@@ -223,11 +234,17 @@ export class GlobalSearchPalette {
 
   open(): void {
     if (!this.overlay) this.buildDom();
+    // Actions DISPONIBLES à cet instant : le prédicat `visible` est relu ici, jamais mémorisé — un
+    // droit retiré à chaud (relecture de `/me`) retire l'action à la prochaine ouverture.
+    this.activeActions = this.actions.filter((a) => {
+      if (!a.visible) return true;
+      try { return !!a.visible(); } catch (e) { console.error(e); return false; }   // repli FERMÉ, comme les gardes du Shell
+    });
     // snapshot des ENTITÉS + les ACTIONS injectées, fondues au même corpus : le score, les groupes et
     // les comptes les traitent comme n'importe quelle famille — seule l'ACTIVATION diverge (run, pas fiche).
     this.corpus = [
       ...GlobalSearchSources.build(this.store),
-      ...this.actions.map((a) => ({ kind: ACTIONS_KIND, id: a.id, label: a.label, sub: a.sub, terms: a.terms || [] })),
+      ...this.activeActions.map((a) => ({ kind: ACTIONS_KIND, id: a.id, label: a.label, sub: a.sub, terms: a.terms || [] })),
     ];
     this.scope = "all"; this.sel = 0; this.input.value = "";
     this.resetRemote();   // état serveur NEUF à chaque ouverture (aucune réponse d'une session passée)
@@ -349,7 +366,7 @@ export class GlobalSearchPalette {
       // Tab CYCLE les portées (maquette) — il ne quitte pas la palette : le seul autre focus utile est
       // le champ lui-même, et Maj+Tab remonte le cycle.
       e.preventDefault();
-      const ids = ["all", ...GlobalSearchSources.SCOPES.map((s) => s.id), ...this.externals.map((x) => x.scopeId), ...(this.actions.length ? ["actions"] : [])];
+      const ids = ["all", ...GlobalSearchSources.SCOPES.map((s) => s.id), ...this.externals.map((x) => x.scopeId), ...(this.activeActions.length ? ["actions"] : [])];
       const at = ids.indexOf(this.scope);
       this.scope = ids[(at + (e.shiftKey ? -1 : 1) + ids.length) % ids.length];
       this.sel = 0; this.render();
@@ -370,7 +387,7 @@ export class GlobalSearchPalette {
     // « > » (maquette) s'ajoute aux préfixes des portées d'entités — seulement si des actions existent.
     const prefixes: Record<string, string> = GlobalSearchSources.prefixes();
     for (const external of this.externals) prefixes[external.prefix] = external.scopeId;
-    if (this.actions.length) prefixes[">"] = "actions";
+    if (this.activeActions.length) prefixes[">"] = "actions";
     const parsed = GlobalSearch.parsePrefix(raw, prefixes);
     if (parsed.scope) this.scope = parsed.scope;
     const query = parsed.query;
@@ -467,7 +484,7 @@ export class GlobalSearchPalette {
     this.scopesEl.innerHTML = pill("all", "", I18n.t("search.scope.all"), total)
       + GlobalSearchSources.SCOPES.map((s) => pill(s.id, s.icon, I18n.t("search.scope." + s.id), countOf(s))).join("")
       + this.externals.map((x) => pill(x.scopeId, x.icon, I18n.t("search.scope." + x.scopeId), byKind[x.kind] || 0)).join("")
-      + (this.actions.length ? pill("actions", Icons.COMMAND, I18n.t("search.scope.actions"), byKind[ACTIONS_KIND] || 0) : "");
+      + (this.activeActions.length ? pill("actions", Icons.COMMAND, I18n.t("search.scope.actions"), byKind[ACTIONS_KIND] || 0) : "");
   }
 
   /** Accueil : consultés récemment (résolus contre le corpus — les disparus sont écartés) + préfixes. */
@@ -491,7 +508,7 @@ export class GlobalSearchPalette {
     html += `<div class="gs-empty gs-welcome"><div class="gs-empty-s">${Html.escape(I18n.t("search.welcome"))}</div>
       <div class="gs-tips">${GlobalSearchSources.SCOPES.map((s) =>
         `<button type="button" class="gs-tip" data-prefix="${Html.escape(s.prefix)}"><b>${Html.escape(s.prefix)}</b> ${Html.escape(I18n.t("search.scope." + s.id))}</button>`).join("")}${this.externals.map((x) =>
-        `<button type="button" class="gs-tip" data-prefix="${Html.escape(x.prefix)}"><b>${Html.escape(x.prefix)}</b> ${Html.escape(I18n.t("search.scope." + x.scopeId))}</button>`).join("")}${this.actions.length
+        `<button type="button" class="gs-tip" data-prefix="${Html.escape(x.prefix)}"><b>${Html.escape(x.prefix)}</b> ${Html.escape(I18n.t("search.scope." + x.scopeId))}</button>`).join("")}${this.activeActions.length
         ? `<button type="button" class="gs-tip" data-prefix="&gt;"><b>&gt;</b> ${Html.escape(I18n.t("search.scope.actions"))}</button>` : ""}
       </div></div>`;
     return html;
@@ -516,7 +533,7 @@ export class GlobalSearchPalette {
     if (item.kind === ACTIONS_KIND) {
       // Une action S'EXÉCUTE — pas de fiche, et pas de « récents » (on ne CONSULTE pas une action ;
       // l'y mettre ferait en plus échouer sa résolution au prochain accueil si les actions changent).
-      const action = this.actions.find((a) => a.id === item.id);
+      const action = this.activeActions.find((a) => a.id === item.id);
       this.close();
       action?.run();
       return;

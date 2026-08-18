@@ -319,7 +319,7 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   `where` serveur ⇄ restriction cliente à 2 sauts ; **FACETTES du régime pagé** — route
   `GET …/facets/:collection?field=…`, liste blanche partagée `ListFacets`).
 - [`hydratation.md`](docs/hydratation.md) — **hydratation du cache client** (état PAR COLLECTION
-  `full`/`partial`/`none` — module pur `core/HydrationState`, injection nulle : mode fichier/visualiseur
+  `full`/`partial`/`none`/**`forbidden`** — module pur `core/HydrationState`, injection nulle : mode fichier/visualiseur
   = tout `full` PAR CONSTRUCTION ; gardes de sûreté — 🚨 **G1 anti-snapshot** : `_persistAll` refuse
   BRUYAMMENT (`HydrationError`) un `PUT /snapshot` dérivé d'un cache partiel, import/`newDocument`
   légitimes par construction ; **G2 export = hydrater TOUT avant** (`Store.hydrateAll`, arbitrage acté) ;
@@ -331,7 +331,9 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   `spares`) ; **M4b** — les mises à jour RÉSIDUELLES d'un `/transact` (`residual.updates`) sont
   refetchées GROUPÉES au cache ; **résolution GROUPÉE des libellés de cibles d'intervention**
   (`core/TargetLabelResolution` — remplace l'hydratation en masse, doctrine « hydraté = ce que le
-  3D consomme ») ; instrumentation `HydrationStats`, seuils D3 5 Mo / 1 s).
+  3D consomme ») ; instrumentation `HydrationStats`, seuils D3 5 Mo / 1 s ; 🚨 **DROITS PARTIELS** —
+  le niveau `forbidden` (« jamais » ≠ « pas encore ») : assiette de chargement ∩ lisible, G1 refuse
+  toujours le snapshot amputé mais G2/G3/G4/G6/G7/G8/M4b n'émettent plus rien, cf. `auth.md` § 10.6).
 - [`i18n.md`](docs/i18n.md) — **localisation du client** (i18next enveloppé par la classe `I18n`,
   catalogues `.ts` par domaine `fr`/`en`, détection de locale + préférence persistée, bascule =
   reload assumé, pilote = libellés d'onglets, test de complétude fr⇄en, phase 2 = codes serveur).
@@ -391,7 +393,14 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   de `main.ts`**), gestes d'écriture par verbe de domaine, sections d'admin par permission méta ; écran
   « aucun accès » = `isEmpty()` sans aucun nom de rôle ; **403 en vol** = toast dédupliqué par permission
   (`core/AccessDenial`) + re-fetch de `/me`, JAMAIS de retour au login (le latch 401 `SessionExpiry` est
-  intouché) ; section « Mode local » — ACL serveur seulement ; § 10.5 liste ce qui n'est PAS gaté en v1).
+  intouché) ; section « Mode local » — ACL serveur seulement ; § 10.5 liste ce qui n'est PAS gaté en v1 ;
+  **§ 10.6 — le client ne DEMANDE pas l'interdit** : assiette de CHARGEMENT intersectée avec le lisible au
+  point commun `Store.init` (port injecté `CollectionReadAccess`, injection nulle), 🚨 niveau d'hydratation
+  **`forbidden`** — vide-parce-qu'interdit ≠ vide, donc G1 refuse BRUYAMMENT tout snapshot amputé alors que
+  G2/G3/G4/G6/G7/G8/M4b n'émettent plus la moindre requête —, gating des sondes de modules (pastilles
+  interventions/certs, rangées de fiche, providers VM/tracker, familles externes de la palette),
+  restauration de vue d'après-droits (module PUR `core/ViewRestoration`, deep-link préservé), et décision
+  **EXPORTS masqués sans la lecture de TOUTES les collections** (`AccessState.hasFullDocumentRead`)).
 - [`user-resolver.md`](docs/user-resolver.md) — **annuaire utilisateurs** (service CORE interface-driven
   `UserResolver` : id canonique `String(id)` SSO sinon login → profil affichable ; impl v1
   `AuthCacheUserResolver` = cache d'auth capturé par puits injecté `ProfileSink` + snapshot SQLite

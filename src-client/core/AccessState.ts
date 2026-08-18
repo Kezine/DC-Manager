@@ -97,4 +97,17 @@ export class AccessState {
   /** Au moins UNE lecture de donnée documentaire — la même règle que la garde serveur du flux SSE et
       de la recherche transverse (`Permissions.hasAnyDocumentRead`). Assiette de la recherche Ctrl+K. */
   hasAnyDocumentRead(): boolean { return Permissions.hasAnyDocumentRead(this.permissions); }
+
+  /** TOUTE la donnée documentaire est-elle lisible ? Prédicat des opérations qui portent le document
+      ENTIER — les EXPORTS (cf. `docs/auth.md` § 10.6). Sous droits partiels, l'assiette de chargement
+      est intersectée avec le lisible : le cache ne contient alors PAS tout le document, et un export
+      en serait la copie AMPUTÉE — sans que rien ne le dise. On masque donc le geste plutôt que de le
+      proposer. Règle déléguée au modèle partagé, comme tout le reste de cette classe. */
+  hasFullDocumentRead(): boolean { return Permissions.hasFullDocumentRead(this.permissions); }
+
+  /** Les COLLECTIONS du modèle que cet utilisateur peut LIRE — l'ASSIETTE avec laquelle le plan de
+      chargement du document est intersecté (cf. `Store.init`). Même dérivation que l'assiette de la
+      recherche transverse côté serveur (`Permissions.readableCollections`), donc strictement la même
+      vérité des deux côtés. Ordre stable (celui de la carte). */
+  readableCollections(): readonly string[] { return Permissions.readableCollections(this.permissions); }
 }

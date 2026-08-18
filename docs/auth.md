@@ -930,6 +930,111 @@ en 403 avec leur toast — jamais une écriture qui passe :
 - les **clients de feature** (certs, notify, interventions, vm, wifi, tracker) n'acheminent pas encore
   leur 403 vers le toast commun : seul le chemin `RestProtocol` (cœur documentaire) le fait.
 
+### 10.6 Le client ne DEMANDE pas l'interdit — l'assiette de chargement, l'état « interdit », les exports
+
+Le § 10.2 gate ce que l'utilisateur **voit**. Ce paragraphe gate ce que le client **demande** : masquer
+un onglet ne suffit pas si le code continue d'interroger sa collection en arrière-plan. Trois pannes
+mesurées sur déploiement réel l'ont montré, et elles n'avaient qu'une racine commune — *le client était
+écrit pour des droits pleins ou nuls, jamais pour des droits PARTIELS*.
+
+| Symptôme observé | Cause exacte |
+|---|---|
+| **`dc-viewer` seul : rien ne se charge.** Ajouter `vm-viewer` « répare » | le chargement du document tirait TOUTES les collections non-lazy sans regarder les droits ; le 403 sur `GET /vms` faisait rejeter le `Promise.all` de `RestAdapter.load`, donc `Store.init`, donc `openDocument` — le boot mourait. `wifiClients` étant *lazy*, elle ne bloquait pas, d'où la différence de symptôme |
+| **Toast « droit manquant (wifi:read) » récurrent** | `Store.countHint` (pastille d'onglet) relevait un `COUNT(*)` serveur pour une collection interdite, à chaque repeinte — et `refreshCounts()` repeint AUSSI les pastilles des onglets masqués. Un échec n'étant (à raison) pas mémoïsé, la requête repartait indéfiniment. **257 requêtes 403 en 9 s** de navigation nominale, mesurées au navigateur. L'anti-rafale `AccessDenial` n'espaçait que les *toasts* |
+| **Deep-link mort après F5** (`#equipements` → écran vide sous une barre d'onglets garnie) | conséquence de la précédente : le boot mourant, `documentOpened()` — le SEUL point qui activait une vue — n'était jamais atteint. Le `switchView` du hash, lui, avait été refusé plus tôt (à ce moment l'accès vaut `NONE`, aucune vue n'est visible) et **rien ne rejouait l'activation** quand les droits arrivaient. Le déclencheur en régime nominal est la réconciliation des catalogues (`Store.init` → `syncCatalogs()`), qui appelait `hydrateAll()` : 403 sur la première collection interdite. Et le correctif de catalogue n'étant jamais persisté, **cela recommençait à chaque F5** |
+
+#### L'assiette de CHARGEMENT est intersectée avec le lisible
+
+Au point **commun** — `Store.init`, chemin unique de toute ouverture ou rechargement complet (§
+[`hydratation.md`](hydratation.md)) —, le plan de chargement saute les collections interdites **en plus**
+des collections lazy, en une seule liste `skipCollections`. Aucune requête n'est même émise : c'est
+exactement la doctrine de l'assiette de la recherche transverse côté serveur (§ 8.3), qui ne
+post-filtre pas non plus. La liste vient de `AccessState.readableCollections()`, qui délègue à
+`Permissions.readableCollections` — la **même** dérivation des deux côtés.
+
+Le Store ne connaît ni les permissions ni les rôles : il reçoit le port **`CollectionReadAccess`**
+(une seule question, `canReadCollection(c)`), injecté par `app/main.ts` sous forme de prédicat relu à
+chaque appel. **Injection nulle** : rien n'est injecté en mode fichier/visualiseur, donc aucune
+collection ne peut y être interdite — par construction, pas par convention.
+
+#### 🚨 L'état « interdit » — pourquoi ce n'est pas « vide »
+
+Une collection interdite entre au cache **vide**. Ce vide-là ne doit surtout pas se lire « la collection
+est vide » : un `PUT /snapshot` ou un export en ferait un document **AMPUTÉ** de ses `vms` /
+`wifiClients`. `core/HydrationState` porte donc un quatrième niveau, **`forbidden`**, qui tient les deux
+bouts à la fois — il compte comme **non hydraté** (donc la garde G1 refuse bruyamment tout snapshot),
+mais il est **exclu de tout ce qui déclenche une requête**. Le détail des transitions, des prédicats et
+de leur effet sur G1/G2/G3 vit dans [`hydratation.md`](hydratation.md) § « Droits partiels ».
+
+#### Plus aucune requête « de confort » vers l'interdit
+
+Gaté aux **points communs**, jamais vue par vue :
+
+| Émetteur | Point commun | Comportement sur une collection interdite |
+|---|---|---|
+| Pastilles d'onglet (G6) | `Store.countHint` / `countOf` | **0**, sans requête |
+| Facettes de listing (G8) | `Store.facetValues` (+ `StoreListRowSource.facetOptions`) | liste vide, sans `SELECT DISTINCT` |
+| Pager serveur d'un listing (G4) | `StoreListRowSource.isServerPaged` | jamais paginé serveur (cache local, vide) |
+| Sections de fiche (G7) | `Store._sectionRows` | section vide, sans `fetchBy` |
+| Rechargement SSE (G3) | `HydrationState.splitReload` | ni re-tirée, ni « différée » (aucun dérivé à relever) |
+| Cascade résiduelle (M4b) | `Store._refreshResidualUpdates` | ids ignorés (rien en cache à rafraîchir) |
+| Hydratation à la demande / export (G2) | `Store.hydrate` / `hydrateAll` | écartée (`hydratableCollections`) |
+| Bibliothèque d'images de façade | `RestDocumentController.reloadImagesIfReadable` | non rechargée sans `dc.site:read` (`images` est une pseudo-collection de ce domaine) |
+
+Et pour les **modules**, dont la permission est distincte de celle qui ouvre la surface : pastilles
+`refreshInterventionsCount` (`interventions:read`) et `refreshCertsCount` (`certs:read`), rangées de
+fiche `interventionHooks.countOpen` / `latestFor` et `loadCertsList`, sonde `probeVmProviders`
+(`vm:read`), providers du pont dans `InterventionsAdminView.ensureTrackerProviders` (`tracker:read`,
+prédicat injecté), et les **familles externes de la palette** Ctrl+F, qui interrogeaient certs et
+interventions à chaque ouverture. La page **Clusters VM** n'a rien demandé de plus : sa seule requête
+(`…/vm/status`) porte `vm:read`, la permission qui la rend visible.
+
+#### Restauration de la vue après l'arrivée des droits
+
+`applyAccess` rejoue l'activation dès que les droits réels arrivent (bootstrap), et non plus seulement
+à `documentOpened()`. La décision — **vue courante → vue bookmarkée → vue par défaut → première vue
+visible** — vit une seule fois, dans le module PUR `core/ViewRestoration`, que partagent le repli
+d'après-ouverture et ce rejeu ; elle était auparavant écrite deux fois, avec des critères différents
+(existence de la vue d'un côté, visibilité de l'autre). Un hash vers une vue **interdite** se replie
+proprement, et `switchView` réécrit alors le hash sur la cible réellement activée — l'URL cesse de
+mentir. Plus aucune vue visible ⇒ on n'active rien : l'écran « aucun accès » couvre l'application.
+
+⚠ **Le timing est la moitié du correctif** : `applyAccess` est appelé une PREMIÈRE fois avant que
+l'intention du hash ne soit connue (le boot pose `NONE` très tôt). Le rejeu est donc gardé par un
+drapeau posé exactement au point où `bookmarkedView` est lu. C'est le genre de séquence qui régresse en
+silence — elle est commentée sur place, dans `main.ts`.
+
+#### Décision : les EXPORTS exigent la lecture de TOUT le document
+
+`Store.hydrateAll` (garde G2) précède les exports, mais **il ne peut plus rendre le corpus complet**
+quand une collection est interdite. Les actions d'export du document entier — export `.json` autonome et
+visualiseur HTML, c'est-à-dire les deux consommateurs de `FileDocuments.snapshotWithImages` — ne sont
+donc **PROPOSÉES que si l'utilisateur peut lire TOUTES les collections** (`AccessState.hasFullDocumentRead()`,
+qui délègue à `Permissions.hasFullDocumentRead` : la borne HAUTE dont `hasAnyDocumentRead` est la borne
+basse). Sinon la section « Export » des Réglages est masquée, ainsi que l'action `export-json` de la
+palette Ctrl+F — sans quoi la palette serait la porte de service du masquage. Un export partiel
+silencieux serait un **piège** ; on ne le propose pas plutôt que de le tronquer ou de le refuser au
+moment du clic.
+
+« Enregistrer sous » n'a pas à être gaté : les contrôles de fichier de la topbar sont déjà masqués en
+mode API (`Shell.setRestMode`). Les téléchargements **unitaires** (une image de façade, le binaire d'une
+pièce jointe) ne sont pas des exports du document : ils partent d'une ligne déjà servie, dans une vue
+déjà gatée par la lecture de sa collection.
+
+#### Limites résiduelles assumées
+
+- Un utilisateur qui peut lire **toute** la donnée mais n'a pas `snapshot:write` verra encore, au boot
+  d'un document dont le catalogue a bougé, l'échec de persistance routé vers `onPersistError` (un
+  toast). Le corpus étant complet, la garde ci-dessus ne s'applique pas ; fermer ce cas demanderait
+  d'exposer au Store un prédicat d'ÉCRITURE en plus de son assiette de lecture.
+- Un **élargissement** des droits en cours de session (rôle ajouté à chaud) n'élargit pas l'assiette de
+  chargement déjà posée : elle est recalculée à la prochaine ouverture de document ou au prochain F5.
+  Le **retrait** de droits, lui, reste couvert par le filet du 403 en vol (§ 10.4).
+- Au boot API, le `store.init()` **docless** (avant tout choix de document) s'exécute alors que l'accès
+  vaut encore `NONE` : il marque donc tout `forbidden`. Sans conséquence — l'état est intégralement
+  recalculé à l'ouverture du document, et le repli est du côté FERMÉ (aucune requête émise avant de
+  savoir ce qui est permis).
+
 ## 11. Rétrocompatibilité
 
 Un déploiement existant se comporte **exactement** comme avant. Ces deux règles vivent dans le

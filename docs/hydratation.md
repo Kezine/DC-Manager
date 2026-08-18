@@ -7,6 +7,11 @@ initialisé `[]` pour toute collection, et RIEN n'y distingue « vide » de « p
 `.notes/toDos/lazy-load-collections-cadrage-2026-08-11.md`). Ce document décrit la vérité
 manquante — l'**état d'hydratation par collection** — et les **gardes** qui s'y adossent.
 
+⚠ Une SECONDE cause d'incomplétude s'y ajoute depuis le correctif « droits partiels » du 2026-08-17 :
+une collection que l'utilisateur n'a pas le droit de LIRE. Elle ressemble à s'y méprendre à une
+collection lazy — cache vide — mais appelle le comportement exactement INVERSE (ne jamais la demander).
+D'où le niveau `forbidden` ; cf. § « Droits partiels » plus bas, et [`auth.md`](auth.md) § 10.6.
+
 Modules concernés : `src-client/core/HydrationState.ts` (état + prédicats, pur),
 `src-client/core/LazyCollections.ts` (LA liste des collections paresseuses),
 `src-client/core/CollectionCountCache.ts` (compteurs async, pur),
@@ -26,6 +31,8 @@ sections G7 + aperçu de cascade G5 + purge du résidu M4 + rafraîchissement du
 `Tests/modules/test-lazy-contacts.js` (vague 1 + tri du lot 1b),
 `Tests/modules/test-lazy-vague2.js` (vague 2), `Tests/modules/test-lazy-vague3.js` (vague 3) et
 `Tests/modules/test-lazy-vague4.js` (vague 4 — M4b, résolution groupée, spares) ;
+`Tests/modules/test-access-partial.js` (niveau `forbidden` : précédence, caractère terminal, double
+nature, invariant anti-snapshot, assiette de chargement et silence des chemins de confort) ;
 côté serveur `Tests/modules/test-relational-schema.js` (liste blanche + ORDER BY) et
 `test-relational-repository.js` (tri SQL réel + `SELECT DISTINCT` réel).
 
@@ -38,6 +45,11 @@ Chaque collection a un **niveau d'hydratation** :
 | `full` | tout le contenu serveur est en cache | la vérité |
 | `partial` | des enregistrements ont été absorbés à la demande (fiche, page de listing, recherche) | un sous-ensemble — NE PAS s'y fier pour « tout » |
 | `none` | collection déclarée lazy, rien n'a encore été lu | un mensonge (`[]`) |
+| `forbidden` | l'utilisateur n'a PAS le droit de lire cette collection — elle ne sera JAMAIS chargée de la session (cf. § « Droits partiels ») | un mensonge (`[]`), et **définitivement** |
+
+⚠ `none` et `forbidden` décrivent le même cache vide pour des raisons **opposées** : « pas encore »
+contre « jamais ». C'est pourquoi ils ne peuvent pas être un seul niveau — l'un appelle « va la
+chercher quand tu en auras besoin », l'autre « ne la demande jamais ».
 
 L'état vit dans `core/HydrationState` (module **pur** : ni DOM, ni réseau, ni Store — testable
 headless). Il ne mémorise que les **déviations** : une collection inconnue de la carte est `full`,
@@ -48,6 +60,7 @@ qui est le régime historique de toutes les collections tant qu'aucune vague n'a
 | Transition | Déclencheur | Point de câblage |
 |---|---|---|
 | `full → none` | `declareLazy([...])` — posé à l'**ouverture** d'un document, AVANT toute lecture | `Store` (constructeur) puis `Store.init` **après** `_hydrate` — cf. § « Vague 1 » |
+| `* → forbidden` | `declareForbidden([...])` — les collections que les DROITS interdisent de lire | `Store.init`, juste **après** `declareLazy` (cf. § « Droits partiels ») |
 | `none → partial` | `noteAbsorption(c)` — un enregistrement entre au cache | `Store._absorbRecord` (list/fetchOne/fetchMany/fetchBy) |
 | `* → full` (une collection) | `markFull(c)` — la collection vient d'être re-tirée EN ENTIER | `Store._refetchWhole` (hydrateAll, rechargement granulaire) |
 | `* → full` (tout) | `markAllFull()` — un instantané COMPLET vient d'être absorbé | `Store._hydrate` (init, import/`replaceAll`, `newDocument`, undo/redo) |
@@ -873,6 +886,76 @@ validation, le serveur (le compte rendu `residual` existait depuis la vague 2 �
 bouge), les 20+ autres listings, le mode fichier et le visualiseur. Le chantier n'a plus de candidate :
 `vms` reste exclue, et tout l'outillage est générique (G5, G7 + `AsyncSection`, G8, M4/M4b,
 `TargetLabelResolution`).
+
+## Droits partiels — le niveau `forbidden` (correctif 2026-08-17)
+
+Le chantier lazy-load répondait à « pas encore chargée ». L'ACL en apporte une seconde, qui lui
+ressemble et n'a pas les mêmes conséquences : « **jamais chargée, parce qu'interdite** ». La décision
+d'accès, elle, vit dans [`auth.md`](auth.md) § 10.6 — ici, seule l'interaction avec l'hydratation.
+
+### Ce qui l'a rendu nécessaire
+
+Trois pannes mesurées sous `dc-viewer` (cf. `auth.md` § 10.6), dont deux passaient par ce document :
+le chargement du boot ne filtrait pas par les droits (403 sur `GET /vms` ⇒ `Store.init` rejette ⇒ rien
+ne se charge), et la réconciliation des catalogues appelait `hydrateAll()`, qui repartait chercher les
+collections interdites (403 ⇒ boot mort, **à chaque F5**, puisque le snapshot correctif n'était jamais
+écrit). Traiter une collection interdite comme une `none` aurait reproduit exactement ces deux pannes :
+`none` est faite pour être chargée à la demande.
+
+### Où l'assiette entre, et par où
+
+Le Store reçoit un port **`CollectionReadAccess`** — une seule méthode, `canReadCollection(c)` —
+injecté par `app/main.ts` (prédicat relu à chaque appel, jamais l'instance `AccessState`, qui est
+immuable et remplacée à chaque changement de droits). **Injection nulle**, comme l'état d'hydratation
+lui-même : `null` en mode fichier/visualiseur ⇒ aucune collection ne peut y être interdite.
+
+`Store.init` — chemin UNIQUE de toute ouverture — fait alors deux choses, dans cet ordre :
+
+1. `adapter.load({ skipCollections: lazy ∪ interdites })` : le plan de chargement est **intersecté**
+   avec le lisible. Une collection interdite n'est **jamais demandée** ;
+2. après `_hydrate` (qui re-marque tout `full`), `declareLazy(lazy)` **puis** `declareForbidden(interdites)`.
+   `forbidden` **prime** sur `none`, et la garde est écrite dans `declareLazy` : l'ordre des deux appels
+   est donc indifférent — une précédence qui dépendrait de l'ordre serait une subtilité à retenir, donc
+   une régression en attente.
+
+### La double nature du niveau, garde par garde
+
+C'est tout l'intérêt d'un niveau à part : il répond **non** aux deux questions à la fois.
+
+| Question posée par | Réponse pour `forbidden` | Pourquoi |
+|---|---|---|
+| 🚨 **G1** `assertFullyHydrated` (snapshot) | **corpus INCOMPLET → refus bruyant** | le cache ne contient pas le document ; un `PUT /snapshot` l'AMPUTERAIT côté serveur. `notFullCollections()` la cite, donc l'erreur la NOMME |
+| **G2** `hydrateAll` / `hydrate` | **écartée** (`hydratableCollections()`) | la recharger ne rendrait pas le corpus complet, seulement un 403 — et, l'appelant ne s'y attendant pas, un boot mort ou une modale qui ne s'ouvre pas |
+| **G3** `splitReload` (SSE) | **ni `refetch`, ni `deferred`** | rien à re-tirer, et aucun dérivé à rafraîchir : la verser dans `deferred` relancerait des compteurs voués au 403 à chaque écriture d'un autre client |
+| **G4** `isServerPaged` | **jamais paginé serveur** | un clic de pager = un 403. L'onglet est masqué de toute façon ; un listing vide vaut mieux qu'une rafale de refus |
+| **G6** `countHint` / `countOf` | **0, sans requête** | c'était la fuite : `refreshCounts()` repeint AUSSI les pastilles des onglets masqués — 257 requêtes 403 en 9 s, mesurées |
+| **G7** `_sectionRows` | **section vide, sans `fetchBy`** | ce que l'utilisateur n'a pas le droit de voir n'existe pas pour lui ; « Chargement impossible » l'inviterait à réessayer un geste voué au 403 |
+| **G8** `facetValues` | **liste vide, sans `SELECT DISTINCT`** | idem |
+| **M4b** `_refreshResidualUpdates` | **ids ignorés** | rien en cache à rafraîchir ; seulement un 403 en marge d'une écriture réussie |
+
+Deux conséquences à ne pas perdre de vue :
+
+- **`hydrateAll` ne rend PLUS forcément le corpus complet.** C'est précisément pourquoi les EXPORTS
+  sont **masqués** sous droits partiels (`auth.md` § 10.6) plutôt que d'exporter un document amputé ;
+- **la réconciliation des catalogues du boot ne persiste plus** quand le corpus est incomplet : `init`
+  teste la MÊME condition que G1 (`isFullyHydrated()`) au lieu de la subir, et se contente de la
+  réconciliation EN MÉMOIRE (les selects de la session sont justes, rien n'est perdu — le catalogue du
+  code est ré-appliqué à chaque ouverture, et un utilisateur qui peut tout lire le persistera pour tous).
+  Lever ici, dans le chemin d'OUVERTURE, tuerait tout le chargement : c'était le symptôme S3.
+
+### Terminal, mais pas éternel
+
+Rien ne dégrade le niveau : `noteAbsorption` ne peut rien absorber d'une collection qu'on ne lit pas
+(la garde y est tout de même posée — défense en profondeur si un enregistrement arrivait par un autre
+chemin). Seuls `markFull` (un rechargement complet a réellement abouti, donc les droits sont revenus)
+et `markAllFull` (remplacement total du cache) l'effacent — et `init` le re-pose aussitôt à partir des
+droits **courants**.
+
+### Mode fichier / visualiseur
+
+**Inchangé, par construction** : l'état inerte `HydrationState.alwaysFull()` fait de `declareForbidden`
+un no-op, et l'hôte n'injecte aucune assiette de lecture. Aucun chemin de code, présent ou futur, ne
+peut y rendre une collection interdite — même garantie, et même patron, que pour le lazy.
 
 ## Arbitrages actés (utilisateur, 2026-08-12)
 

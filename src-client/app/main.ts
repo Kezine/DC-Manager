@@ -41,6 +41,8 @@ import { TargetLabelResolution } from "../core/TargetLabelResolution";   // rés
 import { Prefs } from "../core/Prefs";
 import { AccessState } from "../core/AccessState";   // état d'AUTORISATION du client (lot 2 auth/ACL — `ALL` en mode fichier : injection nulle)
 import { ViewAccess } from "../core/ViewAccess";     // vues NON-listing → leur permission de lecture (les listings, eux, dérivent de leur collection)
+import { ViewRestoration } from "../core/ViewRestoration";   // QUELLE vue activer (boot, arrivée des droits, ouverture de document) — décision PURE
+import type { ViewRestorationState } from "../core/ViewRestoration";
 import { SessionExpiry } from "../core/SessionExpiry";   // verrou idempotent « session expirée → retour au login » (mode API)
 import { Log } from "../core/Log";
 import { Format } from "../core/Format";   // taille lisible des pièces jointes purgées (toast de maintenance)
@@ -85,7 +87,30 @@ const adapter = REST_MODE
 // endroit où cette liste s'écrit) ; en mode fichier/visualiseur,
 // INJECTION NULLE → le Store fabrique l'état INERTE « tout full, par construction » et IGNORE la liste
 // (« le document EST le fichier », principe n°15). D'où UN seul test de mode ici, aucun dans les modules.
-const store = new Store(adapter, REST_MODE ? new HydrationState() : null, LAZY_COLLECTIONS_API);
+/* ---- AUTORISATION (lot 2 auth/ACL, cf. docs/auth.md § « Gating côté client ») ----------------------
+   ÉTAT COURANT de ce que l'utilisateur a le droit de faire. Il vit ICI, dans la racine de composition,
+   et DESCEND partout par des PRÉDICATS (jamais par un import d'un état global depuis une vue) :
+     · le Shell reçoit `visible` / `canAdd` par vue ;
+     · les listings reçoivent leurs raffinements d'action de ligne ;
+     · les fiches lisent `FormBase.access` (chaîne statique — même accroche que `FormBase.images`) ;
+     · la vue Datacenter reçoit `canEditSpace` par son hôte ;
+     · le STORE reçoit l'ASSIETTE DE LECTURE (correctif « droits partiels » — ci-dessous).
+   Les prédicats relisent la variable à CHAQUE évaluation → un changement de droits à chaud (403 en vol
+   → relecture de `/me`) se propage sans reconstruire quoi que ce soit.
+   🚨 MODE FICHIER / VISUALISEUR : `AccessState.ALL`, donc tous ces prédicats rendent VRAI par
+   construction — c'est l'injection nulle (patron `HydrationState`), et c'est ce qui garantit que le
+   mode fichier ne change pas d'un pixel. C'est l'UNIQUE test de mode de tout le gating.
+   MODE API : `NONE` jusqu'à la réponse de `GET /me` (le bootstrap REST l'installe) — on n'affiche pas
+   d'onglet avant de savoir, plutôt que d'en afficher puis d'en retirer.
+   ⚠ Déclaré au niveau MODULE (et non dans `boot()`) parce que le Store, construit ici même, en dépend. */
+let access: AccessState = REST_MODE ? AccessState.NONE : AccessState.ALL;
+/* ASSIETTE DE LECTURE du Store (correctif « droits partiels », docs/auth.md § 10.6) : le plan de
+   chargement du document est INTERSECTÉ avec les collections lisibles, au point commun `Store.init`.
+   Même forme que `FormBase.access` — un objet de PRÉDICATS qui relit `access` à chaque appel, jamais
+   l'instance (immuable et remplacée à chaque changement de droits). Mode fichier/visualiseur : rien
+   n'est injecté (injection nulle) → aucune collection ne peut y être interdite, PAR CONSTRUCTION. */
+const store = new Store(adapter, REST_MODE ? new HydrationState() : null, LAZY_COLLECTIONS_API,
+  REST_MODE ? { canReadCollection: (collection: string) => access.canReadCollection(collection) } : null);
 // LECTEUR SERVEUR des listings (lot 3 « listings serveur-pilotés », cf. docs/recherche.md) — mode API
 // SEULEMENT. Injecté dans chaque `ListView` : une requête ACTIVE (recherche saisie, ou filtre de cible
 // traduisible en `where`) est alors servie par le SERVEUR (colonne `search` enrichie), avec anti-rebond,
@@ -144,6 +169,9 @@ const trackerClient = REST_MODE ? new TrackerSyncClient(adapter as RestAdapter) 
 const userDirectory = REST_MODE ? new UserDirectory(adapter as RestAdapter) : null;
 const W = window as any;
 const HAS_FS_API = typeof W.showSaveFilePicker === "function" && typeof W.showOpenFilePicker === "function";
+/** Onglet d'ACCUEIL de l'application — la cible quand ni la vue courante ni le hash ne tranchent
+    (cf. `core/ViewRestoration`). Nommé ici plutôt que répété en littéral aux trois points de décision. */
+const DEFAULT_VIEW = "equipements";
 
 /** Le document est-il « non vide » (au-delà des seuls catalogues fermés réinjectés) ? */
 function hasUserData(): boolean { return store.totalCount() > store.all("portTypes").length + store.all("cableTypes").length; }
@@ -185,21 +213,8 @@ async function boot(): Promise<void> {
   const session = new SaveState();      // suivi dirty/save (révision modèle vs dernière sauvegarde + meta/images)
   let booted = false;                   // garde : ne suit pas la révision pendant le chargement initial
 
-  /* ---- AUTORISATION (lot 2 auth/ACL, cf. docs/auth.md § « Gating côté client ») ----------------------
-     ÉTAT COURANT de ce que l'utilisateur a le droit de faire. Il vit ICI, dans la racine de composition,
-     et DESCEND partout par des PRÉDICATS (jamais par un import d'un état global depuis une vue) :
-       · le Shell reçoit `visible` / `canAdd` par vue ;
-       · les listings reçoivent leurs raffinements d'action de ligne ;
-       · les fiches lisent `FormBase.access` (chaîne statique — même accroche que `FormBase.images`) ;
-       · la vue Datacenter reçoit `canEditSpace` par son hôte.
-     Les prédicats relisent la variable à CHAQUE évaluation → un changement de droits à chaud (403 en vol
-     → relecture de `/me`) se propage sans reconstruire quoi que ce soit.
-     🚨 MODE FICHIER / VISUALISEUR : `AccessState.ALL`, donc tous ces prédicats rendent VRAI par
-     construction — c'est l'injection nulle (patron `HydrationState`), et c'est ce qui garantit que le
-     mode fichier ne change pas d'un pixel. C'est l'UNIQUE test de mode de tout le gating.
-     MODE API : `NONE` jusqu'à la réponse de `GET /me` (le bootstrap REST l'installe) — on n'affiche pas
-     d'onglet avant de savoir, plutôt que d'en afficher puis d'en retirer. */
-  let access: AccessState = REST_MODE ? AccessState.NONE : AccessState.ALL;
+  /* AUTORISATION : l'état `access` est déclaré au niveau MODULE (cf. son bloc, au voisinage du Store —
+     qui en dépend pour son assiette de lecture). Ne restent ici que les prédicats qui en dérivent. */
   /** Une VUE NON-LISTING est-elle lisible ? Sa permission vient de la carte `ViewAccess` (verrouillée par
       test : une vue déclarée sans entrée casse la suite). Vue hors carte ⇒ visible (elle n'est pas gatée). */
   const canSeeView = (name: string): boolean => {
@@ -243,7 +258,9 @@ async function boot(): Promise<void> {
     { id: "new-cable", label: I18n.t("search.action.newCable"), sub: I18n.t("search.action.newCableSub"), terms: ["add", "ajouter", "créer"], run: () => Forms.cable(store, formHost, null, () => shell.refreshActive()) },
     { id: "goto-datacenter", label: I18n.t("search.action.gotoDatacenter"), sub: I18n.t("search.action.gotoDatacenterSub"), terms: ["3d", "plan", "salle", "vue"], run: () => shell.switchView("datacenter") },
     { id: "toggle-theme", label: I18n.t("search.action.toggleTheme"), sub: I18n.t("search.action.toggleThemeSub"), terms: ["dark", "light", "sombre", "clair", "thème"], run: () => shellHost.onToggleTheme?.() },
-    { id: "export-json", label: I18n.t("search.action.exportJson"), sub: I18n.t("search.action.exportJsonSub"), terms: ["download", "télécharger", "sauvegarde"], run: () => shellHost.onExportJson?.() },
+    // EXPORT : même gating que la section « Export » des Réglages (droits partiels → document amputé,
+    // cf. docs/auth.md § 10.6). Sans ce prédicat, la palette serait la porte de service du masquage.
+    { id: "export-json", label: I18n.t("search.action.exportJson"), sub: I18n.t("search.action.exportJsonSub"), terms: ["download", "télécharger", "sauvegarde"], visible: () => access.hasFullDocumentRead(), run: () => shellHost.onExportJson?.() },
   ], REST_MODE ? [
     // FAMILLES EXTERNES de la palette (mode API seulement — leurs bases vivent côté serveur).
     // Les fermetures visent des `let` assignés PLUS BAS (certsView, interventionsView) : légal,
@@ -251,7 +268,10 @@ async function boot(): Promise<void> {
     {
       kind: "__certs", scopeId: "certs", icon: Icons.CERT_LIST, prefix: "cert:",
       // `list()` = l'arbre COMPLET (la page Certificats le charge déjà ainsi — pas de pagination à gérer).
-      fetch: async () => (await certsClient!.list()).map((c) => ({
+      // 🚨 Gaté sur `certs:read` (correctif « droits partiels ») : la palette est ouverte à quiconque a
+      // UNE lecture documentaire, mais ses familles EXTERNES interrogent des modules qui ont leur propre
+      // permission — sans cette garde, chaque Ctrl+F d'un lecteur DC tirait un 403 et son toast.
+      fetch: async () => (!access.has("certs:read") ? [] : await certsClient!.list()).map((c) => ({
         kind: "__certs", id: c.id,
         label: c.label || c.subject || "?",
         sub: [CertsFormat.kindLabel(c.kind), c.key_algo].filter(Boolean).join(" · "),
@@ -271,6 +291,7 @@ async function boot(): Promise<void> {
       // enregistrements sont GARDÉS (interventionSearchCache) — `open` en a besoin, la modale de
       // détail prend l'enregistrement, pas un id (il n'existe pas de GET /interventions/:id).
       fetch: async () => {
+        if (!access.has("interventions:read")) return [];   // même garde que la famille « certs » ci-dessus
         const page = await interventionsClient!.listPage({ pageSize: 500 });
         interventionSearchCache.clear();
         return page.interventions.map((it) => {
@@ -339,12 +360,18 @@ async function boot(): Promise<void> {
      `GET /me`, donc AUCUNE vue n'est encore visible à ce moment-là et `shell.current` reste null. On garde
      donc l'intention (`bookmarkedView`, déclaré plus bas — fermeture évaluée bien après le boot) comme repli
      avant l'onglet par défaut, sinon un lien profond serait perdu à chaque ouverture de document serveur.
-     `switchView` se replie de lui-même si la cible n'est pas lisible. */
-  const viewAfterOpen = (): string => {
-    if (shell.current && shell.hasView(shell.current)) return shell.current;
-    if (bookmarkedView && shell.hasView(bookmarkedView)) return bookmarkedView;
-    return "equipements";
-  };
+     La DÉCISION elle-même (courante → bookmarkée → défaut → première visible) vit dans le module PUR
+     `core/ViewRestoration`, qu'elle partage avec la restauration d'après-droits (cf. `restoreViewIfIdle`) :
+     l'écrire deux fois, c'est l'avoir écrite deux fois DIFFÉREMMENT — c'était le cas avant le correctif
+     « droits partiels » (existence de la vue ici, visibilité là-bas). */
+  const viewRestorationState = (): ViewRestorationState => ({
+    current: shell.current,
+    bookmarked: bookmarkedView,
+    defaultView: DEFAULT_VIEW,
+    isVisible: (name) => shell.hasView(name) && shell.isViewVisible(name),
+    firstVisible: () => shell.firstVisibleView(),
+  });
+  const viewAfterOpen = (): string => ViewRestoration.afterDocumentOpened(viewRestorationState()) || "";
 
   /* ---- documents FICHIER : cycle de vie EXTRAIT dans `FileDocumentController` (ouvrir/enregistrer/rouvrir,
      mode dossier, compagnon .nmfb, exports) ; ici, seule l'adhérence à la boucle applicative. Les closures de
@@ -600,7 +627,37 @@ async function boot(): Promise<void> {
     shell.setGlobalSearchAllowed(access.hasAnyDocumentRead());   // même règle que la garde serveur de GET /search
     shell.setNewDocumentAllowed(access.has("documents:manage"));
     shell.setMaintenanceAllowed(access.has("maintenance:run"));
+    // EXPORTS du document COMPLET (décision du correctif « droits partiels », docs/auth.md § 10.6) :
+    // proposés SEULEMENT si l'utilisateur peut lire TOUTES les collections. Sous droits partiels, le
+    // cache ne contient plus le document (l'assiette de chargement est intersectée avec le lisible) et
+    // `hydrateAll` ne peut plus le compléter — l'export serait une copie AMPUTÉE, sans que rien ne le
+    // dise. On masque le geste : un export partiel silencieux est un piège, pas une dégradation.
+    shell.setExportAllowed(access.hasFullDocumentRead());
     shell.refreshCounts();
+    // 🚨 RESTAURATION DE VUE (symptôme S3). `refreshCounts` vient d'appliquer la visibilité des onglets :
+    // c'est le premier instant où l'on sait quoi activer. Cf. `restoreViewIfIdle` pour le pourquoi du
+    // garde-fou `viewRestorationReady`.
+    restoreViewIfIdle();
+  };
+  /* 🚨 REJEU de l'activation de vue après un changement de droits (correctif « droits partiels », S3).
+     LA SÉQUENCE, mesurée (instrumentée au navigateur avant correctif) :
+       1. `applyAccess(NONE)` du boot          → aucune vue visible ;
+       2. `switchView(#hash)` (fin de boot)    → REFUSÉ (rien n'est visible) → `shell.current` reste NUL ;
+       3. `applyAccess(grants)` du bootstrap   → les onglets apparaissent… et personne n'active rien ;
+       4. `documentOpened()`                   → activait enfin une vue — MAIS seulement si le document
+          s'est chargé. Un chargement en échec (c'était le cas sous droits partiels, cf. Store.init)
+          laissait l'app sur une barre d'onglets garnie et un écran VIDE.
+     On rejoue donc l'étape 4 dès l'étape 3. L'ordre 3→4 est CONSERVÉ (on n'active pas à la place de
+     `documentOpened`, on active AVANT lui) : `documentOpened` re-switche ensuite sur la MÊME vue, ce qui
+     la re-rend avec les données chargées — coût nul, et le trou est bouché même si l'étape 4 n'arrive pas.
+     ⚠ GARDE-FOU `viewRestorationReady` : `applyAccess` est appelé une PREMIÈRE fois (étape 1) AVANT que
+     `bookmarkedView` ne soit initialisé — y toucher lèverait une ReferenceError de zone morte temporelle.
+     Le drapeau passe à vrai exactement au point où l'intention du hash est connue. */
+  let viewRestorationReady = false;
+  const restoreViewIfIdle = (): void => {
+    if (!viewRestorationReady) return;
+    const target = ViewRestoration.target(viewRestorationState());
+    if (target) shell.switchView(target);   // null = vue courante valable, OU plus aucune vue accessible
   };
   // Les FICHES sont une chaîne de méthodes STATIQUES : elles lisent l'autorisation par le point d'accroche
   // de `FormBase` (comme `FormBase.images`), et la fonction relit l'état COURANT à chaque ouverture.
@@ -815,7 +872,10 @@ async function boot(): Promise<void> {
   let vmConfiguredProviderIds: string[] | null = null;
   let vmProvidersProbeStarted = false;
   const probeVmProviders = (): void => {
-    if (vmProvidersProbeStarted || !vmSyncClient) return;
+    // `GET …/vm/providers` est gardé par `vm:read` côté serveur : sans ce droit, la sonde ne rapporterait
+    // qu'un 403 (correctif « droits partiels »). La liste reste alors INCONNUE — exactement l'état prévu
+    // par le prédicat de visibilité du bouton « Purger… », qui ne suppose rien d'une config non lue.
+    if (vmProvidersProbeStarted || !vmSyncClient || !access.has("vm:read")) return;
     vmProvidersProbeStarted = true;
     vmSyncClient.providers()
       .then((list) => { vmConfiguredProviderIds = list.map((p) => p.id); shell.refreshCounts(); })   // relit la visibilité avec la config réelle
@@ -1296,7 +1356,9 @@ async function boot(): Promise<void> {
   let interventionsOpenCount = 0;
   let interventionsCriticalOpen = false;
   const refreshInterventionsCount = async (): Promise<void> => {
-    if (!interventionsClient || !interventionsClient.docId) { interventionsOpenCount = 0; interventionsCriticalOpen = false; shell.refreshCounts(); return; }
+    // 🚨 Sans `interventions:read`, l'onglet est masqué : sa pastille n'a aucun spectateur, et ces deux
+    // comptages ne rapporteraient qu'un 403 (correctif « droits partiels », même règle que `countHint`).
+    if (!interventionsClient || !interventionsClient.docId || !access.has("interventions:read")) { interventionsOpenCount = 0; interventionsCriticalOpen = false; shell.refreshCounts(); return; }
     try {
       const openStatuses = [...InterventionsFormat.OPEN_STATUS_SLUGS];
       const [openRes, critRes] = await Promise.all([
@@ -1317,18 +1379,27 @@ async function boot(): Promise<void> {
     countClass: REST_MODE ? () => (interventionsCriticalOpen ? "err" : null) : undefined,   // ≥ 1 ouverte critique → alerte rouge
     onShow: () => { interventionsView.show(); void refreshInterventionsCount(); },
   });
-  interventionsView = new InterventionsAdminView(interventionsContainer, interventionsClient, formHost, interventionTargets, trackerClient);   // formulaires dans LA modale de l'app (principe n°11)
+  // Dernier argument : le PONT de réplication a sa propre permission (`tracker:read`), distincte de celle
+  // qui ouvre cette page — prédicat relu à chaque appel, comme partout ailleurs dans le gating.
+  interventionsView = new InterventionsAdminView(interventionsContainer, interventionsClient, formHost, interventionTargets, trackerClient, () => access.has("tracker:read"));   // formulaires dans LA modale de l'app (principe n°11)
   interventionsView.onCountsChanged = () => { void refreshInterventionsCount(); };   // après création/clôture/suppression → recompte les ouvertes
   // INTÉGRATION « FICHES » (badge + déclaration depuis équipement/VM/spare) : hooks injectés dans les fiches
   // via FormHost (contrat découplé — les formulaires n'importent NI la vue NI le client interventions). null
   // hors mode API → aucune rangée « Interventions » dans les fiches. `declareFor` FERME la fiche courante
   // (fait par InterventionFicheRow) PUIS navigue vers l'onglet et ouvre la modale de création pré-liée : on
   // CHANGE DE VUE, la fiche d'où l'on part n'a donc plus lieu d'être — ce n'est pas un empilement.
+  // 🚨 Chaque hook qui touche le RÉSEAU relit `interventions:read` (correctif « droits partiels ») : une
+  // fiche s'ouvre depuis n'importe quel listing DC, alors que le module interventions a sa propre
+  // permission — sans ces gardes, ouvrir une fiche d'équipement suffisait à déclencher un 403 et son toast.
   const interventionHooks: InterventionFicheHooks | null = interventionsClient ? {
-    countOpen: async (kind, id) => { const map = await interventionsClient.counts([{ kind, id }]); return map[kind + ":" + id] || 0; },
+    countOpen: async (kind, id) => {
+      if (!access.has("interventions:read")) return 0;   // pas de rangée « Interventions » sur la fiche
+      const map = await interventionsClient.counts([{ kind, id }]); return map[kind + ":" + id] || 0;
+    },
     // Mini-listing « n dernières » de la cible : listing paginé FILTRÉ (targets) + tri activité récente (défaut
     // serveur), projeté sur le type LOCAL du contrat (on ne fait pas fuiter InterventionRecord dans les fiches).
     latestFor: async (kind, id, n) => {
+      if (!access.has("interventions:read")) return [];
       const page = await interventionsClient.listPage({ pageSize: n, targets: [{ kind, id }], sort: "updated_date", dir: "desc" });
       return page.interventions.map((it) => ({ id: it.id, title: it.title, status: it.status, priority: it.priority, updated_date: it.updated_date }));
     },
@@ -1383,7 +1454,9 @@ async function boot(): Promise<void> {
   let certsListCache: CertificateListItem[] | null = null;
   const invalidateCertsListCache = (): void => { certsListCache = null; };
   const loadCertsList = async (): Promise<CertificateListItem[]> => {
-    if (!certsClient || !certsClient.docId) return [];
+    // POINT COMMUN de toutes les lectures certs venues d'une FICHE (rangée « Certificats TLS ») : la
+    // garde `certs:read` s'y pose une fois, plutôt qu'à chaque hook (correctif « droits partiels »).
+    if (!certsClient || !certsClient.docId || !access.has("certs:read")) return [];
     if (certsListCache) return certsListCache;
     try { certsListCache = await certsClient.list(); return certsListCache; }
     catch (_) { return []; }
@@ -1403,7 +1476,8 @@ async function boot(): Promise<void> {
   // alerte : rien à signaler quand aucune échéance proche). Null en mode fichier (`certsClient` null → pas de badge).
   let certsExpiringCount = 0, certsExpiredCount = 0;
   const refreshCertsCount = async (): Promise<void> => {
-    if (!certsClient || !certsClient.docId) { certsExpiringCount = 0; certsExpiredCount = 0; shell.refreshCounts(); return; }
+    // Même garde que la pastille « Interventions » : pas de `certs:read` ⇒ onglet masqué ⇒ aucun comptage.
+    if (!certsClient || !certsClient.docId || !access.has("certs:read")) { certsExpiringCount = 0; certsExpiredCount = 0; shell.refreshCounts(); return; }
     try {
       const [expiring, expired] = await Promise.all([
         certsClient.listPage({ pageSize: 1, status: "expiring" }),
@@ -1572,7 +1646,10 @@ async function boot(): Promise<void> {
   refreshChrome();
   // restaure l'onglet BOOKMARKÉ depuis l'URL (#nom) si valide, sinon l'onglet par défaut.
   const bookmarkedView = (typeof location !== "undefined") ? decodeURIComponent(location.hash.replace(/^#/, "")) : "";
-  shell.switchView(shell.hasView(bookmarkedView) ? bookmarkedView : "equipements");
+  // L'INTENTION du hash est désormais connue : la restauration d'après-droits peut s'en servir (cf.
+  // `restoreViewIfIdle` — avant cette ligne, `bookmarkedView` est en zone morte temporelle).
+  viewRestorationReady = true;
+  shell.switchView(shell.hasView(bookmarkedView) ? bookmarkedView : DEFAULT_VIEW);
   booted = true;
 
   // VISUALISEUR AUTONOME : charge le document EMBARQUÉ et passe en LECTURE SEULE (ni réseau ni accueil).

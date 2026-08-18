@@ -328,6 +328,17 @@ export class Permissions {
     return set.hasAny(Permissions.DATA_DOMAINS.map((domain) => domain + ":read"));
   }
 
+  /** L'appelant peut-il lire la TOTALITÉ de la donnée documentaire ? Prédicat des opérations qui
+      portent le document ENTIER — au premier chef les EXPORTS (`.json` autonome, visualiseur HTML) :
+      sous droits partiels, l'assiette de chargement est INTERSECTÉE avec ce qui est lisible (cf.
+      `docs/auth.md` § 10.6), donc un export produirait un document silencieusement AMPUTÉ. Le refuser
+      serait un piège ; on ne le PROPOSE simplement pas.
+      C'est la borne HAUTE dont `hasAnyDocumentRead` est la borne basse — les deux vivent ici, dans le
+      modèle partagé, pour que le client n'ait aucune règle d'accès à réécrire. */
+  static hasFullDocumentRead(set: PermissionSet): boolean {
+    return Permissions.DATA_DOMAINS.every((domain) => set.has(domain + ":read"));
+  }
+
   /** Permissions exigées par un LOT d'écriture (`POST /transact`) — logique PURE, testable seule :
       liste d'opérations → liste de permissions, DÉDUPLIQUÉE et d'ordre stable. La garde HTTP ne
       fait que l'appeler et refuser à la première manquante, AVANT que rien ne soit appliqué.

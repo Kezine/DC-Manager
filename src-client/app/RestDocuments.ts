@@ -223,7 +223,7 @@ export class RestDocumentController {
       } else {
         await this.store.init();   // re-tirage COMPLET du document
       }
-      if (plan.refreshImages) await this.imageStore.reloadFromBackend();   // métadonnées d'images SEULEMENT si une image a changé
+      if (plan.refreshImages) await this.reloadImagesIfReadable();   // métadonnées d'images SEULEMENT si une image a changé (et si elles sont lisibles)
       this.session.markLoaded(this.store.histIndex());
       // saut de la reconstruction 3D quand AUCUNE collection dessinée n'a changé (ex. adresse IP, spare, réseau IP) :
       // c'est tout l'intérêt du plan — éviter le gel d'UI pour un changement sans impact géométrique. Cf. RenderImpact.
@@ -303,6 +303,17 @@ export class RestDocumentController {
     }
   }
 
+  /** Miroir d'IMAGES de façade — rechargé SEULEMENT si l'utilisateur a le droit de les lire.
+      `images` est une PSEUDO-collection rattachée au domaine `dc.site` (carte partagée) : `GET …/images`
+      est gardé par `dc.site:read`. Sans ce filtre, l'ouverture d'un document par un utilisateur qui n'a
+      pas ce domaine (un `vm-viewer`, par exemple) mourait ICI, APRÈS un chargement de collections
+      pourtant réussi — la même famille de panne que le symptôme S1, une ligne plus bas.
+      Mode fichier : ce contrôleur n'existe pas. Cf. docs/auth.md § 10.6. */
+  private async reloadImagesIfReadable(): Promise<void> {
+    if (!this.access.canReadCollection("images")) { this.flog("images non lisibles (dc.site:read) : miroir non rechargé"); return; }
+    await this.imageStore.reloadFromBackend();
+  }
+
   /** Ouvre un document serveur : scope l'adapter + le backend d'images, recharge données & images. */
   async openDocument(docId: string, name?: string): Promise<void> {
     this.adapter.setDocument(docId);
@@ -313,7 +324,7 @@ export class RestDocumentController {
     await this.store.init();                       // charge les collections du document
     this.reportHydration(Date.now() - hydrationStart);   // instrumentation du boot (cf. reportHydration)
     if (name) this.store.meta.docName = this.store.meta.docName || name;
-    await this.imageStore.reloadFromBackend();     // miroir d'images du document
+    await this.reloadImagesIfReadable();           // miroir d'images du document (si lisibles)
     this.host.resetUndo();
     const display = name || this.store.meta.docName || "Document";
     this.host.setDisplayName(display);
@@ -331,7 +342,7 @@ export class RestDocumentController {
     this.prefs.lastRestDocId = d.id;               // un doc fraîchement créé devient le « dernier ouvert »
     await this.store.newDocument();                // sème les catalogues + pousse le snapshot DANS le nouveau document
     this.store.meta.docName = d.name; await this.store.persistMeta();
-    await this.imageStore.reloadFromBackend();
+    await this.reloadImagesIfReadable();
     this.host.resetUndo();
     this.host.setDisplayName(d.name); this.session.setFile(true); this.session.markLoaded(this.store.histIndex());
     this.host.documentOpened();
@@ -356,7 +367,7 @@ export class RestDocumentController {
       else if (Array.isArray(raw.faceImages)) nImg = await this.imageStore.replaceAllFromLegacy(raw.faceImages);   // images inline (legacy ≤ v51)
       else await this.imageStore.clearAll();
       this.store.meta.docName = name; await this.store.persistMeta();
-      await this.imageStore.reloadFromBackend();
+      await this.reloadImagesIfReadable();
       this.host.resetUndo();
       this.host.setDisplayName(name); this.session.setFile(true); this.session.markLoaded(this.store.histIndex());
       this.host.documentOpened();
