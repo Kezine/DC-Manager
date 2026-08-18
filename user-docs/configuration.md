@@ -18,7 +18,7 @@ Où les poser, selon le mode de lancement :
 
 ---
 
-## 1. La table de référence (27 variables)
+## 1. La table de référence (28 variables)
 
 ### Service HTTP et stockage
 
@@ -29,6 +29,7 @@ Où les poser, selon le mode de lancement :
 | `CLIENT_DIR` | `../../dist` (soit `DcManager/dist`) | `/client-dist` | Dossier du client buildé à servir. |
 | `DOCS_DIR` | `../data/documents` | `/data/documents` | Dossier des bases SQLite : registre des documents, un `.db` par document, et les bases des modules. |
 | `LOG_LEVEL` | `info` | `info` | Verbosité : `error` \| `warn` \| `info` \| `debug` \| `trace`. Détail des niveaux : [`exploitation.md`](exploitation.md) § Logs. |
+| `PUBLIC_BASE_URL` | *(vide)* | *(vide)* | 🚨 **URL PUBLIQUE ABSOLUE** de l'application (la page du client, **chemin de reverse-proxy à sous-chemin compris**) — encodée dans les **étiquettes QR** des fiches. Même doctrine qu'`OIDC_REDIRECT_URL` : elle **ne se devine pas** derrière un reverse-proxy et **aucun en-tête de requête** n'entre dans sa construction (une URL dérivée de `Host` finirait **imprimée** sur des étiquettes). **Absente → la génération de QR répond 503** actionnable ; le serveur démarre normalement, tout le reste fonctionne. Ex. derrière un proxy à sous-chemin : `https://infra.exemple.org/dc-manager/`. |
 
 > Les deux colonnes de défaut ne se contredisent pas : le **code** applique un chemin relatif à
 > l'emplacement du serveur compilé, et l'**image Docker** pose explicitement des chemins absolus

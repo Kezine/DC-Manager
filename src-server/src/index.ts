@@ -30,6 +30,11 @@ const PORT = parseInt(process.env.PORT || "3000", 10);
 const DOCS_DIR = process.env.DOCS_DIR || path.join(__dirname, "..", "data", "documents");
 const CLIENT_DIR = process.env.CLIENT_DIR || path.join(__dirname, "..", "..", "dist");   // sortie webpack (dist/dc-manager.html)
 const API_BASE = process.env.API_BASE || "/api";
+// URL PUBLIQUE ABSOLUE de l'application (page du client, chemin de proxy à sous-dossier compris) — encodée
+// dans les étiquettes QR (route `/qr`). Même doctrine qu'OIDC_REDIRECT_URL : elle NE se devine PAS derrière un
+// reverse-proxy et AUCUN en-tête de requête n'entre dans sa construction (une base tirée de `Host` finirait
+// imprimée sur des étiquettes). Absente → la route `/qr` répond 503 actionnable, le serveur démarre normalement.
+const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || "").trim();
 // URL de connexion SSO injectée au client (bouton « Connexion » du welcome quand non authentifié). Vide = pas de
 // bouton. La macro ${clbkUrl} y est remplacée côté client par l'URL courante encodée (retour après connexion).
 const SSO_LOGIN_URL = process.env.SSO_LOGIN_URL || "";
@@ -199,7 +204,7 @@ tracker = trackerModule;
 // (cf. user-docs/reverse-proxy.md). SSO_LOGIN_URL, si elle est renseignée, reste PRIORITAIRE : un
 // exploitant qui veut passer par une page intermédiaire garde la main.
 const LOGIN_URL = SSO_LOGIN_URL || (auth.mode === "oidc" ? OidcRoutes.DEFAULT_CLIENT_LOGIN_URL : "");
-new Server({ docs, auth, live, resolver: userResolver, access, clientDir: CLIENT_DIR, apiBase: API_BASE, loginUrl: LOGIN_URL, log, extensions: [vm.extension(), wifi.extension(), notify.extension(), certs.extension(), interventions.extension(), trackerModule.extension()] }).listen(PORT);
+new Server({ docs, auth, live, resolver: userResolver, access, clientDir: CLIENT_DIR, apiBase: API_BASE, loginUrl: LOGIN_URL, publicBaseUrl: PUBLIC_BASE_URL, log, extensions: [vm.extension(), wifi.extension(), notify.extension(), certs.extension(), interventions.extension(), trackerModule.extension()] }).listen(PORT);
 vm.start();   // synchros périodiques (interval_sec > 0) — après l'écoute : le serveur répond pendant une 1re synchro lente
 wifi.start();   // synchros périodiques des clients wifi — même raison que vm.start()
 notify.start();   // timer de rappels (tick 60 s, unref) — après l'écoute, comme vm

@@ -5,7 +5,8 @@
 
    `common` = chaînes partagées entre sous-modules ; `add` = libellés des boutons
    « + … » d'en-tête de chaque onglet ; `vm`/`faces` = actions d'en-tête ;
-   `main` = toasts/dialogues du bootstrap. */
+   `deepLink` = échecs d'ouverture d'une fiche par lien d'étiquette QR
+   (`app/EntityLinkOpener`) ; `main` = toasts/dialogues du bootstrap. */
 export const app = {
   common: {
     reload: "Recharger",
@@ -187,6 +188,14 @@ export const app = {
     exportTitle: "Télécharger toute la bibliothèque d'images au format .nmfb (portable, ré-importable dans un autre document)",
     openCompanion: "Ouvrir un fichier de faces",
     openCompanionTitle: "Charger le compagnon d'images .nmfb apparié au document (mode dossier : liste le dossier ; mode fichier : sélecteur)",
+  },
+  // DEEP-LINK D'ENTITÉ (étiquettes QR) : les trois seuls cas où l'ouverture d'une fiche par lien
+  // ÉCHOUE en le disant — les refus d'AUTORISATION (403) et l'expiration de session, eux, sont déjà
+  // signalés par leurs propres mécanismes et ne sont PAS redits ici. Cf. app/EntityLinkOpener.
+  deepLink: {
+    notFound: "Lien d'étiquette : l'objet visé est introuvable (supprimé, ou absent de ce document).",
+    noDetail: "Lien d'étiquette : ce type d'objet n'a pas de fiche à ouvrir.",
+    docError: "Document visé par le lien inaccessible : {{error}}",
   },
   main: {
     tabConflict: "Ce fichier est aussi ouvert dans un autre onglet.",

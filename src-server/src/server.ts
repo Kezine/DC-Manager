@@ -10,7 +10,10 @@ import { Logger } from "./logger.js";
 import type { UserResolver } from "./users/UserResolver.js";   // annuaire utilisateurs (service CORE injecté dans Api)
 import type { AccessControl } from "./access/AccessControl.js";   // contrôle d'accès (service CORE injecté dans Api)
 
-export interface ServerOptions { docs: DocumentStore; auth: Auth; live: LiveBus; resolver: UserResolver; access: AccessControl; clientDir: string; apiBase: string; loginUrl?: string; log?: Logger; extensions?: ApiExtension[] }
+export interface ServerOptions { docs: DocumentStore; auth: Auth; live: LiveBus; resolver: UserResolver; access: AccessControl; clientDir: string; apiBase: string; loginUrl?: string; log?: Logger; extensions?: ApiExtension[];
+  /** URL PUBLIQUE ABSOLUE de l'application (`PUBLIC_BASE_URL`), passée telle quelle à l'Api pour ENCODER les
+      étiquettes QR — jamais dérivée des en-têtes de requête. Vide → la route `/qr` répond 503 actionnable. */
+  publicBaseUrl?: string }
 
 /** Application HTTP : API REST sous `apiBase` + service du client (HTML autonome) avec injection de config. */
 export class Server {
@@ -31,7 +34,7 @@ export class Server {
     this.app.use(express.json({ limit: "128mb" }));   // /snapshot et /transact peuvent être volumineux
     this.app.get("/healthz", (_req, res) => { res.json({ ok: true }); });
     this.mountOidcRoutes();
-    this.app.use(opts.apiBase, new Api(opts.docs, opts.auth, opts.live, opts.resolver, opts.access, opts.extensions || []).router());
+    this.app.use(opts.apiBase, new Api(opts.docs, opts.auth, opts.live, opts.resolver, opts.access, opts.extensions || [], opts.publicBaseUrl || "").router());
     this.app.use(opts.apiBase, (_req, res) => { res.status(404).json({ error: "endpoint inconnu" }); });   // 404 API
     this.app.get(["/", "/dc-manager.html", "/index.html"], this.serveClient);
     this.app.use(express.static(opts.clientDir, { index: false }));   // assets éventuels (build multi-fichiers en dev)

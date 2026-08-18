@@ -58,6 +58,9 @@ import { UndoTimeline } from "./UndoTimeline";
 import { AutoSave } from "./AutoSave";
 import { FileDocumentController } from "./FileDocuments";
 import { RestDocumentController } from "./RestDocuments";
+import { EntityLink } from "../../src-shared/EntityLink";   // format PARTAGÉ du deep-link d'entité (étiquettes QR) — lecture AGNOSTIQUE de l'hôte imprimé
+import { EntityLinkOpener } from "./EntityLinkOpener";      // exécution d'un deep-link : (docId, collection, id) → fiche ouverte (hash + futur greffon de scan)
+import type { EntityLinkTarget } from "../../src-shared/EntityLink";
 
 // Timeline d'undo UNIFIÉE (modèle + images) : UN SEUL geste défait dans l'ordre chronologique, quelle que soit
 // la pile d'origine. Logique EXTRAITE dans `UndoTimeline` (pure, testée) ; les piles sont enregistrées au boot.
@@ -381,7 +384,10 @@ async function boot(): Promise<void> {
     host: {
       refreshChrome: () => refreshChrome(),
       refreshActive: () => shell.refreshActive(),
-      documentOpened: () => { shell.hideWelcome(); shell.switchView(viewAfterOpen()); applyAutosave(); refreshChrome(); },
+      // `consumePendingDeepLink` EN DERNIER : la fiche d'un lien d'étiquette se pose PAR-DESSUS la vue
+      // restaurée, une fois le document chargé (cf. le bloc DEEP-LINK D'ENTITÉ plus bas). No-op si aucun
+      // lien n'est en attente — c'est le cas de tous les jours.
+      documentOpened: () => { shell.hideWelcome(); shell.switchView(viewAfterOpen()); applyAutosave(); refreshChrome(); consumePendingDeepLink(); },
       applyTheme: () => applyTheme(prefs.theme),
       applyAutosave: () => applyAutosave(),
       setReopen: (name: string | null) => shell.setReopen(name),
@@ -421,7 +427,10 @@ async function boot(): Promise<void> {
       // `resetVmProvidersProbe` EN PREMIER : la config des providers VM est PAR DOCUMENT, et les
       // rafraîchissements qui suivent réévaluent la visibilité du bouton « Purger… » — donc re-sondent
       // avec le document désormais ouvert. (Closure sur une const déclarée plus bas, cf. note ci-dessus.)
-      documentOpened: () => { resetVmProvidersProbe(); shell.hideWelcome(); shell.switchView(viewAfterOpen()); refreshChrome(); shell.refreshActive(); },
+      // `consumePendingDeepLink` EN DERNIER, même raison qu'en mode fichier (fiche par-dessus la vue
+      // restaurée) : ici le document VISÉ est déjà le bon dans le cas nominal, cf. le pré-positionnement
+      // de `prefs.lastRestDocId` avant le bootstrap.
+      documentOpened: () => { resetVmProvidersProbe(); shell.hideWelcome(); shell.switchView(viewAfterOpen()); refreshChrome(); shell.refreshActive(); consumePendingDeepLink(); },
       resetUndo: () => undoTimeline.reset(),
       setDisplayName: (name) => { files.name = name; },
       invalidate3D: () => dcView.invalidate3D(),
@@ -442,6 +451,66 @@ async function boot(): Promise<void> {
   // 401 (session SSO absente/EXPIRÉE) sur une requête → UNE action idempotente : retour au login. Installé APRÈS
   // la construction (référence `rest`), mode REST uniquement (le mode fichier n'a pas de session).
   if (rest) SessionExpiry.install(() => rest.sessionExpired());
+
+  /* ---- DEEP-LINK D'ENTITÉ (étiquettes QR — cf. `src-shared/EntityLink`, `core/EntityLinkRouting`) ----
+     Une étiquette imprimée encode l'URL ABSOLUE d'une fiche :
+     `<URL publique>#doc/<docId>/fiche/<collection>/<id>`. Scannée hors app, elle arrive donc ici comme
+     un simple fragment d'URL. Trois coutures, et l'ORDRE fait tout :
+
+     1. CAPTURER la cible MAINTENANT, avant que quoi que ce soit ne réécrive le hash. `Shell.switchView`
+        reflète l'onglet actif dans l'URL (`location.hash = "#equipements"`) et la fin du boot le fait
+        SYSTÉMATIQUEMENT : relire `location.hash` plus tard ne rendrait plus qu'un nom d'onglet.
+     2. N'OUVRIR la fiche qu'une fois un document PRÊT — sinon `Forms.detail` lirait un cache vide et
+        dirait « introuvable » d'un objet qui existe. Au boot, aucun document n'est encore là (mode
+        fichier : l'utilisateur n'a pas choisi son fichier ; mode API : `rest.bootstrap()` va le
+        charger). On s'accroche donc au MÊME instant que la restauration de vue — la fermeture
+        `documentOpened` des deux contrôleurs — et APRÈS elle : la fiche est une MODALE, elle se pose
+        PAR-DESSUS la vue que `core/ViewRestoration` vient d'activer, sans la perturber.
+     3. NE RIEN CASSER en cas d'échec : `EntityLinkOpener.open` ne lève jamais et notifie lui-même
+        (et se tait quand un autre mécanisme a déjà parlé : 403 → `core/AccessDenial`, 401 →
+        `SessionExpiry`). Un boot sous droits partiels reste donc exactement ce qu'il était.
+
+     CONSOMMATION UNIQUE (`pendingDeepLink` remis à null AVANT l'exécution) : une bascule de document
+     rappelle `documentOpened`, qui rappellerait ce consommateur — la remise à zéro préalable est ce
+     qui empêche la boucle. */
+  let pendingDeepLink: EntityLinkTarget | null = EntityLink.parse(typeof location !== "undefined" ? location.hash : "");
+  const entityLinkOpener = new EntityLinkOpener({
+    store, formHost,
+    // Injection NULLE en mode fichier/visualiseur : sans accès aux documents serveur, la décision pure
+    // ignore le `docId` de la cible (mono-document par nature) — aucun test de mode ailleurs.
+    documents: rest ? {
+      currentDocId: () => rest.docId,
+      // FILET de la bascule : `openDocument` scope l'adapter AVANT de charger. Si le chargement échoue
+      // (étiquette plus vieille que le parc : document supprimé, droit retiré, serveur injoignable),
+      // l'application resterait branchée sur un document MORT — toutes ses requêtes suivantes en 404.
+      // On rouvre donc celui d'où l'on vient avant de laisser l'échec remonter (l'opener le notifiera).
+      // Pas de récursion possible : le lien en attente a déjà été consommé quand ce rappel s'exécute.
+      openDocument: async (docId: string) => {
+        const previous = rest.docId;
+        try { await rest.openDocument(docId); }
+        catch (e) {
+          if (previous && previous !== rest.docId) await rest.openDocument(previous).catch(() => { /* le toast d'échec suffit */ });
+          throw e;
+        }
+      },
+    } : null,
+    notify: (message, kind) => Notify.toast(message, kind),
+    onChanged: () => shell.refreshActive(),   // même rappel que les autres ouvertures de fiche (closure sur `shell`, déclaré plus bas)
+  });
+  const consumePendingDeepLink = (): void => {
+    const target = pendingDeepLink;
+    pendingDeepLink = null;
+    if (target) void entityLinkOpener.open(target);
+  };
+  // HASH CHANGÉ pendant que l'app tourne (lien collé, retour arrière, URL d'étiquette ouverte dans
+  // l'onglet courant) : le deep-link est tenté EN PREMIER. Les deux routages ne peuvent PAS se disputer
+  // un même hash — un fragment d'entité contient des `/`, aucun nom de vue n'en contient — donc quand
+  // `parse` rend null on ne fait RIEN, et la navigation par onglet reste EXACTEMENT ce qu'elle était
+  // (`ShellNav.resolveHash`, écouteur propre au Shell, intouché).
+  window.addEventListener("hashchange", () => {
+    const target = EntityLink.parse(location.hash);
+    if (target) void entityLinkOpener.open(target);
+  });
 
   // Validation PARTAGÉE côté client (Store) : SEUL garde-fou en mode fichier, retour immédiat en mode API.
   store.onInvalid = (errors) => {
@@ -1664,6 +1733,10 @@ async function boot(): Promise<void> {
     modal.editLocked = true;                       // bloque toute modale d'ÉDITION (les fiches restent consultables)
     if (store.meta.docName) shell.setDocName(store.meta.docName);
     refreshChrome(); shell.refreshActive();
+    // Le visualiseur n'a pas de `documentOpened` (il charge l'EMBARQUÉ lui-même) : c'est ICI qu'un
+    // document devient prêt, donc ici que le lien d'étiquette se consomme. Mono-document comme le mode
+    // fichier, donc le `docId` de la cible est ignoré (les fiches restent consultables en lecture seule).
+    consumePendingDeepLink();
     (window as any).__DCMANAGER__ = { EntityRegistry, adapter, store, prefs, shell, graph, dcView, modal, tabChannel, files, imageStore };
     return;
   }
@@ -1671,6 +1744,15 @@ async function boot(): Promise<void> {
   // ré-interaction pour le raccrocher. En mode API, les données viennent du serveur au boot → pas d'accueil.
   if (REST_MODE) {
     shell.hideWelcome();
+    // DEEP-LINK + mode API : le document VISÉ par l'étiquette prime sur le « dernier doc ouvert ». On le
+    // pose AVANT le bootstrap plutôt que de laisser ouvrir l'ancien document puis basculer : une bascule
+    // paierait DEUX hydratations complètes du document (le boot est déjà le moment le plus lourd), et
+    // ferait clignoter une vue peuplée du mauvais document. Ce n'est pas un raccourci risqué :
+    // `bootstrap` VÉRIFIE que le document existe encore (sinon il retombe sur sa priorité historique —
+    // défaut global, puis plus récent) et `openDocument` réécrit cette préférence avec le document
+    // RÉELLEMENT ouvert. Le chemin `switch-doc` de l'opener reste, lui, indispensable EN VOL (hash changé
+    // ou code scanné alors qu'un document est déjà ouvert), et rattrape aussi le cas « document disparu ».
+    if (pendingDeepLink) prefs.lastRestDocId = pendingDeepLink.docId;
     await rest!.bootstrap();   // ouvre le dernier doc ouvert → défaut global → plus récent (ou en crée un) — cf. RestDocumentController.bootstrap
     void refreshInterventionsCount();   // badges d'onglets (données paginées serveur) — après ouverture du document
     void refreshCertsCount();

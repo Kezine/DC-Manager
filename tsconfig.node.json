@@ -15,6 +15,9 @@
     // PIÈCES JOINTES : stockage disque des binaires (chemins sûrs testés + purge d'orphelins sur dossier
     // temporaire réel) et composition PURE de l'en-tête Content-Disposition (assainissement du nom).
     "src-server/src/AttachmentFiles.ts", "src-server/src/ContentDisposition.ts",
+    // Validation PURE des paramètres de rendu d'une étiquette QR (format/size) — extraite de la route
+    // `/qr` (api.ts) pour être testée en isolation ; aucune dépendance à Express ni au paquet `qrcode`.
+    "src-server/src/QrCodeParams.ts",
     // Repository RELATIONNEL (lot L2 migration DB) — chemin de PRODUCTION depuis la bascule L4 : testé
     // avec better-sqlite3 RÉEL (le shim des tests blob ne parle pas ce SQL).
     "src-server/src/RelationalRepository.ts",

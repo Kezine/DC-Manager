@@ -58,6 +58,13 @@ module.exports = (env, argv) => {
            (data: URI) — l'app vit en LAN/hors-ligne (aucun CDN) ET l'export mono-fichier autonome
            (HtmlInlineScriptPlugin) doit contenir les fontes. asset/inline = zéro requête réseau. */
         { test: /\.woff2$/, type: "asset/inline" },
+        /* Binaire WASM du décodeur de codes-barres (zxing-wasm, cf. core/BarcodeDetection et
+           docs/qr-scan.md) : MÊME doctrine mono-HTML que les fontes — inliné en data: URI dans le
+           bundle, sinon le fichier séparé 404erait pour tout poste du mode fichier qui n'a QUE
+           dc-manager.html… c'est-à-dire précisément ceux qui ont besoin du polyfill (jamais de CDN,
+           principe n°15). L'inclusion est payée au BUILD ; la COMPILATION wasm reste paresseuse
+           (premier detect()). */
+        { test: /\.wasm$/, type: "asset/inline" },
       ],
     },
     plugins: [

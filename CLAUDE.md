@@ -406,6 +406,18 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   `AuthCacheUserResolver` = cache d'auth capturé par puits injecté `ProfileSink` + snapshot SQLite
   `users.db` réhydraté au boot ; `RequestAuthor.identity` ; endpoint batch `GET /users/resolve`,
   email/téléphone caviardés sauf pour l'appelant ; impl SSO future, procédure d'ajout).
+- [`qr-scan.md`](docs/qr-scan.md) — **étiquettes QR & scan caméra** (deep-link d'entité à SOURCE
+  UNIQUE `src-shared/EntityLink` — `<PUBLIC_BASE_URL>#doc/<docId>/fiche/<collection>/<id>`, lecture
+  AGNOSTIQUE de l'hôte imprimé : l'étiquette survit à un déménagement d'URL pour l'usage in-app ;
+  **côté client** : routage `core/EntityLinkRouting` (pur — mode fichier IGNORE le docId) +
+  `app/EntityLinkOpener` (pattern palette, boot/hashchange, pré-positionnement du document visé
+  avant `bootstrap`), moteur `core/BarcodeDetection` à DEUX sources — natif si utilisable /
+  **zxing-wasm FORÇABLE à la demande** (décode plus de styles de QR), binaire `.wasm` INLINE en
+  data: URI (~+1,44 Mio mesurés quand un consommateur l'importe, compilation PARESSEUSE au premier
+  detect), ROI recadrée (géométrie cover pure testée), permission diagnostiquée bloquée ⇄
+  re-demandable ; **côté serveur** : route gardée `GET …/qr/:collection/:id` (lib `qrcode`,
+  PNG/SVG bornés `QrCodeParams`), `PUBLIC_BASE_URL` JAMAIS dérivée des en-têtes, 503 actionnable ;
+  section « Mode local » — scan OK dans les deux modes, génération = serveur par décision).
 
 ## Points d'architecture à connaître
 

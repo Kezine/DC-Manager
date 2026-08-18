@@ -2,7 +2,10 @@ import express, { type Router, type RequestHandler, type Request, type Response 
 import multer from "multer";
 import fs from "node:fs";
 import { randomUUID } from "node:crypto";
+import QRCode from "qrcode";   // génération d'étiquettes QR (pure JS, sortie PNG/SVG côté Node — cf. la route `/qr`)
 import { Schema } from "./constants.js";
+import { QrCodeParams } from "./QrCodeParams.js";   // validation PURE des paramètres de rendu QR (format/size) — testée en isolation
+import { EntityLink } from "../../src-shared/EntityLink.js";   // format d'URL PARTAGÉ des deep-links de fiche (source unique — le QR l'ENCODE)
 import { AttachmentFiles } from "./AttachmentFiles.js";   // binaires des pièces jointes : chemins sûrs + I/O disque (instance UNIQUE portée par DocumentStore)
 import { ContentDisposition } from "./ContentDisposition.js";   // en-tête de téléchargement assaini (D6 — nom d'origine = donnée utilisateur)
 import { type RepositoryContract, type Rec, type ListOpts } from "./db.js";   // le CONTRAT (surface publique) — l'implémentation servie est relationnelle depuis la bascule L4
@@ -99,7 +102,12 @@ export class Api {
 
   constructor(private readonly docs: DocumentStore, private readonly auth: Auth, private readonly live: LiveBus,
               private readonly resolver: UserResolver, private readonly access: AccessControl,
-              private readonly extensions: ApiExtension[] = []) {}
+              private readonly extensions: ApiExtension[] = [],
+              /** URL PUBLIQUE ABSOLUE de l'application (page du client, chemin de proxy compris), pour ENCODER les
+                  étiquettes QR. Configurée par `PUBLIC_BASE_URL` et JAMAIS dérivée des en-têtes de requête :
+                  une URL déduite de `Host` finirait IMPRIMÉE sur des étiquettes (anti-spoofing — même doctrine
+                  qu'`OIDC_REDIRECT_URL`). Vide → la route `/qr` répond 503 actionnable, le serveur démarre normalement. */
+              private readonly publicBaseUrl: string = "") {}
 
   router(): Router {
     const r = express.Router();
@@ -173,6 +181,11 @@ export class Api {
     // ferait dépendre le routage de la valeur d'un id. Comme `/search` et `/maintenance`, la route est
     // montée AVANT le CRUD générique et `facets` n'est pas un nom de collection.
     data.get("/facets/:collection", this.access.requireCollection("read"), this.facets);
+    // ÉTIQUETTE QR d'une fiche : LECTURE PURE (GET → moitié lecture de resolveRepo, aucune révision, aucun SSE).
+    // Garde = permission de LECTURE de la collection (même carte partagée que le CRUD). Montée AVANT le CRUD
+    // générique comme /search, /facets et /maintenance ; `qr` n'est pas un nom de collection, et le chemin à
+    // 3 segments ne pourrait de toute façon pas être capté par `/:collection/:id`.
+    data.get("/qr/:collection/:id", this.access.requireCollection("read"), this.qr);
     // CRUD générique : le domaine se déduit de `:collection` en UN point (la carte partagée) —
     // c'est ce qui permet de garder 25 collections sans écrire 100 lignes de gardes.
     // ⚠ La CASCADE de suppression qui suit un DELETE n'est PAS re-vérifiée : la permission porte
@@ -658,6 +671,56 @@ export class Api {
       res.status(400).json({ error: "colonne de facette invalide : " + field }); return;
     }
     res.json({ field, ...this.repoOf(req).facetValues(collection, field) });
+  };
+
+  /* -- ÉTIQUETTES QR (chantier étiquettes QR / scan caméra) -- */
+  /** `GET …/qr/:collection/:id?format=png|svg&size=<px>` → image d'un QR encodant l'URL ABSOLUE de la fiche.
+      La charge utile est `EntityLink.build(publicBaseUrl, …)` — le format d'URL est la SOURCE UNIQUE partagée
+      (`src-shared/EntityLink`), jamais une URL forgée ici : hors app le navigateur ouvre la fiche, dans l'app
+      le greffon de scan en extrait le deep-link sans tenir compte de l'hôte imprimé.
+
+      Comportements d'erreur, dans l'ordre :
+        · 503 ACTIONNABLE si `PUBLIC_BASE_URL` n'est pas configurée (patron des modules à clé absente : le
+          serveur démarre, seule cette route se désactive) — on ne peut pas fabriquer d'URL absolue sans elle,
+          et on ne la DEVINE jamais depuis la requête (une base tirée de `Host` finirait imprimée).
+        · 404 si la collection est inconnue OU si l'enregistrement n'existe pas dans le document : on n'imprime
+          pas d'étiquette morte (vérification par le dépôt, en lecture seule).
+        · 400 si `format`/`size` sont invalides (validation PURE `QrCodeParams`, testée en isolation).
+
+      ⚠ SÉCURITÉ du SVG : il est généré PAR NOUS à partir de données MAÎTRISÉES (l'URL d'une fiche existante,
+      composée par `EntityLink` — pas de saisie utilisateur réinjectée), donc la doctrine anti-XSS-stocké des
+      binaires UPLOADÉS (cf. `putImage`/`createAttachment`) ne s'applique pas ici : aucun contenu tiers n'entre
+      dans le document servi. */
+  private qr: RequestHandler = async (req, res) => {
+    if (!this.publicBaseUrl) {
+      res.status(503).json({ error: "génération de QR indisponible : définir PUBLIC_BASE_URL (URL publique absolue de l'application)" });
+      return;
+    }
+    const collection = req.params.collection;
+    if (!Schema.isCollection(collection)) { res.status(404).json({ error: "collection inconnue" }); return; }
+    const params = QrCodeParams.parse(req.query as Record<string, unknown>);
+    if ("error" in params) { res.status(400).json({ error: params.error }); return; }
+    const docId = (req.params as { docId?: string }).docId || "";
+    const id = req.params.id;
+    // On n'imprime pas d'étiquette pour une fiche qui n'existe pas (lecture seule — resolveRepo a résolu le dépôt).
+    if (!this.repoOf(req).getOne(collection, id)) { res.status(404).json({ error: "introuvable" }); return; }
+    const url = EntityLink.build(this.publicBaseUrl, { docId, collection, id });
+    try {
+      if (params.format === "svg") {
+        const svg = await QRCode.toString(url, { type: "svg", width: params.size, errorCorrectionLevel: "M" });
+        res.setHeader("Content-Type", "image/svg+xml; charset=utf-8");
+        res.setHeader("Cache-Control", "private, max-age=60");   // parité images/pièces jointes ; `nosniff` est global (Server)
+        res.send(svg);
+      } else {
+        const buf = await QRCode.toBuffer(url, { type: "png", width: params.size, errorCorrectionLevel: "M" });
+        res.setHeader("Content-Type", "image/png");
+        res.setHeader("Cache-Control", "private, max-age=60");
+        res.end(buf);
+      }
+    } catch (e: any) {
+      // Échec de génération (données inattendues, mémoire…) : 500 explicite plutôt qu'une réponse tronquée.
+      res.status(500).json({ error: "génération du QR impossible : " + (e && e.message) });
+    }
   };
 
   /* -- CRUD générique par collection -- */

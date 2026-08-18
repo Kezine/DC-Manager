@@ -183,6 +183,12 @@ export const app = {
     openCompanion: "Open a faces file",
     openCompanionTitle: "Load the .nmfb image companion paired with the document (directory mode: lists the directory; file mode: picker)",
   },
+  // ENTITY DEEP-LINK (QR labels) — cf. ../fr/app.ts for the rationale.
+  deepLink: {
+    notFound: "Label link: the target object cannot be found (deleted, or absent from this document).",
+    noDetail: "Label link: this kind of object has no detail sheet to open.",
+    docError: "Document targeted by the link is unreachable: {{error}}",
+  },
   main: {
     tabConflict: "This file is also open in another tab.",
     newDocPromptTitle: "New document name",
