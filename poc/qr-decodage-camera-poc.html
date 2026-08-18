@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>POC — décodage QR par caméra (BarcodeDetector natif)</title>
+<style>
+  /* Thème sombre approximatif de l'app (pas le style exact — POC). */
+  :root {
+    --bg: #0a0a0a; --bg-2: #111; --bg-3: #161616;
+    --line: #222; --line-2: #2d2d2d;
+    --fg: #e8e8e8; --fg-dim: #888; --accent: #ff5500; --ok: #4ade80; --bad: #f87171;
+  }
+  body { background: var(--bg); color: var(--fg); font: 13px/1.5 system-ui, sans-serif; margin: 0; padding: 24px; }
+  h1 { font-size: 16px; letter-spacing: .1em; text-transform: uppercase; }
+  h2 { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); margin: 36px 0 4px; }
+  .hint { color: var(--fg-dim); font-size: 12px; margin: 0 0 10px; }
+  .panel { background: var(--bg-2); border: 1px solid var(--line-2); border-radius: 8px; padding: 16px; max-width: 720px; }
+  button { background: var(--bg-3); color: var(--fg); border: 1px solid var(--line-2); border-radius: 6px; padding: 6px 14px; font: inherit; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .4; cursor: default; }
+  select { background: var(--bg-3); color: var(--fg); border: 1px solid var(--line-2); border-radius: 6px; padding: 6px; font: inherit; max-width: 260px; }
+  label.chk { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  .chip { display: inline-block; background: var(--bg-3); border: 1px solid var(--line-2); border-radius: 99px; padding: 1px 10px; margin: 2px 3px 2px 0; font-size: 11px; }
+  .chip.on { border-color: var(--ok); color: var(--ok); }
+  .yes { color: var(--ok); font-weight: 700; }
+  .no  { color: var(--bad); font-weight: 700; }
+  /* La vidéo garde son ratio intrinsèque ; le canvas d'overlay se superpose exactement. */
+  .videoWrap { position: relative; background: #000; border-radius: 6px; overflow: hidden; max-width: 640px; }
+  .videoWrap video { display: block; width: 100%; height: auto; }
+  .videoWrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  #status { margin-top: 8px; }
+  #lastValue { font: 15px/1.4 ui-monospace, monospace; word-break: break-all; background: var(--bg-3); border: 1px solid var(--line-2); border-radius: 6px; padding: 10px 12px; min-height: 20px; }
+  #lastValue a { color: var(--accent); }
+  #lastMeta { color: var(--fg-dim); font-size: 11px; margin: 4px 0 10px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--fg-dim); font-weight: 400; text-transform: uppercase; font-size: 10px; letter-spacing: .06em; }
+  td.val { font-family: ui-monospace, monospace; word-break: break-all; }
+  td.n { color: var(--fg-dim); white-space: nowrap; }
+</style>
+</head>
+<body>
+<h1>POC — décodage QR par caméra</h1>
+<p class="hint">API <code>BarcodeDetector</code> — NATIVE d'abord (aucune dépendance), avec en option le
+polyfill <code>barcode-detector</code> (zxing-wasm) chargé du CDN pour équiper les postes sans natif
+(bouton du panneau 1 — POC seulement, jamais de CDN en prod). Objectif : mesurer où le natif suffit
+(attendu : Android/macOS OUI ; Chrome Windows/Linux, Firefox, Safari NON). La caméra exige un contexte
+sécurisé : HTTPS ou localhost — <code>file://</code> passe sur Chrome DESKTOP mais est REFUSÉ sur Android
+(mesuré le 2026-08-18).</p>
+
+<h2>1 · Support de la plateforme</h2>
+<div class="panel">
+  <div id="support">Détection…</div>
+  <div class="row" style="margin: 12px 0 0;">
+    <button id="btnPolyfill">Charger le polyfill (CDN)</button>
+    <span class="hint" style="margin: 0;">test SANS build : <code>barcode-detector</code> importé en ESM depuis
+    jsDelivr (Internet requis — interdit en prod, POC seulement). Remplace le moteur même si le natif
+    existe, pour comparer.</span>
+  </div>
+</div>
+
+<h2>2 · Caméra &amp; scan</h2>
+<div class="panel">
+  <div class="row">
+    <select id="camSel" title="Caméra"><option value="">Caméra par défaut (arrière si dispo)</option></select>
+    <button id="btnStart">Démarrer</button>
+    <button id="btnStop" disabled>Arrêter</button>
+    <label class="chk"><input type="checkbox" id="qrOnly" checked> QR uniquement</label>
+  </div>
+  <div class="videoWrap">
+    <!-- muted + playsinline : indispensables pour l'autoplay sur mobile. -->
+    <video id="video" playsinline muted></video>
+    <canvas id="overlay"></canvas>
+  </div>
+  <p class="hint" id="status">Caméra arrêtée.</p>
+</div>
+
+<h2>3 · Résultats</h2>
+<div class="panel">
+  <div id="lastValue"><span class="hint">Rien de décodé pour l'instant.</span></div>
+  <div id="lastMeta"></div>
+  <div class="row">
+    <button id="btnCopy" disabled>Copier la dernière valeur</button>
+    <button id="btnClear" disabled>Vider l'historique</button>
+  </div>
+  <table id="histTable" hidden>
+    <thead><tr><th>Heure</th><th>Format</th><th>Valeur</th><th>Vues</th></tr></thead>
+    <tbody id="histBody"></tbody>
+  </table>
+</div>
+
+<script>
+"use strict";
+
+/* ============================================================================
+ * 1 · SUPPORT — la première chose que le POC mesure.
+ * L'API délègue au décodeur de l'OS : sa présence ET la liste réelle des
+ * formats dépendent de la machine, d'où getSupportedFormats() à l'exécution.
+ * ========================================================================== */
+const supportBox = document.getElementById("support");
+let hasApi = "BarcodeDetector" in window;
+let apiSource = hasApi ? "native" : null;   // 'native' | 'polyfill' | null — affiché dans le panneau support
+let supportedFormats = [];
+let camPermState = null;   // 'granted' | 'prompt' | 'denied' | null = Permissions API indisponible
+
+/** La DEMANDE de permission n'est pas une étape séparée : c'est l'appel
+ *  getUserMedia() (bouton « Démarrer ») qui déclenche l'invite du navigateur.
+ *  La Permissions API ne sert qu'à LIRE l'état courant — et à diagnostiquer le
+ *  cas piégeux « BLOQUÉE » : là, getUserMedia échoue immédiatement et l'invite
+ *  ne reviendra JAMAIS sans déblocage manuel dans le navigateur. */
+async function watchPermission() {
+  try {
+    const st = await navigator.permissions.query({ name: "camera" });
+    camPermState = st.state;
+    st.onchange = () => { camPermState = st.state; renderSupport(); };   // suit accord/blocage en direct
+  } catch { camPermState = null; }   // Permissions API absente ou nom 'camera' inconnu (Firefox)
+  renderSupport();
+}
+
+function permissionRow() {
+  if (camPermState === "granted") return `Permission caméra : <span class="yes">ACCORDÉE</span>`;
+  if (camPermState === "denied")  return `Permission caméra : <span class="no">BLOQUÉE</span> — l'invite ne
+    s'affichera plus : la débloquer via l'icône caméra / les réglages du site dans la barre d'adresse`;
+  if (camPermState === "prompt")  return `Permission caméra : <span class="hint">à demander — l'invite du
+    navigateur s'affichera au premier « Démarrer »</span>`;
+  return `Permission caméra : <span class="hint">état illisible (Permissions API indisponible) — l'invite
+    s'affichera au premier « Démarrer »</span>`;
+}
+
+async function renderSupport() {
+  const rows = [];
+  rows.push(`Contexte sécurisé : <span class="${isSecureContext ? "yes" : "no"}">${isSecureContext ? "OUI" : "NON"}</span>`
+    + (isSecureContext ? "" : " — <b>la caméra sera refusée</b> (servir en HTTPS/localhost, ou ouvrir en file://)"));
+  rows.push(permissionRow());
+  rows.push(`API <code>BarcodeDetector</code> : <span class="${hasApi ? "yes" : "no"}">${
+    apiSource === "polyfill" ? "PRÉSENTE (polyfill zxing-wasm)" : apiSource === "native" ? "PRÉSENTE (native)" : "ABSENTE"}</span>`);
+  if (hasApi) {
+    try {
+      supportedFormats = await BarcodeDetector.getSupportedFormats();
+    } catch (err) {
+      rows.push(`<span class="no">getSupportedFormats() a échoué : ${err.message}</span>`);
+    }
+    if (supportedFormats.length) {
+      const qr = supportedFormats.includes("qr_code");
+      rows.push(`Décodage QR : <span class="${qr ? "yes" : "no"}">${qr ? "OUI" : "NON"}</span>`);
+      rows.push("Formats déclarés : " + supportedFormats.map(f =>
+        `<span class="chip${f === "qr_code" ? " on" : ""}">${f}</span>`).join(""));
+    } else {
+      // API présente mais 0 format : cas réel (Chromium sans décodeur OS) — équivaut à ABSENTE.
+      rows.push(`<span class="no">API présente mais AUCUN format déclaré — inutilisable sur ce poste.</span>`);
+    }
+  } else {
+    rows.push(`<span class="hint">Attendu sur Chrome Windows/Linux, Firefox et Safari : l'API n'y est pas
+      implémentée. Tester sur Android (Chrome/Edge) ou macOS (Chrome/Edge) — ou cliquer
+      « Charger le polyfill (CDN) » ci-dessous pour équiper CE poste et poursuivre le test.</span>`);
+  }
+  supportBox.innerHTML = rows.map(r => `<div>${r}</div>`).join("");
+}
+
+/* ============================================================================
+ * 2 · CAMÉRA + BOUCLE DE SCAN
+ * ========================================================================== */
+const video    = document.getElementById("video");
+const overlay  = document.getElementById("overlay");
+const ctx      = overlay.getContext("2d");
+const camSel   = document.getElementById("camSel");
+const btnStart = document.getElementById("btnStart");
+const btnStop  = document.getElementById("btnStop");
+const qrOnly   = document.getElementById("qrOnly");
+const statusEl = document.getElementById("status");
+
+let stream = null;      // MediaStream actif (null = arrêté)
+let scanToken = 0;      // jeton d'annulation : incrémenté à chaque stop, la boucle en cours se voit périmée
+let detector = null;
+
+function setStatus(msg) { statusEl.textContent = msg; }
+
+/** Le détecteur est recréé quand la case « QR uniquement » change : le choix des
+ *  formats est un paramètre du CONSTRUCTEUR, pas de detect(). On intersecte
+ *  toujours avec les formats déclarés — demander un format absent est au mieux
+ *  ignoré, au pire refusé selon les implémentations. */
+function buildDetector() {
+  const wanted = qrOnly.checked ? ["qr_code"] : supportedFormats;
+  const formats = wanted.filter(f => supportedFormats.includes(f));
+  detector = formats.length ? new BarcodeDetector({ formats }) : null;
+}
+
+/** Liste des caméras. Avant le premier accord de permission, les labels sont
+ *  vides (protection vie privée) — on re-remplit donc APRÈS chaque démarrage. */
+async function fillCameraList() {
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cams = devices.filter(d => d.kind === "videoinput");
+    const current = camSel.value;
+    while (camSel.options.length > 1) camSel.remove(1);
+    cams.forEach((cam, i) => {
+      const opt = document.createElement("option");
+      opt.value = cam.deviceId;
+      opt.textContent = cam.label || `Caméra ${i + 1}`;
+      camSel.add(opt);
+    });
+    camSel.value = current && [...camSel.options].some(o => o.value === current) ? current : "";
+  } catch { /* enumerateDevices indisponible : le choix « défaut » suffit */ }
+}
+
+async function start() {
+  if (!hasApi || !supportedFormats.length) { setStatus("Pas de décodeur natif sur ce poste — rien à scanner."); return; }
+  btnStart.disabled = true;
+  try {
+    // Sans choix explicite : caméra ARRIÈRE de préférence (cas d'usage étiquette).
+    const constraints = camSel.value
+      ? { video: { deviceId: { exact: camSel.value }, width: { ideal: 1280 }, height: { ideal: 720 } } }
+      : { video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } } };
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
+    video.srcObject = stream;
+    await video.play();
+    buildDetector();
+    await fillCameraList();          // maintenant que la permission est accordée, les labels sont lisibles
+    btnStop.disabled = false;
+    setStatus(`Scan en cours (${video.videoWidth}×${video.videoHeight})…`);
+    scanLoop(++scanToken);
+  } catch (err) {
+    stop();   // AVANT les messages : stop() pose son propre statut, il ne doit pas écraser le diagnostic
+    if (err.name === "NotAllowedError") {
+      // Deux réalités derrière la MÊME erreur : invite refusée/fermée (re-demandable au
+      // prochain clic) ou permission BLOQUÉE pour l'origine (l'invite ne reviendra pas).
+      // On re-lit l'état plutôt que se fier au cache : le onchange peut arriver après nous.
+      try { camPermState = (await navigator.permissions.query({ name: "camera" })).state; } catch {}
+      renderSupport();
+      setStatus(camPermState === "denied"
+        ? "Permission caméra BLOQUÉE pour cette origine — la débloquer via l'icône caméra de la barre d'adresse, puis relancer."
+        : "Demande de permission refusée ou fermée — relancer « Démarrer » pour re-demander.");
+    } else if (err.name === "NotFoundError") {
+      setStatus("Aucune caméra détectée sur ce poste.");
+    } else {
+      setStatus(`Échec caméra : ${err.name} — ${err.message}`);
+    }
+  }
+}
+
+function stop() {
+  scanToken++;                       // périme la boucle en cours
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  video.srcObject = null;
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+  btnStart.disabled = false;
+  btnStop.disabled = true;
+  setStatus("Caméra arrêtée.");
+}
+
+/** Boucle de détection auto-replanifiée. Pas de requestAnimationFrame : detect()
+ *  est asynchrone et coûteux, ~8 passes/s suffisent largement pour une visée
+ *  manuelle — inutile de saturer le thread à 60 Hz. */
+async function scanLoop(token) {
+  if (token !== scanToken) return;
+  if (video.readyState >= 2 && detector) {   // HAVE_CURRENT_DATA : une frame est disponible
+    try {
+      const codes = await detector.detect(video);
+      if (token !== scanToken) return;       // stop() pendant l'await
+      drawOverlay(codes);
+      for (const code of codes) onDecoded(code);
+    } catch (err) {
+      // Un échec de detect() est ponctuel (frame illisible…) : on continue, mais on le montre.
+      setStatus(`detect() a échoué : ${err.name} — ${err.message}`);
+    }
+  }
+  setTimeout(() => scanLoop(token), 120);
+}
+
+/** Le canvas est calé sur la résolution INTRINSÈQUE de la vidéo : les
+ *  coordonnées de detect() sont dans ce repère, le CSS met à l'échelle les
+ *  deux éléments ensemble — aucun calcul de conversion nécessaire. */
+function drawOverlay(codes) {
+  if (overlay.width !== video.videoWidth || overlay.height !== video.videoHeight) {
+    overlay.width = video.videoWidth;
+    overlay.height = video.videoHeight;
+  }
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+  const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#ff5500";
+  for (const code of codes) {
+    const pts = code.cornerPoints;
+    if (pts && pts.length) {
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.closePath();
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = accent;
+      ctx.stroke();
+    } else if (code.boundingBox) {
+      const b = code.boundingBox;
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = accent;
+      ctx.strokeRect(b.x, b.y, b.width, b.height);
+    }
+  }
+}
+
+/* ============================================================================
+ * 3 · RÉSULTATS — dernière valeur + historique dédupliqué par rawValue.
+ * ========================================================================== */
+const lastValue = document.getElementById("lastValue");
+const lastMeta  = document.getElementById("lastMeta");
+const btnCopy   = document.getElementById("btnCopy");
+const btnClear  = document.getElementById("btnClear");
+const histTable = document.getElementById("histTable");
+const histBody  = document.getElementById("histBody");
+
+const seen = new Map();   // rawValue → { row, count }
+let lastRaw = null;
+
+function onDecoded(code) {
+  const raw = code.rawValue;
+  const now = new Date().toLocaleTimeString();
+
+  if (raw !== lastRaw) {
+    lastRaw = raw;
+    // Une URL décodée devient un lien cliquable (cas nominal : étiquette → fiche) —
+    // en clic EXPLICITE seulement, jamais de navigation automatique.
+    if (/^https?:\/\//i.test(raw)) {
+      const a = document.createElement("a");
+      a.href = raw; a.target = "_blank"; a.rel = "noopener noreferrer"; a.textContent = raw;
+      lastValue.replaceChildren(a);
+    } else {
+      lastValue.textContent = raw;
+    }
+    lastMeta.textContent = `format : ${code.format} · décodé à ${now}`;
+    btnCopy.disabled = false;
+    if (navigator.vibrate) navigator.vibrate(60);   // retour haptique sur mobile
+  }
+
+  const entry = seen.get(raw);
+  if (entry) {
+    entry.count++;
+    entry.row.cells[3].textContent = String(entry.count);
+  } else {
+    const row = histBody.insertRow(0);
+    row.insertCell().textContent = now;
+    row.insertCell().textContent = code.format;
+    const tdVal = row.insertCell(); tdVal.className = "val"; tdVal.textContent = raw;
+    row.insertCell().textContent = "1";
+    row.cells[0].className = row.cells[3].className = "n";
+    seen.set(raw, { row, count: 1 });
+    histTable.hidden = false;
+    btnClear.disabled = false;
+  }
+}
+
+btnCopy.addEventListener("click", async () => {
+  if (lastRaw === null) return;
+  try { await navigator.clipboard.writeText(lastRaw); setStatus("Valeur copiée."); }
+  catch { setStatus("Copie refusée par le navigateur."); }
+});
+btnClear.addEventListener("click", () => {
+  seen.clear(); histBody.replaceChildren(); histTable.hidden = true;
+  btnClear.disabled = true;
+});
+
+/* ============================================================================
+ * Câblage
+ * ========================================================================== */
+/** Polyfill à la demande — POC UNIQUEMENT : import ESM direct depuis jsDelivr.
+ *  Fonctionne depuis file:// (les CDN servent Access-Control-Allow-Origin: *) et
+ *  dans ce script CLASSIQUE grâce à import() dynamique. En production ce serait
+ *  un paquet npm bundlé + .wasm servi localement (prepareZXingModule) — jamais
+ *  de CDN à l'exécution. On ÉCRASE volontairement un éventuel natif : le bouton
+ *  sert aussi à comparer les deux moteurs sur un poste qui a les deux. */
+const POLYFILL_URL = "https://cdn.jsdelivr.net/npm/barcode-detector@3/+esm";
+const btnPolyfill = document.getElementById("btnPolyfill");
+btnPolyfill.addEventListener("click", async () => {
+  btnPolyfill.disabled = true;
+  btnPolyfill.textContent = "Chargement…";
+  try {
+    const mod = await import(POLYFILL_URL);
+    window.BarcodeDetector = mod.BarcodeDetector;
+    hasApi = true;
+    apiSource = "polyfill";
+    supportedFormats = [];
+    await renderSupport();               // re-liste les formats — ceux de zxing-wasm cette fois
+    if (stream) buildDetector();         // scan en cours : bascule de moteur à chaud
+    btnPolyfill.textContent = "Polyfill actif (zxing-wasm)";
+    setStatus("Polyfill chargé — le binaire .wasm (~0,9 Mo) sera tiré du CDN au premier scan.");
+  } catch (err) {
+    btnPolyfill.disabled = false;
+    btnPolyfill.textContent = "Charger le polyfill (CDN)";
+    setStatus(`Échec du chargement CDN : ${err.message} (connexion Internet ?)`);
+  }
+});
+
+btnStart.addEventListener("click", start);
+btnStop.addEventListener("click", stop);
+qrOnly.addEventListener("change", () => { if (stream) buildDetector(); });
+// Changer de caméra en cours de scan : redémarrage propre sur le nouveau flux.
+camSel.addEventListener("change", () => { if (stream) { stop(); start(); } });
+
+renderSupport();     // rendu immédiat (sans l'état de permission)…
+watchPermission();   // …ré-affiné dès que la Permissions API a répondu, puis suivi en direct
+fillCameraList();
+</script>
+</body>
+</html>
