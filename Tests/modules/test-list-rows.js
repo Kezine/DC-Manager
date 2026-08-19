@@ -278,6 +278,45 @@ module.exports = async () => {
       ck.eq(engine.rows(req("sw")).map((r) => r.id).join(","), "local-1", "… et l'ancien jeu serveur a bien été JETÉ (il n'est pas ressorti du chapeau)");
       engine.reset();
     }
+
+    // -- 9. ÉCRITURE sous filtre ACTIF : la ligne CRÉÉE qui matche doit apparaître au re-rendu (lot R2). --
+    //    🐛 PANNE D'ORIGINE (mode API) : le jeu serveur `remoteRows` est mémoïsé PAR SIGNATURE de requête
+    //    (collection + saisie + cible), et une écriture ne change PAS cette signature. Après « dupliquer »
+    //    un équipement sous un filtre « Bidon », `rows()` ressortait le jeu serveur d'AVANT la copie —
+    //    « Bidon (Copie) » restait invisible tant qu'on ne vidait/re-saisissait pas le filtre (autre
+    //    signature). Le filet `Store.onChange` du ListView invalidait bien l'index de recherche et la page
+    //    serveur (`forgetPage`), mais RIEN ne jetait `remoteRows` : d'où `forgetRemote()`, jumeau de
+    //    `forgetPage()`, appelé au même point. (Le mode FICHIER, lui, n'a jamais eu le bug : son chemin
+    //    `local()` recalcule à chaque rendu — cf. section « StoreListRowSource ».)
+    {
+      const server = [{ id: "bidon", name: "Bidon" }];   // ce que le serveur renvoie pour « bidon »
+      const local = [{ id: "bidon", name: "Bidon" }];    // le cache local — muté par la « duplication »
+      const source = fakeSource(local, () => Promise.resolve(server.slice()));
+      const engine = new ListRowEngine(source, () => {}, 0);
+      const reqBidon = { collection: "equipments", query: "bidon", target: null };
+      engine.rows(reqBidon); await tick(5);
+      ck.eq(engine.rows(reqBidon).map((r) => r.id).join(","), "bidon", "jeu serveur en main pour le filtre « bidon »");
+
+      // « Dupliquer » : la copie entre au cache LOCAL (Store.create) ET au serveur (persistée) — elle matche le filtre.
+      local.push({ id: "bidon-copie", name: "Bidon (Copie)" });
+      server.push({ id: "bidon-copie", name: "Bidon (Copie)" });
+
+      // Re-rendu SANS invalidation : signature inchangée → le jeu serveur mémoïsé RESSORT, la copie est INVISIBLE
+      // (c'est très exactement le symptôme mesuré par l'utilisateur — le bug à corriger).
+      ck.eq(engine.rows(reqBidon).map((r) => r.id).join(","), "bidon",
+        "🐛 sans invalidation : la copie N'APPARAÎT PAS (jeu serveur mémoïsé, signature inchangée)");
+
+      // CORRECTIF : le filet `Store.onChange` appelle `forgetRemote()` → la copie apparaît IMMÉDIATEMENT
+      // depuis le LOCAL (pendant le vol), et une nouvelle requête serveur est reprogrammée.
+      engine.forgetRemote();
+      ck.eq(engine.rows(reqBidon).map((r) => r.id).sort().join(","), "bidon,bidon-copie",
+        "✅ après forgetRemote() : la copie apparaît (lignes LOCALES pendant le vol, même filtre actif)");
+      await tick(5);
+      ck.eq(engine.rows(reqBidon).map((r) => r.id).sort().join(","), "bidon,bidon-copie",
+        "✅ … puis le serveur RÉ-INTERROGÉ renvoie bien les deux lignes");
+      ck.eq(source.calls.remote, 2, "forgetRemote() a REPROGRAMMÉ une requête serveur (le jeu périmé n'a pas été gardé)");
+      engine.reset();
+    }
   }
   });
 

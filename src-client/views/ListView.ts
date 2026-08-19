@@ -216,9 +216,13 @@ export class ListView {
     ) : null;
     // Filet d'invalidation : une écriture qui ne repasse pas par ce listing (SSE, autre onglet) rendrait
     // l'index périmé — et un index périmé, c'est une recherche qui ment (cf. RecordSearchIndex).
-    // Même filet pour la PAGE serveur en main (G4) : une création ou une suppression déplace les lignes
-    // ET change le total — garder la page reçue, ce serait afficher un état que le serveur n'a plus.
-    store.onChange(() => { this.searchIndex.invalidate(); this.rowEngine?.forgetPage(); });
+    // Même filet pour le JEU serveur en main (mode API, régime `rows()`) : le moteur mémoïse la réponse
+    // serveur PAR SIGNATURE de requête (collection + saisie + cible), qu'une écriture ne change PAS —
+    // sans `forgetRemote()`, un enregistrement CRÉÉ qui matche le filtre actif (« dupliquer » sous une
+    // recherche en cours) resterait invisible jusqu'à ce qu'on vide et re-saisisse le filtre (lot R2).
+    // Même filet enfin pour la PAGE serveur en main (G4) : une création ou une suppression déplace les
+    // lignes ET change le total — garder la page reçue, ce serait afficher un état que le serveur n'a plus.
+    store.onChange(() => { this.searchIndex.invalidate(); this.rowEngine?.forgetRemote(); this.rowEngine?.forgetPage(); });
     this.emptyText = opts.emptyText || I18n.t("lists.chrome.empty");
     this.actions = opts.actions || { view: true, edit: true, clone: true, del: true };
     this.onAction = opts.onAction;

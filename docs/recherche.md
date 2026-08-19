@@ -163,6 +163,13 @@ pas `store.all()` : leurs lignes viennent d'un **moteur à source injectée**.
   filtrées avec la même assiette, qui s'affichent.
 - **Anti-boucle** : un échec serveur est mémorisé POUR SA REQUÊTE. Sans ça, le rendu de repli
   reprogrammerait aussitôt la même requête, indéfiniment. Une requête *différente* reste tentée.
+- **Une ÉCRITURE périme le jeu serveur en main.** Le jeu de lignes serveur est mémoïsé par SIGNATURE de
+  requête (collection + saisie + cible), et une écriture (création, « dupliquer », édition, suppression)
+  ne change PAS cette signature. Le moteur l'oublie donc sur `Store.onChange` (`ListRowEngine.forgetRemote`,
+  jumeau de `forgetPage` du régime pagé) : le prochain rendu ré-interroge le serveur et affiche entre-temps
+  les lignes LOCALES (index fraîchement invalidé), qui contiennent déjà la ligne écrite. Sans cet oubli,
+  un enregistrement créé qui matche le filtre actif resterait invisible jusqu'à ce que la saisie change.
+  En mode FICHIER, rien à oublier : le chemin `local()` recalcule à chaque rendu.
 
 ### Limites v1 (assumées)
 

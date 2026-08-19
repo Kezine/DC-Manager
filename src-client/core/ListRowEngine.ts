@@ -190,6 +190,24 @@ export class ListRowEngine {
     return this.source.local(request);   // affichage pendant l'anti-rebond / le vol, et REPLI en cas d'échec
   }
 
+  /** OUBLIE le jeu de lignes SERVEUR en main (régime `rows()`) et annule un tirage éventuellement en vol :
+      le prochain `rows()` sur une requête ACTIVE redemandera au serveur, en affichant entre-temps les
+      lignes LOCALES (index de recherche fraîchement invalidé par le même filet). JUMEAU de `forgetPage()`
+      pour le régime NON paginé.
+
+      🐛 POURQUOI (lot R2) : le jeu serveur est mémoïsé PAR SIGNATURE de requête (collection + saisie +
+      cible, cf. `signature`), et une ÉCRITURE ne change pas cette signature. Sans cet oubli, un
+      enregistrement CRÉÉ qui matche le filtre actif — « dupliquer » un équipement sous une recherche en
+      cours — restait invisible : `rows()` ressortait le jeu serveur d'AVANT la copie, et il fallait vider
+      puis re-saisir le filtre (nouvelle signature) pour la voir. La vue l'appelle donc sur `Store.onChange`,
+      au même point que `searchIndex.invalidate()` et `forgetPage()`. No-op en mode fichier (jamais de jeu
+      serveur en main) : le prochain `rows()` y reste local, le cache ayant déjà la ligne créée. */
+  forgetRemote(): void {
+    this.cancel();   // coupe un anti-rebond ou une requête en vol : la prochaine sera reprogrammée
+    this.remoteRows = null; this.remoteFor = ""; this.noRemoteFor = "";
+    this.servedRemote = false;
+  }
+
   /** PAGE SERVEUR à afficher MAINTENANT (garde G4), ou `null` si ce listing n'est PAS paginé par le
       serveur pour cette requête — l'appelant retombe alors sur `rows()`, comportement historique intact.
 
