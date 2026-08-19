@@ -100,6 +100,36 @@ module.exports = async () => {
     ck(AccessState.fromGrants(["*"]) !== AccessState.ALL, "fromGrants rend une NOUVELLE instance (jamais le singleton)");
     ck(AccessState.fromGrants(["*"]).canDeleteCollection("racks"), "fromGrants([\"*\"]) équivaut fonctionnellement à ALL");
     ck.eq(AccessState.fromGrants(["b:read", "a:read", "b:read"]).grants().join(","), "a:read,b:read", "grants() : dédoublonnés et triés (ordre stable)");
+
+    // -- documentAccessSummary : résumé SOBRE des droits pour la modale d'infos utilisateur (décision PURE).
+    // « accès complet » = TOUTE la donnée lisible ; sinon la liste des DOMAINES lisibles, ordre de la carte.
+    const sAll = all.documentAccessSummary();
+    ck(sAll.full && sAll.domains.length === 0, "summary(ALL) : accès complet (aucun domaine listé)");
+    const sNone = none.documentAccessSummary();
+    ck(!sNone.full && sNone.domains.length === 0, "summary(NONE) : ni complet ni aucun domaine (écran « aucun accès »)");
+    const sStar = AccessState.fromGrants(["*"]).documentAccessSummary();
+    ck(sStar.full, "summary(*) : accès complet (équivaut à ALL)");
+    const sViewer = viewer.documentAccessSummary();   // dc.*:read → tous les domaines DC, mais PAS vm/wifi
+    ck(!sViewer.full, "summary(dc.*:read) : PAS complet (vm/wifi manquent)");
+    ck(sViewer.domains.includes("dc.equipment") && sViewer.domains.includes("dc.ip"), "summary(dc.*:read) : liste les domaines DC lisibles");
+    ck(!sViewer.domains.includes("vm") && !sViewer.domains.includes("wifi"), "summary(dc.*:read) : n'inclut ni vm ni wifi");
+    // ordre = celui de la carte partagée (DATA_DOMAINS), et UNIQUEMENT des domaines lisibles.
+    const expectedViewerDomains = Permissions.DATA_DOMAINS.filter((d) => viewer.has(d + ":read"));
+    ck.eq(sViewer.domains.join(","), expectedViewerDomains.join(","), "summary : domaines dans l'ordre de la carte, filtrés sur la lecture");
+    const sOne = AccessState.fromGrants(["vm:read"]).documentAccessSummary();
+    ck.eq(sOne.domains.join(","), "vm", "summary(vm:read) : un seul domaine (module) listé");
+  });
+
+  await section("client : UserIdentity — nom affichable coalescé (règle UNIQUE, pastille ≡ modale d'infos)", async () => {
+    const { UserIdentity } = D("core/UserIdentity.js");
+    ck.eq(UserIdentity.displayName(null, "??"), "??", "null → repli (aucune session)");
+    ck.eq(UserIdentity.displayName({}, "??"), "??", "objet vide → repli");
+    ck.eq(UserIdentity.displayName({ name: "Ada Lovelace", login: "ada" }, "??"), "Ada Lovelace", "name explicite prioritaire");
+    ck.eq(UserIdentity.displayName({ prenom: "Ada", nom: "Lovelace" }, "??"), "Ada Lovelace", "prénom + nom composés");
+    ck.eq(UserIdentity.displayName({ nom: "Lovelace" }, "??"), "Lovelace", "nom seul (prénom absent, pas d'espace parasite)");
+    ck.eq(UserIdentity.displayName({ login: "ada" }, "??"), "ada", "login à défaut de nom");
+    ck.eq(UserIdentity.displayName({ eMail: "ada@x.io" }, "??"), "ada@x.io", "e-mail (eMail) à défaut de login");
+    ck.eq(UserIdentity.displayName({ email: "ada@x.io" }, "??"), "ada@x.io", "e-mail (email) accepté aussi");
   });
 
   /* ==========================================================================

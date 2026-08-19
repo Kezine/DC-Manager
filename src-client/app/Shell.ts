@@ -71,6 +71,10 @@ export interface ShellHost {
       l'icône des champs déclarés. Persistance et application = bootstrap (Prefs + ScanControl). */
   onScanAllFields?(on: boolean): void;
   onScanForceButtons?(on: boolean): void;
+  /** Ouverture de la modale d'INFOS UTILISATEUR (clic sur la pastille de la topbar — icône seule en
+      responsive, nom + icône en grand écran : MÊME geste). L'implémentation (bootstrap) y injecte
+      l'identité `/me` et l'état d'autorisation DÉJÀ connus — aucun appel serveur. */
+  onUserInfo?(): void;
   onToggleTheme?(): void; onResetViewPrefs?(): void;
   /** Changement d'échelle d'interface (zoom global, taille du texte). */
   onUiScale?(value: number): void;
@@ -110,6 +114,7 @@ export interface ShellStatus { file?: string; release?: string; source?: string;
 
 import { Prefs } from "../core/Prefs";
 import { Html } from "../core/Html";
+import { UserIdentity } from "../core/UserIdentity";
 import { Icons } from "../ui/Icons";
 import { FieldFacet } from "../core/FieldFacet";
 import { I18n, type LocalePreference } from "../i18n/I18n";
@@ -261,8 +266,13 @@ export class Shell {
     this.undoBtn = iconBtn(I18n.t("shell.topbar.undo"), '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-5"/>', () => this.host.onUndo?.()); this.undoBtn.disabled = true;
     this.redoBtn = iconBtn(I18n.t("shell.topbar.redo"), '<path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h5"/>', () => this.host.onRedo?.()); this.redoBtn.disabled = true;
     actions.append(this.undoBtn, this.redoBtn);
-    // pastille utilisateur (mode API) : « connecté en tant que … » — masquée par défaut
-    this.userChip = document.createElement("span"); this.userChip.className = "user-chip"; this.userChip.style.display = "none";
+    // pastille utilisateur (mode API) : « connecté en tant que … » — masquée par défaut. BOUTON (et non
+    // un simple <span>) : le clic ouvre la modale d'infos (le nom disparaît en responsive, seule l'icône
+    // reste — la modale redonne l'identité et les droits). Le title/aria-label portent le nom (posés par
+    // setUser), donc l'icône seule reste annoncée aux lecteurs d'écran.
+    this.userChip = document.createElement("button"); this.userChip.className = "user-chip"; this.userChip.style.display = "none";
+    (this.userChip as HTMLButtonElement).type = "button";
+    this.userChip.onclick = () => this.host.onUserInfo?.();
     actions.appendChild(this.userChip);
     actions.appendChild(this.buildSettingsMenu());
 
@@ -901,11 +911,19 @@ export class Shell {
     if (!this.userChip) return;
     if (user === undefined) { this.userChip.style.display = "none"; return; }
     this.userChip.style.display = "";
+    // L'ICÔNE est TOUJOURS présente ; le NOM vit dans un `.user-chip-name` que le CSS masque sous le
+    // breakpoint responsive de la topbar (comme `.brand-name`/`.doc-name`) — reste alors l'icône seule,
+    // le nom passant en title/aria-label (tooltip). Le clic ouvre la modale d'infos dans les deux cas.
     if (user) {
-      const who = user.name || [user.prenom, user.nom].filter(Boolean).join(" ") || user.login || user.eMail || user.email || I18n.t("shell.user.anonymous");
-      this.userChip.innerHTML = `<span class="gi">${Icons.USER}</span>` + Html.escape(who); this.userChip.title = I18n.t("shell.user.connectedAs", { who }); this.userChip.classList.remove("user-chip--off");
+      const who = UserIdentity.displayName(user, I18n.t("shell.user.anonymous"));
+      this.userChip.innerHTML = `<span class="gi">${Icons.USER}</span><span class="user-chip-name">${Html.escape(who)}</span>`;
+      this.userChip.title = I18n.t("shell.user.connectedAs", { who }); this.userChip.setAttribute("aria-label", I18n.t("shell.user.connectedAs", { who }));
+      this.userChip.classList.remove("user-chip--off");
     } else {
-      this.userChip.innerHTML = `<span class="gi">${Icons.USER}</span>` + Html.escape(I18n.t("shell.user.notConnected")); this.userChip.title = I18n.t("shell.user.noSession"); this.userChip.classList.add("user-chip--off");
+      const label = I18n.t("shell.user.notConnected");
+      this.userChip.innerHTML = `<span class="gi">${Icons.USER}</span><span class="user-chip-name">${Html.escape(label)}</span>`;
+      this.userChip.title = I18n.t("shell.user.noSession"); this.userChip.setAttribute("aria-label", I18n.t("shell.user.noSession"));
+      this.userChip.classList.add("user-chip--off");
     }
   }
   /** Mode API : masque Enregistrer/Enregistrer-sous + réglages fichier ; Nouveau/Ouvrir gèrent les documents serveur. */

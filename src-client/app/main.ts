@@ -14,6 +14,7 @@ import type { InterventionTargetSource, InterventionFicheHooks } from "../views"
 import { FormBase } from "../views/forms/FormBase";
 import { AttachmentUi } from "../views/forms/AttachmentUi";   // téléchargement d'une pièce jointe (action de ligne du sous-onglet + purge maintenance)
 import { GlobalSearchPalette } from "../views/GlobalSearchPalette";   // palette de recherche globale (loupe topbar + Ctrl+K)
+import { UserInfoModal } from "../views/UserInfoModal";   // modale d'infos utilisateur (clic sur la pastille de la topbar)
 import { GlobalSearchSources } from "../views/GlobalSearchSources";   // familles à fiche = périmètre envoyé à la recherche transverse serveur (mode API)
 import { ImageStore, IdbImageBackend, RestImageBackend, AttachmentStore, IdbAttachmentBackend, RestAttachmentBackend } from "../data";
 import type { ListOptions, FormHost } from "../views";
@@ -108,6 +109,10 @@ const adapter = REST_MODE
    d'onglet avant de savoir, plutôt que d'en afficher puis d'en retirer.
    ⚠ Déclaré au niveau MODULE (et non dans `boot()`) parce que le Store, construit ici même, en dépend. */
 let access: AccessState = REST_MODE ? AccessState.NONE : AccessState.ALL;
+/* Identité de session courante (réponse `/me`, mode API) — CAPTURÉE au passage de `setUser` pour la
+   modale d'infos utilisateur (clic sur la pastille de la topbar). null = non connecté / mode fichier :
+   la pastille est alors masquée, la modale n'est jamais ouverte. AUCUN appel serveur — donnée déjà reçue. */
+let currentAuthUser: { name?: string; prenom?: string; nom?: string; login?: string; email?: string; eMail?: string } | null = null;
 /* ASSIETTE DE LECTURE du Store (correctif « droits partiels », docs/auth.md § 10.6) : le plan de
    chargement du document est INTERSECTÉ avec les collections lisibles, au point commun `Store.init`.
    Même forme que `FormBase.access` — un objet de PRÉDICATS qui relit `access` à chaque appel, jamais
@@ -465,7 +470,7 @@ async function boot(): Promise<void> {
       resetUndo: () => undoTimeline.reset(),
       setDisplayName: (name) => { files.name = name; },
       invalidate3D: () => dcView.invalidate3D(),
-      setUser: (user) => shell.setUser(user),
+      setUser: (user) => { currentAuthUser = user || null; shell.setUser(user); },
       // Nouveaux droits (bootstrap, relecture après un 403, expiration de session) → on remplace l'état et on
       // rejoue le gating. `applyAccess` est déclaré PLUS BAS (il a besoin de `shell`) : légal, l'appel est
       // asynchrone — même montage que les autres fermetures de cet hôte.
@@ -653,6 +658,9 @@ async function boot(): Promise<void> {
     onUndo: () => { void doUndo(); },   // timeline unifiée (modèle + images) ; révision suivie via onChange → dirty recalculé
     onRedo: () => { void doRedo(); },
     onGlobalSearch: () => openGlobalSearch(),   // loupe topbar — même implémentation (et même garde) que Ctrl+K
+    // Clic sur la pastille utilisateur → modale d'infos. On lui passe l'identité DÉJÀ reçue de `/me`
+    // (`currentAuthUser`) et l'état d'autorisation COURANT (`access`, relu à chaud) — aucun réseau.
+    onUserInfo: () => UserInfoModal.open(formHost, currentAuthUser, access),
     // SCANNER UNE ÉTIQUETTE (bouton topbar, à côté de la loupe) : viseur en mode LIBRE. Un
     // deep-link décodé passe par l'instance UNIQUE `entityLinkOpener` (le même service que le
     // hash du boot et le hashchange — jamais une résolution dupliquée) ; toute autre valeur

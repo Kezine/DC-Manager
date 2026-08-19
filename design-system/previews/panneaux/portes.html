@@ -361,12 +361,34 @@
   .tab-group.open .tabs-dd-menu { display: flex; }
 
   .topbar-actions { display: flex; align-items: stretch; flex-shrink: 0; border-left: 1px solid var(--line); }
+  /* Pastille utilisateur = BOUTON (clic → modale d'infos) : réinitialise l'apparence bouton, ne garde
+     que le liseré gauche de séparation. En responsive, `.user-chip-name` est masqué (cf. @media 760px) :
+     reste l'icône seule, le nom passant en tooltip/aria-label. */
   .user-chip {
-    display: inline-flex; align-items: center; padding: 0 12px;
-    font-size: 11px; color: var(--fg-dim); white-space: nowrap;
-    border-left: 1px solid var(--line);
+    display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; height: 100%;
+    background: transparent; border: none; border-left: 1px solid var(--line);
+    font-family: inherit; font-size: 11px; color: var(--fg-dim); white-space: nowrap; cursor: pointer;
   }
+  .user-chip:hover { color: var(--fg); background: var(--bg-3); }
+  .user-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   .user-chip--off { color: var(--fg-dimmer); font-style: italic; }
+
+  /* ---- Modale d'INFOS UTILISATEUR (views/UserInfoModal) : corps sobre, lecture seule ---- */
+  .user-info { display: flex; flex-direction: column; gap: 18px; font-family: var(--sans); min-width: min(360px, 78vw); }
+  .user-info-head { display: flex; align-items: center; gap: 14px; }
+  .user-info-avatar { flex: none; width: 44px; height: 44px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--bg-3); color: var(--fg-dim); }
+  .user-info-avatar svg { width: 24px; height: 24px; }
+  .user-info-name { font-size: 17px; font-weight: 600; color: var(--fg); overflow-wrap: anywhere; }
+  .user-info-fields { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0; align-items: baseline; }
+  .user-info-fields dt { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg-dimmer); font-family: var(--mono); }
+  .user-info-fields dd { margin: 0; font-size: 13px; color: var(--fg); overflow-wrap: anywhere; }
+  .user-info-rights { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 14px; }
+  .user-info-rights-title { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg-dimmer); font-family: var(--mono); }
+  .user-info-rights-full { font-size: 13px; color: var(--ok); }
+  .user-info-rights-none { font-size: 13px; color: var(--fg-dim); font-style: italic; }
+  .user-info-domains { display: flex; flex-wrap: wrap; gap: 6px; }
+  .user-info-domain { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: var(--radius-pill); background: var(--bg-3); border: 1px solid var(--line-2); color: var(--fg-dim); font-size: 11.5px; }
+
   .icon-btn {
     height: 100%;
     padding: 0 13px;
@@ -1671,7 +1693,7 @@
   .gi svg { width: 14px; height: 14px; display: block; }
   .dc-card-title .gi { margin-right: 6px; vertical-align: -3px; }
   .dc-card-title .gi svg { width: 15px; height: 15px; }
-  .user-chip .gi { margin-right: 6px; }
+  .user-chip .gi { margin-right: 0; }   /* l'écart icône ↔ nom vient du `gap` de .user-chip (aucun espace mort quand le nom est masqué en responsive) */
   /* pastille d'icône seule (ex. étoile « défaut », cadenas dans la liste de documents) : couleur d'accent nette */
   .doc-star.on { color: var(--accent); }
   .doc-lock.on { color: var(--accent); }
@@ -2561,6 +2583,9 @@
 
   @media (max-width: 760px) {
     .brand-name, .doc-name { display: none; }
+    /* Pastille utilisateur : le NOM disparaît, l'icône reste (le nom passe en tooltip/aria-label ; le
+       clic ouvre la modale d'infos). Même geste qu'en grand écran, juste plus compact. */
+    .user-chip-name { display: none; }
     /* marges latérales MINIMALES → largeur utile maximale */
     main { padding: 10px 4px; }
     main:has(#view-datacenter.active), main:has(#view-graph.active) { padding: 6px 2px; }
@@ -2722,6 +2747,14 @@
   .gs-clear.show { display: flex; }
   .gs-clear:hover { color: var(--fg); border-color: var(--fg); }
   .gs-clear svg { width: 13px; height: 13px; }
+  /* FERMER la palette (✕ explicite) : toujours visible, à l'extrême droite de la rangée de saisie. Sert
+     surtout au TACTILE (pas de clavier pour Échap, et sous 640px la palette est plein écran → aucun fond
+     à taper). Distinct du ✕ d'effacement (`.gs-clear`). */
+  .gs-close { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 30px; height: 30px; padding: 0; background: transparent; border: 1px solid var(--line-2); border-radius: 6px; color: var(--fg-dim); cursor: pointer; }
+  .gs-close:hover { color: var(--fg); border-color: var(--fg); }
+  .gs-close svg { width: 15px; height: 15px; }
+  /* Pointeur GROSSIER (tactile) : cible ≥ 44 px (convention de l'app, cf. autres blocs @media (hover: none)). */
+  @media (hover: none) { .gs-close { width: 44px; height: 44px; } }
 
   /* -- portees : pastilles en WRAP (demande utilisateur 2026-07-30) - avec les familles externes
      et les actions on atteint 10 pastilles, le defilement horizontal masque de la maquette en

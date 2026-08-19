@@ -110,4 +110,17 @@ export class AccessState {
       recherche transverse côté serveur (`Permissions.readableCollections`), donc strictement la même
       vérité des deux côtés. Ordre stable (celui de la carte). */
   readableCollections(): readonly string[] { return Permissions.readableCollections(this.permissions); }
+
+  /** Résumé LISIBLE des droits de LECTURE documentaire, destiné à l'AFFICHAGE (modale d'infos
+      utilisateur de la topbar). Décision PURE et sobre — jamais un inventaire de collection :
+      - `full` VRAI quand TOUTE la donnée est lisible (`hasFullDocumentRead`) → « accès complet »
+        (le cas de l'admin, et du mode fichier où `ALL` rend tout permis par construction) ;
+      - sinon `domains` liste les DOMAINES de donnée dont l'utilisateur a au moins la LECTURE, dans
+        l'ordre stable de la carte partagée (`Permissions.DATA_DOMAINS`), pour un affichage court.
+      On expose des DOMAINES (dix au plus), jamais des grants ni des rôles : le client applique la
+      politique du serveur, il ne la nomme pas. */
+  documentAccessSummary(): { full: boolean; domains: readonly string[] } {
+    if (this.hasFullDocumentRead()) return { full: true, domains: [] };
+    return { full: false, domains: Permissions.DATA_DOMAINS.filter((domain) => this.has(domain + ":read")) };
+  }
 }

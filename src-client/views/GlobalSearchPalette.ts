@@ -307,7 +307,15 @@ export class GlobalSearchPalette {
     this.clearBtn.title = I18n.t("ui.search.clear"); this.clearBtn.setAttribute("aria-label", I18n.t("ui.search.clear"));
     this.clearBtn.onclick = () => { this.input.value = ""; this.scope = "all"; this.sel = 0; this.render(); this.input.focus(); };
     const esc = document.createElement("span"); esc.className = "gs-kbd"; esc.textContent = I18n.t("search.kbd.esc");
-    inputRow.append(lens, this.input, this.clearBtn, esc);
+    // FERMETURE EXPLICITE (✕) : Échap ne suffit pas en TACTILE (pas de clavier), et sous 640px la palette
+    // occupe TOUT l'écran — il n'y a plus de fond à taper. Ce bouton ferme la palette dans tous les cas.
+    // Distinct du ✕ d'EFFACEMENT (`.gs-clear`, qui ne vide que le champ et n'apparaît qu'à la saisie).
+    // Cible ≥ 44 px en pointeur grossier (CSS `@media (hover: none)`), aria-label + tooltip (pattern iconAction).
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button"; closeBtn.className = "gs-close"; closeBtn.innerHTML = Icons.CLOSE;
+    closeBtn.title = I18n.t("ui.action.close"); closeBtn.setAttribute("aria-label", I18n.t("ui.action.close"));
+    closeBtn.onclick = () => this.close();
+    inputRow.append(lens, this.input, this.clearBtn, esc, closeBtn);
 
     // -- portées + résultats + pied --
     this.scopesEl = document.createElement("div"); this.scopesEl.className = "gs-scopes"; this.scopesEl.setAttribute("role", "tablist");
