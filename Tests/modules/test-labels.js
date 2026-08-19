@@ -8,7 +8,12 @@
                           zone (marge en modules), compensation par padding blanc CALCULÉ,
                           mise à l'échelle en mm ;
      - core/LabelHtml   : rendu HTML partagé aperçu ⇄ imprimé (structure, échappement,
-                          répétitions du manchon, planche, document d'impression).
+                          répétitions du manchon, planche, document d'impression) + les COTES
+                          au millimètre (padding/gouttière posés inline depuis LabelLayout) ;
+     - core/LabelPrintPolicy : LA matrice de visibilité contextuelle (retours terrain 2026-08-20) —
+                          offres par sujet, verdict (sujet × contenu × format × nombre), retombée
+                          sur défaut d'un réglage mémorisé devenu invalide ;
+     - core/LabelSubjects : la matière d'une étiquette depuis un enregistrement (sujet FAISCEAU).
    Harnais et assertions : harness.js. */
 "use strict";
 const { ck, section, D } = require("./harness.js");
@@ -17,6 +22,8 @@ module.exports = async () => {
   const { LabelLayout } = D("core/LabelLayout.js");
   const { LabelQrSvg } = D("core/LabelQrSvg.js");
   const { LabelHtml } = D("core/LabelHtml.js");
+  const { LabelPrintPolicy } = D("core/LabelPrintPolicy.js");
+  const { LabelSubjects } = D("core/LabelSubjects.js");
 
   /* Réglage de base : gabarit M, QR + texte, compact — les défauts de la modale. */
   const spec = (over = {}) => Object.assign({
@@ -42,33 +49,35 @@ module.exports = async () => {
   });
 
   await section("labels : LabelLayout — géométrie drapeau / manchon / QR seul (dérivées maquette)", async () => {
-    // DRAPEAU compact QR 18 : panneaux 22, zone 10 → 54 × 20,4 (le spécimen de la maquette).
+    // DRAPEAU compact QR 18 : padding NUL depuis l'amendement des densités (2026-08-20 — seule la
+    // quiet zone du SVG garde le QR) → panneaux 22, zone 10, hauteur = le QR lui-même : 54 × 18.
     const fc = LabelLayout.flagGeometry(18, true);
-    ck.eq(JSON.stringify(fc), JSON.stringify({ pad: 1.2, wz: 10, pan: 22, h: 20.4, w: 54 }), "drapeau compact q18 = 54 × 20,4 (pan 22, wz 10)");
-    // DRAPEAU confort QR 18 : 62 × 22 — la cote nominale de la table.
+    ck.eq(JSON.stringify(fc), JSON.stringify({ pad: 0, wz: 10, pan: 22, h: 18, w: 54 }), "drapeau compact q18 = 54 × 18 (padding nul, pan 22, wz 10)");
+    // DRAPEAU confort QR 18 : 62 × 22 — la cote nominale de la table (l'aisance de la maquette, INCHANGÉE).
     const ff = LabelLayout.flagGeometry(18, false);
     ck.eq(JSON.stringify(ff), JSON.stringify({ pad: 2, wz: 12, pan: 25, h: 22, w: 62 }), "drapeau confort q18 = 62 × 22 (la table)");
     // Un QR plus grand DILATE le panneau (géométrie DÉRIVÉE du QR, jamais figée).
     const fb = LabelLayout.flagGeometry(28, true);
-    ck(near(fb.pan, 30.4) && near(fb.w, 70.8) && near(fb.h, 30.4), "drapeau q28 : panneau 30,4 → 70,8 de large");
+    ck(near(fb.pan, 28) && near(fb.w, 66) && near(fb.h, 28), "drapeau compact q28 : panneau 28 → 66 de large");
     // MANCHON Ø 6, 25 mm, compact : 2 tours (2π·6) + 12 de recouvrement = 49,7 mm (spécimen maquette).
     const sc = LabelLayout.sleeveGeometry(6, 25, true);
     ck(near(sc.w, 49.7, 0.005), "manchon Ø6 compact : largeur 49,7 mm (2 tours + 12)");
     ck(near(sc.turn, Math.PI * 6, 1e-9), "manchon : un tour = π·Ø");
     ck.eq(sc.h, 25, "manchon : hauteur = longueur le long du câble");
     ck.eq(LabelLayout.sleeveGeometry(6, 25, false).overlap, 16, "manchon confort : recouvrement 16");
-    // QR SEUL : carré (QR + marges), la bande propriétaire s'ajoute SOUS le carré.
-    ck.eq(LabelLayout.qrOnlyGeometry(20, true, false).side, 22, "QR seul compact sans owner : 22");
-    ck(near(LabelLayout.qrOnlyGeometry(20, true, true).side, 26.4), "QR seul compact + owner : 26,4 (spécimen maquette)");
+    // QR SEUL : carré (QR + marges), la bande propriétaire s'ajoute SOUS le carré. Compact = le QR
+    // NU (padding nul, densités amendées) ; confort = les marges de la maquette.
+    ck.eq(LabelLayout.qrOnlyGeometry(20, true, false).side, 20, "QR seul compact sans owner : le QR nu (20)");
+    ck(near(LabelLayout.qrOnlyGeometry(20, true, true).side, 24), "QR seul compact + owner : 24 (20 + gouttière 0,4 + bande 3,6)");
     ck(near(LabelLayout.qrOnlyGeometry(20, false, true).side, 29.8), "QR seul confort + owner : 29,8");
     // labelDims agrège le tout.
     ck.eq(JSON.stringify(LabelLayout.labelDims(spec())), JSON.stringify([50, 30]), "dims M = 50×30");
     ck.eq(JSON.stringify(LabelLayout.labelDims(spec({ size: "custom", custom: { w: 38, h: 16 } }))), JSON.stringify([38, 16]), "dims personnalisé = cotes saisies");
-    ck.eq(JSON.stringify(LabelLayout.labelDims(spec({ content: "qr", qr: 20 }))), JSON.stringify([22, 22]), "dims QR seul = carré");
+    ck.eq(JSON.stringify(LabelLayout.labelDims(spec({ content: "qr", qr: 20 }))), JSON.stringify([20, 20]), "dims QR seul = carré");
     const sd = LabelLayout.labelDims(spec({ size: "cable", content: "strip" }));
     ck(near(sd[0], 49.7, 0.005) && sd[1] === 25, "dims manchon = géométrie du manchon");
     const fd = LabelLayout.labelDims(spec({ size: "cable", qr: 18 }));
-    ck(near(fd[0], 54) && near(fd[1], 20.4), "dims drapeau compact = 54 × 20,4");
+    ck(near(fd[0], 54) && near(fd[1], 18), "dims drapeau compact = 54 × 18");
     // Classe de police du personnalisé : suit le gabarit le plus proche (frontières maquette).
     ck.eq(LabelLayout.fontClassForHeight(16), "s", "h 16 → police S");
     ck.eq(LabelLayout.fontClassForHeight(25), "m", "h 25 → police M (frontière)");
@@ -80,7 +89,7 @@ module.exports = async () => {
     // La CELLULE des préréglages « QR + texte » vient de la table (M : 48×33 → 4 col. et 8 rangées = 32,
     // l'annonce de la maquette) ; les autres modes prennent leurs dimensions réelles.
     ck.eq(JSON.stringify(LabelLayout.cellDims(spec())), JSON.stringify([48, 33]), "cellule M = 48×33 (pas 50×30)");
-    ck.eq(JSON.stringify(LabelLayout.cellDims(spec({ content: "qr", qr: 20 }))), JSON.stringify([22, 22]), "cellule QR seul = dims réelles");
+    ck.eq(JSON.stringify(LabelLayout.cellDims(spec({ content: "qr", qr: 20 }))), JSON.stringify([20, 20]), "cellule QR seul = dims réelles");
     ck.eq(LabelLayout.maxColumns(spec()), 4, "M : 4 colonnes max (4×48 = 192 ≤ 194)");
     ck.eq(LabelLayout.maxColumns(spec({ size: "s" })), 3, "S (cellule 50) : 3 colonnes max");
     ck.eq(LabelLayout.maxColumns(spec({ size: "l" })), 2, "L (70) : 2 colonnes max");
@@ -109,8 +118,12 @@ module.exports = async () => {
     // Avertissements — des CODES, jamais des chaînes (l'UI traduit).
     ck.eq(LabelLayout.warnings(spec(), { count: 1, requestedCols: 4 }).length, 0, "M unitaire : aucun avertissement");
     ck(LabelLayout.warnings(spec({ size: "custom", qr: 14 }), { count: 1, requestedCols: 4 }).includes("qr-floor"), "QR 14 < 18 → qr-floor");
-    const tight = LabelLayout.warnings(spec({ size: "custom", qr: 16, custom: { w: 30, h: 16 } }), { count: 1, requestedCols: 4 });
-    ck(tight.includes("qr-exceeds-label"), "QR 16 + marges > hauteur 16 → qr-exceeds-label");
+    // Débordement du PERSONNALISÉ : il n'est JAMAIS clampé (l'utilisateur contrôle ses cotes), on
+    // l'AVERTIT — avec le padding RÉEL de sa densité (en compact il est nul : un QR de 16 dans 16 mm
+    // TIENT, et rien ne doit être signalé ; c'est en confort que les 1,5 mm de marge le font déborder).
+    const tight = LabelLayout.warnings(spec({ size: "custom", compact: false, qr: 16, custom: { w: 30, h: 16 } }), { count: 1, requestedCols: 4 });
+    ck(tight.includes("qr-exceeds-label"), "confort : QR 16 + 2 × 1,5 mm > hauteur 16 → qr-exceeds-label");
+    ck(!LabelLayout.warnings(spec({ size: "custom", qr: 16, custom: { w: 30, h: 16 } }), { count: 1, requestedCols: 4 }).includes("qr-exceeds-label"), "compact (marges nulles) : le même QR 16 tient dans 16 mm");
     ck(tight.includes("qr-floor"), "…et toujours sous le plancher (les deux codes coexistent)");
     ck(LabelLayout.warnings(spec(), { count: 40, requestedCols: 4 }).includes("multi-page"), "40 étiquettes M > 32 → multi-page");
     const lw = LabelLayout.warnings(spec({ size: "l" }), { count: 12, requestedCols: 4 });
@@ -171,7 +184,7 @@ module.exports = async () => {
     ck(LabelHtml.label(subject, spec(), allFields, qr, [48, 33]).includes("width:48mm;height:33mm"), "dims de cellule imposées sur planche");
     // QR seul : carré, bande propriétaire optionnelle.
     const qOnly = LabelHtml.label(subject, spec({ content: "qr", qr: 20, hasOwner: true }), allFields, qr);
-    ck(qOnly.includes("qronly") && qOnly.includes("width:26.4mm;height:26.4mm"), "QR seul + owner : carré 26,4");
+    ck(qOnly.includes("qronly") && qOnly.includes("width:24mm;height:24mm"), "QR seul + owner : carré 24");
     // Câble : drapeau (2 panneaux + zone hachurée), manchons ×2 / ×6.
     const cable = { collection: "cables", id: "c1", name: "CBL-004821", endA: "SRV · P1", endB: "SW · Gi1/0/12", typeLabel: "Cat 6a · 3 m" };
     const flag = LabelHtml.label(cable, spec({ size: "cable", qr: 18 }), allFields, qr);
@@ -190,5 +203,226 @@ module.exports = async () => {
     ck(doc.includes(".label-render .lab{background:#fff"), "print-CSS embarquée (noir sur blanc, aucune variable de thème)");
     ck(!doc.includes("var(--fg"), "aucun token de thème dans l'imprimé");
     ck(doc.includes("T&lt;est&gt;"), "titre du document échappé");
+  });
+
+  /* ============================================================================================
+     RETOURS TERRAIN DU 2026-08-20 — les quatre volets vérifiés ci-dessous :
+       (1) densités amendées + NON-DÉBORDEMENT du QR (bug du format S à l'impression) ;
+       (2) cotes calculées retrouvées AU MILLIMÈTRE dans le HTML, et fenêtre d'impression sans
+           la moindre marge parasite ;
+       (3) LA matrice de visibilité contextuelle (`core/LabelPrintPolicy`) ;
+       (4) le sujet FAISCEAU (nouveau point d'entrée listing + fiche).
+     ============================================================================================ */
+
+  await section("labels : LabelLayout — densités amendées + le QR d'un préréglage NE DÉBORDE JAMAIS", async () => {
+    // DOCTRINE : compact = marges NULLES (la quiet zone du SVG suffit à garder le QR) ; confort =
+    // l'aisance de la maquette (1,5 en S/M, 3 en L, 4 en Baie ; gouttières 2/3/5).
+    ck.eq(LabelLayout.rectPadding("m", true), 0, "compact : padding nul");
+    ck.eq(LabelLayout.rectGap("m", true), 0, "compact : gouttière nulle");
+    ck.eq(LabelLayout.rectPadding("s", false), 1.5, "confort S : 1,5 mm");
+    ck.eq(LabelLayout.rectPadding("l", false), 3, "confort L : 3 mm");
+    ck.eq(LabelLayout.rectPadding("rack", false), 4, "confort Baie : 4 mm");
+    ck.eq(LabelLayout.rectGap("rack", false), 5, "confort Baie : gouttière 5 mm");
+
+    // 🚨 LE BUG MESURÉ : S confort = QR 18 dans 20 mm de haut. Avec 1,5 mm de marge en haut ET en
+    // bas, 18 + 3 = 21 > 20 → le SVG débordait et se faisait rogner à l'impression. La règle est
+    // que c'est la MARGE qui cède, jamais la scannabilité.
+    const sComfort = LabelLayout.rectQrGeometry(spec({ size: "s", compact: false }));
+    ck.eq(sComfort.qr, 18, "S confort : le QR garde ses 18 mm (plancher de scannabilité)");
+    ck.eq(sComfort.padV, 1, "S confort : c'est la marge VERTICALE qui cède (1 mm au lieu de 1,5)");
+    ck.eq(sComfort.padH, 1.5, "S confort : la marge HORIZONTALE, elle, n'a aucune raison de céder");
+    ck(sComfort.qr + 2 * sComfort.padV <= 20, "S confort : 18 + 2 × 1 = 20 → tient EXACTEMENT dans la hauteur");
+
+    // NON-DÉBORDEMENT SYSTÉMATIQUE : tous les préréglages rectangulaires × les DEUX densités,
+    // à la cote NOMINALE (unitaire) comme à la cote de CELLULE (planche).
+    for (const size of ["s", "m", "l", "rack"]) {
+      for (const compact of [true, false]) {
+        const sp = spec({ size, compact });
+        const tag = size.toUpperCase() + (compact ? " compact" : " confort");
+        const [w, h] = LabelLayout.labelDims(sp);
+        const g = LabelLayout.rectQrGeometry(sp);
+        ck(g.qr + 2 * g.padV <= h + 1e-9, tag + " : QR + marges verticales ≤ hauteur (" + h + ")");
+        ck(g.qr + 2 * g.padH <= w + 1e-9, tag + " : QR + marges horizontales ≤ largeur (" + w + ")");
+        ck.eq(g.qr, LabelLayout.qrSizeOf(sp), tag + " : le préréglage garde SA cote de QR (jamais rognée)");
+        // Sur une PLANCHE, la hauteur est celle de la CELLULE (jamais plus serrée qu'à l'unité).
+        const cellH = LabelLayout.cellDims(sp)[1];
+        const gc = LabelLayout.rectQrGeometry(sp, cellH);
+        ck(gc.qr + 2 * gc.padV <= cellH + 1e-9, tag + " sur planche : QR + marges ≤ cellule (" + cellH + ")");
+        // Et la cote SERVIE au SVG passe par ce clamp — c'est LE point de passage unique de l'UI.
+        ck.eq(LabelLayout.renderQrMm(sp), g.qr, tag + " : renderQrMm = la cote clampée");
+        ck.eq(LabelLayout.renderQrMm(sp, cellH), gc.qr, tag + " sur planche : renderQrMm suit la cellule");
+      }
+    }
+    // Anatomies à géométrie DÉRIVÉE du QR (drapeau, manchon, QR seul) : la cote servie reste celle
+    // demandée — leur boîte est construite AUTOUR du QR, elle ne peut pas être trop petite.
+    ck.eq(LabelLayout.renderQrMm(spec({ size: "cable", qr: 22 })), 22, "drapeau : la cote demandée est servie telle quelle");
+    ck.eq(LabelLayout.renderQrMm(spec({ content: "qr", qr: 26 })), 26, "QR seul : la cote demandée est servie telle quelle");
+    // Le PERSONNALISÉ n'est pas clampé (l'utilisateur contrôle ses cotes — il est AVERTI, cf. warnings).
+    ck.eq(LabelLayout.renderQrMm(spec({ size: "custom", qr: 40, custom: { w: 30, h: 20 } })), 40, "personnalisé : jamais clampé (l'avertissement fait foi)");
+  });
+
+  await section("labels : LabelHtml — les cotes calculées se retrouvent AU MILLIMÈTRE (marges de l'imprimé)", async () => {
+    const subject = { collection: "equipments", id: "e1", name: "SRV-01", location: "B12", typeLabel: "Serveur", serial: "X1", owner: "ACME" };
+    const allFields = { location: true, type: true, serial: true, owner: true };
+    const qr = '<svg data-qr="1"></svg>';
+    // COMPACT = zéro marge : c'est le retour « énormément de marges ». Le padding/la gouttière sont
+    // posés INLINE (plus dans le CSS de classe) précisément pour être vérifiables ici.
+    const compact = LabelHtml.label(subject, spec(), allFields, qr);
+    ck(compact.includes("padding:0mm 0mm;gap:0mm"), "M compact : padding et gouttière NULS dans le HTML");
+    // CONFORT = les cotes de la table des densités, au millimètre.
+    const comfort = LabelHtml.label(subject, spec({ compact: false }), allFields, qr);
+    ck(comfort.includes("padding:1.5mm 1.5mm;gap:2mm"), "M confort : 1,5 mm de marge, 2 mm de gouttière");
+    ck(LabelHtml.label(subject, spec({ size: "l", compact: false }), allFields, qr).includes("padding:3mm 3mm;gap:3mm"), "L confort : 3 mm de marge et de gouttière");
+    ck(LabelHtml.label(subject, spec({ size: "rack", compact: false }), allFields, qr).includes("padding:4mm 4mm;gap:5mm"), "Baie confort : 4 mm de marge, 5 de gouttière");
+    // S confort : la marge verticale CÉDÉE se retrouve telle quelle dans le HTML (anti-débordement).
+    ck(LabelHtml.label(subject, spec({ size: "s", compact: false }), allFields, qr).includes("padding:1mm 1.5mm"), "S confort : marge verticale ramenée à 1 mm dans le HTML");
+    // Sur une PLANCHE, c'est la hauteur de CELLULE qui donne la marge (plus d'air, mêmes règles).
+    ck(LabelHtml.label(subject, spec({ size: "s", compact: false }), allFields, qr, [50, 33]).includes("padding:1.5mm 1.5mm"), "cellule plus haute : la marge de confort reprend ses 1,5 mm");
+    // Le CSS partagé ne porte PLUS de padding/gap d'étiquette (sinon les cotes ci-dessus seraient un leurre).
+    ck(!/\.lab\{[^}]*padding/.test(LabelHtml.CSS), "aucun padding d'étiquette laissé dans le CSS de classe");
+    ck(!/\.lab\.compact\{[^}]*padding/.test(LabelHtml.CSS), "…ni dans la variante compacte");
+
+    // FENÊTRE D'IMPRESSION : ni marge de page, ni marge de document — les cotes de l'étiquette sont
+    // la SEULE géométrie qui compte (imprimante à rouleau : une marge de body décalerait tout).
+    const unit = LabelHtml.printDocument({ title: "t", pageSize: "54mm 18mm", pagesHtml: "<div class=\"unit\">x</div>" });
+    ck(unit.includes("html,body{margin:0;padding:0;background:#fff}"), "iframe d'impression : html/body sans marge NI padding");
+    ck(unit.includes("@page{size:54mm 18mm;margin:0}"), "unitaire : @page margin 0 à la cote exacte");
+    const sheet = LabelHtml.printDocument({ title: "t", pageSize: "A4", pagesHtml: "<div class=\"a4\">x</div>" });
+    ck(sheet.includes("@page{size:A4;margin:0}"), "planche : @page margin 0 (la marge de 8 mm est celle de la GRILLE, pas de la page)");
+    ck(sheet.includes(".label-render .a4{width:210mm;height:297mm;background:#fff;padding:8mm"), "planche : les 8 mm de marge utile vivent dans la grille A4");
+  });
+
+  await section("labels : LabelPrintPolicy — offres par contexte (contenus, formats, défauts, cases)", async () => {
+    // CONTENUS : les manchons ne concernent que ce qui s'ENROULE (câble, faisceau).
+    ck.eq(LabelPrintPolicy.contentsFor("equipment").join(","), "full,qr", "équipement : QR+texte et QR seul, pas de manchon");
+    ck.eq(LabelPrintPolicy.contentsFor("rack").join(","), "full,qr", "baie : idem");
+    ck.eq(LabelPrintPolicy.contentsFor("spare").join(","), "full,qr", "spare : idem");
+    ck.eq(LabelPrintPolicy.contentsFor("cable").join(","), "full,qr,strip,id", "câble : manchons offerts");
+    ck.eq(LabelPrintPolicy.contentsFor("bundle").join(","), "full,qr,strip,id", "faisceau : MÊME anatomie que le câble");
+    ck(LabelPrintPolicy.isFlagKind("bundle") && LabelPrintPolicy.isFlagKind("cable"), "câble et faisceau = les deux sujets à DRAPEAU");
+    ck(!LabelPrintPolicy.isFlagKind("equipment") && !LabelPrintPolicy.isFlagKind("rack"), "…et personne d'autre");
+
+    // FORMATS : le drapeau n'existe que pour les sujets à drapeau ; « Baie » n'existe que pour les baies.
+    ck.eq(LabelPrintPolicy.sizesFor("equipment").join(","), "s,m,l,custom", "équipement : ni drapeau ni gabarit Baie");
+    ck.eq(LabelPrintPolicy.sizesFor("spare").join(","), "s,m,l,custom", "spare : idem");
+    ck.eq(LabelPrintPolicy.sizesFor("rack").join(","), "s,m,l,rack,custom", "baie : le gabarit Baie s'ajoute (pour ELLE seule)");
+    ck.eq(LabelPrintPolicy.sizesFor("cable").join(","), "cable,custom", "câble : drapeau ou personnalisé (un rectangle ne s'attache pas à un brin)");
+    ck.eq(LabelPrintPolicy.sizesFor("bundle").join(","), "cable,custom", "faisceau : idem câble");
+
+    // DÉFAUTS du contexte (premier tirage).
+    ck.eq(LabelPrintPolicy.defaultSizeFor("equipment"), "m", "défaut équipement = M");
+    ck.eq(LabelPrintPolicy.defaultSizeFor("rack"), "rack", "défaut baie = gabarit Baie");
+    ck.eq(LabelPrintPolicy.defaultSizeFor("spare"), "s", "défaut spare = S");
+    ck.eq(LabelPrintPolicy.defaultSizeFor("bundle"), "cable", "défaut faisceau = drapeau");
+    ck.eq(LabelPrintPolicy.defaultQrFor("bundle"), 18, "défaut de QR d'un drapeau = 18 (le plancher)");
+    ck.eq(LabelPrintPolicy.defaultQrFor("equipment"), 20, "défaut de QR rectangulaire = 20");
+    ck.eq(LabelPrintPolicy.defaultColsFor("bundle"), 3, "planche de drapeaux : 3 colonnes");
+    ck.eq(LabelPrintPolicy.defaultColsFor("equipment"), 4, "planche rectangulaire : 4 colonnes");
+
+    // CASES OFFERTES = ce que le sujet POSSÈDE (une case sans donnée serait un mensonge d'interface).
+    ck.eq(JSON.stringify(LabelPrintPolicy.offeredFieldsFor("equipment")), JSON.stringify({ location: true, type: true, serial: true, owner: true }), "équipement : les 4 cases (owner = lot E1)");
+    ck.eq(JSON.stringify(LabelPrintPolicy.offeredFieldsFor("spare")), JSON.stringify({ location: true, type: true, serial: true, owner: false }), "spare : pas de propriétaire");
+    ck.eq(JSON.stringify(LabelPrintPolicy.offeredFieldsFor("rack")), JSON.stringify({ location: true, type: true, serial: false, owner: false }), "baie : ni n° de série ni propriétaire");
+    ck.eq(JSON.stringify(LabelPrintPolicy.offeredFieldsFor("bundle")), JSON.stringify({ location: true, type: true, serial: false, owner: false }), "faisceau : extrémités + type seulement");
+    // COCHÉES au premier tirage : emplacement partout, type d'office sur drapeau/baie, owner décoché (décision E).
+    ck.eq(JSON.stringify(LabelPrintPolicy.defaultFieldsFor("equipment")), JSON.stringify({ location: true, type: false, serial: false, owner: false }), "équipement : emplacement seul coché");
+    ck.eq(JSON.stringify(LabelPrintPolicy.defaultFieldsFor("bundle")), JSON.stringify({ location: true, type: true, serial: false, owner: false }), "faisceau : extrémités + type cochés");
+  });
+
+  await section("labels : LabelPrintPolicy — LA matrice (sujet × contenu × format × nombre)", async () => {
+    const v = (kind, content, size, count) => LabelPrintPolicy.visibility(kind, content, size, count || 1);
+
+    // 🚨 RETOUR n°1 : les cotes PERSONNALISÉES ne s'affichent QUE sous « Personnalisé ».
+    for (const size of ["s", "m", "l", "rack"]) {
+      ck(!v("equipment", "full", size).showWidthHeight, "format " + size + " : ni largeur ni hauteur saisissables");
+      ck(!v("equipment", "full", size).showQrMm, "format " + size + " : la cote de QR est IMPOSÉE par le préréglage");
+      ck(!v("equipment", "full", size).showMmRow, "format " + size + " : la rangée mm entière disparaît");
+    }
+    const custom = v("equipment", "full", "custom");
+    ck(custom.showWidthHeight && custom.showQrMm && custom.showMmRow, "personnalisé : largeur, hauteur ET cote de QR");
+    ck(!custom.showDiaLen, "personnalisé : pas de Ø/longueur (ce n'est pas un manchon)");
+    // La cote de QR reste offerte quand elle est LIBRE sans être « personnalisée » (QR seul, drapeau).
+    ck(v("equipment", "qr", "m").showQrMm && !v("equipment", "qr", "m").showWidthHeight, "QR seul : la cote du QR, et elle seule");
+    ck(v("cable", "full", "cable").showQrMm && !v("cable", "full", "cable").showWidthHeight, "drapeau : la cote du QR pilote la géométrie");
+
+    // 🚨 RETOUR n°2 : Ø de câble et longueur de manchon SEULEMENT en mode manchon.
+    for (const kind of ["equipment", "rack", "spare", "cable", "bundle"]) {
+      ck(!v(kind, "full", LabelPrintPolicy.defaultSizeFor(kind)).showDiaLen, kind + " en QR+texte : ni Ø ni longueur de manchon");
+    }
+    const sleeve = v("cable", "strip", "cable");
+    ck(sleeve.showDiaLen && sleeve.showMmRow, "manchon : Ø et longueur affichés");
+    ck(!sleeve.showQrMm && !sleeve.showSizeSelect, "manchon : ni cote de QR (il n'y en a pas) ni sélecteur de format");
+    ck.eq(sleeve.header, "sleeve", "manchon : l'intitulé de section devient « Manchon »");
+    ck.eq(v("cable", "id", "cable").header, "sleeve", "identifiant seul : même intitulé");
+    ck.eq(v("equipment", "qr", "m").header, "qrSize", "QR seul : l'intitulé devient « Taille du QR »");
+    ck.eq(v("equipment", "full", "m").header, "format", "QR + texte : « Format »");
+    ck(v("equipment", "full", "m").showSizeSelect, "QR + texte : le sélecteur de format est là");
+
+    // CASES : intersection de l'offre du SUJET et des règles du CONTENU.
+    ck(!v("rack", "full", "rack").fields.serial, "baie : la case n° de série n'apparaît jamais (le modèle n'en a pas)");
+    ck(!v("cable", "full", "cable").fields.serial, "câble : idem");
+    ck(!v("bundle", "full", "cable").fields.serial, "faisceau : idem");
+    ck(!v("bundle", "full", "cable").fields.owner, "faisceau : pas de propriétaire non plus");
+    ck(v("equipment", "full", "m").fields.serial && v("equipment", "full", "m").fields.owner, "équipement : série et propriétaire offerts");
+    const qrOnly = v("equipment", "qr", "m");
+    ck(!qrOnly.fields.location && !qrOnly.fields.type && !qrOnly.fields.serial, "QR seul : plus rien à part…");
+    ck(qrOnly.fields.owner, "…le propriétaire (bande sous le carré)");
+    ck(!qrOnly.showIdRow, "QR seul : la rangée « Identifiant (toujours) » n'a plus de sens");
+    const idOnly = v("cable", "id", "cable");
+    ck(!idOnly.fields.location && !idOnly.fields.type && !idOnly.fields.owner && !idOnly.showIdRow, "identifiant seul : aucune case (c'est le principe du contenu)");
+    ck(!idOnly.showFieldsSection, "identifiant seul : la SECTION entière disparaît");
+    ck(v("equipment", "qr", "m").showFieldsSection, "QR seul : la section survit pour la seule case propriétaire");
+
+    // Libellé « Extrémités A / B » : les sujets à drapeau, et eux seuls.
+    ck(v("cable", "full", "cable").locationAsEnds && v("bundle", "full", "cable").locationAsEnds, "câble/faisceau : « Emplacement » devient « Extrémités A / B »");
+    ck(!v("equipment", "full", "m").locationAsEnds && !v("rack", "full", "rack").locationAsEnds, "équipement/baie : « Emplacement »");
+
+    // PLANCHE : à partir de 2 étiquettes seulement.
+    ck(!v("equipment", "full", "m", 1).showSheetSection, "1 étiquette : pas de section Planche");
+    ck(v("equipment", "full", "m", 2).showSheetSection, "2 étiquettes : la section Planche apparaît");
+  });
+
+  await section("labels : LabelPrintPolicy — sanitize : un réglage MÉMORISÉ invalide retombe sur le défaut", async () => {
+    // La mémoire de session est PAR contexte, mais un réglage peut devenir inatteignable (ancienne UI
+    // plus permissive, contexte partagé…) : il RETOMBE, jamais d'état que l'UI ne sait plus représenter.
+    const held = { content: "strip", size: "cable", fields: { location: true, type: true, serial: true, owner: true } };
+    const cleaned = LabelPrintPolicy.sanitize("equipment", held);
+    ck.eq(cleaned.content, "full", "contenu manchon hérité sur un équipement → QR + texte");
+    ck.eq(cleaned.size, "m", "format drapeau hérité sur un équipement → son défaut (M)");
+    ck.eq(JSON.stringify(cleaned.fields), JSON.stringify({ location: true, type: true, serial: true, owner: true }), "…et l'équipement possède bien les 4 champs : rien à retirer");
+    ck(cleaned === held, "muté EN PLACE (l'objet de session est partagé par référence)");
+
+    // Cases d'un champ que le sujet ne POSSÈDE pas : décochées d'office.
+    const onBundle = LabelPrintPolicy.sanitize("bundle", { content: "full", size: "cable", fields: { location: true, type: true, serial: true, owner: true } });
+    ck(!onBundle.fields.serial && !onBundle.fields.owner, "faisceau : n° de série et propriétaire décochés (il n'en a pas)");
+    ck(onBundle.fields.location && onBundle.fields.type, "…extrémités et type conservés");
+    ck.eq(LabelPrintPolicy.sanitize("rack", { content: "qr", size: "rack", fields: { location: true, type: true, serial: true, owner: false } }).fields.serial, false, "baie : n° de série décoché");
+    // Un réglage VALIDE traverse sans être touché (le sanitize n'écrase pas la mémoire utile).
+    const kept = LabelPrintPolicy.sanitize("cable", { content: "id", size: "cable", fields: { location: false, type: true, serial: false, owner: false } });
+    ck.eq(kept.content + "/" + kept.size, "id/cable", "réglage valide : conservé tel quel");
+  });
+
+  await section("labels : LabelSubjects — sujet FAISCEAU (extrémités = les 2 patchs terminaux)", async () => {
+    // Lecteur MINIMAL injecté (patron des modules core/ : jamais d'import du Store).
+    const data = {
+      equipments: { pa: { id: "pa", name: "PATCH-A1" }, pb: { id: "pb", name: "PATCH-B7" } },
+      cableTypes: { ct: { id: "ct", name: "OM4 12F" } },
+    };
+    const reader = { get: (collection, id) => (data[collection] || {})[id] || null };
+    const bundle = { id: "b1", name: "TRK-SALLE1-SALLE2", cable_type_id: "ct", fiber_count: 12, length_m: 45, endpoint_a_equipment_id: "pa", endpoint_b_equipment_id: "pb" };
+    const s = LabelSubjects.bundle(reader, bundle);
+    ck.eq(s.collection + "/" + s.id, "cableBundles/b1", "sujet rattaché à la collection des faisceaux (le QR pointe la fiche)");
+    ck.eq(s.name, "TRK-SALLE1-SALLE2", "identifiant = le nom du faisceau");
+    ck.eq(s.endA + " → " + s.endB, "PATCH-A1 → PATCH-B7", "extrémités = les NOMS des deux patchs (un trunk n'a pas de port d'extrémité)");
+    ck.eq(s.typeLabel, "OM4 12F · 12 brins · 45 m", "type = fibre · capacité · longueur");
+    ck(s.serial === undefined && s.owner === undefined, "ni n° de série ni propriétaire (le modèle n'en a pas) — cohérent avec la matrice");
+    // Champs manquants : la ligne correspondante disparaît, jamais de « null » imprimé.
+    const bare = LabelSubjects.bundle(reader, { id: "b2", name: "TRK-2", cable_type_id: null, fiber_count: null, length_m: null, endpoint_a_equipment_id: null, endpoint_b_equipment_id: "pb" });
+    ck.eq(bare.endA, "", "extrémité non raccordée → chaîne vide (ligne absente à l'impression)");
+    ck.eq(bare.endB, "PATCH-B7", "…l'autre reste imprimée");
+    ck.eq(bare.typeLabel, "", "aucun attribut de type → pas de ligne de type");
+    // Le drapeau se rend comme celui d'un câble (même anatomie) : 2 panneaux + zone d'enroulement.
+    const flag = LabelHtml.label(s, spec({ size: "cable", qr: 18 }), { location: true, type: true, serial: false, owner: false }, '<svg data-qr="1"></svg>');
+    ck((flag.match(/class="pan/g) || []).length === 2 && flag.includes("PATCH-A1"), "faisceau : drapeau à 2 panneaux, extrémité A imprimée");
   });
 };

@@ -35,7 +35,7 @@ export const labels = {
     density: "Density",
     densityCompact: "Compact",
     densityComfort: "Comfort",
-    fields: "Human readable",
+    fields: "Additional information",
     fieldId: "Identifier (always)",
     fieldLocation: "Location",
     fieldEnds: "Ends A / B",

@@ -3,7 +3,10 @@
    étiquettes QR). Documentation : docs/qr-scan.md § « Étiquettes imprimables ».
    La maquette design-system/briefs/qr-etiquettes-imprimables-maquette.html FAIT
    FOI : les cotes de ce module reprennent les valeurs EXACTES de son script
-   (table `SIZES`, `cableGeom`, `stripGeom`, bornes des champs « Personnalisé »).
+   (table `SIZES`, `cableGeom`, `stripGeom`, bornes des champs « Personnalisé »),
+   AMENDÉES par les retours terrain du 2026-08-20 : densité COMPACTE = marges
+   nulles (seule la quiet zone du SVG garde le QR), et le QR d'un préréglage ne
+   déborde JAMAIS (cf. rectPadding / rectQrGeometry).
 
    Aucun DOM, aucun réseau, aucune chaîne traduite : les avertissements sont des
    CODES (`LabelWarning`), l'UI (ui/LabelPrintDialog) les traduit — même doctrine
@@ -112,14 +115,64 @@ export class LabelLayout {
     return preset ? preset.qr : spec.qr;
   }
 
-  /** Marge intérieure d'une étiquette RECTANGULAIRE (padding maquette : 1,5 mm, compact 0,7 mm). */
-  static rectPadding(compact: boolean): number { return compact ? 0.7 : 1.5; }
+  /** Marge intérieure d'une étiquette RECTANGULAIRE, par classe de gabarit et densité.
+      🚨 DOCTRINE DES DENSITÉS (retours terrain 2026-08-20, amende la maquette) :
+      **compact = UNIQUEMENT les marges de garde du QR** — la quiet zone est DANS le
+      SVG servi (4 modules, cf. LabelQrSvg), donc le padding d'étiquette est NUL et
+      les gouttières aussi ; **confort = l'aisance de la maquette** (1,5 mm en S/M,
+      3 en L, 4 en Baie). Avant ce retour, L/Baie portaient leur padding dans le CSS
+      seul — il vit ICI désormais, pour que les tests de non-débordement le voient. */
+  static rectPadding(cls: "s" | "m" | "l" | "rack", compact: boolean): number {
+    if (compact) return 0;
+    return cls === "l" ? 3 : cls === "rack" ? 4 : 1.5;
+  }
 
-  /** Géométrie du DRAPEAU de câble — DÉRIVÉE de la taille du QR (maquette `cableGeom`) :
-      deux panneaux de `pan` mm séparés par une zone d'enroulement hachurée de `wz` mm.
-      Compact q18 → 54 × 20,4 ; confort → 62 × 22 (la cote nominale de la table). */
+  /** Gouttière QR ⇄ texte d'une étiquette rectangulaire (même doctrine : compacte = 0,
+      la quiet zone du SVG fait la séparation ; confort = les gaps de la maquette). */
+  static rectGap(cls: "s" | "m" | "l" | "rack", compact: boolean): number {
+    if (compact) return 0;
+    return cls === "l" ? 3 : cls === "rack" ? 5 : 2;
+  }
+
+  /** Géométrie VERTICALE du QR dans une étiquette rectangulaire « QR + texte » —
+      🚨 LE QR D'UN PRÉRÉGLAGE NE DÉBORDE JAMAIS (bug S mesuré : en confort,
+      18 + 2 × 1,5 = 21 > 20 mm — le SVG débordait de la zone de contenu et se
+      faisait rogner à l'impression). Règle : le QR est clampé à (hauteur − 2 marges) ;
+      si le clamp passait SOUS le plancher de scannabilité (18 mm), c'est la MARGE
+      verticale qui cède — la scannabilité prime sur l'aisance, jamais l'inverse.
+      S'applique aux PRÉRÉGLAGES ; le « personnalisé » garde ses cotes saisies et
+      son avertissement `qr-exceeds-label` (l'utilisateur y contrôle tout). */
+  static rectQrGeometry(spec: LabelSpec, heightMm?: number): { qr: number; padV: number; padH: number; gap: number } {
+    const [, nominalH] = LabelLayout.labelDims(spec);
+    const h = heightMm != null ? heightMm : nominalH;   // sur une planche, la CELLULE (plus haute) donne plus d'air
+    const cls = spec.size === "custom" ? LabelLayout.fontClassForHeight(h) : (spec.size as "s" | "m" | "l" | "rack");
+    const pad = LabelLayout.rectPadding(cls, spec.compact);
+    const gap = LabelLayout.rectGap(cls, spec.compact);
+    const wanted = LabelLayout.qrSizeOf(spec);
+    if (spec.size === "custom" || wanted + 2 * pad <= h) return { qr: wanted, padV: pad, padH: pad, gap };
+    // Préréglage trop serré : le QR cède jusqu'au plancher (jamais sous la hauteur
+    // elle-même), puis c'est la marge qui absorbe le reste — répartie également.
+    const qr = Math.min(Math.max(h - 2 * pad, Math.min(LabelLayout.QR_FLOOR_MM, wanted)), h);
+    return { qr, padV: Math.max(0, (h - qr) / 2), padH: pad, gap };
+  }
+
+  /** Cote de QR À SERVIR au SVG (mm) — LA seule que l'UI doive employer pour mettre le code à
+      l'échelle (`LabelQrSvg.scaleToMm`), aperçu ET imprimé, unitaire ET planche. Elle passe par le
+      CLAMP des étiquettes rectangulaires (cf. `rectQrGeometry`) ; les anatomies qui ont leur propre
+      géométrie (drapeau, manchon, QR seul) gardent `qrSizeOf`, leurs cotes étant DÉRIVÉES du QR et
+      donc jamais trop petites pour lui. Sans ce point de passage unique, le SVG pouvait être servi
+      à une cote que la boîte ne pouvait pas contenir — et se faire rogner à l'impression. */
+  static renderQrMm(spec: LabelSpec, heightMm?: number): number {
+    if (spec.content === "full" && spec.size !== "cable") return LabelLayout.rectQrGeometry(spec, heightMm).qr;
+    return LabelLayout.qrSizeOf(spec);
+  }
+
+  /** Géométrie du DRAPEAU de câble — DÉRIVÉE de la taille du QR (maquette `cableGeom`,
+      densités amendées 2026-08-20) : deux panneaux de `pan` mm séparés par une zone
+      d'enroulement hachurée de `wz` mm. Compact = padding nul (quiet zone du SVG
+      seule) → q18 : 54 × 18 ; confort → 62 × 22 (la cote nominale de la table). */
   static flagGeometry(qrMm: number, compact: boolean): { pad: number; wz: number; pan: number; w: number; h: number } {
-    const pad = compact ? 1.2 : 2;
+    const pad = compact ? 0 : 2;
     const wz = compact ? 10 : 12;
     const pan = Math.max(qrMm + 2 * pad, compact ? 22 : 25);
     return { pad, wz, pan, h: qrMm + 2 * pad, w: 2 * pan + wz };
@@ -135,10 +188,11 @@ export class LabelLayout {
   }
 
   /** Géométrie « QR SEUL » : étiquette CARRÉE (QR + marges), une éventuelle bande
-      propriétaire s'ajoute SOUS le carré (maquette : side = qr + 2·pad + gap + bande). */
+      propriétaire s'ajoute SOUS le carré (maquette : side = qr + 2·pad + gap + bande ;
+      densité compacte amendée 2026-08-20 : padding nul, la quiet zone du SVG suffit). */
   static qrOnlyGeometry(qrMm: number, compact: boolean, hasOwner: boolean): { side: number; pad: number; gap: number; ownerBand: number } {
-    const pad = compact ? 1 : 2;
-    const gap = compact ? 0.8 : 1.2;
+    const pad = compact ? 0 : 2;
+    const gap = compact ? 0.4 : 1.2;
     const ownerBand = hasOwner ? (compact ? 3.6 : 4.6) : 0;
     return { side: qrMm + 2 * pad + (hasOwner ? gap + ownerBand : 0), pad, gap, ownerBand };
   }
@@ -231,8 +285,10 @@ export class LabelLayout {
       const qr = LabelLayout.qrSizeOf(spec);
       if (qr < LabelLayout.QR_FLOOR_MM) out.push("qr-floor");
       if (spec.size === "custom" && spec.content === "full") {
-        const pad = LabelLayout.rectPadding(spec.compact);
+        // Le personnalisé n'est PAS clampé (l'utilisateur contrôle ses cotes) : on
+        // AVERTIT avec le padding réel de sa classe de police (cf. rectQrGeometry).
         const [w, h] = LabelLayout.labelDims(spec);
+        const pad = LabelLayout.rectPadding(LabelLayout.fontClassForHeight(h), spec.compact);
         if (qr + 2 * pad > h || qr + 2 * pad > w) out.push("qr-exceeds-label");
       }
     } else if (opts.longestIdLength != null) {

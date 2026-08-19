@@ -428,13 +428,22 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   sortie `ui/LabelPrintDialog` (pile standard, réglages mémorisés EN SESSION par contexte), géométrie
   PURE `core/LabelLayout` (gabarits S/M/L/Baie/câble/personnalisé, drapeau DÉRIVÉ du QR, manchon
   2 tours + recouvrement, 🚨 cellule de planche ≠ étiquette — M 4×8=32, plancher QR 18 mm signalé,
-  débordement en CODES), rendu HTML PARTAGÉ aperçu ⇄ imprimé `core/LabelHtml` (noir sur blanc, zéro
-  token de thème), quiet zone du SVG servi vérifiée/compensée `core/LabelQrSvg`, matière par
+  débordement en CODES ; DENSITÉS — compact = marges NULLES, la quiet zone du SVG suffit — et 🚨 le QR
+  d'un préréglage NE DÉBORDE JAMAIS : `rectQrGeometry` clampe, la MARGE cède avant la scannabilité,
+  `renderQrMm` est le point de passage UNIQUE vers le SVG), 🚨 MATRICE DE VISIBILITÉ CONTEXTUELLE PURE
+  `core/LabelPrintPolicy` (offres par sujet — kind `bundle` = faisceau, même anatomie que le câble —,
+  verdict `visibility(sujet, contenu, format, nombre)` que la modale APPLIQUE sans jamais le calculer,
+  `sanitize` qui fait retomber un réglage mémorisé invalide ; corollaire CSS indissociable
+  `.label-print [hidden]{display:none!important}` — sans lui les `hidden` sont INERTES, une règle
+  d'auteur battant toujours le `[hidden]` du navigateur), rendu HTML PARTAGÉ aperçu ⇄ imprimé
+  `core/LabelHtml` (noir sur blanc, zéro token de thème, cotes posées INLINE depuis LabelLayout),
+  quiet zone du SVG servi vérifiée/compensée `core/LabelQrSvg`, matière par
   enregistrement `core/LabelSubjects` (owner = champ E1 derrière une case, vide → ligne absente) ;
   impression = iframe print-CSS isolée (unitaire `@page` taille EXACTE → Brother/Dymo, planche A4
-  colonnes plafonnées + traits de coupe) ; points d'entrée fiches équipement/baie (étiquette DE la
-  baie ≠ planche DU contenu, U décroissants)/câble (2 extrémités par défaut)/spare + action de ligne
-  du listing équipements — TOUS sous le prédicat injecté `LabelPrintDialog.available()` ;
+  colonnes plafonnées + traits de coupe, `@page`/html/body à marge NULLE des deux côtés) ; points
+  d'entrée fiches équipement/baie (étiquette DE la baie ≠ planche DU contenu, U décroissants)/câble
+  (2 extrémités par défaut)/faisceau/spare + actions de ligne des listings équipements, câbles et
+  faisceaux — TOUS sous le prédicat injecté `LabelPrintDialog.available()` ;
   section « Mode local » — scan OK dans les deux modes, génération/impression = mode API seulement
   (setup injecté par main.ts, patron injection nulle)).
 

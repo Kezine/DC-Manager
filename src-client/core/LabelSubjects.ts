@@ -14,6 +14,9 @@
      · baie : « Salle » = la salle porteuse, type = « Baie <N>U » ;
      · câble : extrémités A/B = « <équipement> · <port> », le SENS A → B est
        l'ORDRE DE LA FICHE (from → to, décision du cadrage E) ;
+     · faisceau (trunk) : MÊME anatomie que le câble — extrémités A/B = les deux
+       PATCHS terminaux (cf. docs/faisceaux.md, contrainte T11 : ce sont des
+       équipements, pas des ports), type = fibre + capacité + longueur ;
      · spare : désignation affichée, emplacement = lieu de stockage.
    Un champ vide reste vide — la ligne correspondante est ABSENTE de l'étiquette
    (décision « owner vide → ligne absente », généralisée par LabelHtml).
@@ -84,6 +87,31 @@ export class LabelSubjects {
       endA: end(cable.from_port_id),
       endB: end(cable.to_port_id),
       typeLabel: [cableType ? cableType.name : "", cable.length_m != null ? cable.length_m + " m" : ""].filter(Boolean).join(" · "),
+    };
+  }
+
+  /** Drapeau/manchon d'un FAISCEAU (trunk) : identifiant, extrémités A/B, type de fibre.
+      Un faisceau n'a PAS de ports d'extrémité (ses brins sont piochés par les ports des
+      patchs) : ses bouts sont les deux ÉQUIPEMENTS patch (`endpoint_*_equipment_id`,
+      contrainte T11) — d'où un libellé d'extrémité réduit au nom du patch, sans « · port ».
+      Le type agrège fibre + CAPACITÉ (la donnée utile au bout d'un trunk : combien de brins
+      y passent) + longueur. */
+  static bundle(reader: LabelSubjectReader, bundle: any): LabelSubject {
+    const patch = (equipmentId: string | null): string => {
+      const eq: any = equipmentId ? reader.get("equipments", equipmentId) : null;
+      return eq ? (eq.name || "") : "";
+    };
+    const fiberType: any = bundle.cable_type_id ? reader.get("cableTypes", bundle.cable_type_id) : null;
+    return {
+      collection: "cableBundles", id: bundle.id,
+      name: bundle.name || "",
+      endA: patch(bundle.endpoint_a_equipment_id),
+      endB: patch(bundle.endpoint_b_equipment_id),
+      typeLabel: [
+        fiberType ? fiberType.name : "",
+        bundle.fiber_count != null ? I18n.t("detail.bundle.strandCount", { count: bundle.fiber_count }) : "",
+        bundle.length_m != null ? bundle.length_m + " m" : "",
+      ].filter(Boolean).join(" · "),
     };
   }
 

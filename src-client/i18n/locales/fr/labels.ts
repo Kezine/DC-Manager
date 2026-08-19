@@ -1,7 +1,7 @@
 /* ============================================================================
    Domaine `labels` — FRANÇAIS. ÉTIQUETTES QR IMPRIMABLES (chantier étiquettes
-   QR, lot E) : points d'entrée des fiches (équipement/baie/câble/spare), modale
-   d'impression (`ui/LabelPrintDialog` — panneau de réglages, aperçu, stats),
+   QR, lot E) : points d'entrée des fiches (équipement/baie/câble/faisceau/spare),
+   modale d'impression (`ui/LabelPrintDialog` — panneau de réglages, aperçu, stats),
    avertissements de débordement (codes de `core/LabelLayout` → libellés ICI),
    libellés composés des sujets (`core/LabelSubjects`). L'action de LIGNE des
    listings vit dans `lists.chrome.rowPrint`. Agrégé par `../fr.ts`.
@@ -12,6 +12,8 @@ export const labels = {
     rack: "Étiquette de baie",
     rackSheet: "Planche du contenu ({{n}})",
     rackSheetSource: "Baie {{rack}} · contenu",
+    // Gestes du DRAPEAU — ils nomment l'ANATOMIE, pas la famille : câbles ET faisceaux
+    // (mêmes deux extrémités, même drapeau) les partagent. `{{cable}}` = le nom de l'objet.
     cableOne: "Un drapeau",
     cableBoth: "Imprimer les 2 extrémités",
     cableBothSource: "{{cable}} · extrémités A et B",
@@ -40,7 +42,9 @@ export const labels = {
     density: "Densité",
     densityCompact: "Compact",
     densityComfort: "Confort",
-    fields: "Lisible humain",
+    // Titre de la section des cases par champ. « Lisible humain » (maquette) disait le REGISTRE
+    // typographique, pas le contenu — renommé sur retour terrain 2026-08-20.
+    fields: "Informations additionnelles",
     fieldId: "Identifiant (toujours)",
     fieldLocation: "Emplacement",
     fieldEnds: "Extrémités A / B",

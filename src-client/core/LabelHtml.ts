@@ -54,11 +54,16 @@ export interface LabelFields {
 
 export class LabelHtml {
   /** CSS des étiquettes — UNE source pour l'aperçu ET l'imprimé (cf. en-tête).
-      Porté de la maquette, scopé `.label-render`, couleurs littérales seulement. */
+      Porté de la maquette, scopé `.label-render`, couleurs littérales seulement.
+      ⚠ Les PADDINGS et GOUTTIÈRES des étiquettes ne vivent PLUS ici : ils sont
+      calculés par `LabelLayout` (table des densités, clamp anti-débordement) et
+      posés INLINE par `label()` — les tests vérifient les cotes AU MILLIMÈTRE
+      dans le HTML généré, ce qu'une règle CSS de classe rendrait invisible.
+      La typographie COMPACTE se resserre en fin de feuille (`.lab.compact`). */
   static readonly CSS = `
 .label-render{--lp-mono:ui-monospace,"SF Mono","Menlo","Consolas","Cascadia Mono","Roboto Mono",monospace;--lp-sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;color:#000}
 .label-render *{box-sizing:border-box}
-.label-render .lab{background:#fff;color:#000;display:flex;align-items:center;gap:2mm;padding:1.5mm;overflow:hidden;font-family:var(--lp-sans)}
+.label-render .lab{background:#fff;color:#000;display:flex;align-items:center;overflow:hidden;font-family:var(--lp-sans)}
 .label-render .lab *{color:#000}
 .label-render .lab svg{flex:none;display:block}
 .label-render .lab .txt{min-width:0;display:flex;flex-direction:column;gap:.6mm}
@@ -68,18 +73,13 @@ export class LabelHtml {
 .label-render .lab .l-sn{font-family:var(--lp-mono);color:#444;line-height:1.1}
 .label-render .lab .l-own{font-family:var(--lp-sans);text-transform:uppercase;letter-spacing:.07em;color:#222;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
 .label-render .lab .rule{height:.35mm;background:#000;width:100%;margin:.8mm 0}
-.label-render .lab.compact{padding:.7mm;gap:1.4mm}
-.label-render .lab.s{gap:2mm}
 .label-render .lab.s .l-id{font-size:8pt}.label-render .lab.s .l-loc{font-size:6.5pt}.label-render .lab.s .l-own{font-size:5pt}
-.label-render .lab.m{gap:2mm}
 .label-render .lab.m .l-id{font-size:8.5pt}.label-render .lab.m .l-loc{font-size:7pt}.label-render .lab.m .l-meta{font-size:6pt}.label-render .lab.m .l-sn{font-size:5.5pt}.label-render .lab.m .l-own{font-size:5.5pt}
-.label-render .lab.l{gap:3mm;padding:3mm}
 .label-render .lab.l .l-id{font-size:12pt}.label-render .lab.l .l-loc{font-size:9pt}.label-render .lab.l .l-meta{font-size:7.5pt}.label-render .lab.l .l-sn{font-size:7pt}.label-render .lab.l .l-own{font-size:7pt}
-.label-render .lab.rack{gap:5mm;padding:4mm;align-items:center}
+.label-render .lab.rack{align-items:center}
 .label-render .lab.rack .l-id{font-size:26pt;letter-spacing:-.03em}
 .label-render .lab.rack .l-loc{font-size:12pt;white-space:normal}
 .label-render .lab.rack .l-meta{font-size:9pt}.label-render .lab.rack .l-sn{font-size:8pt}.label-render .lab.rack .l-own{font-size:9pt}
-.label-render .lab.l.compact,.label-render .lab.rack.compact{padding:1.5mm}
 .label-render .lab.qronly{justify-content:center;flex-direction:column}
 .label-render .lab.qronly .txt{align-items:center;width:100%}
 .label-render .lab.qronly .l-own{text-align:center}
@@ -96,6 +96,8 @@ export class LabelHtml {
 .label-render .lab.cable.strip .cell2 .l-id{font-size:8pt;letter-spacing:0;display:block;white-space:nowrap;text-overflow:ellipsis;max-width:100%}
 .label-render .lab.cable.strip .cell2 .l-loc,.label-render .lab.cable.strip .cell2 .l-own{font-size:5pt;white-space:normal;overflow-wrap:anywhere;text-align:start;max-height:100%}
 .label-render .lab.cable.strip .ov{flex:none;background:repeating-linear-gradient(45deg,#fff 0 1mm,#e9e9e9 1mm 2mm);border-left:.2mm dashed #999}
+.label-render .lab.compact .txt{gap:.2mm}
+.label-render .lab.compact .rule{margin:.4mm 0}
 .label-render .a4{width:210mm;height:297mm;background:#fff;padding:8mm;display:grid;gap:0;align-content:start}
 .label-render .a4 .cell{border:.2mm dashed #bbb;display:flex;align-items:center;justify-content:center;overflow:hidden}
 .label-render .a4 .cell.nocut{border:0}
@@ -155,6 +157,9 @@ export class LabelHtml {
 
     // QR + TEXTE (gabarits S/M/L/Baie/personnalisé) : QR TOUJOURS à gauche (la main
     // sait où viser sans lire), colonne de texte à droite — anatomie de la maquette.
+    // Padding/gouttière INLINE depuis LabelLayout (table des densités + clamp du QR
+    // des préréglages — bug S : en confort la marge cède, jamais la scannabilité).
+    const rg = LabelLayout.rectQrGeometry(spec, h);
     const big = cls === "l" || cls === "rack";
     let t = `<div class="l-id">${esc(subject.name)}</div>`;
     if (fields.location && subject.location) t += `<div class="l-loc">${esc(subject.location)}</div>`;
@@ -162,7 +167,7 @@ export class LabelHtml {
     if (fields.type && subject.typeLabel && cls !== "s") t += `<div class="l-meta">${esc(subject.typeLabel)}</div>`;
     if (fields.serial && subject.serial && cls !== "s") t += `<div class="l-sn">SN ${esc(subject.serial)}</div>`;
     if (own) t += `<div class="l-own">${esc(own)}</div>`;
-    return `<div class="lab ${cls}${cp ? " compact" : ""}" style="width:${mm(w)}mm;height:${mm(h)}mm">${qrSvg}<div class="txt">${t}</div></div>`;
+    return `<div class="lab ${cls}${cp ? " compact" : ""}" style="width:${mm(w)}mm;height:${mm(h)}mm;padding:${mm(rg.padV)}mm ${mm(rg.padH)}mm;gap:${mm(rg.gap)}mm">${qrSvg}<div class="txt">${t}</div></div>`;
   }
 
   /* ---------------------------------- planche ---------------------------------- */

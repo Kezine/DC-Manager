@@ -9,14 +9,25 @@
    SON enregistrement.
 
    UN SEUL écran de sortie : ce dialogue. Ce qui change est ce qu'il REÇOIT
-   (`LabelPrintContext` — un objet, les 2 extrémités d'un câble, le contenu
-   d'une baie). Il s'ouvre dans la PILE DE MODALES STANDARD (principe n°11 —
-   par-dessus la fiche appelante, ← y revient).
+   (`LabelPrintContext` — un objet, les 2 extrémités d'un câble ou d'un
+   faisceau, le contenu d'une baie). Il s'ouvre dans la PILE DE MODALES
+   STANDARD (principe n°11 — par-dessus la fiche appelante, ← y revient).
 
-   DÉCOUPE : la géométrie est PURE (`core/LabelLayout`), le rendu HTML est PUR
-   et PARTAGÉ aperçu ⇄ imprimé (`core/LabelHtml`), le SVG de QR est retravaillé
-   PUREMENT (`core/LabelQrSvg`). Ici ne vivent que l'orchestration DOM, l'état
-   de session et l'iframe d'impression.
+   DÉCOUPE : la géométrie est PURE (`core/LabelLayout`), la MATRICE DE
+   VISIBILITÉ contextuelle est PURE (`core/LabelPrintPolicy`), le rendu HTML est
+   PUR et PARTAGÉ aperçu ⇄ imprimé (`core/LabelHtml`), le SVG de QR est
+   retravaillé PUREMENT (`core/LabelQrSvg`). Ici ne vivent que l'orchestration
+   DOM, l'état de session et l'iframe d'impression.
+
+   🚨 AUCUNE RÈGLE DE VISIBILITÉ ÉCRITE ICI (retours terrain 2026-08-20 : « tous
+   les contrôles dans tous les contextes »). `render()` demande UN verdict à
+   `LabelPrintPolicy.visibility(kind, contenu, format, nombre)` et se contente de
+   POSER `hidden` — et `sanitize` ramène, à l'ouverture, des réglages mémorisés
+   devenus invalides sur les défauts du contexte. Corollaire CSS indissociable :
+   la feuille de l'app porte `.label-print [hidden]{display:none!important}` —
+   sans elle, `.btn`/`.label-print-mm-field` (règles d'AUTEUR, qui battent
+   toujours le `[hidden]` de la feuille du navigateur) rendaient ces `hidden`
+   parfaitement INERTES. C'était la cause première du retour terrain.
 
    MODE LOCAL : l'impression d'étiquettes est MODE API SEULEMENT (génération
    serveur, décision § 2.1 du handoff). Patron « injection nulle » (cf.
@@ -47,6 +58,8 @@ import type { LabelSpec, LabelSizeId, LabelContentId, LabelWarning } from "../co
 import { LabelHtml } from "../core/LabelHtml";
 import type { LabelSubject, LabelFields } from "../core/LabelHtml";
 import { LabelQrSvg } from "../core/LabelQrSvg";
+import { LabelPrintPolicy } from "../core/LabelPrintPolicy";
+import type { LabelPrintKind } from "../core/LabelPrintPolicy";
 
 /** Ce que la modale attend de l'application (câblé UNE fois par main.ts, MODE API seulement). */
 export interface LabelPrintHost {
@@ -56,8 +69,10 @@ export interface LabelPrintHost {
   fetchQrSvg(collection: string, id: string): Promise<string>;
 }
 
-/** Contexte d'ouverture — ce qui change entre les points d'entrée. */
-export type LabelPrintKind = "equipment" | "rack" | "cable" | "spare";
+/** Contexte d'ouverture — ce qui change entre les points d'entrée. Le TYPE de sujet
+    (`LabelPrintKind`, faisceaux compris) vit dans `core/LabelPrintPolicy`, avec la
+    matrice de visibilité qu'il pilote — ré-exporté ici pour les points d'entrée. */
+export type { LabelPrintKind };
 export interface LabelPrintContext {
   kind: LabelPrintKind;
   /** Étiquettes à tirer (1 = unitaire, ≥ 2 = planche). Un câble « 2 extrémités » =
@@ -94,19 +109,18 @@ export class LabelPrintDialog {
       setup) — le prédicat que TOUTES les entrées d'impression consultent. */
   static available(): boolean { return !!LabelPrintDialog.host; }
 
-  /** Défauts d'un contexte (maquette `openPrint`) — le premier tirage d'un contexte
-      part de là, les suivants reprennent le dernier tirage de la session. */
+  /** Défauts d'un contexte — DÉCIDÉS par la politique pure (`core/LabelPrintPolicy`,
+      valeurs de la maquette `openPrint`) : le premier tirage d'un contexte part de
+      là, les suivants reprennent le dernier tirage de la session. */
   private static defaultsFor(kind: LabelPrintKind): LabelPrintSettings {
     return {
-      size: kind === "cable" ? "cable" : kind === "rack" ? "rack" : kind === "spare" ? "s" : "m",
+      size: LabelPrintPolicy.defaultSizeFor(kind),
       content: "full",
       compact: true,
-      qr: kind === "cable" ? 18 : 20,
+      qr: LabelPrintPolicy.defaultQrFor(kind),
       customW: 50, customH: 25, dia: 6, len: 25,
-      // Emplacement coché partout ; type d'office pour câble/baie (maquette) ; owner
-      // DÉCOCHÉ par défaut (décision E — mémorisé en session comme le reste).
-      fields: { location: true, type: kind === "cable" || kind === "rack", serial: false, owner: false },
-      cols: kind === "cable" ? 3 : 4,
+      fields: LabelPrintPolicy.defaultFieldsFor(kind),
+      cols: LabelPrintPolicy.defaultColsFor(kind),
       cuts: true,
     };
   }
@@ -123,9 +137,14 @@ export class LabelPrintDialog {
     const host = LabelPrintDialog.host;
     const subjects = (ctx.subjects || []).filter(Boolean);
     if (!host || !subjects.length) return;
-    const st = LabelPrintDialog.settingsFor(ctx.kind);
-    const isCable = ctx.kind === "cable";
+    // Réglages mémorisés RAMENÉS dans ce que le contexte offre (retombée sur défaut —
+    // un format drapeau hérité n'a aucun sens sur un équipement, cf. LabelPrintPolicy).
+    const st = LabelPrintPolicy.sanitize(ctx.kind, LabelPrintDialog.settingsFor(ctx.kind));
     const count = subjects.length;
+    // Verdict d'OUVERTURE : sert aux traits qui ne dépendent QUE du sujet et ne bougeront donc
+    // plus (libellé « Emplacement » ⇄ « Extrémités A / B »). Tout le reste est réévalué à chaque
+    // rendu — c'est le même appel, avec l'état courant.
+    const openVis = LabelPrintPolicy.visibility(ctx.kind, st.content, st.size, count);
     const longestId = subjects.reduce((max, s) => Math.max(max, (s.name || "").length), 0);
     const t = (key: string, vars?: Record<string, unknown>) => I18n.t("labels." + key, vars);
 
@@ -148,32 +167,26 @@ export class LabelPrintDialog {
       return box;
     };
 
-    // -- Contenu : QR + texte / QR seul (+ manchons pour les câbles) --
-    const contentOpts = [
-      { value: "full", label: t("dialog.contentFull") },
-      { value: "qr", label: t("dialog.contentQr") },
-      ...(isCable ? [
-        { value: "strip", label: t("dialog.contentStrip") },
-        { value: "id", label: t("dialog.contentId") },
-      ] : []),
-    ];
-    if (!isCable && (st.content === "strip" || st.content === "id")) st.content = "full";   // garde : réglage hérité d'un autre onglet de session
-    const contentSel = FormControls.select(contentOpts, st.content);
+    // -- Contenu : options OFFERTES par le contexte (matrice LabelPrintPolicy —
+    //    les manchons n'existent que pour les câbles/faisceaux) --
+    const contentLabels: Record<LabelContentId, string> = {
+      full: t("dialog.contentFull"), qr: t("dialog.contentQr"),
+      strip: t("dialog.contentStrip"), id: t("dialog.contentId"),
+    };
+    const contentSel = FormControls.select(
+      LabelPrintPolicy.contentsFor(ctx.kind).map((c) => ({ value: c, label: contentLabels[c] })), st.content);
     fset(t("dialog.content")).appendChild(contentSel);
 
-    // -- Format : préréglages (+ Personnalisé mm) ; les câbles n'ont que drapeau/personnalisé --
-    const sizeOpts = isCable
-      ? [{ value: "cable", label: t("dialog.sizeCable") }, { value: "custom", label: t("dialog.sizeCustom") }]
-      : [
-          { value: "s", label: t("dialog.sizeS") }, { value: "m", label: t("dialog.sizeM") },
-          { value: "l", label: t("dialog.sizeL") }, { value: "rack", label: t("dialog.sizeRack") },
-          { value: "custom", label: t("dialog.sizeCustom") },
-        ];
-    if (isCable && st.size !== "cable" && st.size !== "custom") st.size = "cable";
-    if (!isCable && st.size === "cable") st.size = "m";
+    // -- Format : préréglages OFFERTS par le contexte (drapeau = câbles/faisceaux
+    //    seulement, « Baie » = baies seulement — cf. LabelPrintPolicy.sizesFor) --
+    const sizeLabels: Record<LabelSizeId, string> = {
+      s: t("dialog.sizeS"), m: t("dialog.sizeM"), l: t("dialog.sizeL"),
+      rack: t("dialog.sizeRack"), cable: t("dialog.sizeCable"), custom: t("dialog.sizeCustom"),
+    };
     const sizeBox = fset(t("dialog.format"));
     const sizeHead = sizeBox.querySelector(".label-print-h") as HTMLElement;
-    const sizeSel = FormControls.select(sizeOpts, st.size);
+    const sizeSel = FormControls.select(
+      LabelPrintPolicy.sizesFor(ctx.kind).map((s) => ({ value: s, label: sizeLabels[s] })), st.size);
     sizeBox.appendChild(sizeSel);
     // Rangée des cotes en mm (personnalisé / taille de QR / manchon) — visibilité par mode.
     const mmRow = document.createElement("div"); mmRow.className = "label-print-mm";
@@ -203,26 +216,29 @@ export class LabelPrintDialog {
     );
     fset(t("dialog.density")).appendChild(densSeg);
 
-    // -- Lisible humain : identifiant verrouillé + cases par champ (owner incluse — décision E) --
+    // -- Informations additionnelles : identifiant verrouillé + cases par champ (owner incluse —
+    //    décision E). Les cases PRÉSENTES sont celles que le SUJET possède ; celles que le CONTENU
+    //    courant annule sont masquées au rendu (verdict `fields`), jamais décidées ici. --
     const fieldsBox = fset(t("dialog.fields"));
     const fieldsCol = document.createElement("div"); fieldsCol.className = "label-print-checks"; fieldsBox.appendChild(fieldsCol);
     const idToggle = FormControls.toggle(t("dialog.fieldId"), true, () => { /* toujours coché */ }, { disabled: true, block: true });
-    const locToggle = FormControls.toggle(isCable ? t("dialog.fieldEnds") : t("dialog.fieldLocation"), st.fields.location, (v) => { st.fields.location = v; render(); }, { block: true });
+    // « Emplacement » devient « Extrémités A / B » pour les sujets à DRAPEAU (câble, faisceau) :
+    // le verdict le dit, le dialogue n'a pas à savoir quelles familles sont concernées.
+    const locToggle = FormControls.toggle(openVis.locationAsEnds ? t("dialog.fieldEnds") : t("dialog.fieldLocation"), st.fields.location, (v) => { st.fields.location = v; render(); }, { block: true });
     const typeToggle = FormControls.toggle(t("dialog.fieldType"), st.fields.type, (v) => { st.fields.type = v; render(); }, { block: true });
     const snToggle = FormControls.toggle(t("dialog.fieldSerial"), st.fields.serial, (v) => { st.fields.serial = v; render(); }, { block: true });
     const ownerToggle = FormControls.toggle(t("dialog.fieldOwner"), st.fields.owner, (v) => { st.fields.owner = v; render(); }, { block: true });
     fieldsCol.append(idToggle, locToggle, typeToggle, snToggle, ownerToggle);
 
-    // -- Planche : colonnes plafonnées + traits de coupe — seulement à partir de 2 étiquettes --
-    const sheetBox = count >= 2 ? fset(t("dialog.sheet")) : null;
+    // -- Planche : colonnes plafonnées + traits de coupe. La section est CONSTRUITE dans tous les
+    //    cas et masquée par le verdict (`showSheetSection` — ≥ 2 étiquettes) : une seule règle,
+    //    écrite dans la politique, plutôt qu'un `if` de construction qui la dupliquerait. --
+    const sheetBox = fset(t("dialog.sheet"));
     const colsHolder = document.createElement("div");
-    let cutsToggle: HTMLButtonElement | null = null;
-    if (sheetBox) {
-      sheetBox.appendChild(colsHolder);
-      cutsToggle = FormControls.toggle(t("dialog.cuts"), st.cuts, (v) => { st.cuts = v; render(); }, { block: true });
-      cutsToggle.style.marginTop = "8px";
-      sheetBox.appendChild(cutsToggle);
-    }
+    sheetBox.appendChild(colsHolder);
+    const cutsToggle = FormControls.toggle(t("dialog.cuts"), st.cuts, (v) => { st.cuts = v; render(); }, { block: true });
+    cutsToggle.style.marginTop = "8px";
+    sheetBox.appendChild(cutsToggle);
 
     // -- Avertissements (codes de LabelLayout traduits ici) --
     const warnBox = document.createElement("div"); warnBox.className = "label-print-warn"; warnBox.hidden = true;
@@ -265,7 +281,10 @@ export class LabelPrintDialog {
       let svg = "";
       if (needQr()) {
         const raw = qrCache.get(qrKey(s)) || "";
-        if (raw) svg = LabelQrSvg.scaleToMm(raw, LabelLayout.qrSizeOf(sp));
+        // Cote SERVIE au SVG = celle que la boîte peut RÉELLEMENT contenir (`renderQrMm` applique le
+        // clamp de `rectQrGeometry` — correctif du QR rogné en format S). Le même chemin sert
+        // l'aperçu et l'imprimé, l'unitaire et la planche (la CELLULE donne alors la hauteur).
+        if (raw) svg = LabelQrSvg.scaleToMm(raw, LabelLayout.renderQrMm(sp, dims ? dims[1] : undefined));
       }
       return LabelHtml.label(s, sp, st.fields, svg, dims);
     };
@@ -290,31 +309,30 @@ export class LabelPrintDialog {
     const render = (): void => {
       const sp = spec();
       const sleeve = sp.content === "strip" || sp.content === "id";
-      const qrOnly = sp.content === "qr";
-      // Visibilité des contrôles (règles de la maquette) : le format s'efface derrière
-      // la seule cote utile en QR seul / manchon ; les cotes libres suivent le mode.
-      sizeHead.textContent = sleeve ? t("dialog.formatSleeve") : qrOnly ? t("dialog.formatQrSize") : t("dialog.format");
-      sizeSel.hidden = qrOnly || sleeve;
-      const qrDriven = qrOnly || sp.size === "cable";
-      mmRow.hidden = !(qrDriven || sp.size === "custom" || sleeve);
-      cwF.hidden = qrDriven || sleeve;
-      chF.hidden = qrDriven || sleeve;
-      cqF.hidden = sleeve;
-      cdF.hidden = !sleeve;
-      clF.hidden = !sleeve;
-      // Lisible humain : tout masqué en « identifiant seul » ; en QR seul ne survit que
-      // le propriétaire (bande sous le carré) ; le n° de série n'existe pas sur un câble.
-      idToggle.hidden = qrOnly || sp.content === "id";
-      locToggle.hidden = qrOnly || sp.content === "id";
-      typeToggle.hidden = qrOnly || sp.content === "id";
-      snToggle.hidden = isCable || qrOnly || sp.content === "id";
-      ownerToggle.hidden = sp.content === "id";
+      // LE VERDICT — un seul appel, appliqué tel quel (aucune règle de visibilité ici, cf. en-tête).
+      const vis = LabelPrintPolicy.visibility(ctx.kind, sp.content, sp.size, count);
+      sizeHead.textContent = vis.header === "sleeve" ? t("dialog.formatSleeve")
+        : vis.header === "qrSize" ? t("dialog.formatQrSize") : t("dialog.format");
+      sizeSel.hidden = !vis.showSizeSelect;
+      mmRow.hidden = !vis.showMmRow;
+      cwF.hidden = !vis.showWidthHeight;
+      chF.hidden = !vis.showWidthHeight;
+      cqF.hidden = !vis.showQrMm;
+      cdF.hidden = !vis.showDiaLen;
+      clF.hidden = !vis.showDiaLen;
+      idToggle.hidden = !vis.showIdRow;
+      locToggle.hidden = !vis.fields.location;
+      typeToggle.hidden = !vis.fields.type;
+      snToggle.hidden = !vis.fields.serial;
+      ownerToggle.hidden = !vis.fields.owner;
+      fieldsBox.hidden = !vis.showFieldsSection;
+      sheetBox.hidden = !vis.showSheetSection;
       sizeHint.textContent = sleeve
         ? t("dialog.sleeveHint", { dia: sp.dia, len: sp.len })
         : (LabelLayout.qrSizeOf(sp) >= LabelLayout.QR_FLOOR_MM ? t("dialog.qrOk", { mm: LabelLayout.qrSizeOf(sp) }) : t("dialog.qrLow", { mm: LabelLayout.qrSizeOf(sp) }));
 
       // Colonnes de planche : reconstruites à chaque rendu (le plafond dépend du gabarit).
-      if (sheetBox) {
+      if (vis.showSheetSection) {
         const maxCols = LabelLayout.maxColumns(sp);
         const effective = Math.min(st.cols, maxCols);
         colsHolder.innerHTML = "";
@@ -367,7 +385,7 @@ export class LabelPrintDialog {
       st.content = (contentSel.value as LabelContentId) || "full";
       if (needQr()) ensureQrs(); else render();
     };
-    sizeSel.onchange = () => { st.size = (sizeSel.value as LabelSizeId) || (isCable ? "cable" : "m"); render(); };
+    sizeSel.onchange = () => { st.size = (sizeSel.value as LabelSizeId) || LabelPrintPolicy.defaultSizeFor(ctx.kind); render(); };
     const numInput = (input: HTMLInputElement, apply: (v: number) => void) => {
       input.oninput = () => { const v = parseFloat(input.value); if (Number.isFinite(v) && v > 0) { apply(v); render(); } };
     };

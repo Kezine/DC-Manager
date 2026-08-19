@@ -1126,6 +1126,16 @@ async function boot(): Promise<void> {
     subtitle: I18n.t("tabs.cables.subtitle"),
     form: (id, done) => Forms.cable(store, formHost, id, done), addLabel: I18n.t("app.add.cable"),
     links: ["reseaux", "porttypes", "cabletypes", "faisceaux"], locate: "cable",
+    // « Imprimer l'étiquette » de ligne (retour terrain 2026-08-20 : l'action manquait ici). Elle
+    // rejoue le geste PRINCIPAL de la fiche câble — DEUX drapeaux identiques, un par extrémité
+    // (décision E) — plutôt qu'un seul : un câble s'étiquette par paire, la ligne n'a aucune raison
+    // d'en offrir un demi. « Un drapeau » reste accessible depuis la fiche.
+    onPrint: (id) => {
+      const cable: any = store.get("cables", id);
+      if (!cable) return;
+      const subject = () => LabelSubjects.cable(store, cable);
+      LabelPrintDialog.open({ kind: "cable", subjects: [subject(), subject()], source: I18n.t("labels.entry.cableBothSource", { cable: cable.name || "" }) });
+    },
   });
   // IPAM : la page PRINCIPALE de l'onglet est la liste des ADRESSES IP ; les réseaux (sous-réseaux) et les plages
   // DHCP sont des sous-onglets. Le titre/soustitre réutilisent les libellés « adresses » ; ceux « IPAM — Réseaux IP »
@@ -1323,6 +1333,14 @@ async function boot(): Promise<void> {
     icon: Icons.BUNDLE,
     title: I18n.t("tabs.faisceaux.title"), subtitle: I18n.t("tabs.faisceaux.subtitle"),
     form: (id, done) => Forms.cableBundle(store, formHost, id, done), addLabel: I18n.t("app.add.bundle"), kind: "secondary", parent: "cables",
+    // Étiquette de FAISCEAU (retour terrain 2026-08-20) : même anatomie que le câble — un drapeau
+    // par extrémité, donc DEUX par défaut (les deux patchs terminaux, cf. docs/faisceaux.md).
+    onPrint: (id) => {
+      const bundle: any = store.get("cableBundles", id);
+      if (!bundle) return;
+      const subject = () => LabelSubjects.bundle(store, bundle);
+      LabelPrintDialog.open({ kind: "bundle", subjects: [subject(), subject()], source: I18n.t("labels.entry.cableBothSource", { cable: bundle.name || "" }) });
+    },
   });
   addListTab("porttypes", I18n.t("tabs.porttypes.label"), ListConfigs.portTypes, {
     icon: Icons.PORT,

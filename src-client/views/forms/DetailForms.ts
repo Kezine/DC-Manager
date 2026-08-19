@@ -252,7 +252,22 @@ export class DetailForms extends IpamForms {
     tw?.querySelectorAll("[data-port-loc]").forEach((el) => { (el as HTMLElement).onclick = () => host.locate?.("port", (el as HTMLElement).dataset.portLoc!, () => this.cableBundleDetail(store, host, id, onChanged)); });
 
     AuditLine.attach(root, b, host.userDirectory);   // « Créé/Modifié par » (mode API)
-    const footerActions = this.footer(() => this.cableBundle(store, host, id, onChanged), "cableBundles");
+    // ÉTIQUETTES de faisceau (retour terrain 2026-08-20 — mode API seulement, prédicat injecté) :
+    // un trunk s'étiquette comme un câble, PAR PAIRE (un drapeau à chaque patch terminal). Mêmes
+    // libellés que la fiche câble : ils nomment l'ANATOMIE (le drapeau), pas la famille.
+    const footerActions: HTMLElement[] = [];
+    if (LabelPrintDialog.available()) {
+      const subject = () => LabelSubjects.bundle(store, b);
+      const oneBtn = document.createElement("button"); oneBtn.type = "button"; oneBtn.className = "btn btn-ghost";
+      oneBtn.textContent = I18n.t("labels.entry.cableOne");
+      oneBtn.onclick = () => LabelPrintDialog.open({ kind: "bundle", subjects: [subject()], source: b.name || "" });
+      footerActions.push(oneBtn);
+      const bothBtn = document.createElement("button"); bothBtn.type = "button"; bothBtn.className = "btn btn-ghost";
+      bothBtn.innerHTML = `<span class="gi">${Icons.PRINT}</span>${I18n.t("labels.entry.cableBoth")}`;
+      bothBtn.onclick = () => LabelPrintDialog.open({ kind: "bundle", subjects: [subject(), subject()], source: I18n.t("labels.entry.cableBothSource", { cable: b.name || "" }) });
+      footerActions.push(bothBtn);
+    }
+    footerActions.push(...this.footer(() => this.cableBundle(store, host, id, onChanged), "cableBundles"));
     host.openModal({ title: I18n.t("detail.bundle.title"), subtitle: Html.escape(b.name || ""), body: root, footerActions, stackKey: "detail:cableBundles/" + id, onResume: () => this.cableBundleDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 

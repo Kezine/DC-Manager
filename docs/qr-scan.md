@@ -299,20 +299,39 @@ objet, les deux extrémités d'un câble, le contenu d'une baie).
 
 | Module | Rôle |
 |---|---|
-| `core/LabelLayout` | **Géométrie PURE** (mm) : table des gabarits (cotes EXACTES de la maquette), drapeau **dérivé du QR**, manchon (2 tours + recouvrement), QR seul, **cellule de planche ≠ étiquette**, plafond de colonnes, capacité A4, bornes du personnalisé, **débordement en CODES** (`LabelWarning` — l'UI traduit) |
+| `core/LabelLayout` | **Géométrie PURE** (mm) : table des gabarits (cotes EXACTES de la maquette), **densités** (padding/gouttière), drapeau **dérivé du QR**, manchon (2 tours + recouvrement), QR seul, **cellule de planche ≠ étiquette**, plafond de colonnes, capacité A4, bornes du personnalisé, **débordement en CODES** (`LabelWarning` — l'UI traduit) |
+| `core/LabelPrintPolicy` | **LA matrice de visibilité contextuelle** (pure) : contenus/formats/défauts/cases OFFERTS par sujet, **verdict** `visibility(sujet, contenu, format, nombre)` consommé tel quel par la modale, et `sanitize` qui fait RETOMBER un réglage mémorisé devenu invalide |
 | `core/LabelQrSvg` | Retravail PUR du SVG servi par `/qr` : **quiet zone vérifiée** (marge en modules lue dans le tracé) et **compensée par un padding blanc calculé** si < 4 modules (un `?size=` plus grand n'y changerait rien — propriété en modules, pas en pixels), mise à l'échelle en mm |
-| `core/LabelHtml` | Rendu HTML PUR **partagé aperçu ⇄ imprimé** (une seule source, fidélité par construction) : étiquette, page de planche, document d'impression. **Noir sur blanc, aucun token de thème** |
-| `core/LabelSubjects` | La matière d'une étiquette depuis un enregistrement (lecteur injecté) : équipement (« baie · U »), baie, câble (A/B = **ordre de la fiche**), spare — la règle écrite UNE fois pour tous les points d'entrée |
-| `ui/LabelPrintDialog` | La modale : panneau de réglages + aperçu fidèle réduit + avertissements + iframe d'impression. Réglages **mémorisés en session** par contexte (jamais de Prefs persistées — dernier tirage repris) |
+| `core/LabelHtml` | Rendu HTML PUR **partagé aperçu ⇄ imprimé** (une seule source, fidélité par construction) : étiquette, page de planche, document d'impression. **Noir sur blanc, aucun token de thème** ; les COTES (padding/gouttière) sont posées INLINE depuis `LabelLayout` |
+| `core/LabelSubjects` | La matière d'une étiquette depuis un enregistrement (lecteur injecté) : équipement (« baie · U »), baie, câble (A/B = **ordre de la fiche**), **faisceau** (A/B = les deux patchs terminaux), spare — la règle écrite UNE fois pour tous les points d'entrée |
+| `ui/LabelPrintDialog` | La modale : panneau de réglages + aperçu fidèle réduit + avertissements + iframe d'impression. **N'écrit AUCUNE règle de visibilité** — elle applique le verdict de `LabelPrintPolicy` (pose `hidden`). Réglages **mémorisés en session** par contexte (jamais de Prefs persistées — dernier tirage repris) |
 
 ### Gabarits et planche
 
 Préréglages S 50×20 (QR 18) / **M 50×30 (QR 20, défaut)** / L 70×40 (QR 28) / Baie 100×60 (QR 34) /
-Câble (drapeau dérivé du QR : compact 54×20,4, confort 62×22) + manchons SANS QR (repère complet ×2
+Câble (drapeau dérivé du QR : compact 54×18, confort 62×22) + manchons SANS QR (repère complet ×2
 tours, ou identifiant ×6 lisible sous tous les angles) + Personnalisé (largeur 20–210, hauteur
 12–297, QR 12–60 mm ; Ø 3–30 et longueur 10–60 pour les manchons). Densité **compact (défaut)** /
 confort. Plancher de scannabilité **QR ≥ 18 mm** (signalé, jamais interdit) ; quiet zone 4 modules
 INTOUCHABLE (dans le SVG servi — vérifiée/compensée par `LabelQrSvg`). QR TOUJOURS à gauche.
+
+**Doctrine des DENSITÉS** (amende la maquette — retour terrain « énormément de marges ») :
+**compact = marges NULLES**, padding et gouttières compris — la quiet zone vit DÉJÀ dans le SVG
+servi (4 modules), une marge d'étiquette par-dessus ne protège rien et vole de la place au texte ;
+**confort = l'aisance de la maquette** (1,5 mm en S/M, 3 en L, 4 en Baie ; gouttières 2/3/5).
+Ces cotes vivent dans `LabelLayout` (`rectPadding`/`rectGap`) et sont posées **inline** par
+`LabelHtml` — plus dans le CSS de classe : ce qui est calculé doit être vérifiable au millimètre
+dans le HTML généré (c'est ce que testent `Tests/modules/test-labels.js`).
+
+🚨 **Le QR d'un préréglage ne déborde JAMAIS** (`LabelLayout.rectQrGeometry`). Bug mesuré en format
+S : 18 mm de QR + 2 × 1,5 mm de marge de confort = 21 mm dans une étiquette haute de 20 — le SVG
+débordait de la zone de contenu et se faisait **rogner à l'impression**. La règle : le QR est clampé
+à `hauteur − 2 marges`, et si ce clamp passait sous le plancher de scannabilité, **c'est la MARGE
+verticale qui cède** — la scannabilité prime sur l'aisance, jamais l'inverse. Corollaire : l'UI ne
+sert au SVG **que** la cote de `LabelLayout.renderQrMm(...)` — point de passage UNIQUE de l'aperçu
+comme de l'imprimé, de l'unitaire comme de la planche (où c'est la hauteur de CELLULE qui compte).
+Le gabarit « Personnalisé » n'est PAS clampé (l'utilisateur contrôle ses cotes) : il est **averti**
+(`qr-exceeds-label`), avec le padding réel de sa densité.
 
 **Planche A4** (dès 2 étiquettes) : marge 8 mm, en-tête hors zone (source · compte/date), colonnes
 2/3/4 **plafonnées par la largeur réelle**, traits de coupe pointillés 0,2 mm désactivables,
@@ -336,6 +355,40 @@ Brother/Dymo, sans découpe).
 - **Câbles** : le geste principal imprime **les 2 extrémités** (deux drapeaux identiques), « Un
   drapeau » reste offert ; sens A → B = l'**ordre de la fiche** (from → to).
 
+### Matrice de visibilité contextuelle (`core/LabelPrintPolicy`)
+
+Le retour terrain était « **tous les contrôles dans tous les contextes** » : Ø de câble sur une baie,
+largeur/hauteur personnalisées sous un préréglage… La règle « quels contrôles pour (sujet, contenu,
+format, nombre) ? » était éparpillée dans le rendu DOM, donc invérifiable — elle vit désormais dans
+UN module pur, et la modale ne fait plus qu'**appliquer le verdict** (poser `hidden`).
+
+- **Sujets** (`LabelPrintKind`) : `equipment`, `rack`, `cable`, **`bundle`** (faisceau/trunk — même
+  anatomie que le câble : un identifiant, deux extrémités, donc le même drapeau), `spare`.
+- **Contenus** : les manchons (repère complet / identifiant seul) n'existent que pour ce qui
+  s'ENROULE — câble et faisceau ; un équipement ne s'enroule pas.
+- **Formats** : « Câble — drapeau » = câble/faisceau seulement (et réciproquement : un rectangle
+  S/M/L ne s'attache pas à un brin) ; « Baie » 100×60 = baies seulement (un autre sujet qui veut ces
+  cotes passe par « Personnalisé »).
+- **Cotes mm** : Larg./Haut. **uniquement** sous « Personnalisé » ; la cote de QR quand elle est
+  LIBRE (QR seul, drapeau, personnalisé — sinon le préréglage l'impose) ; Ø et longueur
+  **uniquement** pour les manchons. La rangée entière disparaît quand aucune ne s'applique.
+- **Informations additionnelles** (ex-« Lisible humain », renommé sur retour terrain) : les cases
+  offertes sont **ce que le sujet POSSÈDE** (pas de n° de série sur une baie ni sur un faisceau, pas
+  de propriétaire hors équipement — une case sans donnée est un mensonge d'interface), intersectées
+  avec les règles du contenu (« QR seul » ne garde que le propriétaire ; « identifiant seul » ne
+  garde rien, section comprise). Le libellé « Emplacement » devient « **Extrémités A / B** » pour
+  les sujets à drapeau.
+- **Planche** : à partir de 2 étiquettes.
+- **Mémoire de session** : `sanitize(kind, settings)` tourne à CHAQUE ouverture — un réglage hérité
+  devenu invalide (format drapeau sur un équipement, case d'un champ inexistant) **retombe** sur le
+  défaut du contexte, plutôt que de laisser un état que l'UI ne sait plus représenter.
+
+⚠ **Corollaire CSS indissociable** : `.label-print [hidden] { display: none !important }`
+(`dc-manager.css`). Sans cette ligne les `hidden` de la modale sont **inertes** — `[hidden]` vient
+de la feuille du NAVIGATEUR, et toute règle d'auteur qui pose un `display` la bat, quelle que soit
+sa spécificité ; or `.btn`, `.label-print-fset`, `.label-print-mm` et `.label-print-mm-field` en
+posent une. C'était la cause première du retour terrain.
+
 ### Points d'entrée (tous sous `LabelPrintDialog.available()`)
 
 | Où | Geste |
@@ -344,6 +397,9 @@ Brother/Dymo, sans découpe).
 | Listing équipements | Action de ligne « Imprimer l'étiquette » (menu ⋮ — les actions secondaires de ligne y vivent toutes, cf. `ListView._openRowMenu`) |
 | Fiche baie | « Étiquette de baie » (gabarit Baie) **et** « Planche du contenu (N) » (masquée si vide) — deux gestes distincts, deux papiers |
 | Fiche câble | « Un drapeau » / « Imprimer les 2 extrémités » |
+| Listing câbles | Action de ligne : les **2 extrémités** (le geste principal de la fiche — un câble s'étiquette par paire, la ligne n'a pas de raison d'en offrir un demi) |
+| Fiche faisceau | « Un drapeau » / « Imprimer les 2 extrémités » (les deux patchs terminaux) |
+| Listing faisceaux | Action de ligne : les **2 extrémités**, comme les câbles |
 | Fiche spare | « Imprimer l'étiquette » (gabarit S par défaut) |
 
 ### Rendu d'impression
@@ -356,6 +412,11 @@ inline, `print()` n'attend que le `load` de l'iframe. Les SVG sont tirés en par
 cache le temps de la modale ; un échec (503 `PUBLIC_BASE_URL` absente, 404…) affiche le message
 serveur et désactive « Imprimer ».
 
+**Zéro marge parasite** (vérifié par test) : `@page … margin: 0` dans les DEUX régimes, et
+`html, body { margin: 0; padding: 0 }` dans l'iframe — les cotes de l'étiquette sont la seule
+géométrie qui compte, une marge de document décalerait tout un rouleau. Les 8 mm de marge d'une
+planche appartiennent à la **grille A4**, pas à la page.
+
 ### Mode local
 
 L'impression d'étiquettes est **mode API seulement** (la génération des QR est serveur, décision
@@ -367,4 +428,7 @@ aucun test dispersé.
 
 Tests : `Tests/modules/test-labels.js` (gabarits golden, géométrie drapeau/manchon, cellule de
 planche et plafonds, bornes du personnalisé, codes de débordement, quiet zone du SVG, rendu HTML
-partagé — échappement, manchons ×2/×6, `@page`, zéro token de thème dans l'imprimé).
+partagé — échappement, manchons ×2/×6, `@page`, zéro token de thème dans l'imprimé ; **densités
+amendées et NON-DÉBORDEMENT du QR sur tous les préréglages × les deux densités**, cotes retrouvées
+au millimètre dans le HTML, marges de la fenêtre d'impression, **la matrice de visibilité** — offres
+par sujet, verdict, retombée sur défaut — et le sujet FAISCEAU).

@@ -3091,6 +3091,13 @@
      l'aperçu et le document d'impression (noir sur blanc, aucun token de thème là-bas). */
   .label-print { display: grid; grid-template-columns: 250px 1fr; gap: 16px; align-items: start; }
   @media (max-width: 760px) { .label-print { grid-template-columns: 1fr; } }
+  /* 🚨 `hidden` DOIT gagner DANS cette modale — sans quoi la matrice de visibilité contextuelle
+     (`core/LabelPrintPolicy`) pose des `hidden` parfaitement INERTES : c'était le retour terrain
+     « tous les contrôles dans tous les contextes » (2026-08-20). Raison exacte : `[hidden]{display:none}`
+     vient de la feuille du NAVIGATEUR, et TOUTE règle d'auteur qui pose un `display` la bat — quelle
+     que soit sa spécificité. Or les contrôles d'ici en portent tous une : `.btn` (inline-flex),
+     `.label-print-mm-field` (flex), `.label-print-fset` (flex), `.label-print-mm` (grid)… */
+  .label-print [hidden] { display: none !important; }
   .label-print-side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
   .label-print-fset { display: flex; flex-direction: column; gap: 8px; }
   .label-print-h { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--fg-dimmer); }
