@@ -556,6 +556,11 @@ const SPEC_FIELDS = {
       brand:          { type: "string", default: "" },
       model:          { type: "string", default: "" },
       serial:         { type: "string", default: "" },
+      // PROPRIÉTAIRE (société à qui appartient le matériel — décision utilisateur 2026-08-20). Champ PLAT
+      // facetté au même titre que `brand`/`model` : `string` ⇒ facettable/triable AUTOMATIQUEMENT (dérivé
+      // de la spec par ListFacets/ListOrder) et cherchable via `ownText` (aucun terme dérivé — patron
+      // `serial`/`assigned_to`/`applications.url`, donc SANS bump de SEARCH_VERSION, cf. SearchTerms).
+      owner:          { type: "string", default: "" },
       description:    { type: "string", default: "" },
       // ADMINISTRATIF (achat / garantie / attribution) — dates ISO courtes en TEXTE (aucun tri/filtre serveur).
       purchase_date:  { type: "string", default: "" },

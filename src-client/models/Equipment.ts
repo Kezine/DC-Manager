@@ -15,6 +15,8 @@ export class Equipment extends Entity implements Records.Equipment {
   model: string;
   /** Numéro de série. */
   serial: string;
+  /** Société PROPRIÉTAIRE du matériel (facetté comme marque/modèle). */
+  owner: string;
 
   /* ---- champs ADMINISTRATIFS (achat / garantie / attribution) ---- */
   /** Date d'achat (YYYY-MM-DD). */
@@ -177,6 +179,7 @@ export class Equipment extends Entity implements Records.Equipment {
     this.brand = p.brand || "";
     this.model = p.model || "";
     this.serial = p.serial || "";
+    this.owner = p.owner || "";
     this.purchase_date = p.purchase_date || "";
     this.po_ref = p.po_ref || "";
     this.warranty_end = p.warranty_end || "";

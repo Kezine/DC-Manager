@@ -32,6 +32,7 @@ export const equipment = {
   field: {
     brand: "Marque",
     model: "Modèle",
+    owner: "Propriétaire",
     serial: "N° de série",
     serialNum: "Numéro de série",
     warrantyEnd: "Fin de garantie",
@@ -186,6 +187,7 @@ export const equipment = {
     invOnlyTitle: "Répertorié uniquement : ni placement, ni câblage, ni ports.",
     brandPlaceholder: "ex. Cisco, Dell…",
     modelPlaceholder: "ex. Catalyst 2960…",
+    ownerPlaceholder: "ex. société propriétaire…",
     serialPlaceholder: "n° de série",
     assignToPlaceholder: "nom de la personne",
     amperesPlaceholder: "ampères",

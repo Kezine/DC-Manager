@@ -66,6 +66,8 @@ export class EquipmentForms extends FormBase {
     add(I18n.t("lists.col.type"), `<span class="pill">${Html.escape(EquipmentTypes.label(eq.type))}</span>` + (eq.inventory_only ? ` <span class="pill" style="color:var(--fg-dim)">${I18n.t("equipment.detail.invOnlyPill")}</span>` : ""));
     add(I18n.t("equipment.field.brand"), eq.brand ? Html.escape(eq.brand) : "—");
     add(I18n.t("equipment.field.model"), eq.model ? Html.escape(eq.model) : "—");
+    // Propriétaire : ligne affichée SEULEMENT si renseigné (parité champs administratifs conditionnels).
+    if (eq.owner) add(I18n.t("equipment.field.owner"), Html.escape(eq.owner));
     add(I18n.t("equipment.field.serial"), eq.serial ? Html.escape(eq.serial) : "—");
     const primaryGrp: any = eq.group_id ? store.get("groups", eq.group_id) : null;
     const secondaryGrps: any[] = store.equipmentGroupIds(eq).filter((gid: string) => gid !== (eq.group_id || null)).map((gid: string) => store.get("groups", gid)).filter(Boolean);
@@ -609,6 +611,9 @@ export class EquipmentForms extends FormBase {
     const brandI = FormControls.text(eq ? eq.brand : "", I18n.t("equipment.equip.brandPlaceholder"));
     const modelI = FormControls.text(eq ? eq.model : "", I18n.t("equipment.equip.modelPlaceholder"));
     root.appendChild(FormUi.row2(FormControls.fieldRow(I18n.t("equipment.field.brand"), brandI), FormControls.fieldRow(I18n.t("equipment.field.model"), modelI)));
+    // Propriétaire : autocomplétion facettée IDENTIQUE à marque/modèle (valeurs distinctes existantes), attachée plus bas.
+    const ownerI = FormControls.text(eq ? eq.owner : "", I18n.t("equipment.equip.ownerPlaceholder"));
+    root.appendChild(FormControls.fieldRow(I18n.t("equipment.field.owner"), ownerI));
     const serialI = FormControls.text(eq ? eq.serial : "", I18n.t("equipment.equip.serialPlaceholder"));
     root.appendChild(FormControls.fieldRow(I18n.t("equipment.field.serialNum"), serialI));
     // Greffon de SCAN caméra (déclaré) : le service tag constructeur (QR / Code 128 / DataMatrix)
@@ -1237,7 +1242,7 @@ export class EquipmentForms extends FormBase {
         const secondary = secondaryGroups.getValue().filter((gid) => gid && gid !== primaryGroup);
         const groupIds = [...new Set([...(primaryGroup ? [primaryGroup] : []), ...secondary])];
         const payload: any = {
-          name, type: typeI.value, brand: brandI.value.trim(), model: modelI.value.trim(), serial: serialI.value.trim(),
+          name, type: typeI.value, brand: brandI.value.trim(), model: modelI.value.trim(), owner: ownerI.value.trim(), serial: serialI.value.trim(),
           inventory_only: inv, locked: (lockedI as any).checked, group_id: primaryGroup, group_ids: groupIds, description: descI.value.trim(),
           purchase_date: (purchaseI as any).value || "", warranty_end: (warrantyI as any).value || "", po_ref: poI.value.trim(),
           assigned_date: (assignDateI as any).value || "", assigned_to: assignToI.value.trim(),
@@ -1442,6 +1447,7 @@ export class EquipmentForms extends FormBase {
       attachFacet(nameI, "name");
       attachFacet(brandI, "brand");
       attachFacet(modelI, "model", (): Record<string, string> => { const b = brandI.value.trim(); return b ? { brand: b } : {}; });
+      attachFacet(ownerI, "owner");
       attachFacet(assignToI, "assigned_to");
       nameI.focus();
       // P2b : un équipement DÉJÀ patch à l'OUVERTURE (données legacy / API pré-T7) dont des ports portent encore un

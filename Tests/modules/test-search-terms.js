@@ -242,6 +242,12 @@ module.exports = async () => {
     ck(termsOf("equipments", { id: "e-bm", type: "server", brand: "Dell", model: "R740" }).includes("Dell R740"), "equipment : « marque modèle » composé (Dell R740 se tape d'un trait)");
     ck(!termsOf("equipments", { id: "e-b", type: "server", brand: "Dell" }).some((t) => t.startsWith("Dell ")), "equipment : marque SEULE → pas de composition (la valeur propre suffit)");
 
+    // PROPRIÉTAIRE (E1, étiquettes QR) : colonne PLATE cherchable — AUCUN terme dérivé (patron serial/
+    // assigned_to/applications.url), donc SANS bump de SEARCH_VERSION. searchText la porte via ownText.
+    const ownerRec = { id: "e-own", name: "SW-Prop", type: "server", owner: "ACME Corp" };
+    ck(!termsOf("equipments", ownerRec).some((t) => norm(t).includes(norm("ACME"))), "equipment : propriétaire ABSENT des termes dérivés (colonne plate — ownText suffit, pas de terme composé)");
+    ck(SearchTerms.searchText("equipments", ownerRec, fetchOf(CORPUS), findOf(CORPUS)).includes(norm("ACME Corp")), "equipment : searchText porte le propriétaire via ownText (cherchable sans terme dérivé ni bump de version)");
+
     // baie : « 42 U » avec le DÉFAUT du client reproduit (sub de la palette : (u_count || 42) + " U").
     ck(termsOf("racks", rec("racks", "rk-1")).includes("42 U"), "baie sans u_count : « 42 U » (défaut client reproduit)");
     ck(termsOf("racks", { id: "rk-47", name: "B", u_count: 47 }).includes("47 U"), "baie 47 U : « 47 U »");
