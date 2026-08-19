@@ -23,3 +23,7 @@ export type { TipContent, TipSection, TipLine, TipRect, TipSize, TipPoint } from
 export { Icons } from "./Icons";
 export { IconButton } from "./IconButton";
 export type { IconButtonOpts } from "./IconButton";
+export { ScanControl } from "./ScanControl";
+export type { ScanControlHost, ScanAttachSpec } from "./ScanControl";
+export { ScanViewfinder } from "./ScanViewfinder";
+export type { ScanViewfinderHost, ScanViewfinderTarget } from "./ScanViewfinder";

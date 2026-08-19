@@ -138,6 +138,98 @@ webpack `{ test: /\.wasm$/, type: "asset/inline" }`, même doctrine que les font
 - Un data: URI n'a pas de souci de MIME `application/wasm` côté serveur ; si une CSP arrive un
   jour, prévoir `'wasm-unsafe-eval'` dans `script-src`.
 
+## L'UI de scan — greffon de champ + viseur
+
+La maquette `design-system/briefs/qr-saisie-camera-maquette.html` **fait foi** (consigne
+utilisateur). Deux composants, et une découpe stricte : le **moteur** (`core/BarcodeDetection`)
+fait caméra + boucle + décodage, l'**UI** traduit ses états et n'accède jamais aux API caméra.
+
+- **`ui/ScanControl`** — le **greffon** attachable (principe n°14) : un bouton-icône 44 px
+  (`Icons.SCAN`, aria-label + tooltip) accolé au champ hôte, qui ouvre le viseur et **injecte** la
+  valeur validée « comme une frappe » (setter natif + événements `input`/`change` qui bullent →
+  validation live et `onchange` du formulaire réagissent à l'identique ; flash de confirmation,
+  focus rendu au champ). L'hôte (pile de modales + préférences) est **injecté** par `main.ts`
+  (`ScanControl.setup`) — le module n'importe ni `Prefs` ni le Store.
+- **`ui/ScanViewfinder`** — le **viseur** : un niveau **info** de la pile de modales STANDARD
+  (jamais un overlay parallèle — Échap/✕/← gardent leur sémantique de pile, l'édition en dessous
+  survit par construction), vidéo `playsinline muted`, badge du moteur actif, torche best-effort,
+  bascule de caméra (si plusieurs), verrouillage visuel + vibration (`Haptics.decoded`, 40 ms) +
+  annonce vocale `aria-live` à la lecture ; échecs caméra TYPÉS traduits (permission **bloquée**
+  avec geste de déblocage ⇄ **re-demandable** avec « Réessayer », suivi `watchCameraPermission` :
+  un accord donné dans les réglages du site **relance la caméra tout seul**) ; scanline coupée
+  par `prefers-reduced-motion`.
+
+### Deux régimes d'attachement
+
+| Régime | Qui | Parseur |
+|---|---|---|
+| **Déclaré** | Les champs qui nomment leur parseur : les 3 `serial` (formulaires équipement, sous-équipement, spare — `ScanControl.attach({ input, parser: "serial", fieldKey, label })`) | `serial` |
+| **Générique** | Préférence « bouton scan sur tous les champs texte » : un `MutationObserver` sur le corps de la modale (`Modal.body`) greffe les `input[type=text]` **enfants directs** d'une rangée `.form-field` — les contrôles composites (date, pickers, chips…) enveloppent leur input et sont exclus par construction | `raw` |
+
+**Visibilité** (décision pure `core/ScanAffordance`, prédicats injectés — testée) : bouton de champ
+= (pointeur grossier OU écran < 900 px OU préférence de forçage) ET une caméra existe ET contexte
+sécurisé — « pas d'icône morte » sur PC 16/9 ; entrée globale = caméra + contexte seulement.
+Évaluée à l'attachement (un champ vit le temps d'une modale).
+
+### Parseurs nommés — « jamais d'injection silencieuse »
+
+`core/ScanParsing` (pur, testé) : le scan est une **source de saisie**, la valeur décodée passe
+par le parseur du champ avant toute injection. Résultat `{ ok, value, warning? }` en **codes**
+(`empty` / `multiline` / `linklike`), l'UI traduit (`scan.warning.*`). Non conforme = valeur
+**affichée** avec l'avertissement et « Valider » **désactivé**. `raw` : trim, non vide,
+mono-ligne. `serial` : préfixes constructeur nettoyés (« SN: », « S/N », « SER »… — séparateur
+**requis** : `SN123456` reste intact), et refus de ce qui ressemble à un **lien** (URL http(s) ou
+deep-link — `EntityLink.parse` est la source unique, jamais une regex maison) : sur une planche
+dense, c'est le mauvais code.
+
+### Zone de décodage (ROI) mémorisée par champ
+
+`core/ScanRoiMemory` (pur, testé) : rectangle en **fractions** du plateau, déplaçable au pointeur
+et redimensionnable par les coins (pointer capture, comme la maquette ; coin **opposé ancré** —
+écart assumé : la maquette laissait glisser la boîte au minimum de taille), tailles mini
+16 %×14 %, défaut centré 62 %×46 %. Persistée dans localStorage (`dcmanager.scanRoi`, carte
+`clé de champ → rect` — clés `equipments.serial`, `spares.serial`, `subEquipments.serial`,
+`global` pour l'entrée globale, `field:<libellé>` pour le générique). La ROI est **relue à chaque
+passe** par le moteur ; seule cette région part au décodeur (`detect(video, roi)` — le mapping
+cover est au moteur, cf. plus haut).
+
+### Bascule de moteur, résultat
+
+Toggle « Moteur : Auto (natif) / WASM » dans le viseur — affiché **seulement** si
+`nativeAvailable()` (sans natif, rien à basculer), préférence persistée (`Prefs.scanEngine`),
+bascule = moteur **recréé à chaud**. Panneau résultat : valeur brute, format, heure ;
+« Continuer » relance (le code tout juste lu est ignoré 1,5 s — sans quoi il re-verrouillerait
+avant qu'on vise le suivant), « Valider » injecte et ferme.
+
+### Entrée globale et raccourci clavier
+
+- **Topbar** : bouton « Scanner une étiquette » (`Icons.SCAN`, à côté de la loupe), révélé par la
+  sonde caméra du boot. Viseur en mode **libre** : un **deep-link** décodé part à l'instance
+  unique `EntityLinkOpener` de `main.ts` (fermeture immédiate, la fiche s'ouvre) ; sinon panneau
+  d'actions — copier, « insérer dans le dernier champ actif » (suivi `focusin` des champs texte
+  éditables, cible **capturée à l'ouverture**), et un **lien cliquable** si la valeur est une URL
+  http(s) (`Html.externalLink` — JAMAIS de navigation automatique, doctrine POC).
+- **Ctrl+Maj+S** : ouvre le viseur sur le champ texte **focalisé** (parseur du champ s'il est
+  déclaré, `raw` sinon). Enregistré dans `main.ts` à côté du Ctrl+F de la palette ; la garde est
+  le focus lui-même — hors d'un champ texte éditable, la touche ne fait rien.
+
+### Préférences
+
+| Préférence (`core/Prefs`) | Réglages | Effet |
+|---|---|---|
+| `scanAllFields` (défaut faux) | « Bouton scan sur tous les champs texte » | greffon générique + forçage de visibilité |
+| `scanForceButtons` (défaut faux) | « Toujours afficher le bouton scan » | force l'icône des champs déclarés sur desktop (webcam poste fixe) |
+| `scanEngine` (`auto`/`wasm`, défaut `auto`) | toggle du viseur | source du moteur de décodage |
+
+### Extension future — mode lot
+
+Le « mode lot » de la maquette (champs **multivalués** : chaque lecture empile un chip, doublons
+signalés, « Terminer » ferme) n'est **pas implémenté en v1** : aucun champ multivalué ne consomme
+le scan aujourd'hui. Le jour venu, c'est une variante de cible du viseur (accumulation côté
+`ScanViewfinder` + injection par chips côté hôte) — le moteur et les parseurs n'ont pas à bouger.
+
+Tests : `Tests/modules/test-scan-ui.js` (parseurs, affordance, géométrie + persistance de la ROI).
+
 ## Sécurité
 
 - **La caméra exige un contexte sécurisé** : HTTPS ou localhost (mesuré : `file://` passe sur

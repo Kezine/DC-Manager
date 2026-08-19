@@ -5,6 +5,7 @@ import { PortEditorControls, type PortDraft } from "./PortEditorControls";
 import { EnergyInfo } from "./EnergyInfo";   // bilan énergie (jauge PoE + charges/avertissements) = fiche INFO, pas édition
 import { ImageStore } from "../../data/ImageStore";
 import { FormControls } from "../../ui/FormControls";
+import { ScanControl } from "../../ui/ScanControl";   // greffon de scan caméra des champs n° de série (déclaré, parseur `serial` — docs/qr-scan.md § UI)
 import { ChipsInput, ChipItem } from "../../ui/ChipsInput";
 import { Autocomplete } from "../../ui/Autocomplete";
 import { FieldFacet } from "../../core/FieldFacet";
@@ -450,6 +451,10 @@ export class EquipmentForms extends FormBase {
     root.appendChild(FormUi.row2(FormControls.fieldRow(I18n.t("equipment.field.brand"), brandI), FormControls.fieldRow(I18n.t("equipment.spare.modelPn"), pnI)));
     const serialI = FormControls.text(sp ? sp.serial : "", I18n.t("equipment.spare.serialPlaceholder"));
     root.appendChild(FormControls.fieldRow(I18n.t("equipment.field.serialNum"), serialI));
+    // Greffon de SCAN caméra (déclaré) : service tag / étiquette constructeur → parseur `serial`
+    // (préfixes « SN: » nettoyés). Attaché APRÈS la pose dans la rangée (le greffon enveloppe le
+    // champ sur place). La clé « spares.serial » mémorise la zone de décodage PROPRE à ce champ.
+    ScanControl.attach({ input: serialI, parser: "serial", fieldKey: "spares.serial", label: I18n.t("equipment.field.serialNum") });
 
     // -- bloc DISQUE (HDD/SSD) --
     const diskBlock = document.createElement("div");
@@ -606,6 +611,9 @@ export class EquipmentForms extends FormBase {
     root.appendChild(FormUi.row2(FormControls.fieldRow(I18n.t("equipment.field.brand"), brandI), FormControls.fieldRow(I18n.t("equipment.field.model"), modelI)));
     const serialI = FormControls.text(eq ? eq.serial : "", I18n.t("equipment.equip.serialPlaceholder"));
     root.appendChild(FormControls.fieldRow(I18n.t("equipment.field.serialNum"), serialI));
+    // Greffon de SCAN caméra (déclaré) : le service tag constructeur (QR / Code 128 / DataMatrix)
+    // remplit le champ via le parseur `serial` — cf. docs/qr-scan.md § « L'UI de scan ».
+    ScanControl.attach({ input: serialI, parser: "serial", fieldKey: "equipments.serial", label: I18n.t("equipment.field.serialNum") });
 
     // -- administratif --
     root.appendChild(FormUi.divider(I18n.t("equipment.field.admin")));

@@ -415,7 +415,14 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   **zxing-wasm FORÇABLE à la demande** (décode plus de styles de QR), binaire `.wasm` INLINE en
   data: URI (~+1,44 Mio mesurés quand un consommateur l'importe, compilation PARESSEUSE au premier
   detect), ROI recadrée (géométrie cover pure testée), permission diagnostiquée bloquée ⇄
-  re-demandable ; **côté serveur** : route gardée `GET …/qr/:collection/:id` (lib `qrcode`,
+  re-demandable ; **UI de scan** : greffon PAR CHAMP `ui/ScanControl` (bouton 44 px, attachement
+  DÉCLARÉ — les 3 champs `serial` en parseur `serial` — ou GÉNÉRIQUE via la préférence « scan
+  partout », injection « comme une frappe ») + viseur `ui/ScanViewfinder` (niveau INFO de la pile
+  de modales standard, ROI déplaçable MÉMORISÉE PAR CHAMP `core/ScanRoiMemory`, parseurs nommés
+  `core/ScanParsing` — « jamais d'injection silencieuse » —, visibilité `core/ScanAffordance`,
+  toggle moteur persisté `Prefs.scanEngine`), entrée GLOBALE topbar (deep-link → fiche via
+  l'instance `EntityLinkOpener`, sinon copier/insérer/lien) et raccourci **Ctrl+Maj+S** sur le
+  champ focalisé ; **côté serveur** : route gardée `GET …/qr/:collection/:id` (lib `qrcode`,
   PNG/SVG bornés `QrCodeParams`), `PUBLIC_BASE_URL` JAMAIS dérivée des en-têtes, 503 actionnable ;
   section « Mode local » — scan OK dans les deux modes, génération = serveur par décision).
 

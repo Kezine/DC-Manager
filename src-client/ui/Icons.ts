@@ -101,6 +101,23 @@ export class Icons {
   /** Rechercher : loupe. Icône INTÉGRÉE au champ de recherche des barres de listing (revue design lot C). */
   static readonly SEARCH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>';
 
+  /** SCANNER un code (QR / code-barres) à la caméra : viseur à coins + ligne de visée. Sert au
+      greffon de champ (`ui/ScanControl`), à l'entrée globale de la topbar et au viseur lui-même
+      (chantier étiquettes QR — la maquette qr-saisie-camera fait foi pour le dessin). */
+  static readonly SCAN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8V5a2 2 0 0 1 2-2h3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M21 16v3a2 2 0 0 1-2 2h-3"/><line x1="7" y1="12" x2="17" y2="12"/></svg>';
+
+  /** TORCHE de la caméra (fond de baie sombre) : lampe éclair. Intention DISTINCTE de POWER
+      (l'alimentation électrique du domaine) : ici on ALLUME une lumière, outil du viseur de scan. */
+  static readonly TORCH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6l-1 5h3l-8 13 2-9H8z"/></svg>';
+
+  /** CAMÉRA (choisir / changer la caméra du viseur de scan) : boîtier + objectif. */
+  static readonly CAMERA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h2L9 4h6l1.5 2h2A2.5 2.5 0 0 1 21 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"/><circle cx="12" cy="13" r="3.4"/></svg>';
+
+  /** RECENTRER la zone de décodage du viseur (revenir au cadre par défaut) : cadre + croix de
+      centrage. Intention distincte de LOCATE_OFF (éteindre un état de vue) : ici on RÉINITIALISE
+      une géométrie réglable. */
+  static readonly RECENTER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 12h6M12 9v6"/></svg>';
+
   /** Inverser / échanger deux valeurs (remplace le glyphe `⇅`) : deux flèches verticales de sens opposés.
       Intention « PERMUTER » (ex. inverser les extrémités A ⇄ B d'un câble) — distincte de RENEW (cycle) et
       d'IMPORT/EXPORT (transfert vers/depuis un bac). */

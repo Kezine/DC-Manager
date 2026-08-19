@@ -19,4 +19,7 @@ export class Haptics {
   static select(): void { Haptics.fire(14); }
   /** CONFIRMATION d'action (validation, drop réussi). */
   static confirm(): void { Haptics.fire([10, 28, 12]); }
+  /** CODE DÉCODÉ par le scan caméra (40 ms — spec maquette qr-saisie-camera) : seul signal fiable
+      quand l'appareil est à bout de bras dans une allée froide. */
+  static decoded(): void { Haptics.fire(40); }
 }

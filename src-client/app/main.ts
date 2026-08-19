@@ -17,7 +17,7 @@ import { GlobalSearchPalette } from "../views/GlobalSearchPalette";   // palette
 import { GlobalSearchSources } from "../views/GlobalSearchSources";   // familles à fiche = périmètre envoyé à la recherche transverse serveur (mode API)
 import { ImageStore, IdbImageBackend, RestImageBackend, AttachmentStore, IdbAttachmentBackend, RestAttachmentBackend } from "../data";
 import type { ListOptions, FormHost } from "../views";
-import { Modal, Notify, FormControls, Dialog, Fullscreen, RichTooltip, Icons } from "../ui";
+import { Modal, Notify, FormControls, Dialog, Fullscreen, RichTooltip, Icons, ScanControl } from "../ui";
 import { Html } from "../core/Html";
 import type { RemoteListReader } from "../core/StoreListRowSource";   // lecteur SERVEUR des listings (mode API — lot 3)
 import { EntityCandidateSource, type EntitySearchReader, type EntityCandidateFamily } from "../core/EntityCandidates";   // candidats d'entités serveur-pilotés (mode API — lot 4)
@@ -235,6 +235,24 @@ async function boot(): Promise<void> {
   // `markDirty` : garde « modifications non enregistrées » du NIVEAU de modale, pour les éditeurs SANS
   // champ de saisie (la chaîne de route) que l'instantané de `Modal` ne peut pas voir bouger.
   const formHost: FormHost = { openModal: (o) => modal.open(o), closeModal: () => modal.close(), refreshModal: () => modal.refresh(), markDirty: () => modal.markDirty(), setDirty: () => { refreshChrome(); }, autocompleteLimit: () => prefs.autocompleteMaxResults, userDirectory };   // mutation modèle déjà suivie par la révision (store.onChange) ; userDirectory : résout les auteurs d'audit (mode API)
+  /* ---- SCAN CAMÉRA (chantier étiquettes QR, lot D — docs/qr-scan.md § « L'UI de scan ») ----
+     L'hôte du greffon est câblé UNE fois : pile de modales STANDARD (la même instance `modal` que
+     formHost — le viseur est un niveau de la pile, jamais un overlay parallèle) + préférences.
+     `installGeneric` observe le CORPS de la modale : quand la préférence « scan partout » est
+     active, les champs texte des formulaires qui s'y posent reçoivent le bouton (parseur brut).
+     `installFieldTracking` suit le dernier champ texte actif — la cible du « insérer dans le
+     dernier champ » de l'entrée globale. Les champs DÉCLARÉS (n° de série), eux, s'attachent
+     dans leurs formulaires (`ScanControl.attach`, cf. EquipmentForms/SubEquipmentForms). */
+  ScanControl.setup({
+    openModal: (o) => formHost.openModal(o),
+    closeModal: () => modal.close(),
+    enginePref: () => prefs.scanEngine,
+    setEnginePref: (mode) => { prefs.scanEngine = mode; },
+    scanAllFields: () => prefs.scanAllFields,
+    forceButtons: () => prefs.scanForceButtons,
+  });
+  ScanControl.installGeneric(modal.body);
+  ScanControl.installFieldTracking();
   // RECHERCHE GLOBALE (modale dédiée) — UNE instance, UNE implémentation pour les DEUX chemins
   // (déclencheur topbar + Ctrl+K). Garde d'overlay = le pattern des raccourcis undo/redo (sélecteurs
   // DOM) : la palette est un geste de NAVIGATION GLOBALE, pas un niveau de la pile de modales — son
@@ -622,6 +640,15 @@ async function boot(): Promise<void> {
     onUndo: () => { void doUndo(); },   // timeline unifiée (modèle + images) ; révision suivie via onChange → dirty recalculé
     onRedo: () => { void doRedo(); },
     onGlobalSearch: () => openGlobalSearch(),   // loupe topbar — même implémentation (et même garde) que Ctrl+K
+    // SCANNER UNE ÉTIQUETTE (bouton topbar, à côté de la loupe) : viseur en mode LIBRE. Un
+    // deep-link décodé passe par l'instance UNIQUE `entityLinkOpener` (le même service que le
+    // hash du boot et le hashchange — jamais une résolution dupliquée) ; toute autre valeur
+    // offre copier / insérer dans le dernier champ actif (cf. ScanControl.openGlobal).
+    onScanGlobal: () => ScanControl.openGlobal({ openTarget: (target) => { void entityLinkOpener.open(target); } }),
+    // Préférences du scan (réglages → Scan) : persistées puis reflétées — l'effet est IMMÉDIAT
+    // pour les prochains formulaires (le greffon relit les préférences à chaque attachement).
+    onScanAllFields: (on) => { prefs.scanAllFields = on; shell.setScanPrefs(prefs.scanAllFields, prefs.scanForceButtons); },
+    onScanForceButtons: (on) => { prefs.scanForceButtons = on; shell.setScanPrefs(prefs.scanAllFields, prefs.scanForceButtons); },
     onToggleTheme: () => { prefs.theme = (prefs.theme === "light") ? "dark" : "light"; applyTheme(prefs.theme); shell.setTheme(prefs.theme); dcView.onThemeChanged(); },
     onUiScale: (value) => { prefs.uiScale = value; applyUiScale(prefs.uiScale); shell.setUiScale(prefs.uiScale); },
     onModalFullscreen: (on) => { prefs.modalFullscreen = on; applyModalFullscreen(prefs.modalFullscreen); shell.setModalFullscreen(prefs.modalFullscreen); },   // une modale DÉJÀ ouverte s'adapte par le CSS seul
@@ -686,6 +713,11 @@ async function boot(): Promise<void> {
   };
 
   const shell = new Shell(root, shellHost);
+  // SCAN : reflète les préférences dans les réglages, puis SONDE la caméra (async) — l'entrée
+  // globale « scanner une étiquette » n'apparaît que si le poste peut scanner (caméra + contexte
+  // sécurisé, cf. core/ScanAffordance) : jamais de bouton qui ne mène qu'à un échec.
+  shell.setScanPrefs(prefs.scanAllFields, prefs.scanForceButtons);
+  void ScanControl.globalAvailable().then((ok) => shell.setScanAvailable(ok));
 
   /** Installe un nouvel état d'autorisation et REJOUE tout le gating d'un coup. Les prédicats posés sur les
       vues/actions relisent `access` d'eux-mêmes, il suffit donc de redemander une évaluation
@@ -1709,6 +1741,22 @@ async function boot(): Promise<void> {
     if (!globalSearch.isOpen() && (document.querySelector(".modal-overlay.open, .dialog-overlay") || document.body.classList.contains("welcome-active"))) return;
     e.preventDefault();
     openGlobalSearch();
+  });
+
+  // raccourci clavier SCAN (Ctrl+Maj+S — chantier QR lot D) : ouvre le viseur caméra sur le champ
+  // texte FOCALISÉ — parseur du champ s'il est greffé en déclaré (n° de série), brut sinon. La
+  // GARDE est le focus lui-même : hors d'un champ texte éditable, la touche ne fait RIEN (repli
+  // navigateur). PAS de garde d'overlay, contrairement à Ctrl+F : scanner PENDANT une saisie en
+  // modale est précisément le cas d'usage. NB : le tooltip « Enregistrer une copie sous… » annonce
+  // historiquement le même raccourci mais aucun gestionnaire ne l'implémente — et celui-ci ne
+  // s'applique qu'à un champ focalisé, aucune collision.
+  document.addEventListener("keydown", (e) => {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || !e.shiftKey) return;
+    if (e.key.toLowerCase() !== "s") return;
+    const target = document.activeElement;
+    if (!ScanControl.isEditableTextField(target)) return;
+    e.preventDefault();
+    ScanControl.openForField(target);
   });
 
   applyAutosave();        // initialise l'état auto-save + le popover

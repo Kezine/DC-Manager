@@ -64,6 +64,13 @@ export interface ShellHost {
   /** Ouverture de la RECHERCHE GLOBALE (palette) — loupe de la topbar ET raccourci Ctrl+K (le
       raccourci est enregistré par le bootstrap, qui porte la garde « pas par-dessus une modale »). */
   onGlobalSearch?(): void;
+  /** SCANNER UNE ÉTIQUETTE (viseur caméra en mode libre — chantier QR, cf. docs/qr-scan.md § UI).
+      Bouton révélé par `setScanAvailable` quand une caméra existe. */
+  onScanGlobal?(): void;
+  /** Préférences du SCAN (réglages) : greffon générique « tous les champs texte » / forçage de
+      l'icône des champs déclarés. Persistance et application = bootstrap (Prefs + ScanControl). */
+  onScanAllFields?(on: boolean): void;
+  onScanForceButtons?(on: boolean): void;
   onToggleTheme?(): void; onResetViewPrefs?(): void;
   /** Changement d'échelle d'interface (zoom global, taille du texte). */
   onUiScale?(value: number): void;
@@ -149,6 +156,9 @@ export class Shell {
   private modalFsChk!: HTMLInputElement;           // bascule « modales en plein écran » (préférence desktop)
   private acMaxSel!: HTMLSelectElement;            // nb max de suggestions d'autocomplétion (formulaires)
   private searchBtn!: HTMLButtonElement;          // loupe « Recherche globale » (Ctrl+F) — masquée sans aucune lecture documentaire
+  private scanBtn!: HTMLButtonElement;            // « Scanner une étiquette » (viseur caméra) — masqué sans caméra (cf. setScanAvailable)
+  private scanAllChk!: HTMLInputElement;          // pref « bouton scan sur tous les champs texte » (réglages Scan)
+  private scanForceChk!: HTMLInputElement;        // pref « toujours afficher le bouton scan » (réglages Scan)
   private newBtn!: HTMLButtonElement;             // « Nouveau » (fichier ou document serveur)
   private openBtn!: HTMLButtonElement;            // « Ouvrir » (fichier ou sélecteur de documents)
   private fileActionsEl!: HTMLElement;            // Enregistrer/Enregistrer-sous (masqués en mode API)
@@ -226,6 +236,18 @@ export class Shell {
     // de fichier. Le raccourci (Ctrl+F, annoncé dans le tooltip) est enregistré par le bootstrap.
     this.searchBtn = iconBtn(I18n.t("shell.topbar.globalSearch"), '<circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/>', () => this.host.onGlobalSearch?.());
     actions.appendChild(this.searchBtn);
+    // SCANNER UNE ÉTIQUETTE (chantier QR) : le viseur caméra en mode LIBRE — un deep-link d'étiquette
+    // OUVRE la fiche, toute autre valeur offre copier / insérer. Posé À CÔTÉ de la loupe : les deux
+    // sont des entrées de NAVIGATION (retrouver un objet), avant les actions de fichier. MASQUÉ par
+    // défaut — l'hôte le révèle si une caméra existe (`setScanAvailable`, sonde async du bootstrap).
+    // L'icône vient du registre (`Icons.SCAN`, principe n°14) — d'où l'innerHTML plutôt qu'iconBtn,
+    // qui fabrique son propre <svg> à partir de chemins nus.
+    this.scanBtn = document.createElement("button"); this.scanBtn.type = "button"; this.scanBtn.className = "icon-btn";
+    this.scanBtn.title = I18n.t("shell.topbar.scan"); this.scanBtn.setAttribute("aria-label", I18n.t("shell.topbar.scan"));
+    this.scanBtn.innerHTML = Icons.SCAN;
+    this.scanBtn.style.display = "none";
+    this.scanBtn.onclick = () => this.host.onScanGlobal?.();
+    actions.appendChild(this.scanBtn);
     // Nouveau / Ouvrir : utiles dans LES DEUX modes (fichier → fichier ; API → document serveur). Toujours visibles.
     this.newBtn = iconBtn(I18n.t("shell.topbar.new"), '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>', () => this.host.onNew?.());
     this.openBtn = iconBtn(I18n.t("shell.topbar.open"), '<path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', () => this.host.onOpen?.());
@@ -347,6 +369,24 @@ export class Shell {
     freqRow.append(freqLbl, this.autosaveIntervalSel); as.appendChild(freqRow);
     this.autosaveStatusEl = document.createElement("div"); this.autosaveStatusEl.className = "settings-status-line"; as.appendChild(this.autosaveStatusEl);
     this.fileOnlySections.push(fa, as);   // sections propres au mode fichier → masquées en mode API
+
+    // -- Scan (caméra) : préférences du greffon de scan (chantier QR, cf. docs/qr-scan.md § UI) --
+    // Deux bascules : greffon GÉNÉRIQUE sur tous les champs texte, et FORÇAGE de l'icône des champs
+    // déclarés sur desktop (par défaut elle n'apparaît qu'en tactile/écran étroit — pas d'icône morte).
+    const sc = section(I18n.t("shell.settings.scan"));
+    const scAllRow = document.createElement("div"); scAllRow.className = "settings-toggle-row";
+    const scAllLabel = document.createElement("label"); scAllLabel.className = "settings-toggle";
+    this.scanAllChk = document.createElement("input"); this.scanAllChk.type = "checkbox";
+    this.scanAllChk.onchange = () => this.host.onScanAllFields?.(this.scanAllChk.checked);
+    scAllLabel.append(this.scanAllChk, document.createTextNode(I18n.t("shell.settings.scanAllFields")));
+    scAllRow.appendChild(scAllLabel); sc.appendChild(scAllRow);
+    const scForceRow = document.createElement("div"); scForceRow.className = "settings-toggle-row";
+    const scForceLabel = document.createElement("label"); scForceLabel.className = "settings-toggle";
+    this.scanForceChk = document.createElement("input"); this.scanForceChk.type = "checkbox";
+    this.scanForceChk.onchange = () => this.host.onScanForceButtons?.(this.scanForceChk.checked);
+    scForceLabel.append(this.scanForceChk, document.createTextNode(I18n.t("shell.settings.scanForce")));
+    scForceRow.appendChild(scForceLabel); sc.appendChild(scForceRow);
+    const scNote = document.createElement("div"); scNote.className = "settings-row-note"; scNote.textContent = I18n.t("shell.settings.scanNote"); sc.appendChild(scNote);
 
     // -- Apparence -- (seule section « cosmétique » conservée en mode visualiseur ; cf. body.viewer-mode)
     const app = section(I18n.t("shell.settings.appearance")); app.classList.add("settings-cosmetic");
@@ -890,6 +930,15 @@ export class Shell {
       que la garde serveur de `GET /search`, dont l'assiette est de toute façon restreinte à ce que l'appelant
       a le droit de lire (docs/auth.md § 8.3). Sans aucune lecture, la palette ne trouverait rien. */
   setGlobalSearchAllowed(on: boolean): void { if (this.searchBtn) this.searchBtn.style.display = on ? "" : "none"; }
+  /** Bouton « Scanner une étiquette » : révélé quand une CAMÉRA existe et que le contexte permet
+      `getUserMedia` (sonde async `ScanControl.globalAvailable` du bootstrap) — un poste fixe sans
+      webcam ne voit jamais le bouton (cf. core/ScanAffordance). */
+  setScanAvailable(on: boolean): void { if (this.scanBtn) this.scanBtn.style.display = on ? "" : "none"; }
+  /** Reflète les préférences de scan dans les bascules des réglages (sans déclencher les rappels). */
+  setScanPrefs(allFields: boolean, force: boolean): void {
+    if (this.scanAllChk) this.scanAllChk.checked = allFields;
+    if (this.scanForceChk) this.scanForceChk.checked = force;
+  }
   /** Bouton « Nouveau » de la topbar : en mode API il CRÉE un document serveur (`documents:manage`) ; en mode
       fichier il repart d'un document local, et l'état « tout permis » le laisse visible (injection nulle). */
   setNewDocumentAllowed(on: boolean): void { if (this.newBtn) this.newBtn.style.display = on ? "" : "none"; }

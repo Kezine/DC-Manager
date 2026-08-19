@@ -12,6 +12,7 @@ export const shell = {
   },
   topbar: {
     globalSearch: "Recherche globale (Ctrl+F)",
+    scan: "Scanner une étiquette (caméra)",
     new: "Nouveau document (Ctrl+N)",
     open: "Ouvrir un fichier (Ctrl+O)",
     save: "Enregistrer (Ctrl+S)",
@@ -47,6 +48,10 @@ export const shell = {
     autosave: "Auto-save",
     autosaveEnable: "Activer l'auto-save",
     frequency: "Fréquence",
+    scan: "Scan (caméra)",
+    scanAllFields: "Bouton scan sur tous les champs texte",
+    scanForce: "Toujours afficher le bouton scan",
+    scanNote: "Par défaut, le bouton scan n'apparaît que sur écran tactile ou étroit, quand une caméra existe. « Toujours afficher » le force sur les champs qui le déclarent (n° de série…) ; « tous les champs texte » l'ajoute partout dans les formulaires. Raccourci : Ctrl+Maj+S sur un champ texte.",
     appearance: "Apparence",
     toggleTheme: "Basculer le thème clair / sombre",
     textSize: "Taille du texte",

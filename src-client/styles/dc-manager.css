@@ -2946,3 +2946,99 @@
     .rc-grip { width: 44px; height: 44px; }
     .rc-insert-btn { width: 44px; height: 44px; top: -22px; opacity: 1; }
   }
+
+  /* ============ SCAN CAMÉRA — greffon de champ + viseur (chantier étiquettes QR, lot D) ============
+     Maquette de référence : design-system/briefs/qr-saisie-camera-maquette.html (elle FAIT FOI).
+     Composants : ui/ScanControl (bouton 44px accolé au champ) + ui/ScanViewfinder (modale de visée
+     via la pile standard). Le PLATEAU (.scan-stage) est toujours NOIR — c'est de la vidéo — et son
+     chrome (outils, badge, indice) est en blanc translucide par-dessus, dans LES DEUX thèmes ;
+     le reste (résultat, avertissements) suit les tokens du thème. */
+  .scan-row { display: flex; gap: 8px; align-items: stretch; }
+  .scan-row > input { flex: 1 1 auto; min-width: 0; }
+  /* 44px de large (cible tactile de la maquette) ; la HAUTEUR suit celle du champ hôte (stretch) —
+     les inputs de l'app font ~35px sur desktop, un carré fixe de 44 casserait la rangée. */
+  .scan-btn {
+    flex: none; width: 44px; display: inline-flex; align-items: center; justify-content: center;
+    background: var(--bg-3); border: 1px solid var(--line-2); border-radius: var(--radius-pill);
+    color: var(--accent); cursor: pointer; padding: 0;
+  }
+  .scan-btn:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .scan-btn svg { width: 20px; height: 20px; }
+  /* Flash de CONFIRMATION posé sur le champ à l'injection (repris de la maquette `.inp.flash`). */
+  .scan-flash { animation: scanFlash 0.9s ease; }
+  @keyframes scanFlash { 0% { background: color-mix(in srgb, var(--ok) 30%, transparent); border-color: var(--ok); } }
+
+  /* -- plateau vidéo + zone de décodage (ROI) -- */
+  .scan-stage {
+    position: relative; background: #000; width: 100%; aspect-ratio: 3 / 4; max-height: 52vh;
+    overflow: hidden; touch-action: none; user-select: none; border: 1px solid var(--line-2);
+  }
+  .scan-stage video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+  .scan-roi { position: absolute; border: 1px solid var(--accent); box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55); cursor: move; }
+  .scan-roi.lock { border-color: var(--ok); box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.62), 0 0 18px color-mix(in srgb, var(--ok) 60%, transparent); }
+  .scan-roi .cn { position: absolute; width: 16px; height: 16px; border: 2px solid var(--accent); pointer-events: none; }
+  .scan-roi.lock .cn { border-color: var(--ok); }
+  .scan-roi .cn.tl { top: -1px; left: -1px; border-right: 0; border-bottom: 0; }
+  .scan-roi .cn.tr { top: -1px; right: -1px; border-left: 0; border-bottom: 0; }
+  .scan-roi .cn.bl { bottom: -1px; left: -1px; border-right: 0; border-top: 0; }
+  .scan-roi .cn.br { bottom: -1px; right: -1px; border-left: 0; border-top: 0; }
+  /* Poignées de redimensionnement : 28px INVISIBLES débordant des coins (cibles tactiles). */
+  .scan-roi .h { position: absolute; width: 28px; height: 28px; cursor: nwse-resize; }
+  .scan-roi .h.tl { top: -14px; left: -14px; }
+  .scan-roi .h.tr { top: -14px; right: -14px; cursor: nesw-resize; }
+  .scan-roi .h.bl { bottom: -14px; left: -14px; cursor: nesw-resize; }
+  .scan-roi .h.br { bottom: -14px; right: -14px; }
+  .scan-scanline {
+    position: absolute; left: 0; right: 0; height: 2px; pointer-events: none;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    animation: scanSweep 2.1s linear infinite;
+  }
+  @keyframes scanSweep { 0% { top: 0; opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { top: 100%; opacity: 0; } }
+  .scan-roi.lock .scan-scanline { display: none; }
+  .scan-stage-hint {
+    position: absolute; left: 12px; right: 12px; bottom: 12px; text-align: center; pointer-events: none;
+    font-family: var(--sans); font-size: 11px; color: #e8e8e8; background: rgba(0, 0, 0, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 6px; padding: 6px 8px;
+  }
+  .scan-stage-tools { position: absolute; top: 10px; right: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .scan-tool {
+    width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center; padding: 0;
+    background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: var(--radius-pill); color: #e8e8e8; cursor: pointer;
+  }
+  .scan-tool[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+  .scan-tool:disabled { opacity: 0.4; cursor: default; }
+  .scan-tool svg { width: 18px; height: 18px; }
+  .scan-src-tag {
+    position: absolute; top: 10px; left: 10px; font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: #e8e8e8; background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 4px; padding: 3px 6px; pointer-events: none;
+  }
+
+  /* -- rangée « Moteur : Auto / WASM » (visible seulement quand le natif existe) -- */
+  .scan-engine-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 10px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.08em; }
+
+  /* -- panneau RÉSULTAT (valeur décodée + Continuer / Valider) -- */
+  .scan-result { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+  .scan-res-head { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ok); display: flex; align-items: center; gap: 6px; }
+  .scan-res-head svg { width: 13px; height: 13px; flex: none; }
+  .scan-res-val { font-family: var(--mono); font-size: 14px; word-break: break-all; white-space: pre-wrap; background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; padding: 10px 12px; }
+  .scan-res-meta { display: flex; gap: 10px; flex-wrap: wrap; font-size: 10px; color: var(--fg-dim); letter-spacing: 0.04em; text-transform: uppercase; }
+  .scan-res-warn { font-family: var(--sans); font-size: 12px; color: var(--warn); }
+  .scan-res-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .scan-res-actions .btn { flex: 1 1 auto; }
+  .scan-res-link { font-family: var(--sans); font-size: 12px; word-break: break-all; }
+
+  /* -- panneau d'ÉTAT (permission, contexte, absence de caméra) : remplace le plateau -- */
+  .scan-msg { font-family: var(--sans); font-size: 13px; color: var(--fg); background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .scan-msg .btn { align-self: flex-start; }
+
+  /* -- annonce vocale (aria-live) : présente pour les lecteurs d'écran, invisible à l'écran -- */
+  .scan-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  /* prefers-reduced-motion : la scanline (balayage continu) et le flash sont un CONFORT, jamais
+     l'information seule (le verrou visuel + le panneau résultat disent tout) → coupés. */
+  @media (prefers-reduced-motion: reduce) {
+    .scan-scanline { display: none; }
+    .scan-flash { animation: none; }
+  }

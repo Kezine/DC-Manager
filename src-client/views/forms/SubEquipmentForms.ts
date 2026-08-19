@@ -32,6 +32,7 @@ import { LifecycleFormat } from "../../core/LifecycleFormat";   // âge d'achat 
 import { Notify } from "../../ui/Notify";
 import { Dialog } from "../../ui/Dialog";
 import { FormControls } from "../../ui/FormControls";
+import { ScanControl } from "../../ui/ScanControl";   // greffon de scan caméra du champ n° de série (déclaré, parseur `serial` — docs/qr-scan.md § UI)
 import { ChipsInput, ChipItem } from "../../ui/ChipsInput";
 import { FieldFacet } from "../../core/FieldFacet";
 import { LiveValidation } from "./LiveValidation";
@@ -179,6 +180,9 @@ export class SubEquipmentForms extends FormBase {
     root.appendChild(FormControls.fieldRow(I18n.t("equipment.field.model"), modelI));
     const serialI = FormControls.text(se ? se.serial : "", I18n.t("subEquipment.serialPlaceholder"));
     root.appendChild(FormControls.fieldRow(I18n.t("equipment.field.serial"), serialI));
+    // Greffon de SCAN caméra (déclaré) : parité avec les formulaires équipement/spare — parseur
+    // `serial`, zone de décodage mémorisée sous sa propre clé (cf. docs/qr-scan.md § UI).
+    ScanControl.attach({ input: serialI, parser: "serial", fieldKey: "subEquipments.serial", label: I18n.t("equipment.field.serial") });
 
     // ADMINISTRATIF (achat / garantie) — D5(c) 2026-08-03, décalqué d'`EquipmentForms.form` (~L560-565).
     // `FormControls.date` = primitive maison OBLIGATOIRE pour les dates (principe n°14), jamais un

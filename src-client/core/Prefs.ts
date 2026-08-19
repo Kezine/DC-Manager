@@ -9,7 +9,10 @@ import { FieldFacet } from "./FieldFacet";
 export type ThemeName = "dark" | "light";
 export type DataSource = "local" | "api";
 export type FileAccessMode = "file" | "directory";   // accès FS : 1 autorisation par fichier · 1 autorisation pour le dossier
-export interface AppPrefs { theme: ThemeName; autosave: boolean; autosaveInterval: number; dataSource: DataSource; dataSourceUserSet: boolean; apiBaseUrl: string; loginUrl: string; fileAccessMode: FileAccessMode; debugLog: boolean; uiScale: number; autocompleteMaxResults: number; modalFullscreen: boolean; lastRestDocId: string; }
+/** Source de décodage DEMANDÉE au moteur de scan (cf. core/BarcodeDetection) : `auto` = natif si
+    utilisable sinon wasm ; `wasm` = zxing-wasm forcé (décode plus de styles de QR). */
+export type ScanEngineMode = "auto" | "wasm";
+export interface AppPrefs { theme: ThemeName; autosave: boolean; autosaveInterval: number; dataSource: DataSource; dataSourceUserSet: boolean; apiBaseUrl: string; loginUrl: string; fileAccessMode: FileAccessMode; debugLog: boolean; uiScale: number; autocompleteMaxResults: number; modalFullscreen: boolean; lastRestDocId: string; scanAllFields: boolean; scanForceButtons: boolean; scanEngine: ScanEngineMode; }
 
 export class Prefs {
   static readonly KEY = "dcmanager.prefs";
@@ -28,7 +31,7 @@ export class Prefs {
     { value: 1.1, labelKey: "shell.settings.scaleEnlarged" },
   ];
 
-  private data: AppPrefs = { theme: "dark", autosave: false, autosaveInterval: Prefs.INTERVAL_DEFAULT, dataSource: "local", dataSourceUserSet: false, apiBaseUrl: "", loginUrl: "", fileAccessMode: "file", debugLog: false, uiScale: Prefs.UI_SCALE_DEFAULT, autocompleteMaxResults: FieldFacet.MAX_RESULTS_DEFAULT, modalFullscreen: false, lastRestDocId: "" };
+  private data: AppPrefs = { theme: "dark", autosave: false, autosaveInterval: Prefs.INTERVAL_DEFAULT, dataSource: "local", dataSourceUserSet: false, apiBaseUrl: "", loginUrl: "", fileAccessMode: "file", debugLog: false, uiScale: Prefs.UI_SCALE_DEFAULT, autocompleteMaxResults: FieldFacet.MAX_RESULTS_DEFAULT, modalFullscreen: false, lastRestDocId: "", scanAllFields: false, scanForceButtons: false, scanEngine: "auto" };
 
   constructor() { this.load(); }
 
@@ -49,6 +52,9 @@ export class Prefs {
       if (p.autocompleteMaxResults != null) this.data.autocompleteMaxResults = FieldFacet.clampLimit(p.autocompleteMaxResults);
       this.data.modalFullscreen = !!p.modalFullscreen;
       if (typeof p.lastRestDocId === "string") this.data.lastRestDocId = p.lastRestDocId;
+      this.data.scanAllFields = !!p.scanAllFields;
+      this.data.scanForceButtons = !!p.scanForceButtons;
+      if (p.scanEngine === "auto" || p.scanEngine === "wasm") this.data.scanEngine = p.scanEngine;
     } catch (e) { console.warn("Prefs.load a échoué", e); }
   }
   save(): void { try { window.localStorage.setItem(Prefs.KEY, JSON.stringify(this.data)); } catch (e) { console.warn("Prefs.save a échoué", e); } }
@@ -84,4 +90,15 @@ export class Prefs {
   // "" = aucun (le boot retombe alors sur le doc par défaut global, puis sur le plus récent). Cf. restBootstrap.
   get lastRestDocId(): string { return this.data.lastRestDocId; }
   set lastRestDocId(v: string) { this.data.lastRestDocId = (typeof v === "string") ? v : ""; this.save(); }
+  // --- SCAN CAMÉRA (chantier étiquettes QR — cf. docs/qr-scan.md § « L'UI de scan ») ---
+  // Greffon GÉNÉRIQUE : un bouton scan sur TOUS les champs texte des formulaires (parseur brut).
+  get scanAllFields(): boolean { return this.data.scanAllFields; }
+  set scanAllFields(v: boolean) { this.data.scanAllFields = !!v; this.save(); }
+  // FORÇAGE de l'icône des champs DÉCLARÉS sur desktop (webcam poste fixe) — sans lui, le bouton
+  // n'apparaît qu'en pointeur grossier / écran étroit (cf. core/ScanAffordance).
+  get scanForceButtons(): boolean { return this.data.scanForceButtons; }
+  set scanForceButtons(v: boolean) { this.data.scanForceButtons = !!v; this.save(); }
+  // Moteur de décodage du viseur (toggle « Auto / WASM » de la modale de scan, persisté).
+  get scanEngine(): ScanEngineMode { return this.data.scanEngine; }
+  set scanEngine(v: ScanEngineMode) { this.data.scanEngine = (v === "wasm") ? "wasm" : "auto"; this.save(); }
 }

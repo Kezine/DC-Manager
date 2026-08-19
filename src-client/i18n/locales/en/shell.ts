@@ -7,6 +7,7 @@ export const shell = {
   },
   topbar: {
     globalSearch: "Global search (Ctrl+F)",
+    scan: "Scan a label (camera)",
     new: "New document (Ctrl+N)",
     open: "Open a file (Ctrl+O)",
     save: "Save (Ctrl+S)",
@@ -42,6 +43,10 @@ export const shell = {
     autosave: "Auto-save",
     autosaveEnable: "Enable auto-save",
     frequency: "Frequency",
+    scan: "Scan (camera)",
+    scanAllFields: "Scan button on every text field",
+    scanForce: "Always show the scan button",
+    scanNote: "By default the scan button only appears on touch or narrow screens, when a camera exists. “Always show” forces it on the fields that declare it (serial numbers…); “every text field” adds it everywhere in forms. Shortcut: Ctrl+Shift+S on a text field.",
     appearance: "Appearance",
     toggleTheme: "Toggle light / dark theme",
     textSize: "Text size",

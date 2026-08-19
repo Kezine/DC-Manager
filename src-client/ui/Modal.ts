@@ -274,6 +274,12 @@ export class Modal {
   /** Signale une modification NON-SAISIE (ajout de port, glisser un marqueur…) sur le niveau COURANT. */
   markDirty(): void { const level = this.stack.top(); if (level) level.dirty = true; }
 
+  /** CORPS de la modale (réceptacle où les niveaux posent leur DOM) — point d'accroche des greffons
+      TRANSVERSES qui observent les formulaires (le greffon de scan générique, cf. `ui/ScanControl.
+      installGeneric` : un MutationObserver y guette les champs texte). Exposé en lecture seule
+      plutôt que d'obliger l'hôte à re-quérir `.modal-body` dans le document. */
+  get body(): HTMLElement { return this.elBody; }
+
   /** Instantané des champs d'un corps DONNÉ (et non du corps affiché) : un niveau enfoui doit rester
       comparable à son instantané alors que sa DOM est détachée de l'overlay. */
   private static _snapshotOf(body: HTMLElement): string {
