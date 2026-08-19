@@ -1,0 +1,757 @@
+<!-- PULL depuis claude.ai « DC Manager » (explorations/Étiquettes imprimables - maquette.html),
+     rapatriée le 2026-08-20 pour le lot E du chantier étiquettes QR (carton qr-etiquettes-imprimables.md).
+     La maquette FAIT FOI pour les gabarits/anatomie/flux d impression (consigne § 7 du handoff). -->
+<!doctype html>
+<html lang="fr" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Étiquettes QR imprimables — maquette</title>
+<style>
+  :root{
+    --bg:#0a0a0a;--bg-2:#111111;--bg-3:#161616;--line:#222222;--line-2:#2d2d2d;
+    --fg:#e8e8e8;--fg-dim:#9a9aa2;--fg-dimmer:#555555;
+    --accent-fill:oklch(0.67 0.19 46);--accent:oklch(0.72 0.175 50);--accent-text:oklch(0.80 0.15 62);
+    --ok:oklch(0.76 0.15 152);--warn:oklch(0.82 0.14 88);--err:oklch(0.66 0.19 27);--info:oklch(0.70 0.14 230);
+    --focus:var(--accent-text);--grid-size:24px;--radius-pill:5px;--control-h:34px;
+    --mono:ui-monospace,"SF Mono","Menlo","Consolas","Cascadia Mono","Roboto Mono",monospace;
+    --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  }
+  [data-theme="light"]{
+    --bg:#f4f4f1;--bg-2:#ffffff;--bg-3:#ebebe6;--line:#d6d6d0;--line-2:#b8b8b0;
+    --fg:#1a1a1a;--fg-dim:#5a5a55;--fg-dimmer:#8a8a82;
+    --accent-fill:oklch(0.57 0.18 42);--accent:oklch(0.58 0.17 45);--accent-text:oklch(0.55 0.18 45);
+    --ok:oklch(0.52 0.14 152);--warn:oklch(0.58 0.13 80);--err:oklch(0.52 0.19 27);--info:oklch(0.50 0.14 250);
+  }
+  *{box-sizing:border-box}
+  [hidden]{display:none!important}
+  html,body{margin:0}
+  body{background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px;line-height:1.5;
+    background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
+    background-size:var(--grid-size) var(--grid-size);-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1180px;margin:0 auto;padding:40px 28px 120px}
+  a{color:var(--accent-text)}a:hover{color:var(--accent)}
+  code{color:var(--accent-text);font-family:var(--mono)}
+  :focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+  header.top{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;flex-wrap:wrap}
+  .eyebrow{font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:var(--accent-text)}
+  h1{font-size:24px;letter-spacing:.06em;margin:6px 0 0;font-weight:700}
+  .lede{font-family:var(--sans);color:var(--fg-dim);max-width:78ch;margin:14px 0 0;font-size:14px}
+  .theme-btn{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;background:var(--bg-2);color:var(--fg-dim);border:1px solid var(--line-2);border-radius:var(--radius-pill);padding:8px 12px;cursor:pointer;flex:none;min-height:var(--control-h);display:inline-flex;align-items:center;gap:7px}
+  .theme-btn:hover{color:var(--fg);border-color:var(--fg)}
+  .theme-btn svg{width:13px;height:13px}
+  section{margin-top:42px}
+  .sec-h{display:flex;align-items:baseline;gap:12px;border-bottom:1px solid var(--line-2);padding-bottom:8px;margin-bottom:20px;flex-wrap:wrap}
+  .sec-n{font-size:11px;color:var(--accent-text);letter-spacing:.12em}
+  .sec-t{font-size:15px;letter-spacing:.1em;text-transform:uppercase;font-weight:700}
+  .sec-tag{margin-left:auto;font-size:10px;color:var(--fg-dim);letter-spacing:.06em;text-transform:uppercase}
+  .card{background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:22px}
+  .prose{font-family:var(--sans);color:var(--fg-dim);font-size:13px;max-width:80ch;margin:0 0 18px}
+  .notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px;margin-top:22px}
+  .note{border-left:2px solid var(--line-2);padding:2px 0 2px 12px}
+  .note.good{border-color:var(--ok)}.note.warn{border-color:var(--warn)}.note.info{border-color:var(--info)}
+  .note h4{margin:0 0 3px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dim)}
+  .note p{margin:0;font-family:var(--sans);font-size:12px;color:var(--fg);line-height:1.45}
+  .btn{display:inline-flex;align-items:center;gap:8px;justify-content:center;background:var(--bg-3);border:1px solid var(--line-2);color:var(--fg);font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;border-radius:var(--radius-pill);min-height:40px;padding:0 14px;cursor:pointer}
+  .btn:hover{border-color:var(--fg)}
+  .btn>svg{width:14px;height:14px;flex:none}
+  .btn-primary{background:var(--accent-fill);border-color:var(--accent-fill);color:#000;font-weight:600}
+  .btn-primary:hover{filter:brightness(1.12)}
+  .btn-ghost{background:transparent;border-color:var(--line)}
+  .btn-sm{min-height:32px;font-size:10px;padding:0 10px}
+  .ibtn{flex:none;width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;background:var(--bg-3);border:1px solid var(--line-2);border-radius:var(--radius-pill);color:var(--fg-dim);cursor:pointer}
+  .ibtn:hover{color:var(--accent-text);border-color:var(--accent)}
+  .ibtn svg{width:15px;height:15px}
+  @media (pointer:coarse){.ibtn{width:44px;height:44px}.btn{min-height:44px}}
+
+  /* ---------- papier : tout imprimé est noir sur blanc ---------- */
+  .paper{background:#fff;color:#000;border-radius:3px;font-family:var(--sans)}
+  .paper *{color:#000}
+  .lab{background:#fff;color:#000;display:flex;align-items:center;gap:2mm;padding:1.5mm;overflow:hidden;font-family:var(--sans)}
+  .lab .qr{flex:none;display:block}
+  .lab .txt{min-width:0;display:flex;flex-direction:column;gap:.6mm}
+  .lab .l-id{font-family:var(--mono);font-weight:700;line-height:1.08;letter-spacing:-.02em;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow-wrap:anywhere}
+  .lab .l-loc{font-family:var(--mono);line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .lab .l-meta{line-height:1.15;color:#333;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .lab .l-sn{font-family:var(--mono);color:#444;line-height:1.1}
+  .lab .l-own{font-family:var(--sans);text-transform:uppercase;letter-spacing:.07em;color:#222;line-height:1.35;white-space:nowrap;overflow:visible;text-overflow:ellipsis;font-weight:600}
+  .lab.compact{padding:.7mm;gap:1.4mm}
+  .lab.qronly{justify-content:center;gap:.8mm;flex-direction:column;padding:1mm;height:auto}
+  .lab.qronly .txt{align-items:center;width:100%}
+  .lab.qronly .l-own{text-align:center}
+  .lab.s{width:50mm;height:20mm;gap:2mm}
+  .lab.s .l-id{font-size:8pt}.lab.s .l-loc{font-size:6.5pt}.lab.s .l-own{font-size:5pt}
+  .lab.m{width:50mm;height:30mm;gap:2mm}
+  .lab.m .l-id{font-size:8.5pt}.lab.m .l-loc{font-size:7pt}.lab.m .l-meta{font-size:6pt}.lab.m .l-sn{font-size:5.5pt}.lab.m .l-own{font-size:5.5pt}
+  .lab.l{width:70mm;height:40mm;gap:3mm;padding:3mm}
+  .lab.l .l-id{font-size:12pt}.lab.l .l-loc{font-size:9pt}.lab.l .l-meta{font-size:7.5pt}.lab.l .l-sn{font-size:7pt}.lab.l .l-own{font-size:7pt}
+  .lab.rack{width:100mm;height:60mm;gap:5mm;padding:4mm;align-items:center}
+  .lab.rack .l-loc{white-space:normal}
+  .lab.rack .l-own{font-size:9pt}
+  .lab.cable{padding:0;gap:0;align-items:stretch}
+  .lab.cable .pan{flex:none;display:flex;align-items:center;justify-content:center;gap:1.2mm;overflow:hidden}
+  .lab.cable .pan.b{justify-content:flex-start}
+  .lab.cable .wz{flex:none;border-left:.2mm dashed #999;border-right:.2mm dashed #999;background:repeating-linear-gradient(45deg,#fff 0 1mm,#e9e9e9 1mm 2mm)}
+  .lab.cable .txt{gap:.4mm}
+  .lab.cable .l-id{font-size:7pt;line-height:1.1}
+  .lab.cable .l-loc,.lab.cable .l-meta,.lab.cable .l-own{font-size:5pt;white-space:normal;overflow-wrap:anywhere;line-height:1.2}
+  .lab.cable .l-loc b{font-family:var(--mono);font-weight:700;color:#000}
+  .lab.cable.strip{align-items:stretch;gap:0;padding:0}
+  .lab.cable.strip .cell2{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:1mm 0;overflow:hidden;border-right:.2mm dashed #ccc;writing-mode:vertical-rl}
+  .lab.cable.strip .cell2 .l-id{font-size:8pt;letter-spacing:0;display:block;white-space:nowrap;text-overflow:ellipsis;max-width:100%}
+  .lab.cable.strip .cell2 .l-loc,.lab.cable.strip .cell2 .l-own{font-size:5pt;white-space:normal;overflow-wrap:anywhere;text-align:start;max-height:100%}
+  .lab.cable.strip .ov{flex:none;background:repeating-linear-gradient(45deg,#fff 0 1mm,#e9e9e9 1mm 2mm);border-left:.2mm dashed #999}
+  .lab.rack .l-id{font-size:26pt;letter-spacing:-.03em}
+  .lab.rack .l-loc{font-size:12pt}
+  .lab.rack .l-meta{font-size:9pt}
+  .lab.rack .l-sn{font-size:8pt}
+  .lab .rule{height:.35mm;background:#000;width:100%;margin:.8mm 0}
+
+  .specimens{display:flex;flex-wrap:wrap;gap:26px;align-items:flex-start}
+  .spec{display:flex;flex-direction:column;gap:8px}
+  .spec .frame{border:1px dashed var(--line-2);padding:5px;border-radius:4px;background:#fff;width:fit-content}
+  .spec .cap{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--fg-dim)}
+  .spec .dim{font-size:10px;color:var(--accent-text)}
+  .spec .use{font-family:var(--sans);font-size:12px;color:var(--fg-dim);max-width:34ch}
+
+  /* ---------- anatomie ---------- */
+  .anat{display:grid;grid-template-columns:auto 1fr;gap:32px;align-items:start}
+  @media (max-width:900px){.anat{grid-template-columns:1fr}}
+  .anat-stage{position:relative;background:#fff;padding:16px 74px 34px 16px;border-radius:6px;width:fit-content}
+  .anat-stage .lab{transform:scale(2.4);transform-origin:top left}
+  .anat-hold{width:calc(50mm * 2.4);height:calc(30mm * 2.4)}
+  .cal{position:absolute;width:20px;height:20px;border-radius:50%;background:var(--accent-fill);color:#000;font-family:var(--mono);font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 2px #fff;z-index:2}
+  .cal-lead{position:absolute;border-top:1px dashed color-mix(in srgb,var(--accent-fill) 70%,#fff);z-index:1}
+  .cal-lead.v{border-top:0;border-left:1px dashed color-mix(in srgb,var(--accent-fill) 70%,#fff)}
+  .legend{display:flex;flex-direction:column;gap:14px;margin:0;padding:0;list-style:none}
+  .legend li{display:grid;grid-template-columns:22px 1fr;gap:10px;align-items:start}
+  .legend .n{width:20px;height:20px;border-radius:50%;border:1px solid var(--accent);color:var(--accent-text);font-size:11px;display:flex;align-items:center;justify-content:center}
+  .legend h5{margin:0 0 2px;font-size:11px;letter-spacing:.08em;text-transform:uppercase}
+  .legend p{margin:0;font-family:var(--sans);font-size:12px;color:var(--fg-dim)}
+
+  /* ---------- planche A4 ---------- */
+  .a4{width:210mm;height:297mm;background:#fff;padding:8mm;display:grid;gap:0;align-content:start}
+  .a4 .cell{border:.2mm dashed #bbb;display:flex;align-items:center;justify-content:center;overflow:hidden}
+  .a4 .cell .lab{flex:none}
+  .a4 .cell .lab{width:100%;height:100%}
+  .a4-head{display:flex;justify-content:space-between;font-family:var(--mono);font-size:6pt;color:#666;grid-column:1/-1;padding-bottom:2mm}
+  .a4-scale{transform:scale(.44);transform-origin:top left}
+  .a4-hold{width:calc(210mm * .44);height:calc(297mm * .44);border:1px solid var(--line-2);border-radius:4px;overflow:hidden}
+
+  /* ---------- flux : app frame ---------- */
+  .app{border:1px solid var(--line-2);border-radius:10px;overflow:hidden;background:var(--bg);position:relative}
+  .app-bar{display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--line);background:var(--bg-2);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--fg-dim)}
+  .app-bar .dot{width:7px;height:7px;border-radius:50%;background:var(--accent-fill)}
+  .app-body{padding:18px}
+  .fiche-h{display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap}
+  .fiche-h h3{margin:0;font-size:18px;letter-spacing:.04em}
+  .fiche-h .sub{font-size:11px;color:var(--fg-dim);margin-top:4px}
+  .fiche-actions{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+  .kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px 24px;margin-top:18px;border-top:1px solid var(--line);padding-top:16px}
+  .kv div{display:flex;flex-direction:column;gap:2px}
+  .kv .k{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--fg-dimmer)}
+  .kv .v{font-size:13px}
+  table.list{width:100%;border-collapse:collapse;font-size:12px}
+  table.list th{text-align:left;font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--fg-dimmer);font-weight:400;padding:0 10px 8px;border-bottom:1px solid var(--line-2)}
+  table.list th.num,table.list td.num{text-align:right;font-variant-numeric:tabular-nums}
+  table.list td{padding:9px 10px;border-bottom:1px solid var(--line)}
+  table.list tr[data-sel="1"]{background:color-mix(in srgb,var(--accent) 9%,transparent)}
+  table.list td:first-child,table.list th:first-child{width:34px;padding-right:0}
+  .tbl-scroll{overflow-x:auto}
+  .sel-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px;padding:10px 12px;border:1px solid var(--accent);border-radius:var(--radius-pill);background:color-mix(in srgb,var(--accent) 10%,transparent)}
+  .sel-bar .cnt{font-size:11px;letter-spacing:.06em;color:var(--accent-text)}
+  .sel-bar .sp{margin-left:auto}
+  input[type=checkbox]{appearance:none;width:16px;height:16px;border:1px solid var(--line-2);border-radius:3px;background:var(--bg-3);cursor:pointer;position:relative;flex:none;margin:0}
+  input[type=checkbox]:checked{background:var(--accent-fill);border-color:var(--accent-fill)}
+  input[type=checkbox]:checked::after{content:"";position:absolute;left:4px;top:1px;width:6px;height:10px;border-right:2px solid #000;border-bottom:2px solid #000;transform:rotate(38deg)}
+  label.cbx{display:flex;align-items:center;gap:9px;font-size:12px;cursor:pointer;min-height:28px}
+  @media (pointer:coarse){label.cbx{min-height:44px}}
+
+  /* ---------- modale ---------- */
+  .scrim{position:fixed;inset:0;background:rgba(0,0,0,.66);backdrop-filter:blur(2px);z-index:60;display:none;align-items:flex-start;justify-content:center;padding:32px 16px;overflow:auto}
+  .scrim.open{display:flex}
+  .modal{width:100%;max-width:940px;background:var(--bg-2);border:1px solid var(--line-2);border-radius:10px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.55)}
+  .m-head{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid var(--line)}
+  .m-title{font-size:12px;letter-spacing:.12em;text-transform:uppercase;font-weight:700}
+  .m-sub{font-size:10px;color:var(--fg-dim)}
+  .m-body{display:grid;grid-template-columns:260px 1fr;min-height:0}
+  @media (max-width:800px){.m-body{grid-template-columns:1fr}}
+  .m-side{padding:16px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:20px}
+  @media (max-width:800px){.m-side{border-right:0;border-bottom:1px solid var(--line)}}
+  .fset h5{margin:0 0 9px;font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--fg-dimmer)}
+  .seg{display:flex;border:1px solid var(--line-2);border-radius:var(--radius-pill);overflow:hidden}
+  .seg button{flex:1;background:transparent;border:0;border-right:1px solid var(--line-2);color:var(--fg-dim);font-family:var(--mono);font-size:11px;letter-spacing:.06em;padding:0 6px;min-height:36px;cursor:pointer}
+  .seg button:last-child{border-right:0}
+  .seg button[aria-pressed=true]{background:var(--accent-fill);color:#000;font-weight:600}
+  .m-prev{padding:18px;background:var(--bg-3);display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:flex-start;min-height:320px}
+  .prev-meta{display:flex;gap:14px;align-items:center;width:100%;font-size:10px;color:var(--fg-dim);letter-spacing:.06em;text-transform:uppercase;flex-wrap:wrap}
+  .prev-meta .sp{margin-left:auto}
+  .prev-vp{width:100%;overflow:auto;display:flex;justify-content:center;padding:4px}
+  .m-foot{display:flex;align-items:center;gap:10px;padding:13px 16px;border-top:1px solid var(--line)}
+  .m-foot .sp{margin-left:auto}
+  .warn-inline{font-family:var(--sans);font-size:11px;color:var(--warn);display:flex;gap:7px;align-items:flex-start}
+  .hint{font-family:var(--sans);font-size:11px;color:var(--fg-dimmer);margin:6px 0 0}
+  .stat{font-family:var(--mono);font-size:11px;color:var(--fg-dim)}
+  .stat b{color:var(--fg);font-weight:400}
+  select.ctl,input.ctl{width:100%;background:var(--bg);border:1px solid var(--line-2);border-radius:var(--radius-pill);color:var(--fg);font-family:var(--mono);font-size:12px;min-height:36px;padding:0 9px;outline:none}
+  select.ctl:focus,input.ctl:focus{border-color:var(--accent)}
+  input.ctl::placeholder{color:var(--fg-dimmer)}
+  .mm-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(64px,1fr));gap:6px;margin-top:8px}
+  .mm-row label{display:flex;flex-direction:column;gap:4px;font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dimmer)}
+
+  @media print{
+    body{background:#fff!important;background-image:none!important}
+    body>*{display:none!important}
+    .scrim.open{display:block!important;position:static;padding:0;background:#fff;inset:auto;overflow:visible;backdrop-filter:none}
+    .modal{max-width:none;border:0;box-shadow:none;background:#fff}
+    .m-head,.m-side,.m-foot,.prev-meta{display:none!important}
+    .m-body{display:block}
+    .m-prev{padding:0;background:#fff;min-height:0}
+    .prev-vp{overflow:visible;padding:0}
+    .a4-scale{transform:none}
+    .a4-hold{width:auto;height:auto;border:0}
+    .a4{padding:8mm}
+    @page{size:A4;margin:0}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+  <div>
+    <div class="eyebrow">Chantier étiquettes QR · lot E — impression</div>
+    <h1>Étiquettes QR imprimables</h1>
+    <p class="lede">Quatre gabarits (unitaire équipement, tête de baie, drapeau et manchon de câble, planche A4), l'anatomie d'une étiquette aux tailles réelles, et le flux d'impression depuis l'app. La sortie imprimée est <strong>noir sur blanc</strong> : elle ignore le thème de l'app. Les QR de cette maquette sont <em>simulés</em> — en production c'est <code>GET /qr/:collection/:id?format=svg</code>.</p>
+  </div>
+  <button class="theme-btn" id="themeBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg><span>Thème</span></button>
+</header>
+
+<section>
+  <div class="sec-h"><span class="sec-n">01</span><span class="sec-t">Ce qu'on tranche</span><span class="sec-tag">à valider</span></div>
+  <div class="card">
+    <p class="prose">Quatre décisions au moment d'imprimer : <strong>format</strong> (préréglage ou cotes libres), <strong>contenu</strong> (QR seul ou QR + texte), <strong>densité</strong> et <strong>société propriétaire</strong>. Le reste est un défaut dérivé du format — plus l'étiquette est grande, plus elle porte de lisible humain. Les champs restent décochables, mais personne ne devrait avoir à y toucher.</p>
+    <div class="notes">
+      <div class="note good"><h4>Format par défaut</h4><p><b>M — 50 × 30 mm</b>, QR 20 mm, nom + baie·U. Couvre 90 % des équipements et tient sur une façade 1U.</p></div>
+      <div class="note good"><h4>Plancher scannabilité</h4><p>QR jamais sous <b>18 mm</b> de côté, quiet zone 4 modules (≈ 2,5 mm) toujours blanche. Le format S est le minimum absolu.</p></div>
+      <div class="note good"><h4>Densité par défaut : compact</h4><p>Marges 0,7 mm, gouttière 1,4 mm. On est presque toujours à l'étroit sur une façade : <b>compact est le défaut</b>, « confort » reste à un clic.</p></div>
+      <div class="note good"><h4>Format libre à l'impression</h4><p>S / M / L / baie en préréglages, plus <b>Personnalisé</b> (largeur, hauteur, taille de QR en mm) pour coller à un rouleau ou à une planche existante.</p></div>
+      <div class="note info"><h4>QR seul</h4><p>Bascule « QR seul » en tête de la modale : l'étiquette devient <b>carrée</b> (QR + quiet zone), le format cède la place à une seule cote — la taille du QR.</p></div>
+      <div class="note info"><h4>Société propriétaire</h4><p>Champ libre saisi à l'impression, <b>non persisté</b> ; mémorisé le temps de la session pour ne pas le retaper. Côté API : paramètre de rendu, pas un champ de fiche.</p></div>
+      <div class="note info"><h4>Champs par défaut</h4><p>S : nom seul. M : nom + emplacement. L / baie : + type et n° de série. Jamais de statut, IP ou date — l'imprimé est pérenne.</p></div>
+      <div class="note info"><h4>Planche</h4><p>A4, <b>4 × 8 = 32</b> étiquettes M par feuille, marge 8 mm, traits de coupe pointillés. Colonnes réglables 2/3/4, <b>plafonnées par la largeur réelle</b> de l'étiquette (une L de 70 mm → 2 col. max).</p></div>
+      <div class="note warn"><h4>Pas de réglage</h4><p>Ni police, ni marges au millimètre, ni orientation, ni densité de QR. Deux crans de densité suffisent ; l'aperçu print-CSS est la seule vérité.</p></div>
+      <div class="note warn"><h4>Imprimante d'étiquettes</h4><p>En unitaire, on émet une page à la taille exacte de l'étiquette (<code>@page size</code>) → passe sur Brother/Dymo 50 mm sans découpe.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-h"><span class="sec-n">02</span><span class="sec-t">Les gabarits, à taille réelle</span><span class="sec-tag">imprimez cette page pour vérifier</span></div>
+  <div class="card">
+    <p class="prose">Rendus en millimètres CSS : à l'écran la taille dépend de la densité, à l'impression ce sont les cotes réelles.</p>
+    <div class="specimens" id="specimens"></div>
+    <div class="notes">
+      <div class="note"><h4>S — façade étroite</h4><p>Switch 1U dense, bandeau de brassage, spare en bac. QR 18 mm + nom, rien d'autre ne tient.</p></div>
+      <div class="note"><h4>M — défaut</h4><p>Serveur, onduleur, tiroir optique. Le couple <em>nom + baie·U</em> suffit à retrouver l'objet sans scanner.</p></div>
+      <div class="note"><h4>L — équipement critique</h4><p>Cœur de réseau, châssis. Lisible à 2 m dans une allée froide.</p></div>
+      <div class="note"><h4>Baie — 100 × 60 mm</h4><p>En tête de baie : nom en 26 pt, salle · rangée · position, et le QR mène à la fiche baie (contenu, U libres).</p></div>
+      <div class="note"><h4>Câble — manchon sans QR</h4><p>Deux tours + recouvrement dans le sens de l'enroulement (49,7 mm pour un Ø 6), <b>25 mm le long du câble</b> : c'est là qu'est la place, donc le texte est écrit dans cet axe. Variante <em>identifiant seul</em> : le même identifiant <b>répété six fois</b> sur le tour, lisible sous n'importe quel angle sans faire tourner le câble.</p></div>
+      <div class="note"><h4>Câble — drapeau</h4><p>Deux panneaux de 22 mm séparés par 10 mm de zone d'enroulement hachurée (54 × 20,4 mm à plat) : la géométrie <b>découle de la taille du QR</b>. Un drapeau à chaque bout.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-h"><span class="sec-n">03</span><span class="sec-t">Anatomie</span><span class="sec-tag">gabarit M agrandi ×2,4</span></div>
+  <div class="card">
+    <div class="anat">
+      <div class="anat-stage" id="anatStage"><div class="anat-hold" id="anatHold"></div></div>
+      <ol class="legend">
+        <li><span class="n">1</span><div><h5>QR — 20 mm, à gauche</h5><p>Toujours au même endroit sur tous les gabarits : la main sait où viser sans lire. Correction M, encode l'URL absolue de la fiche.</p></div></li>
+        <li><span class="n">2</span><div><h5>Quiet zone</h5><p>4 modules de blanc (≈ 2,5 mm) intouchables. Aucun texte, aucun filet ne les traverse — c'est la cause n°1 d'un QR qui ne prend pas.</p></div></li>
+        <li><span class="n">3</span><div><h5>Identifiant — mono, gras, 8,5 pt</h5><p>Le seul élément qu'on lit de loin. Corps calibré pour qu'un identifiant de 12 à 14 caractères tienne <em>en entier</em> ; au-delà il passe sur deux lignes plutôt que d'être tronqué.</p></div></li>
+        <li><span class="n">4</span><div><h5>Emplacement — mono, 7 pt</h5><p><code>B12 · U18-U19</code> pour un équipement, <code>Salle 2 · Rangée C</code> pour une baie. Semi-pérenne : un déplacement = une réimpression, assumé.</p></div></li>
+        <li><span class="n">5</span><div><h5>Type + n° de série — sans-serif 6 pt</h5><p>Registre secondaire, gris 20 %. Optionnels en M, par défaut en L. Le n° de série reste en mono (donnée à recopier).</p></div></li>
+        <li><span class="n">6</span><div><h5>Société propriétaire — optionnelle</h5><p>Saisie à l'impression, jamais stockée côté app : en bas de bloc, sans-serif gras 5,5 pt. Utile en colocation / matériel client, inutile en parc interne.</p></div></li>
+        <li><span class="n">7</span><div><h5>Ce qui n'y figure jamais</h5><p>Statut, IP, VLAN, date d'intervention, logo. L'étiquette vit 5 ans ; ces valeurs pas 5 jours. Le QR fait le lien vers la fiche à jour.</p></div></li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-h"><span class="sec-n">04</span><span class="sec-t">Planche A4</span><span class="sec-tag">32 étiquettes M</span></div>
+  <div class="card">
+    <div style="display:flex;gap:30px;flex-wrap:wrap;align-items:flex-start">
+      <div class="a4-hold"><div class="a4-scale" id="sheetDemo"></div></div>
+      <div style="flex:1;min-width:280px">
+        <p class="prose">Cas d'usage réel : <em>« j'étiquette toute la baie B12 »</em>. On imprime le contenu d'une baie ou une sélection de listing en une feuille, dans l'ordre des U décroissants — l'ordre dans lequel on les colle.</p>
+        <div class="notes" style="grid-template-columns:1fr">
+          <div class="note info"><h4>Traits de coupe</h4><p>Filets pointillés 0,2 mm gris 70 % : visibles au ciseau, invisibles au scan. Sur papier pré-découpé (Avery), un réglage désactive les filets.</p></div>
+          <div class="note info"><h4>En-tête de feuille</h4><p>Une ligne 6 pt hors zone d'étiquettes : objet source, date, nombre. Utile quand trois planches traînent sur l'établi.</p></div>
+          <div class="note warn"><h4>Débordement</h4><p>Au-delà d'une feuille, on pagine sans le dire — pas de dialogue « 42 étiquettes = 2 feuilles ». Le compteur de l'aperçu l'indique déjà.</p></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-h"><span class="sec-n">05</span><span class="sec-t">Flux — trois points d'entrée</span><span class="sec-tag">cliquable</span></div>
+  <p class="prose">Un seul écran de sortie : la modale d'impression. Ce qui change, c'est ce qu'elle reçoit — un objet, une sélection, ou le contenu d'une baie.</p>
+
+  <div class="app" style="margin-bottom:22px">
+    <div class="app-bar"><span class="dot"></span><span>Fiche équipement</span></div>
+    <div class="app-body">
+      <div class="fiche-h">
+        <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round" style="width:26px;height:26px;margin-top:3px"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><line x1="7" y1="7.5" x2="7.02" y2="7.5"/><line x1="7" y1="16.5" x2="7.02" y2="16.5"/></svg>
+        <div><h3>SRV-PROD-014</h3><div class="sub">Serveur · Dell PowerEdge R650</div></div>
+        <div class="fiche-actions">
+          <button class="btn btn-primary" data-print="one"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 9V4h12v5"/><rect x="3" y="9" width="18" height="7" rx="1.5"/><path d="M6 16h12v4H6z"/></svg>Imprimer l'étiquette</button>
+          <button class="ibtn" title="Plus d'actions"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/></svg></button>
+        </div>
+      </div>
+      <div class="kv">
+        <div><span class="k">Baie · position</span><span class="v">B12 · U18-U19</span></div>
+        <div><span class="k">Salle</span><span class="v">Salle 2 · Rangée C</span></div>
+        <div><span class="k">N° de série</span><span class="v">7KJ2X91</span></div>
+        <div><span class="k">Rôle réseau</span><span class="v">Production</span></div>
+      </div>
+      <p class="hint">Action primaire dans l'en-tête de fiche — pas dans un menu « … ». Étiqueter est un geste de terrain fréquent après une pose.</p>
+    </div>
+  </div>
+
+  <div class="app" style="margin-bottom:22px">
+    <div class="app-bar"><span class="dot"></span><span>Listing équipements · sélection multiple</span></div>
+    <div class="app-body">
+      <div class="tbl-scroll">
+      <table class="list">
+        <thead><tr><th><input type="checkbox" id="selAll" aria-label="Tout sélectionner"></th><th>Identifiant</th><th>Type</th><th>Baie</th><th class="num">U</th><th style="width:44px"></th></tr></thead>
+        <tbody id="listBody"></tbody>
+      </table>
+      </div>
+      <div class="sel-bar" id="selBar" hidden>
+        <span class="cnt" id="selCnt">0 sélectionnés</span>
+        <span class="sp"></span>
+        <button class="btn btn-sm btn-ghost">Exporter</button>
+        <button class="btn btn-sm btn-primary" data-print="sel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 9V4h12v5"/><rect x="3" y="9" width="18" height="7" rx="1.5"/><path d="M6 16h12v4H6z"/></svg>Planche d'étiquettes</button>
+      </div>
+      <p class="hint">Action de ligne (icône imprimante) pour un objet ; la barre de sélection propose la planche dès 2 objets cochés.</p>
+    </div>
+  </div>
+
+  <div class="app">
+    <div class="app-bar"><span class="dot"></span><span>Baie B12</span></div>
+    <div class="app-body">
+      <div class="fiche-h">
+        <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round" style="width:26px;height:26px;margin-top:3px"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></svg>
+        <div><h3>B12</h3><div class="sub">Salle 2 · Rangée C · 42U · 19 équipements</div></div>
+        <div class="fiche-actions">
+          <button class="btn btn-ghost" data-print="rack"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 9V4h12v5"/><rect x="3" y="9" width="18" height="7" rx="1.5"/><path d="M6 16h12v4H6z"/></svg>Étiquette de baie</button>
+          <button class="btn btn-primary" data-print="rackall"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 9V4h12v5"/><rect x="3" y="9" width="18" height="7" rx="1.5"/><path d="M6 16h12v4H6z"/></svg>Planche du contenu (19)</button>
+        </div>
+      </div>
+      <p class="hint">Deux boutons distincts : l'étiquette <em>de</em> la baie et les étiquettes <em>du contenu</em> ne sont pas le même geste ni le même papier.</p>
+    </div>
+  </div>
+
+  <div class="app" style="margin-top:22px">
+    <div class="app-bar"><span class="dot"></span><span>Fiche câble</span></div>
+    <div class="app-body">
+      <div class="fiche-h">
+        <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round" style="width:26px;height:26px;margin-top:3px"><rect x="2.5" y="9" width="6" height="6" rx="1.2"/><rect x="15.5" y="9" width="6" height="6" rx="1.2"/><line x1="8.5" y1="12" x2="15.5" y2="12"/></svg>
+        <div><h3>CBL-004821</h3><div class="sub">Cat 6a S/FTP · bleu · 3 m · B12 · U19 → U40</div></div>
+        <div class="fiche-actions">
+          <button class="btn btn-ghost" data-print="cable1">Un drapeau</button>
+          <button class="btn btn-primary" data-print="cable2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 9V4h12v5"/><rect x="3" y="9" width="18" height="7" rx="1.5"/><path d="M6 16h12v4H6z"/></svg>Imprimer les 2 extrémités</button>
+        </div>
+      </div>
+      <div class="kv">
+        <div><span class="k">Extrémité A</span><span class="v">SRV-PROD-014 · P1</span></div>
+        <div><span class="k">Extrémité B</span><span class="v">SW-CORE-02 · Gi1/0/12</span></div>
+        <div><span class="k">Type</span><span class="v">Cat 6a S/FTP</span></div>
+        <div><span class="k">Longueur</span><span class="v">3 m</span></div>
+      </div>
+      <p class="hint">Un câble s'étiquette par paire : le défaut imprime <em>deux</em> drapeaux identiques, un par extrémité. Depuis un listing de brassage, même logique en planche (2 drapeaux par câble sélectionné).</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-h"><span class="sec-n">06</span><span class="sec-t">Reste à décider</span></div>
+  <div class="card">
+    <div class="notes">
+      <div class="note warn"><h4>Papier pré-découpé</h4><p>Faut-il des gabarits Avery nommés (3422, L7160…) ou le réglage colonnes suffit-il ? Un catalogue de références est un coût de maintenance.</p></div>
+      <div class="note warn"><h4>Réimpression</h4><p>Trace-t-on « étiquette imprimée le … » sur la fiche ? Utile en audit de parc, mais c'est un champ de plus.</p></div>
+      <div class="note warn"><h4>API à enrichir</h4><p>Le rendu doit accepter taille/QR en mm, un mode « QR seul » et une chaîne libre « propriétaire » non stockée. À arbitrer : longueur max de la chaîne (34 car. ici).</p></div>
+      <div class="note info"><h4>Câbles — arbitrages restants</h4><p>Imprime-t-on <b>les deux extrémités d'un coup</b> (2 drapeaux par câble, systématique) ou laisse-t-on choisir ? Et le sens A→B suit-il le brassage ou la fiche ?</p></div>
+    </div>
+  </div>
+</section>
+</div>
+
+<div class="scrim" id="scrim" role="dialog" aria-modal="true" aria-labelledby="mTitle">
+  <div class="modal">
+    <div class="m-head">
+      <span class="m-title" id="mTitle">Imprimer des étiquettes</span>
+      <span class="m-sub" id="mSub"></span>
+      <button class="ibtn" id="mClose" style="margin-left:auto" title="Fermer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>
+    </div>
+    <div class="m-body">
+      <div class="m-side">
+        <div class="fset">
+          <h5>Contenu</h5>
+          <select class="ctl" id="contentSel">
+            <option value="full" selected>QR + texte</option>
+            <option value="qr">QR seul</option>
+            <option value="strip" data-cable="1">Manchon sans QR — repère complet</option>
+            <option value="id" data-cable="1">Manchon sans QR — identifiant seul</option>
+          </select>
+        </div>
+        <div class="fset" id="sizeSet">
+          <h5 id="sizeSetH">Format</h5>
+          <select class="ctl" id="sizeSel">
+            <option value="s">S — 50 × 20 mm</option>
+            <option value="m" selected>M — 50 × 30 mm (défaut)</option>
+            <option value="l">L — 70 × 40 mm</option>
+            <option value="rack">Baie — 100 × 60 mm</option>
+            <option value="cable">Câble — drapeau 54 × 20 mm</option>
+            <option value="custom">Personnalisé…</option>
+          </select>
+          <div class="mm-row" id="customRow" hidden>
+            <label id="cwL">Larg. mm<input class="ctl" id="cw" type="number" min="20" max="210" step="1" value="50"></label>
+            <label id="chL">Haut. mm<input class="ctl" id="ch" type="number" min="12" max="297" step="1" value="25"></label>
+            <label id="cdL" hidden>Ø câble mm<input class="ctl" id="cd" type="number" min="3" max="30" step=".5" value="6"></label>
+            <label id="clL" hidden>Long. mm<input class="ctl" id="cl" type="number" min="10" max="60" step="1" value="25"></label>
+            <label id="cqL">QR mm<input class="ctl" id="cq" type="number" min="12" max="60" step="1" value="18"></label>
+          </div>
+          <p class="hint" id="sizeHint">QR 20 mm — au-dessus du plancher de scannabilité.</p>
+        </div>
+        <div class="fset">
+          <h5>Densité</h5>
+          <div class="seg" id="densSeg">
+            <button data-dens="compact" aria-pressed="true">Compact</button>
+            <button data-dens="normal" aria-pressed="false">Confort</button>
+          </div>
+        </div>
+        <div class="fset" id="fieldSet">
+          <h5>Lisible humain</h5>
+          <div style="display:flex;flex-direction:column;gap:2px">
+            <label class="cbx"><input type="checkbox" checked disabled><span style="color:var(--fg-dim)">Identifiant (toujours)</span></label>
+            <label class="cbx"><input type="checkbox" id="fLoc" checked><span id="fLocL">Emplacement</span></label>
+            <label class="cbx"><input type="checkbox" id="fType"><span>Type / famille</span></label>
+            <label class="cbx"><input type="checkbox" id="fSn"><span>N° de série</span></label>
+          </div>
+        </div>
+        <div class="fset">
+          <h5>Société propriétaire</h5>
+          <input class="ctl" id="fOwner" type="text" maxlength="34" placeholder="ex. ACME Industries">
+          <p class="hint">Non persistée : saisie à chaque impression, reprise du dernier tirage de la session.</p>
+        </div>
+        <div class="fset" id="colSet" hidden>
+          <h5>Planche</h5>
+          <div class="seg" id="colSeg">
+            <button data-col="2" aria-pressed="false">2 col.</button>
+            <button data-col="3" aria-pressed="false">3 col.</button>
+            <button data-col="4" aria-pressed="true">4 col.</button>
+          </div>
+          <label class="cbx" style="margin-top:8px"><input type="checkbox" id="fCut" checked><span>Traits de coupe</span></label>
+        </div>
+        <div class="warn-inline" id="wOverflow" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" style="width:14px;height:14px;flex:none;margin-top:2px"><path d="M12 3 1.7 21h20.6z"/><line x1="12" y1="9" x2="12" y2="14"/><line x1="12" y1="17" x2="12.02" y2="17"/></svg><span id="wOverflowTxt"></span></div>
+      </div>
+      <div class="m-prev">
+        <div class="prev-meta"><span id="prevKind">Aperçu</span><span class="sp"></span><span class="stat" id="prevStat"></span></div>
+        <div class="prev-vp" id="prevVp"></div>
+      </div>
+    </div>
+    <div class="m-foot">
+      <span class="stat" id="footStat"></span>
+      <span class="sp"></span>
+      <button class="btn btn-ghost" id="mCancel">Annuler</button>
+      <button class="btn btn-primary" id="mPrint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 9V4h12v5"/><rect x="3" y="9" width="18" height="7" rx="1.5"/><path d="M6 16h12v4H6z"/></svg>Imprimer</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---------- QR simulé (déterministe) — en prod : /qr/:collection/:id?format=svg ---------- */
+function qr(seed,mm){
+  let h=2166136261;for(const c of seed){h^=c.charCodeAt(0);h=Math.imul(h,16777619)}
+  const rnd=()=>{h^=h<<13;h^=h>>>17;h^=h<<5;return ((h>>>0)%1000)/1000};
+  const N=25,Q=4,T=N+2*Q,g=Array.from({length:N},()=>Array(N).fill(0)),res=(r,c)=>r>=0&&c>=0&&r<N&&c<N;
+  const finder=(r,c)=>{for(let i=-1;i<8;i++)for(let j=-1;j<8;j++){if(!res(r+i,c+j))continue;
+    const on=(i>=0&&i<7&&j>=0&&j<7)&&(i===0||i===6||j===0||j===6||(i>=2&&i<=4&&j>=2&&j<=4));g[r+i][c+j]=on?1:0;g[r+i][c+j]+=0;}};
+  const rsv=Array.from({length:N},()=>Array(N).fill(0));
+  const mark=(r,c,w,hh)=>{for(let i=0;i<hh;i++)for(let j=0;j<w;j++)if(res(r+i,c+j))rsv[r+i][c+j]=1};
+  mark(0,0,8,8);mark(0,N-8,8,8);mark(N-8,0,8,8);mark(N-9,N-9,9,9);
+  for(let i=0;i<N;i++){rsv[6][i]=1;rsv[i][6]=1}
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++)if(!rsv[r][c])g[r][c]=rnd()>.5?1:0;
+  finder(0,0);finder(0,N-7);finder(N-7,0);
+  for(let i=8;i<N-8;i++){g[6][i]=i%2?0:1;g[i][6]=i%2?0:1}
+  const ar=N-9;for(let i=-2;i<=2;i++)for(let j=-2;j<=2;j++)g[ar+i][ar+j]=(Math.abs(i)===2||Math.abs(j)===2||(i===0&&j===0))?1:0;
+  let d='';for(let r=0;r<N;r++)for(let c=0;c<N;c++)if(g[r][c])d+=`M${c+Q} ${r+Q}h1v1h-1z`;
+  return `<svg class="qr" width="${mm}mm" height="${mm}mm" viewBox="0 0 ${T} ${T}" shape-rendering="crispEdges" role="img" aria-label="QR ${seed}"><rect width="${T}" height="${T}" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
+}
+
+const DATA=[
+  {id:'SRV-PROD-014',type:'Serveur · PowerEdge R650',rack:'B12',u:'U18-U19',un:18,sn:'7KJ2X91'},
+  {id:'SW-CORE-02',type:'Switch · Nexus 9336C',rack:'B12',u:'U40',un:40,sn:'FDO2143A9K'},
+  {id:'SRV-PROD-015',type:'Serveur · PowerEdge R650',rack:'B12',u:'U16-U17',un:16,sn:'7KJ2X92'},
+  {id:'PDU-B12-A',type:'PDU · APC AP8853',rack:'B12',u:'U0',un:0,sn:'ZA2318003'},
+  {id:'TOR-OPT-B12',type:'Tiroir optique 24 LC',rack:'B12',u:'U38',un:38,sn:'—'},
+  {id:'UPS-SALLE2-01',type:'Onduleur · Galaxy VS',rack:'B03',u:'U1-U6',un:1,sn:'GVS220041'}
+];
+const CABLES=[
+  {id:'CBL-004821',type:'Cat 6a S/FTP · bleu · 3 m',a:'SRV-PROD-014 · P1',b:'SW-CORE-02 · Gi1/0/12',rack:'B12',u:'U19 → U40',sn:'—',isCable:true},
+  {id:'CBL-004822',type:'Cat 6a S/FTP · bleu · 3 m',a:'SRV-PROD-015 · P1',b:'SW-CORE-02 · Gi1/0/13',rack:'B12',u:'U17 → U40',sn:'—',isCable:true},
+  {id:'CBL-004900',type:'OM4 LC-LC · aqua · 10 m',a:'TOR-OPT-B12 · 05',b:'TOR-OPT-B03 · 11',rack:'B12',u:'U38 → B03',sn:'—',isCable:true}
+];
+const RACK={id:'B12',type:'Baie 42U · 800×1200',rack:'Salle 2 · Rangée C',u:'Position C-04',sn:'INV-BAIE-0112',isRack:true};
+
+const SIZES={s:{qr:18,cls:'s',w:50,h:20,dim:'50 × 20 mm',cell:[50,20]},m:{qr:20,cls:'m',w:50,h:30,dim:'50 × 30 mm',cell:[48,33]},l:{qr:28,cls:'l',w:70,h:40,dim:'70 × 40 mm',cell:[70,40]},rack:{qr:34,cls:'rack',w:100,h:60,dim:'100 × 60 mm',cell:[100,60]},cable:{qr:18,cls:'cable',w:62,h:22,dim:'62 × 22 mm (drapeau)',cell:[62,22]}};
+function clsFor(h){return h<25?'s':h<36?'m':h<50?'l':'rack'}
+
+function label(o,size,f,opt){
+  opt=opt||{};
+  const custom=size==='custom';
+  const w=custom?opt.w:SIZES[size].w,h=custom?opt.h:SIZES[size].h,qrmm=(opt.qrOnly||custom)?(opt.qr??SIZES[size].qr):SIZES[size].qr;
+  const cls=custom?clsFor(h):SIZES[size].cls,cp=opt.compact!==false,big=cls==='l'||cls==='rack';
+  const own=(f.owner||'').trim();
+  if(cls==='cable'){
+    if(opt.noQr){
+      const g=stripGeom(opt);
+      const extra=opt.idOnly?'':`${f.loc?`<div class="l-loc"><b>A</b> ${o.a}</div><div class="l-loc"><b>B</b> ${o.b}</div>`:''}${f.type?`<div class="l-loc">${o.type}</div>`:''}${own?`<div class="l-own">${own}</div>`:''}`;
+      const cell=`<div class="cell2"><div class="l-id">${o.id}</div>${extra}</div>`;
+      const reps=opt.idOnly?6:2;
+      return `<div class="lab cable strip${cp?' compact':''}" style="width:${+g.w.toFixed(1)}mm;height:${g.h}mm">${cell.repeat(reps)}<div class="ov" style="width:${g.ov}mm"></div></div>`;
+    }
+    const g=cableGeom(size,opt);
+    let t=`<div class="l-id">${o.id}</div>`;
+    if(f.loc){t+=`<div class="l-loc"><b>A</b> ${o.a}</div><div class="l-loc"><b>B</b> ${o.b}</div>`}
+    if(f.type)t+=`<div class="l-meta">${o.type}</div>`;
+    if(own)t+=`<div class="l-own">${own}</div>`;
+    const panB=opt.qrOnly?qr(o.id,g.q):`<div class="txt">${t}</div>`;
+    return `<div class="lab cable${cp?' compact':''}" style="width:${+g.w.toFixed(1)}mm;height:${+g.H.toFixed(1)}mm">`+
+      `<div class="pan" style="width:${g.pan}mm;padding:${g.pad}mm">${qr(o.id,g.q)}</div>`+
+      `<div class="wz" style="width:${g.wz}mm"></div>`+
+      `<div class="pan b" style="width:${g.pan}mm;padding:${g.pad}mm">${panB}</div></div>`;
+  }
+  if(opt.qrOnly){
+    const pad=cp?1:2,gap=cp?.8:1.2,ownH=own?(cp?3.6:4.6):0,side=qrmm+2*pad+(own?gap+ownH:0);
+    return `<div class="lab ${cls} qronly${cp?' compact':''}" style="width:${side}mm;height:${side}mm;padding:${pad}mm;gap:${gap}mm">${qr(o.id,qrmm)}${own?`<div class="txt"><div class="l-own">${own}</div></div>`:''}</div>`;
+  }
+  let t=`<div class="l-id">${o.id}</div>`;
+  if(f.loc&&o.u)t+=`<div class="l-loc">${o.rack} · ${o.u}</div>`;
+  if(big&&(f.type||f.sn||own))t+=`<div class="rule"></div>`;
+  if(f.type&&cls!=='s')t+=`<div class="l-meta">${o.type}</div>`;
+  if(f.sn&&cls!=='s')t+=`<div class="l-sn">SN ${o.sn}</div>`;
+  if(own)t+=`<div class="l-own">${own}</div>`;
+  return `<div class="lab ${cls}${cp?' compact':''}" style="width:${w}mm;height:${h}mm">${qr(o.id,qrmm)}<div class="txt">${t}</div></div>`;
+}
+
+/* ---------- 02 spécimens ---------- */
+const SPECS=[
+  ['s',DATA[1],{loc:true},{},'50 × 20 mm · QR 18 mm','Façade étroite, bandeau, spare'],
+  ['m',DATA[0],{loc:true},{},'50 × 30 mm · QR 20 mm','Défaut — compact, serveur/onduleur'],
+  ['m',DATA[0],{loc:true,type:true,sn:true,owner:'ACME Industries'},{compact:false},'50 × 30 mm · confort','Tous les champs + société propriétaire'],
+  ['custom',DATA[3],{loc:true},{w:38,h:16,qr:14,compact:true},'38 × 16 mm · QR 14 mm','Personnalisé — sous le plancher, à scanner de près'],
+  ['m',DATA[0],{owner:'ACME'},{qrOnly:true,qr:20},'26,4 × 26,4 mm · QR 20 mm','QR seul — carré, rien à lire, tout à scanner'],
+  ['l',DATA[0],{loc:true,type:true,sn:true},{},'70 × 40 mm · QR 28 mm','Équipement critique, lisible à 2 m'],
+  ['rack',RACK,{loc:true,type:true,sn:true,owner:'ACME Industries'},{},'100 × 60 mm · QR 34 mm','Tête de baie'],
+  ['cable',CABLES[0],{loc:true,type:true},{},'54 × 20,4 mm compact · QR 18 mm','Câble — drapeau : QR d’un côté, repère A/B de l’autre'],
+  ['cable',CABLES[2],{},{qrOnly:true,qr:18},'54 × 20,4 mm · QR des deux côtés','Câble en chemin de câbles — scannable des deux faces'],
+  ['cable',CABLES[0],{loc:true,type:true},{noQr:true,dia:6,len:25},'49,7 × 25 mm · Ø 6 mm','Manchon sans QR — repère complet, texte longitudinal'],
+  ['cable',CABLES[1],{},{noQr:true,idOnly:true,dia:6,len:25},'49,7 × 25 mm · Ø 6 mm','Manchon — identifiant seul répété 6× : lisible sous tous les angles']
+];
+document.getElementById('specimens').innerHTML=SPECS.map(([s,o,f,opt,dim,use])=>
+  `<div class="spec"><div class="cap">${s==='rack'?'Baie':s==='cable'?(opt.qrOnly?'Câble · QR seul':opt.idOnly?'Câble · ID seul':opt.noQr?'Câble · manchon':'Câble'):s==='custom'?'Perso':opt.qrOnly?'QR seul':opt.compact===false?'M confort':s.toUpperCase()}</div><div class="dim">${dim}</div><div class="frame">${label(o,s,f,opt)}</div><div class="use">${use}</div></div>`).join('')
+  +`<div class="spec"><div class="cap">Câble · plié</div><div class="dim">25 × 22 mm visibles</div><div class="frame" style="display:flex;align-items:center;gap:0;padding:14px 0"><div style="width:34px;height:7px;background:#3a3a3a;border-radius:2px"></div><div class="lab cable" style="width:25mm;height:22mm;box-shadow:0 0 0 .2mm #aaa"><div class="pan b" style="width:25mm;padding:1.2mm"><div class="txt"><div class="l-id">CBL-004821</div><div class="l-loc"><b>A</b> SRV-PROD-014 · P1</div><div class="l-loc"><b>B</b> SW-CORE-02 · Gi1/0/12</div><div class="l-meta">Cat 6a S/FTP · bleu · 3 m</div></div></div></div><div style="width:34px;height:7px;background:#3a3a3a;border-radius:2px"></div></div><div class="use">La zone hachurée s’enroule autour de la gaine, les deux panneaux se collent dos à dos.</div></div>`;
+
+/* ---------- 03 anatomie ---------- */
+document.getElementById('anatHold').innerHTML=label(DATA[0],'m',{loc:true,type:true,sn:true,owner:'ACME Industries'},{compact:false});
+function anat(){
+  const st=document.getElementById('anatStage'),lab=st.querySelector('.lab');
+  st.querySelectorAll('.cal,.cal-lead').forEach(e=>e.remove());
+  const S=st.getBoundingClientRect(),L=lab.getBoundingClientRect();
+  const r=el=>{const b=el.getBoundingClientRect();return{l:b.left-S.left,t:b.top-S.top,r:b.right-S.left,b:b.bottom-S.top,cy:(b.top+b.bottom)/2-S.top,cx:(b.left+b.right)/2-S.left}};
+  const put=(n,x,y)=>{const s=document.createElement('span');s.className='cal';s.style.left=(x-10)+'px';s.style.top=(y-10)+'px';s.textContent=n;st.appendChild(s)};
+  const lead=(x1,y,x2)=>{const d=document.createElement('i');d.className='cal-lead';d.style.left=Math.min(x1,x2)+'px';d.style.top=y+'px';d.style.width=Math.abs(x2-x1)+'px';st.appendChild(d)};
+  const vlead=(x,y1,y2)=>{const d=document.createElement('i');d.className='cal-lead v';d.style.left=x+'px';d.style.top=Math.min(y1,y2)+'px';d.style.height=Math.abs(y2-y1)+'px';st.appendChild(d)};
+  const q=r(lab.querySelector('.qr')),colX=L.right-S.left+40;
+  put(1,q.cx,q.cy);
+  const qz=Math.max(6,(q.r-q.l)*0.16/2);
+  put(2,q.l-14,q.t+qz);lead(q.l-4,q.t+qz,q.l+qz);
+  [['.l-id',3],['.l-loc',4],['.l-meta',5],['.l-own',6]].forEach(([sel,n])=>{const e=lab.querySelector(sel);if(!e)return;const b=r(e);
+    put(n,colX,b.cy);lead(b.r,b.cy,colX-12)});
+  const sn=lab.querySelector('.l-sn');if(sn){const b=r(sn);lead(b.r,b.cy,colX-12);vlead(colX-12,b.cy,r(lab.querySelector('.l-meta')).cy)}
+  put(7,L.left-S.left+40,L.bottom-S.top+18);
+}
+anat();window.addEventListener('resize',anat);document.fonts&&document.fonts.ready.then(anat);
+
+/* ---------- planche ---------- */
+function qrmmOf(size,opt){return(opt.qrOnly||size==='custom'||size==='cable')?(opt.qr??SIZES[size].qr):SIZES[size].qr}
+function cableGeom(size,opt){
+  const q=qrmmOf(size,opt),cp=opt.compact!==false,pad=cp?1.2:2,wz=cp?10:12;
+  const pan=Math.max(q+2*pad,cp?22:25);
+  return{q,pad,wz,pan,H:q+2*pad,w:2*pan+wz};
+}
+function stripGeom(opt){
+  const cp=opt.compact!==false,d=opt.dia||6,ov=cp?12:16,h=opt.len||25;
+  return{d,ov,h,tour:Math.PI*d,w:2*Math.PI*d+ov};
+}
+function labDims(size,opt,f){
+  const own=(f.owner||'').trim(),qrmm=qrmmOf(size,opt);
+  if(size==='cable'){const g=opt.noQr?stripGeom(opt):cableGeom(size,opt);return[g.w,opt.noQr?g.h:g.H]}
+  if(opt.qrOnly){const pad=opt.compact?1:2,gap=opt.compact?.8:1.2,oh=own?(opt.compact?3.6:4.6):0;
+    const side=qrmm+2*pad+(own?gap+oh:0);return[side,side]}
+  return size==='custom'?[opt.w,opt.h]:[SIZES[size].w,SIZES[size].h];
+}
+function maxCols(size,opt,f){return Math.max(1,Math.floor((210-16)/labDims(size,opt,f)[0]))}
+function sheet(objs,size,cols,cut,src){
+  const opt=labOpt(),f=state.fields;
+  const [w,hh]=labDims(size,opt,f);
+  cols=Math.min(cols,maxCols(size,opt,f));
+  const rows=Math.max(1,Math.floor((297-16-6)/hh));
+  const per=cols*rows,page=objs.slice(0,per);
+  const cells=page.map(o=>`<div class="cell" style="height:${hh}mm;${cut?'':'border:0'}">${label(o,size,f,opt)}</div>`).join('');
+  return {html:`<div class="a4" style="grid-template-columns:repeat(${cols},1fr)"><div class="a4-head"><span>${src}</span><span>${objs.length} étiquette${objs.length>1?'s':''} · 19/08/2026</span></div>${cells}</div>`,per,cols,pages:Math.ceil(objs.length/per)};
+}
+function labOpt(){return{compact:state.compact!==false,qrOnly:state.qrOnly===true,noQr:state.noQr===true,idOnly:state.idOnly===true,w:state.cw,h:state.ch,qr:state.cq,dia:state.cd,len:state.cl}}
+const demo=[...DATA,...DATA,...DATA,...DATA,...DATA,...DATA].slice(0,19);
+const state={fields:{loc:true,type:false,sn:false,owner:''},compact:true,qrOnly:false,noQr:false,idOnly:false,cw:50,ch:25,cq:18,cd:6,cl:25,cols:4,cut:true,size:'m'};
+document.getElementById('sheetDemo').innerHTML=sheet(demo,'m',4,true,'Baie B12 · contenu').html;
+
+/* ---------- 05 listing ---------- */
+const body=document.getElementById('listBody');
+body.innerHTML=DATA.map((o,i)=>`<tr data-i="${i}"><td><input type="checkbox" class="rowc" aria-label="Sélectionner ${o.id}"></td><td>${o.id}</td><td style="color:var(--fg-dim)">${o.type.split(' · ')[0]}</td><td>${o.rack}</td><td class="num">${o.u}</td><td><button class="ibtn" data-row="${i}" title="Imprimer l'étiquette de ${o.id}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 9V4h12v5"/><rect x="3" y="9" width="18" height="7" rx="1.5"/><path d="M6 16h12v4H6z"/></svg></button></td></tr>`).join('');
+function syncSel(){
+  const cs=[...body.querySelectorAll('.rowc')];
+  cs.forEach(c=>c.closest('tr').dataset.sel=c.checked?'1':'0');
+  const n=cs.filter(c=>c.checked).length;
+  document.getElementById('selBar').hidden=n===0;
+  document.getElementById('selCnt').textContent=n+' sélectionné'+(n>1?'s':'');
+  document.getElementById('selAll').checked=n===cs.length&&n>0;
+}
+body.addEventListener('change',e=>{if(e.target.classList.contains('rowc'))syncSel()});
+document.getElementById('selAll').addEventListener('change',e=>{body.querySelectorAll('.rowc').forEach(c=>c.checked=e.target.checked);syncSel()});
+[1,2].forEach(i=>body.querySelectorAll('.rowc')[i].checked=true);syncSel();
+
+/* ---------- modale ---------- */
+const scrim=document.getElementById('scrim');
+let ctx={objs:[DATA[0]],mode:'one',src:''};
+let lastOwner='';
+function openPrint(mode,objs,src){
+  ctx={mode,objs,src};
+  const isCable=!!objs[0].isCable;
+  state.size=isCable?'cable':mode==='rack'?'rack':'m';
+  state.cols=isCable?3:4;state.cut=true;state.qrOnly=false;state.compact=true;
+  state.noQr=false;state.idOnly=false;
+  document.getElementById('contentSel').value='full';
+  [...document.getElementById('contentSel').options].forEach(o=>{if(o.dataset.cable)o.hidden=!isCable});
+  state.fields={loc:true,type:isCable||mode==='rack',sn:mode==='rack',owner:lastOwner};
+  document.getElementById('fLocL').textContent=isCable?'Extrémités A / B':'Emplacement';
+  [...document.getElementById('sizeSel').options].forEach(o=>{
+    o.disabled=isCable?(o.value!=='cable'&&o.value!=='custom'):o.value==='cable'});
+  document.getElementById('fLoc').checked=state.fields.loc;
+  document.getElementById('fType').checked=state.fields.type;
+  document.getElementById('fSn').checked=state.fields.sn;
+  document.getElementById('fOwner').value=lastOwner;
+  document.getElementById('sizeSel').value=state.size;
+  state.cq=isCable?18:state.cq;
+  document.getElementById('cq').value=state.cq;
+  document.getElementById('customRow').hidden=true;
+  document.getElementById('colSet').hidden=objs.length<2;
+  document.getElementById('mSub').textContent=src;
+  seg('densSeg','dens','compact');
+  scrim.classList.add('open');render();
+  document.getElementById('mPrint').focus();
+}
+function seg(id,key,val){[...document.querySelectorAll('#'+id+' button')].forEach(b=>b.setAttribute('aria-pressed',b.dataset[key]===val))}
+function dimOf(size,opt,f){const d=labDims(size,opt,f);return `${+d[0].toFixed(1)} × ${+d[1].toFixed(1)} mm`}
+function render(){
+  const f=state.fields,objs=ctx.objs,size=state.size,opt=labOpt();
+  const qrmm=qrmmOf(size,opt);
+  const vp=document.getElementById('prevVp');
+  document.getElementById('fieldSet').hidden=state.qrOnly;
+  document.getElementById('sizeSetH').textContent=state.noQr?'Manchon':state.qrOnly?'Taille du QR':'Format';
+  const qrDriven=state.qrOnly||size==='cable';
+  document.getElementById('sizeSel').hidden=state.qrOnly||state.noQr;
+  document.getElementById('customRow').hidden=!(qrDriven||size==='custom');
+  document.getElementById('cwL').hidden=qrDriven;
+  document.getElementById('chL').hidden=qrDriven;
+  document.getElementById('cqL').hidden=state.noQr;
+  document.getElementById('cdL').hidden=!state.noQr;
+  document.getElementById('clL').hidden=!state.noQr;
+  document.getElementById('fieldSet').hidden=state.qrOnly||state.idOnly;
+  const mc=maxCols(size,opt,f);
+  [...document.querySelectorAll('#colSeg button')].forEach(b=>{const v=+b.dataset.col;b.disabled=v>mc;b.style.opacity=v>mc?.35:'';
+    b.setAttribute('aria-pressed',v===Math.min(state.cols,mc))});
+  let capped=false;
+  if(objs.length<2){
+    vp.innerHTML=`<div style="background:#fff;padding:6mm;border-radius:3px">${label(objs[0],size,f,opt)}</div>`;
+    document.getElementById('prevKind').textContent='Aperçu — étiquette unitaire';
+    document.getElementById('prevStat').textContent=dimOf(size,opt,f);
+    document.getElementById('footStat').textContent='1 étiquette · page à la taille de l\'étiquette';
+  }else{
+    const s=sheet(objs,size,state.cols,state.cut,ctx.src);
+    capped=s.cols<state.cols;
+    vp.innerHTML=`<div class="a4-hold" style="width:calc(210mm * .52);height:calc(297mm * .52)"><div class="a4-scale" style="transform:scale(.52)">${s.html}</div></div>`;
+    document.getElementById('prevKind').textContent='Aperçu — planche A4';
+    document.getElementById('prevStat').textContent=`${dimOf(size,opt,f)} · ${s.cols} col. · ${s.per} par feuille`;
+    document.getElementById('footStat').textContent=`${objs.length} étiquettes · ${s.pages} feuille${s.pages>1?'s':''} A4`;
+  }
+  const ov=objs.length>1&&objs.length>sheet(objs,size,state.cols,state.cut,ctx.src).per;
+  const small=qrmm<18&&!state.noQr;
+  const tight=[...vp.querySelectorAll('.cell2')].some(e=>e.scrollWidth>e.clientWidth+1||e.scrollHeight>e.clientHeight+1);
+  const w=document.getElementById('wOverflow');
+  w.hidden=!(ov||small||capped||tight);
+  if(ov||small||capped||tight)document.getElementById('wOverflowTxt').textContent=[
+    small?`QR ${qrmm} mm : sous le plancher de 18 mm — scan fiable seulement de très près.`:'',
+    tight?`Le contenu ne tient pas dans ${state.cl||25} mm : rallongez le manchon ou décochez un champ.`:'',
+    capped?`Une étiquette de ${+labDims(size,opt,f)[0].toFixed(1)} mm de large ne tient qu'en ${mc} colonne${mc>1?'s':''} sur A4 : la planche a été ramenée à ${mc}.`:'',
+    ov?`${objs.length} étiquettes ne tiennent pas sur une feuille : plusieurs feuilles seront imprimées.`:''
+  ].filter(Boolean).join(' ');
+  document.getElementById('sizeHint').textContent=state.noQr
+    ?`Deux tours de Ø ${state.cd||6} mm (2 × ${(Math.PI*(state.cd||6)).toFixed(1)} mm) + recouvrement, ${state.cl||25} mm le long du câble — texte longitudinal.`
+    :`QR ${qrmm} mm — ${qrmm>=18?'au-dessus du plancher de scannabilité.':'sous le plancher de 18 mm.'}`;
+}
+document.querySelectorAll('[data-print]').forEach(b=>b.addEventListener('click',()=>{
+  const k=b.dataset.print;
+  if(k==='one')openPrint('one',[DATA[0]],'SRV-PROD-014');
+  if(k==='sel'){const sel=[...body.querySelectorAll('.rowc')].map((c,i)=>c.checked?DATA[i]:null).filter(Boolean);openPrint('sheet',sel,'Sélection · listing équipements')}
+  if(k==='rack')openPrint('rack',[RACK],'Baie B12');
+  if(k==='rackall')openPrint('sheet',demo,'Baie B12 · contenu');
+  if(k==='cable1')openPrint('one',[CABLES[0]],'CBL-004821');
+  if(k==='cable2')openPrint('sheet',[CABLES[0],CABLES[0]],'CBL-004821 · extrémités A et B')}));
+body.addEventListener('click',e=>{const b=e.target.closest('[data-row]');if(b)openPrint('one',[DATA[+b.dataset.row]],DATA[+b.dataset.row].id)});
+document.getElementById('sizeSel').addEventListener('change',e=>{
+  state.size=e.target.value;
+  if(state.size==='cable'){state.cq=18;document.getElementById('cq').value=18}
+  render()});
+['cw','ch','cq','cd','cl'].forEach(id=>document.getElementById(id).addEventListener('input',e=>{
+  const v=+e.target.value;if(!v)return;state[id]=v;render()}));
+document.getElementById('contentSel').addEventListener('change',e=>{
+  const k=e.target.value;
+  if(k==='qr'&&!state.qrOnly){state.cq=qrmmOf(state.size,{qr:state.cq});document.getElementById('cq').value=state.cq}
+  state.qrOnly=k==='qr';state.noQr=k==='strip'||k==='id';state.idOnly=k==='id';
+  render()});
+document.getElementById('densSeg').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
+  state.compact=b.dataset.dens==='compact';seg('densSeg','dens',b.dataset.dens);render()});
+document.getElementById('fOwner').addEventListener('input',e=>{
+  state.fields.owner=e.target.value;lastOwner=e.target.value;render()});
+document.getElementById('colSeg').addEventListener('click',e=>{const b=e.target.closest('button');if(!b||b.disabled)return;
+  state.cols=+b.dataset.col;render()});
+['fLoc','fType','fSn'].forEach(id=>document.getElementById(id).addEventListener('change',e=>{
+  state.fields[{fLoc:'loc',fType:'type',fSn:'sn'}[id]]=e.target.checked;render()}));
+document.getElementById('fCut').addEventListener('change',e=>{state.cut=e.target.checked;render()});
+const close=()=>scrim.classList.remove('open');
+document.getElementById('mClose').addEventListener('click',close);
+document.getElementById('mCancel').addEventListener('click',close);
+scrim.addEventListener('click',e=>{if(e.target===scrim)close()});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')close()});
+document.getElementById('mPrint').addEventListener('click',()=>window.print());
+document.getElementById('themeBtn').addEventListener('click',()=>{
+  const h=document.documentElement;h.dataset.theme=h.dataset.theme==='dark'?'light':'dark'});
+</script>
+</body>
+</html>
