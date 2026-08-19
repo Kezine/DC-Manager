@@ -27,6 +27,8 @@ import { SessionExpiry } from "../core/SessionExpiry";
 import { AccessState } from "../core/AccessState";
 import { AccessDenial } from "../core/AccessDenial";
 import { HydrationStats } from "../core/HydrationStats";
+import { DocFreshness } from "../core/DocFreshness";
+import type { DocFreshnessTrigger } from "../core/DocFreshness";
 
 const W = window as any;
 
@@ -85,6 +87,14 @@ export class RestDocumentController {
   // Anti-rafale des refus d'AUTORISATION (403) : une seule action fautive peut tirer plusieurs requêtes.
   // Fenêtre de silence PAR PERMISSION — jamais un verrou terminal (cf. core/AccessDenial vs SessionExpiry).
   private readonly denials = new AccessDenial();
+  // FRAÎCHEUR du cache (lot R3, docs/hydratation.md § « Fraîcheur — SSE manqués ») : les événements SSE
+  // peuvent être MANQUÉS sans signal (onglet endormi/déchargé, veille, coupure — EventSource re-connecte
+  // mais ne rejoue rien, LiveBus n'a aucun historique). La DÉCISION (anti-rafale, verdict d'écart) vit
+  // dans le module pur ; ICI, seulement les déclencheurs et le rattrapage. Le contrôleur n'existant qu'en
+  // mode REST, le mode fichier/visualiseur est no-op PAR CONSTRUCTION (aucun test de mode).
+  private readonly freshness = new DocFreshness();
+  private freshnessTimer: any = 0;      // heartbeat (setInterval) — armé par startFreshnessWatch, coupé par stopFreshnessWatch
+  private freshnessActive = false;      // veille en cours (document ouvert, session valide) — tous les déclencheurs s'y gatent
   private refreshingAccess = false;                       // une relecture de /me est déjà en vol (rafale de 403)
   // Copie LOCALE de l'état d'autorisation : le contrôleur gate lui-même les gestes du SÉLECTEUR de documents
   // (créer, renommer, verrouiller, supprimer, doc par défaut, importer) — ils vivent ici, dans aucune vue.
@@ -122,8 +132,21 @@ export class RestDocumentController {
     // RETOUR au premier plan : en arrière-plan on a ACCUMULÉ les changesets SSE sans recharger (cf. scheduleReload) —
     // on flush MAINTENANT, en UNE fois. Sans ça, l'onglet repris se prend une rafale de reload empilés (timers
     // throttlés + rAF gelé en arrière-plan). Listener unique (le contrôleur vit toute la session).
+    // FRAÎCHEUR (R3) : le retour de visibilité est AUSSI le moment où des événements SSE ont pu être manqués
+    // SANS trace (onglet déchargé, veille profonde : rien n'a été accumulé, il n'y a rien à flusher) —
+    // vérification de révision légère en plus du flush.
     if (typeof document !== "undefined") {
-      document.addEventListener("visibilitychange", () => { if (!document.hidden && this.pendingChangeset) this.scheduleReload(); });
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) return;
+        if (this.pendingChangeset) this.scheduleReload();
+        void this.checkFreshness("visibility");
+      });
+    }
+    // FRAÎCHEUR (R3) : le focus fenêtre recoupe le retour de visibilité (alt-tab émet les deux) mais couvre
+    // AUSSI « fenêtre restée visible sans focus » (second écran) — l'anti-rafale du module absorbe le
+    // recouvrement. Garde défensive sur addEventListener : le stub de test ne l'offre pas.
+    if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+      window.addEventListener("focus", () => { void this.checkFreshness("focus"); });
     }
   }
 
@@ -143,6 +166,7 @@ export class RestDocumentController {
     Notify.toast(I18n.t("app.rest.sessionExpired"), "err");
     if (this.events) { this.events.close(); this.events = null; }
     clearTimeout(this.reloadTO);
+    this.stopFreshnessWatch();   // plus de session ⇒ plus de veille de fraîcheur (un poll partirait en 401)
     this.pendingChangeset = null;
     this.host.closeAllModals();
     this.host.setUser(null);
@@ -261,10 +285,21 @@ export class RestDocumentController {
   }
   /** Abonnement SSE : recharge si une révision PLUS RÉCENTE que la nôtre arrive (changement d'un autre client). */
   private subscribeLive(): void {
+    // FRAÎCHEUR (R3) : la veille (heartbeat + fenêtre « frais ») démarre avec le canal live — AVANT le
+    // early-return ci-dessous, à dessein : quand EventSource est indisponible, le poll de révision est
+    // le SEUL filet de fraîcheur, il doit donc tourner quand même.
+    this.startFreshnessWatch();
     if (this.events) { this.events.close(); this.events = null; }
     const url = this.adapter.eventsUrl; if (!url || typeof EventSource === "undefined") return;
     try {
       const es = new EventSource(url, { withCredentials: true }); this.events = es;
+      // RE-CONNEXION SSE (R3) : le navigateur re-connecte tout seul (champ retry) mais ne REJOUE JAMAIS les
+      // événements émis pendant la coupure — le serveur (LiveBus) n'a ni historique ni `id:` SSE, donc
+      // Last-Event-ID ne peut rien rattraper. La fenêtre entre coupure et reprise est AVEUGLE : à chaque
+      // `open` qui SUIT un `error` (re-connexion, jamais la connexion initiale — le document vient d'être
+      // chargé), on vérifie la révision.
+      let sawError = false;
+      es.onopen = () => { if (sawError) { sawError = false; void this.checkFreshness("sse-reconnect"); } };
       es.onmessage = (e) => { try {
         const d = JSON.parse(e.data);
         if (!d || (d.origin && d.origin === this.adapter.clientId)) return;   // NOTRE propre écriture → on ignore (pas de reload)
@@ -282,8 +317,76 @@ export class RestDocumentController {
           this.scheduleReload();   // débouncé si visible ; SI CACHÉ : accumule seulement, flush au retour (visibilitychange) → pas de rafale
         }
       } catch (_) { /* ignore */ } };
-      es.onerror = () => { /* reconnexion auto du navigateur (champ retry) */ };
+      es.onerror = () => { sawError = true; };   // reconnexion auto du navigateur (champ retry) ; noté pour la vérification à l'open suivant
     } catch (e) { this.flog("SSE indisponible", e); }
+  }
+
+  /** (Ré)arme la VEILLE DE FRAÎCHEUR (R3) : fenêtre « frais » posée à l'instant présent (le document VIENT
+      d'être chargé en entier — re-vérifier dans la foulée serait absurde) + heartbeat modeste. Le heartbeat
+      est le « GET régulier » demandé : il attrape le cas qu'AUCUN événement ne signale — un flux SSE
+      silencieusement mort (socket zombie après reprise réseau, proxy qui a coupé sans FIN) alors que
+      l'onglet reste visible. Onglet CACHÉ au tick : on NE vérifie PAS (les timers y sont throttlés de
+      toute façon, et le retour de visibilité vérifie) — même doctrine d'arrière-plan que scheduleReload. */
+  private startFreshnessWatch(): void {
+    clearInterval(this.freshnessTimer);
+    this.freshness.noteFresh(Date.now());
+    this.freshnessActive = true;
+    this.freshnessTimer = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      void this.checkFreshness("heartbeat");
+    }, DocFreshness.HEARTBEAT_MS);
+  }
+  /** Coupe la veille de fraîcheur (session expirée) : plus rien à vérifier, et un poll partirait en 401. */
+  private stopFreshnessWatch(): void {
+    clearInterval(this.freshnessTimer); this.freshnessTimer = 0;
+    this.freshnessActive = false;
+  }
+
+  /** VÉRIFICATION DE RÉVISION (fraîcheur du cache — docs/hydratation.md § « Fraîcheur — SSE manqués »).
+      Compare la révision SERVEUR du document courant à `adapter.docRev`. La révision est lue dans le
+      REGISTRE (`GET /documents`, dont les DocMeta portent `rev`) : la route existante la plus légère
+      (un SELECT du registre), et surtout NON SCOPÉE — sa réponse ne porte pas X-Doc-Rev, donc la
+      vérification ne resynchronise PAS `docRev` avant la comparaison. Une route scopée (passant par
+      `resolveRepoRead`) poserait l'en-tête, `RestProtocol.interpret` alignerait `docRev` dessus, et
+      l'écart qu'on vient mesurer serait MASQUÉ — pire : les écritures suivantes porteraient un
+      X-Base-Rev à jour sur un cache périmé, court-circuitant le verrou optimiste.
+
+      Égales → rien (le cas nominal, silencieux par contrat). Écart — dans les DEUX sens : un backup
+      serveur restauré fait RECULER la révision — → RATTRAPAGE par le chemin SSE EXISTANT : un changeset
+      couvrant toutes les collections part dans la mécanique debounce/fusion ordinaire (`scheduleReload`
+      → `reload` → `store.reloadCollections` → G3 re-tire les HYDRATÉES, saute lazy/interdites avec
+      leurs invalidations compteurs/facettes/page-en-main, méta relue, images rechargées si lisibles,
+      3D invalidée). JAMAIS une seconde implémentation de rechargement — mêmes garanties que le SSE :
+      les écritures du client (immédiates en mode API) ne sont pas en jeu, et le X-Base-Rev des
+      suivantes se resynchronise par les X-Doc-Rev du rattrapage lui-même.
+
+      Échec réseau : AVALÉ avec trace (on retentera au prochain déclencheur) ; un 401 en chemin est déjà
+      routé vers SessionExpiry par le protocole (qui coupe la veille via sessionExpired). Aucun toast
+      propre : seul le toast historique « Document mis à jour » du reload apparaît quand un rattrapage a
+      réellement lieu — un rattrapage est un comportement attendu, pas un incident. */
+  private async checkFreshness(trigger: DocFreshnessTrigger): Promise<void> {
+    if (!this.freshnessActive || !this.docId) return;
+    if (!this.freshness.accept(Date.now())) return;   // anti-rafale (les déclencheurs se recouvrent) + jamais deux en vol
+    try {
+      const docs = await this.adapter.listDocuments();
+      const serverRev = DocFreshness.revFromList(docs, this.docId);
+      if (DocFreshness.verdict(serverRev, this.adapter.docRev) !== "stale") return;   // frais, ou révision illisible (document supprimé ?) : rien
+      this.flog("fraîcheur (" + trigger + ") : révision serveur", serverRev, "≠ locale", this.adapter.docRev, "→ rattrapage");
+      // Rattrapage SANS événement reçu → l'auteur du changement est INCONNU : on efface lastBy, sinon le
+      // toast nommerait l'auteur d'un VIEIL événement. (Si un changeset SSE attend déjà, on garde le sien.)
+      if (!this.pendingChangeset) this.lastBy = null;
+      // Périmètre HONNÊTE : le serveur ne sait pas rejouer les changesets manqués (LiveBus sans historique),
+      // donc tout a pu changer — toutes les collections + méta + images. SANS le drapeau `full`, à dessein :
+      // `full` ferait passer le reload par `store.init()` (rechargement total qui re-déclare les lazy et
+      // JETTE leurs enregistrements absorbés) au lieu du partitionnement G3 de `reloadCollections`.
+      const catchUp: DocumentChangeset = { full: false, collections: [...EntityRegistry.COLLECTIONS], meta: true, images: true };
+      this.pendingChangeset = this.pendingChangeset ? Changeset.merge(this.pendingChangeset, catchUp) : catchUp;
+      this.scheduleReload();
+    } catch (e) {
+      this.flog("fraîcheur (" + trigger + ") : vérification impossible (sans gravité, on retentera)", e);
+    } finally {
+      this.freshness.done();
+    }
   }
 
   /** INSTRUMENTATION du boot (volet A du cadrage chargement-dynamique, décisions D1/D3 2026-08-02 —

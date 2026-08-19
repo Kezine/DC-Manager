@@ -18,6 +18,8 @@ Modules concernés : `src-client/core/HydrationState.ts` (état + prédicats, pu
 `src-client/core/CollectionFacetCache.ts` (valeurs de facette async, pur — vague 3),
 `src-client/core/TargetLabelResolution.ts` (partition pure de la résolution GROUPÉE des libellés de
 cibles, vague 4),
+`src-client/core/DocFreshness.ts` (fraîcheur du cache : décision pure des vérifications de révision —
+anti-rafale, verdict d'écart —, lot R3, câblée dans `app/RestDocuments.ts`),
 `src-client/store/Store.ts` (câblage G1/G2/G3/G4/G6/G8 + hydratation à la demande + jumeaux async des
 sections G7 + aperçu de cascade G5 + purge du résidu M4 + rafraîchissement du résidu M4b),
 `src-client/core/ListRowEngine.ts` + `src-client/core/StoreListRowSource.ts` + `views/ListView.ts`
@@ -29,8 +31,9 @@ sections G7 + aperçu de cascade G5 + purge du résidu M4 + rafraîchissement du
 `src-client/app/FileDocuments.ts` (branchement export), `src-client/core/HydrationStats.ts`
 (instrumentation). Tests : `Tests/modules/test-hydration.js` (lot 0),
 `Tests/modules/test-lazy-contacts.js` (vague 1 + tri du lot 1b),
-`Tests/modules/test-lazy-vague2.js` (vague 2), `Tests/modules/test-lazy-vague3.js` (vague 3) et
-`Tests/modules/test-lazy-vague4.js` (vague 4 — M4b, résolution groupée, spares) ;
+`Tests/modules/test-lazy-vague2.js` (vague 2), `Tests/modules/test-lazy-vague3.js` (vague 3),
+`Tests/modules/test-lazy-vague4.js` (vague 4 — M4b, résolution groupée, spares) et
+`Tests/modules/test-doc-freshness.js` (fraîcheur — SSE manqués, lot R3) ;
 `Tests/modules/test-access-partial.js` (niveau `forbidden` : précédence, caractère terminal, double
 nature, invariant anti-snapshot, assiette de chargement et silence des chemins de confort) ;
 côté serveur `Tests/modules/test-relational-schema.js` (liste blanche + ORDER BY) et
@@ -143,6 +146,66 @@ un rendu des pastilles (`shell.refreshCounts()`) et **oublie la page en main** d
 collection (`ListView.forgetServerPage()`, vague 2 — cf. § « Vague 2 »). Oublier une PAGE n'est pas
 re-tirer la COLLECTION : c'est ce que G3 refuse, et la distinction est nette — le prochain rendu
 redemande une page, exactement comme un clic sur « ‹ › ».
+
+### Fraîcheur — SSE MANQUÉS (vérification de révision + rattrapage, lot R3)
+
+G3 suppose que les événements SSE **arrivent**. Or ils peuvent être MANQUÉS sans aucun signal :
+onglet endormi ou déchargé par le navigateur, machine en veille, coupure réseau. `EventSource`
+re-connecte tout seul (champ `retry` du flux) mais **ne rejoue jamais** les événements émis pendant
+la coupure — le serveur (`LiveBus`) ne garde **aucun historique** et n'émet pas d'`id:` SSE, donc
+`Last-Event-ID` ne peut rien rattraper. Le listener `visibilitychange` du contrôleur ne flush, lui,
+que les changesets **déjà reçus** et accumulés. Résultat mesuré : une app laissée de côté sert un
+cache PÉRIMÉ en silence (ex. la recherche de la modale de sélection 3D, locale par construction,
+propose un état ancien). La réponse est une **vérification de révision légère** + un **rattrapage
+par le chemin G3 existant** — jamais une seconde implémentation de rechargement.
+
+**Modules** : `core/DocFreshness` (décision PURE — anti-rafale, verdict — horloge passée en
+paramètre, patron `AccessDenial`) ; câblage dans `app/RestDocuments.ts`. Le contrôleur n'existant
+qu'en mode REST, le **mode fichier/visualiseur est no-op PAR CONSTRUCTION** (principe n°15 — même
+garantie, et même construction, que tout le contrôleur : aucun test de mode nulle part).
+
+**Déclencheurs** (le guichet `accept(nowMs)` les dédouble — fenêtre anti-rafale
+`MIN_INTERVAL_MS` = 15 s, jamais deux vérifications en vol : un alt-tab émet focus ET
+visibilitychange à quelques ms d'écart) :
+
+| Déclencheur | Pourquoi |
+|---|---|
+| retour de **visibilité** (`visibilitychange` → visible) | l'onglet a pu dormir — la fenêtre aveugle typique |
+| **focus** fenêtre | recoupe le précédent, mais couvre « fenêtre visible sans focus » (second écran) |
+| **re-connexion SSE** (`open` qui SUIT un `error` — jamais la connexion initiale) | la fenêtre entre coupure et reprise est aveugle |
+| **heartbeat** (`HEARTBEAT_MS` = 5 min, sauté si l'onglet est caché — le retour de visibilité vérifie) | le « GET régulier » demandé : attrape un flux SSE silencieusement MORT (socket zombie, proxy qui a coupé sans FIN) qu'aucun événement ne signalera |
+
+L'ouverture d'un document pose la fenêtre « frais » (`noteFresh`) : le corpus vient d'être chargé,
+re-vérifier dans la foulée serait absurde. La session expirée COUPE la veille (un poll partirait
+en 401).
+
+**La vérification** : `GET /documents` — la route existante la plus légère (un SELECT du registre,
+les `DocMeta` portent `rev` ; garde `requireAuthenticated` + garde globale, déjà appelée par tout
+client au bootstrap). 🚨 Elle est **non scopée**, et c'est une propriété STRUCTURELLE, pas un
+raccourci : sa réponse ne porte pas `X-Doc-Rev`, donc la vérification ne resynchronise PAS
+`RestAdapter.docRev` avant la comparaison. Une route scopée (passant par `resolveRepoRead`)
+poserait l'en-tête, `RestProtocol.interpret` alignerait `docRev` dessus, et l'écart qu'on vient
+mesurer serait **masqué** — pire, les écritures suivantes porteraient un `X-Base-Rev` à jour sur un
+cache périmé, court-circuitant le verrou optimiste. C'est pourquoi AUCUNE route serveur n'a été
+ajoutée. Verdict (`DocFreshness.verdict`) : égalité → rien (cas nominal, silencieux) ; révision
+illisible (document supprimé, réponse inattendue) → rien non plus (jamais de rattrapage sur une
+donnée douteuse) ; **écart, dans les DEUX sens** → rattrapage — une révision serveur INFÉRIEURE est
+aussi un cache périmé (backup serveur restauré ; l'événement SSE ne recharge que sur révision
+supérieure, mais la vérification délibérée n'hérite pas de cette asymétrie).
+
+**Le rattrapage** : le serveur ne sait pas rejouer les changesets manqués depuis une révision X
+(`LiveBus` est un pur diffuseur) — le périmètre honnête est donc « tout a pu changer ». Un changeset
+couvrant **toutes les collections + méta + images, SANS le drapeau `full`**, part dans la mécanique
+SSE ordinaire (fusion dans `pendingChangeset` + `scheduleReload` → `reload` →
+`store.reloadCollections`) : G3 partitionne, re-tire les **hydratées** en entier, saute
+lazy/`forbidden` avec leurs invalidations (compteurs G6, facettes G8, page en main oubliée), la méta
+est relue, les images rechargées si lisibles, la 3D invalidée, et `docRev` se resynchronise par les
+`X-Doc-Rev` du rattrapage lui-même. ⚠ `full` aurait fait passer le reload par `store.init()`
+(rechargement total qui re-déclare les lazy et JETTE leurs enregistrements absorbés) au lieu du
+partitionnement G3. Aucun toast propre : seul le toast historique « Document mis à jour » du reload
+apparaît quand un rattrapage a réellement lieu (sans nom d'auteur — il est inconnu, `lastBy` est
+effacé si aucun événement n'attend). Un échec de la vérification est AVALÉ avec trace : on retentera
+au prochain déclencheur.
 
 ## Vague 1 — `contacts` chargée paresseusement (mode API)
 

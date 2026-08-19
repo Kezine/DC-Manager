@@ -254,6 +254,12 @@ invalidation fine n'y serait fiable. Deux déclencheurs : tout rendu qui **n'est
 (`ListView.render()` sans `typing`), et `Store.onChange` (filet pour les écritures venues d'ailleurs :
 SSE, autre onglet). Un index périmé, c'est une recherche qui ment : dans le doute, on jette.
 
+> ⚠ Ces invalidations supposent que le CACHE lui-même est à jour — or les événements SSE peuvent être
+> MANQUÉS sans signal (onglet endormi, veille, coupure). La vérification de révision + rattrapage qui
+> couvre ce trou passe par le chemin SSE ordinaire, donc les invalidations ci-dessus (et celles des
+> recherches locales par construction, comme la modale de sélection 3D) jouent d'elles-mêmes :
+> cf. [`hydratation.md`](hydratation.md) § « Fraîcheur — SSE manqués ».
+
 ## Filtre CIBLE unifié (dimension « à RECHERCHE »)
 
 Un listing peut être filtré par une **entité du modèle** plutôt que par une valeur d'énumération : « les
