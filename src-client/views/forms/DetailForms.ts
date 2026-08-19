@@ -36,6 +36,8 @@ import { AttachmentUi } from "./AttachmentUi";   // téléchargement + viewer d'
 import { ApplicationUi } from "./ApplicationUi";   // section « Applications hébergées » de la fiche VM (factorisée avec la fiche équipement)
 import { AttachmentViewKind } from "../../core/AttachmentViewKind";   // « Afficher » conditionnel : présent seulement si le type est visualisable
 import { AuditLine } from "./AuditLine";   // ligne « Créé/Modifié par {auteur} le {date} » (résolue via l'annuaire, mode API)
+import { LabelPrintDialog } from "../../ui/LabelPrintDialog";   // impression d'étiquettes QR (lot E — mode API seulement, prédicat `available`)
+import { LabelSubjects } from "../../core/LabelSubjects";       // matière d'une étiquette depuis un enregistrement
 
 /* =============================================================================
    FICHES DÉTAIL (lecture) des entités « secondaires » — remplacent le vidage
@@ -176,6 +178,20 @@ export class DetailForms extends IpamForms {
     // (doctrine §6.32). Une extrémité posée sur un ÉTAGE compte désormais, comme partout ailleurs.
     const footerActions: HTMLElement[] = [];
     if (host.locate && store.cableLocatable(c)) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>${I18n.t("lists.chrome.rowLocate")}`; locBtn.onclick = () => host.locate!("cable", c.id, () => this.cableDetail(store, host, id, onChanged)); footerActions.push(locBtn); }
+    // ÉTIQUETTES de câble (lot E étiquettes QR — mode API seulement, prédicat injecté) : un câble
+    // s'étiquette PAR PAIRE — le geste principal imprime DEUX drapeaux identiques (un par extrémité,
+    // décision E, défaut maquette), « Un drapeau » reste offert. Sens A → B = l'ordre de la fiche.
+    if (LabelPrintDialog.available()) {
+      const subject = () => LabelSubjects.cable(store, c);
+      const oneBtn = document.createElement("button"); oneBtn.type = "button"; oneBtn.className = "btn btn-ghost";
+      oneBtn.textContent = I18n.t("labels.entry.cableOne");
+      oneBtn.onclick = () => LabelPrintDialog.open({ kind: "cable", subjects: [subject()], source: c.name || "" });
+      footerActions.push(oneBtn);
+      const bothBtn = document.createElement("button"); bothBtn.type = "button"; bothBtn.className = "btn btn-ghost";
+      bothBtn.innerHTML = `<span class="gi">${Icons.PRINT}</span>${I18n.t("labels.entry.cableBoth")}`;
+      bothBtn.onclick = () => LabelPrintDialog.open({ kind: "cable", subjects: [subject(), subject()], source: I18n.t("labels.entry.cableBothSource", { cable: c.name || "" }) });
+      footerActions.push(bothBtn);
+    }
     if (this.canEditCollection("cables")) { const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-primary"; b.textContent = I18n.t("lists.chrome.rowEdit"); b.onclick = () => this.cable(store, host, id, onChanged); footerActions.push(b); }
     host.openModal({ title: I18n.t("detail.cable.title"), subtitle: Html.escape(c.name || ""), body: root, footerActions, stackKey: "detail:cables/" + id, onResume: () => this.cableDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
@@ -541,6 +557,14 @@ export class DetailForms extends IpamForms {
     InterventionFicheRow.attach(root, host.interventionHooks, { kind: "spare", id, label: (sp.displayName ? sp.displayName() : (sp.name || "")) }, () => host.closeModal?.());
     AuditLine.attach(root, sp, host.userDirectory);   // « Créé/Modifié par » (mode API)
     const footerActions = this.footer(() => this.spare(store, host, id, onChanged), "spares");
+    // « Imprimer l'étiquette » (lot E étiquettes QR — mode API seulement, prédicat injecté) : gabarit S
+    // par défaut (petit matériel en bac — cf. defaultsFor("spare") de la modale), AVANT « Modifier ».
+    if (LabelPrintDialog.available()) {
+      const printBtn = document.createElement("button"); printBtn.type = "button"; printBtn.className = "btn btn-ghost";
+      printBtn.innerHTML = `<span class="gi">${Icons.PRINT}</span>${I18n.t("labels.entry.equipment")}`;
+      printBtn.onclick = () => LabelPrintDialog.open({ kind: "spare", subjects: [LabelSubjects.spare(store, sp)], source: (sp.displayName ? sp.displayName() : (sp.name || "")) });
+      footerActions.unshift(printBtn);
+    }
     host.openModal({ title: I18n.t("detail.spare.title"), subtitle: Html.escape(sp.displayName ? sp.displayName() : (sp.name || "")), body: root, footerActions, stackKey: "detail:spares/" + id, onResume: () => this.spareDetail(store, host, id, onChanged), hideFooter: true, wide: true });
   }
 

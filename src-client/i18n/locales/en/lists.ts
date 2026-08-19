@@ -34,6 +34,7 @@ export const lists = {
     rowDelete: "Delete",
     rowMore: "More actions",
     rowLocate: "Locate in 3D",
+    rowPrint: "Print label",
     rowDownload: "Download",
     rowClone: "Clone",
     // Panneau du filtre CIBLE « à recherche » (déclencheur fermé + panneau-portail, refonte

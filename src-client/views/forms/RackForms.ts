@@ -35,6 +35,8 @@ import type { FormHost } from "./shared";
 import { CableForms } from "./CableForms";
 import { EquipmentForms } from "./EquipmentForms";   // fiche équipement (nom cliquable dans le contenu de baie)
 import { EntityViz } from "../EntityViz";
+import { LabelPrintDialog } from "../../ui/LabelPrintDialog";   // impression d'étiquettes QR (lot E — mode API seulement, prédicat `available`)
+import { LabelSubjects } from "../../core/LabelSubjects";       // matière d'une étiquette depuis un enregistrement
 
 export class RackForms extends CableForms {
   static rack(store: Store, host: FormHost, id: string | null, onSaved?: () => void): void {
@@ -330,6 +332,26 @@ export class RackForms extends CableForms {
     // locateRack) — sinon toast d'erreur.
     const footerActions: HTMLElement[] = [];
     if (host.locate && rk.datacenter_id) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>${I18n.t("lists.chrome.rowLocate")}`; locBtn.onclick = () => host.locate!("rack", rk.id, () => this.rackDetail(store, host, rk.id, onChanged)); footerActions.push(locBtn); }
+    // ÉTIQUETTES (lot E étiquettes QR — mode API seulement, prédicat injecté LabelPrintDialog.available) :
+    // DEUX gestes distincts, comme la maquette — l'étiquette DE la baie (gabarit « Baie » en tête de baie)
+    // et la planche DU CONTENU (une étiquette par équipement monté, dans l'ordre des U DÉCROISSANTS :
+    // l'ordre dans lequel on les colle en descendant la baie). La planche n'apparaît que s'il y a du contenu.
+    if (LabelPrintDialog.available()) {
+      const rackLblBtn = document.createElement("button"); rackLblBtn.type = "button"; rackLblBtn.className = "btn btn-ghost";
+      rackLblBtn.innerHTML = `<span class="gi">${Icons.PRINT}</span>${I18n.t("labels.entry.rack")}`;
+      rackLblBtn.onclick = () => LabelPrintDialog.open({ kind: "rack", subjects: [LabelSubjects.rack(store, rk)], source: rk.name || "" });
+      footerActions.push(rackLblBtn);
+      if (eqs.length) {
+        const sheetBtn = document.createElement("button"); sheetBtn.type = "button"; sheetBtn.className = "btn btn-ghost";
+        sheetBtn.innerHTML = `<span class="gi">${Icons.PRINT}</span>${I18n.t("labels.entry.rackSheet", { n: eqs.length })}`;
+        sheetBtn.onclick = () => LabelPrintDialog.open({
+          kind: "equipment",
+          subjects: eqs.slice().sort((a: any, b: any) => (b.rack_u || 0) - (a.rack_u || 0)).map((e: any) => LabelSubjects.equipment(store, e)),
+          source: I18n.t("labels.entry.rackSheetSource", { rack: rk.name || "" }),
+        });
+        footerActions.push(sheetBtn);
+      }
+    }
     if (this.canEditCollection("racks")) {   // viewer / droit de mise à jour absent : pas d'édition (contenu ni fiche)
       const contentBtn = document.createElement("button"); contentBtn.type = "button"; contentBtn.className = "btn btn-ghost"; contentBtn.textContent = I18n.t("rack.rackDetail.contentBtn");
       contentBtn.title = I18n.t("rack.rackDetail.contentTitle");

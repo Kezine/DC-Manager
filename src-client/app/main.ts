@@ -17,7 +17,8 @@ import { GlobalSearchPalette } from "../views/GlobalSearchPalette";   // palette
 import { GlobalSearchSources } from "../views/GlobalSearchSources";   // familles à fiche = périmètre envoyé à la recherche transverse serveur (mode API)
 import { ImageStore, IdbImageBackend, RestImageBackend, AttachmentStore, IdbAttachmentBackend, RestAttachmentBackend } from "../data";
 import type { ListOptions, FormHost } from "../views";
-import { Modal, Notify, FormControls, Dialog, Fullscreen, RichTooltip, Icons, ScanControl } from "../ui";
+import { Modal, Notify, FormControls, Dialog, Fullscreen, RichTooltip, Icons, ScanControl, LabelPrintDialog } from "../ui";
+import { LabelSubjects } from "../core/LabelSubjects";   // matière des étiquettes imprimables (lot E étiquettes QR) — constructeurs par famille
 import { Html } from "../core/Html";
 import type { RemoteListReader } from "../core/StoreListRowSource";   // lecteur SERVEUR des listings (mode API — lot 3)
 import { EntityCandidateSource, type EntitySearchReader, type EntityCandidateFamily } from "../core/EntityCandidates";   // candidats d'entités serveur-pilotés (mode API — lot 4)
@@ -253,6 +254,18 @@ async function boot(): Promise<void> {
   });
   ScanControl.installGeneric(modal.body);
   ScanControl.installFieldTracking();
+  /* ---- IMPRESSION D'ÉTIQUETTES (chantier étiquettes QR, lot E — docs/qr-scan.md § « Étiquettes
+     imprimables ») : MODE API SEULEMENT (la génération des QR est serveur, décision § 2.1 du handoff).
+     Patron « injection nulle » : `setup` n'est appelé qu'ici et qu'en mode API — partout ailleurs
+     `LabelPrintDialog.available()` rend faux et TOUTES les entrées d'impression (fiches, action de
+     ligne) restent masquées, sans aucun test de mode dispersé. La modale s'ouvre dans la pile
+     STANDARD (même instance que formHost) ; les SVG viennent de la route `GET …/qr/…?format=svg`. */
+  if (REST_MODE) {
+    LabelPrintDialog.setup({
+      openModal: (o) => formHost.openModal(o),
+      fetchQrSvg: (collection, id) => (adapter as RestAdapter).qrSvg(collection, id),
+    });
+  }
   // RECHERCHE GLOBALE (modale dédiée) — UNE instance, UNE implémentation pour les DEUX chemins
   // (déclencheur topbar + Ctrl+K). Garde d'overlay = le pattern des raccourcis undo/redo (sélecteurs
   // DOM) : la palette est un geste de NAVIGATION GLOBALE, pas un niveau de la pile de modales — son
@@ -824,6 +837,11 @@ async function boot(): Promise<void> {
         Même raison d'être que `onDownload` : le viewer lit le binaire via l'`attachmentStore` (hors Store du
         modèle). Absent = pas de viewer. À ne pas confondre avec l'`onShow` du cycle de vue (build paresseux). */
     onShow?: (id: string) => void;
+    /** Action « Imprimer l'étiquette » d'une ligne (chantier étiquettes QR, lot E). Threadée comme
+        `onDownload` : l'impression passe par `LabelPrintDialog` (génération serveur), pas par le Store.
+        Présente ⇒ l'action est proposée, GATÉE par `LabelPrintDialog.available()` (mode API seulement —
+        le prédicat est réévalué au rendu, donc l'action disparaît d'elle-même en mode fichier). */
+    onPrint?: (id: string) => void;
   }
   /** Déclare un onglet de LISTE et rend un ACCESSEUR sur sa `ListView` — null tant que l'onglet n'a
       jamais été affiché (la vue est construite au premier `onShow`, à dessein : on ne paie pas le
@@ -892,6 +910,9 @@ async function boot(): Promise<void> {
               : {
                   ...(cfg.actions || { view: true, edit: !!formFn, clone: true, del: true }),
                   ...(opts.locate ? { locate: true, canLocate } : {}), ...(opts.manage ? { manage: true } : {}),
+                  // « Imprimer l'étiquette » (lot E) : proposée si l'onglet la câble, disponible en mode API
+                  // seulement — le prédicat suit l'injection (aucun setup en mode fichier → jamais visible).
+                  ...(opts.onPrint ? { print: true, canPrint: () => LabelPrintDialog.available() } : {}),
                   // Gestes d'ÉCRITURE de la ligne, gatés par le verbe correspondant du domaine.
                   canEdit: andCan(canUpdateRow, cfgActions.canEdit),
                   canDel: andCan(canDeleteRow, cfgActions.canDel),
@@ -913,6 +934,7 @@ async function boot(): Promise<void> {
               }
               if (act === "download") { opts.onDownload?.(id); return; }   // binaire hors document (pièces jointes) — cf. onDownload
               if (act === "show") { opts.onShow?.(id); return; }           // viewer intégré (binaire hors document) — cf. onShow
+              if (act === "print") { opts.onPrint?.(id); return; }         // étiquette QR imprimable (lot E) — cf. onPrint
               if (act === "edit") { formFn?.(id, reRender); return; }
               if (act === "clone") {
                 const c = cfg.collection === "equipments" ? await store.cloneEquipment(id) : await store.cloneSimple(cfg.collection, id);
@@ -951,6 +973,12 @@ async function boot(): Promise<void> {
     subtitle: I18n.t("tabs.equipements.subtitle"),
     form: (id, done) => Forms.equipment(store, formHost, id, done), addLabel: I18n.t("app.add.equipment"),
     links: ["groupes", "faceimages", "spares", "sousequipements", "applications", "attachments"], locate: "equipment",
+    // « Imprimer l'étiquette » de ligne (lot E étiquettes QR) : geste UNITAIRE — la planche s'obtient par
+    // la BAIE (« Planche du contenu »), la sélection multiple des listings est DIFFÉRÉE (décision E).
+    onPrint: (id) => {
+      const eq: any = store.get("equipments", id);
+      if (eq) LabelPrintDialog.open({ kind: "equipment", subjects: [LabelSubjects.equipment(store, eq)], source: eq.name || "" });
+    },
   });
   // VMs : onglet de PREMIER NIVEAU (à côté d'Équipements). Deux origines : la SYNCHRO (Proxmox…) et la SAISIE
   // MANUELLE (forme B, cadrage 2026-08-15 : une VM manuelle = `provider_id` vide). Le bouton « + VM » et le

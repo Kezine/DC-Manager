@@ -101,6 +101,10 @@ export class Icons {
   /** Rechercher : loupe. Icône INTÉGRÉE au champ de recherche des barres de listing (revue design lot C). */
   static readonly SEARCH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>';
 
+  /** IMPRIMER (étiquettes QR, lot E — dessin de la maquette qr-etiquettes-imprimables) : imprimante.
+      Intention distincte d'EXPORT (télécharger un fichier) : ici du PAPIER sort d'une machine. */
+  static readonly PRINT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V4h12v5"/><rect x="3" y="9" width="18" height="7" rx="1.5"/><path d="M6 16h12v4H6z"/></svg>';
+
   /** SCANNER un code (QR / code-barres) à la caméra : viseur à coins + ligne de visée. Sert au
       greffon de champ (`ui/ScanControl`), à l'entrée globale de la topbar et au viseur lui-même
       (chantier étiquettes QR — la maquette qr-saisie-camera fait foi pour le dessin). */

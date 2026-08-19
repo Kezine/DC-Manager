@@ -77,6 +77,11 @@ export interface ListActions {
   /** Raffinement de `manage` (éditeur de contenu de baie = une MISE À JOUR), même raison d'être que
       `canClone`. Absent → `manage` vaut pour toutes les lignes. */
   canManage?: (id: string) => boolean;
+  /** « Imprimer l'étiquette » (chantier étiquettes QR, lot E) : action du MENU de ligne — déléguée à
+      `onAction("print", id)` comme `download`. L'impression est MODE API SEULEMENT (génération serveur) :
+      le prédicat `canPrint` porte cette disponibilité (injectée — cf. `LabelPrintDialog.available`). */
+  print?: boolean;
+  canPrint?: (id: string) => boolean;
 }
 export interface ListOptions {
   collection: string;
@@ -604,7 +609,7 @@ export class ListView {
     if (a.view) html += IconButton.html({ icon: Icons.INFO, label: I18n.t("lists.chrome.rowView"), act: "view" });
     if (this._rowCanManage(id)) html += IconButton.html({ icon: Icons.RACK_CONTENT, label: I18n.t("lists.chrome.rowManage"), act: "manage" });   // éditeur de contenu de baie (inline, à côté de Détails)
     if (this._rowCanEdit(id)) html += IconButton.html({ icon: Icons.EDIT, label: I18n.t("lists.chrome.rowEdit"), act: "edit" });
-    if (this._rowCanShow(id) || this._rowCanLocate(id) || this._rowCanClone(id) || this._rowCanDel(id) || a.download) {
+    if (this._rowCanShow(id) || this._rowCanLocate(id) || this._rowCanPrint(id) || this._rowCanClone(id) || this._rowCanDel(id) || a.download) {
       const moreLbl = I18n.t("lists.chrome.rowMore");
       html += `<button type="button" class="btn btn-ghost btn-sm icon-action row-overflow" data-act="__more__" title="${moreLbl}" aria-label="${moreLbl}" aria-haspopup="menu" aria-expanded="false">${Icons.MORE}</button>`;
     }
@@ -641,6 +646,12 @@ export class ListView {
     return !!this.actions.manage && (!this.actions.canManage || this.actions.canManage(id));
   }
 
+  /** `print` (« Imprimer l'étiquette ») effectif pour UNE ligne : action activée ET prédicat satisfait
+      (le prédicat porte la disponibilité de l'impression — mode API seulement, cf. ListActions). */
+  private _rowCanPrint(id: string): boolean {
+    return !!this.actions.print && (!this.actions.canPrint || this.actions.canPrint(id));
+  }
+
   /** Ouvre le menu « plus d'actions » (overflow) d'une ligne : actions secondaires actives, déléguées à onAction. */
   private _openRowMenu(trigger: HTMLElement, id: string): void {
     const a = this.actions;
@@ -650,6 +661,9 @@ export class ListView {
     if (this._rowCanLocate(id)) items.push({ label: I18n.t("lists.chrome.rowLocate"), icon: Icons.LOCATE, onClick: () => this.onAction && this.onAction("locate", id) });
     // « Afficher » (viewer) AVANT « Télécharger » (cadrage B, D-B4) : consulter d'abord, télécharger ensuite.
     if (this._rowCanShow(id)) items.push({ label: I18n.t("lists.chrome.rowShow"), icon: Icons.EYE, onClick: () => this.onAction && this.onAction("show", id) });
+    // « Imprimer l'étiquette » (lot E étiquettes QR) : geste UNITAIRE de ligne — la planche, elle,
+    // s'obtient par la baie (« Planche du contenu »), pas par une sélection multiple (décision E).
+    if (this._rowCanPrint(id)) items.push({ label: I18n.t("lists.chrome.rowPrint"), icon: Icons.PRINT, onClick: () => this.onAction && this.onAction("print", id) });
     if (a.download) items.push({ label: I18n.t("lists.chrome.rowDownload"), icon: Icons.EXPORT, onClick: () => this.onAction && this.onAction("download", id) });
     if (this._rowCanClone(id)) items.push({ label: I18n.t("lists.chrome.rowClone"), icon: Icons.CLONE, onClick: () => this.onAction && this.onAction("clone", id) });
     if (this._rowCanDel(id)) items.push({ label: I18n.t("ui.action.delete"), icon: Icons.DELETE, danger: true, onClick: () => this.onAction && this.onAction("del", id) });

@@ -206,6 +206,24 @@ export class RestAdapter extends DataAdapter {
     const res = await this._send("GET", "/facets/" + collection + "?field=" + encodeURIComponent(field));
     return (res && Array.isArray(res.values)) ? res.values.map((v: any) => String(v)) : null;
   }
+  /** SVG d'ÉTIQUETTE QR d'une fiche : `GET …/qr/<collection>/<id>?format=svg` (lot E — impression
+      d'étiquettes, cf. docs/qr-scan.md). LECTURE PURE, mais la réponse est du SVG BRUT (image/svg+xml),
+      pas du JSON : le protocole (`interpret`) ne s'applique pas — fetch dédié, mêmes cookies de session
+      (`credentials: include`). Rejette avec le message SERVEUR quand il est actionnable (503 explicite
+      « définir PUBLIC_BASE_URL », 404 fiche disparue…) : la modale d'impression l'affiche tel quel. */
+  async qrSvg(collection: string, id: string): Promise<string> {
+    if (!this.docId) throw new Error("aucun document ouvert");
+    const res = await fetch(this.dataBase + "/qr/" + encodeURIComponent(collection) + "/" + encodeURIComponent(id) + "?format=svg", {
+      credentials: "include",
+      headers: { "X-Client-Id": this.clientId },
+    });
+    if (!res.ok) {
+      let message = "";
+      try { message = String(((await res.json()) || {}).error || ""); } catch { /* corps non-JSON : statut seul */ }
+      throw new Error(message || ("HTTP " + res.status));
+    }
+    return res.text();
+  }
   async saveMeta(meta: Record<string, any>): Promise<unknown> { return this._send("PUT", "/meta", meta); }
   /** MAINTENANCE du document courant (admin) : purge serveur des images ORPHELINES et des BINAIRES de
       pièces jointes orphelins (D5 — seul endroit où un binaire est supprimé) + compactage (VACUUM).

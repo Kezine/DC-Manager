@@ -424,7 +424,19 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   l'instance `EntityLinkOpener`, sinon copier/insérer/lien) et raccourci **Ctrl+Maj+S** sur le
   champ focalisé ; **côté serveur** : route gardée `GET …/qr/:collection/:id` (lib `qrcode`,
   PNG/SVG bornés `QrCodeParams`), `PUBLIC_BASE_URL` JAMAIS dérivée des en-têtes, 503 actionnable ;
-  section « Mode local » — scan OK dans les deux modes, génération = serveur par décision).
+  **ÉTIQUETTES IMPRIMABLES** (lot E — la maquette qr-etiquettes-imprimables FAIT FOI) : UN écran de
+  sortie `ui/LabelPrintDialog` (pile standard, réglages mémorisés EN SESSION par contexte), géométrie
+  PURE `core/LabelLayout` (gabarits S/M/L/Baie/câble/personnalisé, drapeau DÉRIVÉ du QR, manchon
+  2 tours + recouvrement, 🚨 cellule de planche ≠ étiquette — M 4×8=32, plancher QR 18 mm signalé,
+  débordement en CODES), rendu HTML PARTAGÉ aperçu ⇄ imprimé `core/LabelHtml` (noir sur blanc, zéro
+  token de thème), quiet zone du SVG servi vérifiée/compensée `core/LabelQrSvg`, matière par
+  enregistrement `core/LabelSubjects` (owner = champ E1 derrière une case, vide → ligne absente) ;
+  impression = iframe print-CSS isolée (unitaire `@page` taille EXACTE → Brother/Dymo, planche A4
+  colonnes plafonnées + traits de coupe) ; points d'entrée fiches équipement/baie (étiquette DE la
+  baie ≠ planche DU contenu, U décroissants)/câble (2 extrémités par défaut)/spare + action de ligne
+  du listing équipements — TOUS sous le prédicat injecté `LabelPrintDialog.available()` ;
+  section « Mode local » — scan OK dans les deux modes, génération/impression = mode API seulement
+  (setup injecté par main.ts, patron injection nulle)).
 
 ## Points d'architecture à connaître
 

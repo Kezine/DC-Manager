@@ -6,6 +6,8 @@ import { EnergyInfo } from "./EnergyInfo";   // bilan énergie (jauge PoE + char
 import { ImageStore } from "../../data/ImageStore";
 import { FormControls } from "../../ui/FormControls";
 import { ScanControl } from "../../ui/ScanControl";   // greffon de scan caméra des champs n° de série (déclaré, parseur `serial` — docs/qr-scan.md § UI)
+import { LabelPrintDialog } from "../../ui/LabelPrintDialog";   // impression d'étiquettes QR (lot E — mode API seulement, prédicat `available`)
+import { LabelSubjects } from "../../core/LabelSubjects";       // matière d'une étiquette depuis un enregistrement (règle écrite une fois)
 import { ChipsInput, ChipItem } from "../../ui/ChipsInput";
 import { Autocomplete } from "../../ui/Autocomplete";
 import { FieldFacet } from "../../core/FieldFacet";
@@ -258,6 +260,15 @@ export class EquipmentForms extends FormBase {
     // miroir des refus de locateEquipment) — un équipement d'inventaire pur ou dans une baie non placée n'aurait
     // qu'un toast d'erreur (parité avec le listing, cf. ListActions.canLocate).
     if (host.locate && store.equipmentLocatable(eq.id)) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>${I18n.t("lists.chrome.rowLocate")}`; locBtn.onclick = () => host.locate!("equipment", eq.id, () => this.equipmentDetail(store, host, eq.id, onChanged)); footerActions.push(locBtn); }
+    // « Imprimer l'étiquette » (lot E étiquettes QR) : MASQUÉ hors mode API — la génération des QR est
+    // serveur (prédicat injecté `LabelPrintDialog.available`, patron injection nulle — docs/qr-scan.md).
+    // La lecture de la fiche suffit comme permission : on n'imprime que ce qu'on affiche déjà.
+    if (LabelPrintDialog.available()) {
+      const printBtn = document.createElement("button"); printBtn.type = "button"; printBtn.className = "btn btn-ghost";
+      printBtn.innerHTML = `<span class="gi">${Icons.PRINT}</span>${I18n.t("labels.entry.equipment")}`;
+      printBtn.onclick = () => LabelPrintDialog.open({ kind: "equipment", subjects: [LabelSubjects.equipment(store, eq)], source: eq.name || "" });
+      footerActions.push(printBtn);
+    }
     if (this.canEditCollection("equipments")) {   // viewer / droit de mise à jour absent : pas de bouton « Modifier »
       const editBtn = document.createElement("button"); editBtn.type = "button"; editBtn.className = "btn btn-primary"; editBtn.textContent = I18n.t("lists.chrome.rowEdit");
       editBtn.onclick = () => this.equipment(store, host, eq.id, onChanged);

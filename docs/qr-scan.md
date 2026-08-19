@@ -284,5 +284,87 @@ qu'`api.ts` : Express/multer non résolus dans le programme de test — cf. en-t
 
 **Mode local** : la génération d'étiquettes est SERVEUR par décision d'architecture (« aucune lib
 de génération dans le client », GO 2026-08-18) — le mode fichier n'imprime donc pas d'étiquettes
-(écart au principe n°15 assumé et documenté ici). Le SCAN, lui, fonctionne dans les deux modes
-(cf. « Mode local » ci-dessus).
+(écart au principe n°15 assumé, cf. « Mode local » de la section suivante pour le mécanisme de
+masquage). Le SCAN, lui, fonctionne dans les deux modes (cf. « Mode local » ci-dessus).
+
+## Étiquettes imprimables
+
+La maquette `design-system/briefs/qr-etiquettes-imprimables-maquette.html` **fait foi** (gabarits,
+anatomie, flux), amendée par les décisions du cadrage E (2026-08-20) — notées ci-dessous. **Un seul
+écran de sortie** : la modale d'impression `ui/LabelPrintDialog` (pile de modales standard, principe
+n°11) ; ce qui change entre les points d'entrée est ce qu'elle **reçoit** (`LabelPrintContext` — un
+objet, les deux extrémités d'un câble, le contenu d'une baie).
+
+### Découpe des modules
+
+| Module | Rôle |
+|---|---|
+| `core/LabelLayout` | **Géométrie PURE** (mm) : table des gabarits (cotes EXACTES de la maquette), drapeau **dérivé du QR**, manchon (2 tours + recouvrement), QR seul, **cellule de planche ≠ étiquette**, plafond de colonnes, capacité A4, bornes du personnalisé, **débordement en CODES** (`LabelWarning` — l'UI traduit) |
+| `core/LabelQrSvg` | Retravail PUR du SVG servi par `/qr` : **quiet zone vérifiée** (marge en modules lue dans le tracé) et **compensée par un padding blanc calculé** si < 4 modules (un `?size=` plus grand n'y changerait rien — propriété en modules, pas en pixels), mise à l'échelle en mm |
+| `core/LabelHtml` | Rendu HTML PUR **partagé aperçu ⇄ imprimé** (une seule source, fidélité par construction) : étiquette, page de planche, document d'impression. **Noir sur blanc, aucun token de thème** |
+| `core/LabelSubjects` | La matière d'une étiquette depuis un enregistrement (lecteur injecté) : équipement (« baie · U »), baie, câble (A/B = **ordre de la fiche**), spare — la règle écrite UNE fois pour tous les points d'entrée |
+| `ui/LabelPrintDialog` | La modale : panneau de réglages + aperçu fidèle réduit + avertissements + iframe d'impression. Réglages **mémorisés en session** par contexte (jamais de Prefs persistées — dernier tirage repris) |
+
+### Gabarits et planche
+
+Préréglages S 50×20 (QR 18) / **M 50×30 (QR 20, défaut)** / L 70×40 (QR 28) / Baie 100×60 (QR 34) /
+Câble (drapeau dérivé du QR : compact 54×20,4, confort 62×22) + manchons SANS QR (repère complet ×2
+tours, ou identifiant ×6 lisible sous tous les angles) + Personnalisé (largeur 20–210, hauteur
+12–297, QR 12–60 mm ; Ø 3–30 et longueur 10–60 pour les manchons). Densité **compact (défaut)** /
+confort. Plancher de scannabilité **QR ≥ 18 mm** (signalé, jamais interdit) ; quiet zone 4 modules
+INTOUCHABLE (dans le SVG servi — vérifiée/compensée par `LabelQrSvg`). QR TOUJOURS à gauche.
+
+**Planche A4** (dès 2 étiquettes) : marge 8 mm, en-tête hors zone (source · compte/date), colonnes
+2/3/4 **plafonnées par la largeur réelle**, traits de coupe pointillés 0,2 mm désactivables,
+pagination silencieuse au-delà d'une feuille (le compteur l'annonce). ⚠ Sur une planche, l'étiquette
+s'étire dans sa **cellule** de grille (colonne `cell` de la table — M : 48×33, d'où « 4 × 8 = 32 par
+feuille » alors que la cote nominale est 50 mm) ; le plafond de colonnes se calcule sur la CELLULE.
+**Unitaire** : page à la taille EXACTE de l'étiquette (`@page size` → imprimantes à rouleau
+Brother/Dymo, sans découpe).
+
+### Décisions du cadrage E (amendent la maquette)
+
+- **« Société propriétaire » = le champ `equipments.owner`** (lot E1), PAS une saisie d'impression
+  non persistée : sur l'étiquette il est derrière une **case** du bloc « Lisible humain » (décochée
+  par défaut, mémorisée en session) ; sur une planche chaque étiquette porte le `owner` de SON
+  enregistrement — vide → ligne absente. Le champ libre de la maquette a disparu.
+- **Pas de sélection multiple des listings en v1** : ni cases ni barre de sélection — la planche
+  s'obtient par la **baie** (« Planche du contenu », U décroissants : l'ordre de collage). Le point
+  d'entrée listing est l'action de ligne **unitaire** seulement.
+- Catalogue Avery nommé : NON (les colonnes réglables suffisent). Trace « imprimée le … » sur la
+  fiche : NON.
+- **Câbles** : le geste principal imprime **les 2 extrémités** (deux drapeaux identiques), « Un
+  drapeau » reste offert ; sens A → B = l'**ordre de la fiche** (from → to).
+
+### Points d'entrée (tous sous `LabelPrintDialog.available()`)
+
+| Où | Geste |
+|---|---|
+| Fiche équipement | « Imprimer l'étiquette » (pied de fiche) |
+| Listing équipements | Action de ligne « Imprimer l'étiquette » (menu ⋮ — les actions secondaires de ligne y vivent toutes, cf. `ListView._openRowMenu`) |
+| Fiche baie | « Étiquette de baie » (gabarit Baie) **et** « Planche du contenu (N) » (masquée si vide) — deux gestes distincts, deux papiers |
+| Fiche câble | « Un drapeau » / « Imprimer les 2 extrémités » |
+| Fiche spare | « Imprimer l'étiquette » (gabarit S par défaut) |
+
+### Rendu d'impression
+
+Les QR viennent de `GET <dataBase>/qr/:collection/:id?format=svg` (`RestAdapter.qrSvg` — fetch
+dédié : la réponse est du SVG brut, hors protocole JSON), mis à l'échelle en mm par `LabelQrSvg`
+puis **inlinés** dans un document print-CSS **isolé** (iframe cachée) : unitaire =
+`@page { size: <w>mm <h>mm; margin: 0 }`, planche = A4 + grille + traits de coupe. Tout étant
+inline, `print()` n'attend que le `load` de l'iframe. Les SVG sont tirés en parallèle et mis en
+cache le temps de la modale ; un échec (503 `PUBLIC_BASE_URL` absente, 404…) affiche le message
+serveur et désactive « Imprimer ».
+
+### Mode local
+
+L'impression d'étiquettes est **mode API seulement** (la génération des QR est serveur, décision
+§ 2.1 du GO — écart au principe n°15 assumé). Mécanisme : patron **injection nulle**
+(`AccessState`/`HydrationState`) — `LabelPrintDialog.setup(...)` n'est appelé par `main.ts` QU'EN
+mode API ; partout ailleurs `LabelPrintDialog.available()` rend faux et TOUTES les entrées
+d'impression (fiches, action de ligne) restent masquées. **Un seul test de mode**, dans `main.ts` —
+aucun test dispersé.
+
+Tests : `Tests/modules/test-labels.js` (gabarits golden, géométrie drapeau/manchon, cellule de
+planche et plafonds, bornes du personnalisé, codes de débordement, quiet zone du SVG, rendu HTML
+partagé — échappement, manchons ×2/×6, `@page`, zéro token de thème dans l'imprimé).
