@@ -133,7 +133,4 @@ export const tabs = {
     label: "Certificates",
     subtitle: "Internal (zero-knowledge) PKI: master key, authorities and X.509/SSH certificates, issuance, exports, revocation. Cryptography happens in the browser — the server never sees the master key.",
   },
-  parametres: {
-    label: "Settings",
-  },
 } as const;

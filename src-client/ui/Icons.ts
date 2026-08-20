@@ -328,7 +328,12 @@ export class Icons {
   /** Notifications : cloche. */
   static readonly NOTIFICATION = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>';
 
-  /** Paramètres : engrenage DENTÉ (rouage). Utilisé par le groupe « Paramètres » (contacts + notifications). */
+  /** Menu de navigation : trois barres (« burger »). UNE seule intention — OUVRIR LE MENU — donc une
+      seule icône : le tiroir responsive du Shell (cf. `app/ShellDrawer`). Ne pas la détourner pour un
+      « plus d'options » de ligne, qui a déjà `MORE`. */
+  static readonly MENU = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>';
+
+  /** Paramètres : engrenage DENTÉ (rouage). Utilisé par le domaine « Paramètres » (contacts + notifications). */
   static readonly SETTINGS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
 
   /* ------------------------------------------------------------------------
@@ -346,4 +351,17 @@ export class Icons {
 
   /** Plein écran : quatre coins qui s'écartent. Repère de la bascule « modales en plein écran ». */
   static readonly FULLSCREEN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>';
+
+  /** Résolution d'une icône par le NOM de sa constante (`"EQUIPMENT"` → le SVG correspondant).
+      POURQUOI : les modules PURS qui décrivent de l'UI sans la peindre (cf. `app/NavModel`, dont le
+      catalogue de domaines ne peut importer ni le DOM ni ce registre) désignent leur icône par son
+      NOM ; c'est l'appelant qui la résout, ici, en un seul point. Un nom inconnu rend la chaîne VIDE
+      plutôt que `undefined` : l'hôte peint alors une pastille sans glyphe au lieu d'écrire
+      « undefined » dans le DOM. Le filtre `startsWith("<svg")` interdit d'atteindre autre chose
+      qu'une icône (une méthode statique, `name`, `prototype`…) par un nom fabriqué. */
+  static byName(name?: string): string {
+    if (!name) return "";
+    const value = (Icons as unknown as Record<string, unknown>)[name];
+    return typeof value === "string" && value.startsWith("<svg") ? value : "";
+  }
 }

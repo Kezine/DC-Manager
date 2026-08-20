@@ -93,12 +93,21 @@ export const shell = {
     reopen: "Reopen « {{name}} »",
   },
   header: {
-    back: "← {{label}}",
-    backTitle: "Back: {{label}}",
     addDefault: "+ New",
   },
-  tabs: {
-    menu: "Menu",
+  // Calque de `../fr/shell.ts` § nav / save (menu à deux niveaux, cf. docs/navigation.md).
+  nav: {
+    menu: "Navigation menu",
+    close: "Close menu",
+    views: "Views in this area",
+    crumbSeparator: "›",
+    undo: "Undo",
+    redo: "Redo",
+  },
+  save: {
+    mem: "In memory",
+    clean: "Saved",
+    dirty: "Unsaved",
   },
   user: {
     connectedAs: "Logged in as {{who}}",

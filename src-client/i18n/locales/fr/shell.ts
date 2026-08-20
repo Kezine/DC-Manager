@@ -100,12 +100,26 @@ export const shell = {
     reopen: "Rouvrir « {{name}} »",
   },
   header: {
-    back: "← {{label}}",
-    backTitle: "Retour : {{label}}",
     addDefault: "+ Nouveau",
   },
-  tabs: {
-    menu: "Menu",
+  // MENU À DEUX NIVEAUX (cf. docs/navigation.md). Les LIBELLÉS DES DOMAINES vivent, eux, dans le
+  // domaine i18n `nav` : ils sont référencés par le module PUR `app/NavModel`, pas par le Shell.
+  nav: {
+    menu: "Menu de navigation",
+    close: "Fermer le menu",
+    views: "Vues du domaine",
+    // Fil d'Ariane « domaine › vue » : le chevron est un SÉPARATEUR, pas de la ponctuation française —
+    // il est localisable pour les écritures qui n'utilisent pas ce glyphe.
+    crumbSeparator: "›",
+    undo: "Annuler",
+    redo: "Rétablir",
+  },
+  // État de sauvegarde en TOUTES LETTRES (en-tête du tiroir responsive, où la barre de statut n'est pas
+  // visible) — même vérité que la pastille `.save-state-icon`, dite autrement.
+  save: {
+    mem: "En mémoire",
+    clean: "Enregistré",
+    dirty: "Non enregistré",
   },
   user: {
     connectedAs: "Connecté en tant que {{who}}",

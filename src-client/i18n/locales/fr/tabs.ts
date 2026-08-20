@@ -134,7 +134,4 @@ export const tabs = {
     label: "Certificats",
     subtitle: "PKI interne (zéro-connaissance) : clé maître, autorités et certificats X.509/SSH, émission, exports, révocation. La cryptographie se fait dans le navigateur — le serveur ne voit jamais la clé maître.",
   },
-  parametres: {
-    label: "Paramètres",
-  },
 } as const;

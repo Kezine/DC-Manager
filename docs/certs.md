@@ -942,15 +942,16 @@ jamais ; côté client tout vit dans les fichiers dédiés ci-dessous).
    triviale que le code certs importe encore — RESTE, réutilisable et non spécifique aux certificats) ; retirer de
    `main.ts` l'enregistrement de l'**onglet principal** « Certificats » (`shell.addView` +
    `new CertsAdminView(...)` + le `certsClient`), et les exports dans `views/index.ts`. Le
-   groupe `parametres` ne référence plus « certificats » (l'onglet est désormais primaire) —
-   rien à retirer de ses `children`. Retirer le fichier de tests `Tests/modules/test-certs.js`.
+   domaine `parametres` de `NAV_DOMAINS` ne référence pas « certificats » (qui vit dans le domaine
+   « Exploitation », cf. `docs/navigation.md`) — en revanche il FAUT retirer `"certificats"` des
+   `views` de ce domaine, sans quoi le verrou d'exhaustivité de `NavModel` signalera une entrée périmée. Retirer le fichier de tests `Tests/modules/test-certs.js`.
 3. **Dépendances** : `@peculiar/x509` (et l'écosystème `@peculiar/asn1-*` transitif) ET
    **`fflate`** (emballage ZIP, importée UNIQUEMENT par `CertZip`) n'étaient utilisées QUE par
    la PKI → **retirables** de `package.json` une fois la feature partie (vérifier qu'aucun autre
    module ne les importe avant de désinstaller — `fflate` n'est employée que par `certs/`).
 4. **Ce qui RESTE (indépendant du module certs)** :
-   - le **groupe « Paramètres »** — conteneur de navigation générique (l'onglet
-     « Certificats » est primaire, hors de ses `children` : rien à y ajuster) ;
+   - le **domaine « Paramètres »** — regroupement de navigation générique (« Certificats » vit dans
+     le domaine « Exploitation », rien à y ajuster) ;
    - la primitive **`ui/Clipboard.ts`** — copie presse-papiers générique (réutilisable) ;
    - le **service de notifications** (`notify/`) — le producteur `cert-expiry` disparaît
      simplement, les autres producteurs et abonnements sont intacts ;

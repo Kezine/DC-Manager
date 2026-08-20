@@ -33,5 +33,6 @@ import { search } from "./en/search";
 import { attachment } from "./en/attachment";
 import { scan } from "./en/scan";
 import { labels } from "./en/labels";
+import { nav } from "./en/nav";
 
-export const en = { tabs, interventions, ui, shell, app, graph, lists, forms, cable, ipam, domain, rack, equipment, detail, face, dc, vm, wifi, tracker, notify, certs, analysis, subEquipment, search, attachment, scan, labels } as const;
+export const en = { tabs, interventions, ui, shell, app, graph, lists, forms, cable, ipam, domain, rack, equipment, detail, face, dc, vm, wifi, tracker, notify, certs, analysis, subEquipment, search, attachment, scan, labels, nav } as const;

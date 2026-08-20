@@ -1,4 +1,4 @@
-<!-- @dsCard group="Navigation" name="Navigation" subtitle="barre d'onglets (icône + actif), onglet groupe, menu déroulant, pagination" -->
+<!-- @dsCard group="Navigation" name="Navigation" subtitle="domaines (niveau 1), barre de vues (niveau 2), fil d'Ariane, tiroir responsive, pagination" -->
 <!doctype html>
 <html lang="fr">
 <head>
@@ -316,49 +316,48 @@
   .tab-count.warn { background: transparent; border-color: var(--warn); color: var(--warn); }
   .tab-count.err { background: transparent; border-color: var(--err); color: var(--err); }
 
-  /* Onglet en ICÔNE (barre desktop) : l'icône (span .gi) remplace le texte ; taille alignée sur les autres icônes
-     de la topbar (.icon-btn svg = 16px). Le libellé reste porté par title + aria-label (a11y). Le soulignement de
-     l'onglet actif (::after, en absolu), le badge .tab-count et le caret des groupes ne sont pas affectés. */
-  .tab.tab-icon { display: inline-flex; align-items: center; }
   .tab .gi svg { width: 16px; height: 16px; }
 
-  /* Onglets en MENU DEROULANT custom (responsive) — pas un <select> natif. Masque en grand ecran. */
-  .tabs-dd { position: relative; display: none; align-items: stretch; flex: 1; min-width: 0; }
-  .tabs-dd-trigger {
-    display: flex; align-items: center; gap: 8px; width: 100%;
-    background: transparent; border: none; border-right: 1px solid var(--line);
-    color: var(--fg); font-family: var(--mono); font-size: 12px; letter-spacing: 0.13em;
-    text-transform: uppercase; padding: 0 16px; cursor: pointer;
-  }
-  .tabs-dd-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
-  .tabs-dd-caret { color: var(--fg-dim); flex: 0 0 auto; }
-  .tabs-dd-menu {
-    position: absolute; top: 100%; left: 0; min-width: 240px; max-width: 84vw; max-height: 70vh; overflow: auto;
-    display: none; flex-direction: column;
-    background: var(--bg-2); border: 1px solid var(--line);
-    box-shadow: 0 8px 24px rgba(0,0,0,0.4); z-index: 200;
-  }
-  .tabs-dd.open .tabs-dd-menu { display: flex; }
-  .tabs-dd-item {
-    display: flex; align-items: center; gap: 6px;
-    background: transparent; border: none; border-bottom: 1px solid var(--line);
-    color: var(--fg-dim); font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em;
-    text-transform: uppercase; padding: 12px 16px; cursor: pointer; text-align: left;
-  }
-  .tabs-dd-item:last-child { border-bottom: none; }
-  .tabs-dd-item:hover { color: var(--fg); background: var(--bg-3); }
-  .tabs-dd-item.active { color: var(--accent-text); }   /* libellé d'onglet actif = texte accent → --accent-text */
-  /* En-tête de GROUPE dans le menu responsive (non cliquable) + ses enfants indentés (piège ②) — RÉUTILISE le
-     gabarit .tabs-dd-menu/.tabs-dd-item, on n'ajoute que le repère de section et le décalage. */
-  .tabs-dd-group { padding: 10px 16px 4px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--fg-dimmer); border-bottom: 1px solid var(--line); }
-  .tabs-dd-item--child { padding-left: 28px; }
+  /* ---- NIVEAU 1 : les DOMAINES (menu à deux niveaux, cf. docs/navigation.md) ----
+     Icône + LIBELLÉ, le libellé toujours visible : la maquette tranche « libellés > icônes », l'icône
+     seule n'est plus le régime normal (elle exigeait de mémoriser onze pictogrammes). Sous ~1000 px le
+     libellé cède (cf. bloc responsive) ; sous 760 px la barre entière cède au TIROIR. */
+  .tab.tab-domain { display: inline-flex; align-items: center; gap: 8px; }
+  .tab-label { white-space: nowrap; }
 
-  /* Onglet GROUPE (toujours déroulant, ex. « Paramètres ») : bouton .tab (mêmes styles que les autres onglets) +
-     menu réutilisant .tabs-dd-menu/.tabs-dd-item. Placé HORS de .tabs (sinon son overflow rognerait le menu). */
-  .tab-group { position: relative; display: flex; align-items: stretch; flex: 0 0 auto; }
-  .tab-group > .tab { display: inline-flex; align-items: center; gap: 6px; }
-  .tab-group .tabs-dd-menu { right: 0; left: auto; }   /* dernier onglet : menu aligné à droite pour ne pas déborder */
-  .tab-group.open .tabs-dd-menu { display: flex; }
+  /* ---- NIVEAU 2 : la BARRE DE VUES ----
+     Pattern UNIQUE de sous-navigation : elle remplace À LA FOIS l'ancien groupe déroulant
+     « Paramètres » et les liens d'en-tête de toutes les autres sous-vues. NON sticky (la barre de
+     statut occupe déjà `top:56px` ; deux collants au même offset se chevaucheraient au défilement). */
+  .views-bar {
+    display: flex; align-items: center; gap: 0;
+    min-height: 38px; padding: 0 6px;
+    background: var(--bg); border-bottom: 1px solid var(--line);
+    overflow-x: auto; overflow-y: hidden;
+  }
+  .view-tab {
+    display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto;
+    min-height: 30px; padding: 0 11px; margin: 4px 1px;
+    background: transparent; border: 1px solid transparent; border-radius: var(--radius-pill);
+    color: var(--fg-dim); font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em;
+    text-transform: uppercase; cursor: pointer; white-space: nowrap;
+  }
+  .view-tab:hover { color: var(--fg); background: var(--bg-3); }
+  /* Pastille ACTIVE : texte accent + fond/bordure teintés par color-mix des tokens (aucune couleur en
+     dur — les deux thèmes suivent leurs propres valeurs de --accent). */
+  .view-tab.active {
+    color: var(--accent-text);
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+  /* Séparateur INTERNE au domaine (regroupement visuel, ex. `… | VMs · Clusters | Wifi`). */
+  .view-sep { width: 1px; height: 18px; background: var(--line); margin: 0 8px; flex: 0 0 auto; }
+  /* La pastille de comptage garde sa `margin-left` historique (héritée des onglets en flux INLINE) ;
+     dans ces conteneurs FLEX c'est le `gap` qui espace — sinon l'écart est compté deux fois. */
+  .tab-domain .tab-count, .view-tab .tab-count, .nav-acc-item .tab-count { margin-left: 0; }
+
+  /* ---- BURGER (responsive) : masqué au-dessus du breakpoint, révélé par le bloc @media 760px ---- */
+  .topbar-burger { display: none; }
 
   .topbar-actions { display: flex; align-items: stretch; flex-shrink: 0; border-left: 1px solid var(--line); }
   /* Pastille utilisateur = BOUTON (clic → modale d'infos) : réinitialise l'apparence bouton, ne garde
@@ -487,6 +486,12 @@
     margin-bottom: 16px;
     flex-wrap: wrap;
   }
+  /* FIL D'ARIANE « domaine › vue » (menu à deux niveaux) : REPÈRE, pas une navigation — il remplace le
+     bouton « ← retour », qui ne disait que d'où l'on venait. Non cliquable : un domaine n'est pas une
+     destination (il n'a pas de vue à lui). */
+  .view-crumb { display: flex; align-items: center; gap: 6px; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--fg-dimmer); margin-bottom: 4px; }
+  .view-crumb-domain { color: var(--fg-dim); }
+  .view-crumb-sep { color: var(--line-2); }
   .view-title { font-size: 16px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700; }
   .view-title span { color: var(--accent-text); }   /* titre de vue (accent) → --accent-text */
   .view-sub { font-size: 11px; color: var(--fg-dim); margin-top: 2px; letter-spacing: 0.04em; text-transform: none; }
@@ -2573,19 +2578,93 @@
     background: var(--bg-2); border-radius: 4px; text-align: left;
   }
 
-  /* contrÃ´les tributaires d'un document : neutralisÃ©s tant que l'Ã©cran d'accueil est actif */
+  /* ============ TIROIR DE NAVIGATION (responsive) — src-client/app/ShellDrawer.ts ============
+     Il REMPLACE l'ancien menu déroulant aplati, qui OMETTAIT les sous-vues des primaires (Groupes,
+     Spares, Sous-équipements…) : elles n'étaient atteignables qu'en passant par leur vue parente. Ici
+     un accordéon par domaine expose TOUTES ses vues. Cibles ≥ 44 px, fermeture au doigt (voile, croix,
+     Échap). Le voile est en position FIXE et couvre l'écran : il vit hors de la topbar. */
+  /* z-index 150 : AU-DESSUS de la topbar (100) et de l'écran d'accueil (80) — le tiroir doit couvrir la
+     barre qui l'a ouvert —, mais SOUS la modale (200) et le dialogue (300). Un menu de navigation ne
+     passe jamais devant une tâche en cours ; de toute façon, l'overlay d'une modale recouvre le burger,
+     donc le tiroir ne peut pas s'ouvrir par-dessus. */
+  .nav-drawer { position: fixed; inset: 0; z-index: 150; background: rgba(0,0,0,0.62); }
+  [data-theme="light"] .nav-drawer { background: rgba(0,0,0,0.38); }
+  .nav-drawer-panel {
+    position: absolute; top: 0; right: 0; bottom: 0;
+    width: 88%; max-width: 320px;
+    display: flex; flex-direction: column;
+    background: var(--bg-2); border-left: 1px solid var(--line-2);
+    box-shadow: -16px 0 40px rgba(0,0,0,0.5);
+  }
+  .nav-drawer-head { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  .nav-drawer-user, .nav-drawer-close {
+    display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+    width: 44px; height: 44px; padding: 0;
+    background: transparent; border: none; color: var(--fg-dim); cursor: pointer;
+  }
+  .nav-drawer-user:hover, .nav-drawer-close:hover { color: var(--fg); background: var(--bg-3); }
+  .nav-drawer-user svg, .nav-drawer-close svg { width: 18px; height: 18px; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .nav-drawer-who { flex: 1 1 auto; min-width: 0; }
+  .nav-drawer-name { font-size: 12px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nav-drawer-save { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-dim); }
+  .nav-drawer-body { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
+  .nav-acc { border-bottom: 1px solid var(--line); }
+  .nav-acc-head {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    min-height: 48px; padding: 0 12px;
+    background: transparent; border: none; color: var(--fg);
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+    cursor: pointer; text-align: left;
+  }
+  .nav-acc-head .gi { display: inline-flex; flex: 0 0 auto; color: var(--fg-dim); }
+  .nav-acc-head .gi svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .nav-acc-label { flex: 1 1 auto; }
+  .nav-acc-caret { flex: 0 0 auto; color: var(--fg-dimmer); font-size: 11px; transition: transform .16s; }
+  .nav-acc.open > .nav-acc-head { color: var(--accent-text); background: var(--bg-3); }
+  .nav-acc.open > .nav-acc-head .gi { color: var(--accent); }
+  .nav-acc.open > .nav-acc-head .nav-acc-caret { transform: rotate(180deg); }
+  .nav-acc-body { display: none; flex-direction: column; padding: 4px 0 8px; background: var(--bg); }
+  .nav-acc.open > .nav-acc-body { display: flex; }
+  .nav-acc-item {
+    display: flex; align-items: center; gap: 9px;
+    min-height: 44px; padding: 0 12px 0 38px;
+    background: transparent; border: none; border-left: 2px solid transparent;
+    color: var(--fg-dim); font-family: var(--mono); font-size: 12px; text-align: left; cursor: pointer;
+  }
+  .nav-acc-item:hover { color: var(--fg); background: var(--bg-3); }
+  .nav-acc-item.active { color: var(--accent-text); border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .nav-acc-item-label { flex: 1 1 auto; }
+  .nav-drawer-foot { flex: 0 0 auto; display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); }
+  .nav-drawer-act { flex: 1 1 0; justify-content: center; min-height: 44px; }
+
+  /* contrÃ´les tributaires d'un document : neutralisÃ©s tant que l'Ã©cran d'accueil est actif.
+     🚨 TOUT chemin de navigation doit y figurer — sinon, écran d'accueil affiché, on peut naviguer dans
+     une app SANS document chargé. Les DEUX barres du menu, le burger et le tiroir portent en plus la
+     classe `topbar-needs-doc` (posée par le Shell) : la liste ci-dessous n'a donc pas à s'allonger à
+     chaque nouvel élément de nav. */
   body.welcome-active .statusbar > .status-stat { visibility: hidden; }
-  body.welcome-active .tab,
-  body.welcome-active .tabs-dd-trigger,
-  body.welcome-active .tab-group,
+  body.welcome-active .tabs,
+  body.welcome-active .views-bar,
   body.welcome-active #doc-name,
   body.welcome-active .topbar-needs-doc { opacity: 0.4; pointer-events: none; }
 
+  /* Barre de niveau 1 en ICÔNES SEULES sous ~1000 px : la topbar de DC Manager porte, en plus des
+     domaines, la marque, le nom de document et jusqu'à huit boutons d'action — cinq tuiles libellées n'y
+     tiennent plus bien avant le breakpoint du tiroir. Le libellé reste en title/aria-label. */
+  @media (max-width: 1000px) {
+    .tab-label { display: none; }
+    .tab.tab-domain { gap: 0; }
+  }
+
   @media (max-width: 760px) {
     .brand-name, .doc-name { display: none; }
-    /* Pastille utilisateur : le NOM disparaît, l'icône reste (le nom passe en tooltip/aria-label ; le
-       clic ouvre la modale d'infos). Même geste qu'en grand écran, juste plus compact. */
-    .user-chip-name { display: none; }
+    /* Topbar mobile = marque · loupe · scanner · (actions fichier) · réglages · BURGER. Ce qui a un
+       équivalent DE PREMIÈRE CLASSE dans le tiroir en sort : la pastille utilisateur (en-tête du tiroir)
+       et annuler/rétablir (pied du tiroir). Les actions FICHIER et les réglages restent, eux : le tiroir
+       n'en offre pas de copie, et le mode fichier doit rester entièrement utilisable sur petit écran
+       (principe n°15). */
+    .user-chip { display: none; }
+    .topbar-actions .icon-btn.topbar-burger { display: inline-flex; }
     /* marges latérales MINIMALES → largeur utile maximale */
     main { padding: 10px 4px; }
     main:has(#view-datacenter.active), main:has(#view-graph.active) { padding: 6px 2px; }
@@ -2599,11 +2678,14 @@
     .list-chrome .lc-search, .list-chrome .lc-searchpop { flex-basis: 100%; }
     .list-chrome .lc-right { margin-left: 0; }
     .view-header { margin-bottom: 10px; }
-    /* Onglets → MENU DEROULANT (gain de place, accessible au pouce) : la barre d'onglets cède la place au déclencheur.
-       Les boutons de GROUPE (dans .tabs) disparaissent aussi — leurs enfants sont aplatis dans le menu global (piège ②). */
+    /* Annuler / Rétablir quittent la topbar : le PIED du tiroir les porte (et en mode API ils sont déjà
+       masqués par `setRestMode` — les deux règles se composent sans se contredire). */
+    .topbar-history { display: none; }
+    /* MENU → TIROIR (gain de place, tout au pouce) : les DEUX barres cèdent, le burger prend le relais.
+       Contrairement à l'ancien menu aplati, rien ne se perd au passage : le tiroir liste TOUTES les vues
+       de TOUS les domaines, sous-vues comprises (cf. docs/navigation.md § 1, douleur n°3). */
     .tabs { display: none; }
-    .tab-group { display: none; }
-    .tabs-dd { display: flex; }
+    .views-bar { display: none; }
     /* MODALE PLEIN ÉCRAN, SYSTÉMATIQUE sous le breakpoint de bascule des onglets : sur petit écran une
        modale « flottante » à marges gâche l'espace utile → elle occupe TOUT l'écran. MIROIR EXACT du bloc
        `html[data-modal-fs]` (préférence desktop) près des règles `.modal` — garder les deux synchronisés.
@@ -2676,6 +2758,9 @@
     .cell-actions .row-btn { width: 44px; height: 44px; margin-left: 8px; }
     /* pagination (⋮ overflow relève de .icon-action ci-dessus) */
     .page-btn { min-width: 44px; height: 44px; }
+    /* pastilles de la barre de vues (niveau 2) : visibles au-dessus de 760 px, donc atteignables au
+       doigt sur une tablette en paysage — elles passent à 44 px comme le reste du tactile. */
+    .view-tab { min-height: 44px; }
     /* sélecteur de date : input + boutons alignés à 44 px (l'input suit pour ne pas dépareiller la rangée) */
     .date-ctrl-btn { height: 44px; }
     .date-ctrl-btn.date-ctrl-icon { width: 44px; }
@@ -3182,57 +3267,95 @@
   <header class="ds-card-head">
     <div class="ds-card-group">Navigation</div>
     <div class="ds-card-title">Navigation</div>
-    <div class="ds-card-sub">barre d'onglets (icône + actif), onglet groupe, menu déroulant, pagination</div>
+    <div class="ds-card-sub">domaines (niveau 1), barre de vues (niveau 2), fil d'Ariane, tiroir responsive, pagination</div>
   </header>
-<!-- DÉRIVÉ de src-client/app/Shell.ts (barre d'onglets : .tab.tab-icon avec <span class="gi">,
-     .tab.active, .tab-count ; .tab-group + caret ; .tabs-dd responsive) et de
-     src-client/views/ListView.ts (pagination : .page-btn + select.page-size). -->
+<!-- DÉRIVÉ de src-client/app/Shell.ts (barre de niveau 1 : .tab.tab-domain avec <span class="gi"> +
+     .tab-label, .tab.active, .tab-count ; barre de niveau 2 : .views-bar / .view-tab / .view-sep ;
+     fil d'Ariane : .view-crumb), de src-client/app/ShellDrawer.ts (tiroir responsive : .nav-drawer*,
+     .nav-acc*) et de src-client/views/ListView.ts (pagination : .page-btn + select.page-size).
+     Menu à DEUX NIVEAUX — cf. docs/navigation.md. -->
 <section class="ds-section">
-  <h2>Barre d'onglets (desktop, icônes seules)</h2>
-  <p class="ds-note">Sur desktop, chaque onglet est une ICÔNE seule (libellé porté par <code>title</code> + <code>aria-label</code>). L'onglet actif est souligné (<code>.tab.active::after</code>). Le badge de comptage est un <code>.tab-count</code>.</p>
+  <h2>Niveau 1 — les domaines (.tab.tab-domain)</h2>
+  <p class="ds-note">Cinq domaines libellés remplacent les onze onglets en icône seule : <b>libellés &gt; icônes</b>, l'icône seule n'est plus le régime normal (elle ne revient que sous ~1000 px, le libellé restant en <code>title</code> + <code>aria-label</code>). Un domaine <b>ne navigue pas vers lui-même</b> : le cliquer active sa première vue visible. 🚨 Jamais de <code>.tab-count</code> sur un domaine — un badge n'appartient qu'à une entrée <b>terminale</b>.</p>
   <div class="ds-demo ds-tight" style="padding:0;overflow:hidden;">
     <div class="topbar" style="position:static;">
       <nav class="tabs">
-        <button type="button" class="tab tab-icon active" title="Datacenter" aria-label="Datacenter"><span class="gi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="16" rx="1"/><rect x="14" y="4" width="7" height="16" rx="1"/><path d="M5 8h3M16 8h3M5 12h3M16 12h3M5 16h3M16 16h3"/></svg></span></button>
-        <button type="button" class="tab tab-icon" title="Netmap" aria-label="Netmap"><span class="gi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2"/><circle cx="19" cy="8" r="2"/><circle cx="11" cy="18" r="2"/><path d="M6.8 6.9 9.4 16.2M17.2 9.4 12.6 16.4M6.9 6.4 17.1 7.7"/></svg></span></button>
-        <button type="button" class="tab tab-icon" title="Câbles" aria-label="Câbles"><span class="gi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="9" width="6" height="6" rx="1.2"/><rect x="15.5" y="9" width="6" height="6" rx="1.2"/><line x1="8.5" y1="12" x2="15.5" y2="12"/></svg></span></button>
-        <button type="button" class="tab tab-icon" title="Certificats" aria-label="Certificats"><span class="gi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="1.5"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="13" y2="12"/><circle cx="15.5" cy="16" r="3"/><path d="M13.8 18.3 13 21l2.5-1.4L18 21l-.8-2.7"/></svg></span><span class="tab-count warn">6</span></button>
-        <button type="button" class="tab tab-icon" title="Interventions" aria-label="Interventions"><span class="gi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.66 5.66l-6.7 6.7a1.5 1.5 0 0 0 2.12 2.12l6.7-6.7a4 4 0 0 0 5.66-5.66l-2.83 2.83-2.12-.71-.71-2.12z"/></svg></span><span class="tab-count err">3</span></button>
+        <button type="button" class="tab tab-domain active" title="Inventaire" aria-label="Inventaire"><span class="gi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><line x1="7" y1="7.5" x2="7.02" y2="7.5"/><line x1="7" y1="16.5" x2="7.02" y2="16.5"/></svg></span><span class="tab-label">Inventaire</span></button>
+        <button type="button" class="tab tab-domain" title="Implantation" aria-label="Implantation"><span class="gi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="16" rx="1"/><rect x="14" y="4" width="7" height="16" rx="1"/><path d="M5 8h3M16 8h3M5 12h3M16 12h3M5 16h3M16 16h3"/></svg></span><span class="tab-label">Implantation</span></button>
+        <button type="button" class="tab tab-domain" title="Réseau" aria-label="Réseau"><span class="gi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.6 2.5 4 5.7 4 9s-1.4 6.5-4 9c-2.6-2.5-4-5.7-4-9s1.4-6.5 4-9z"/></svg></span><span class="tab-label">Réseau</span></button>
+        <button type="button" class="tab tab-domain" title="Exploitation" aria-label="Exploitation"><span class="gi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.66 5.66l-6.7 6.7a1.5 1.5 0 0 0 2.12 2.12l6.7-6.7a4 4 0 0 0 5.66-5.66l-2.83 2.83-2.12-.71-.71-2.12z"/></svg></span><span class="tab-label">Exploitation</span></button>
+        <button type="button" class="tab tab-domain" title="Paramètres" aria-label="Paramètres"><span class="gi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span><span class="tab-label">Paramètres</span></button>
       </nav>
     </div>
   </div>
 </section>
 
 <section class="ds-section">
-  <h2>Onglet groupe (déroulant, .tab-group)</h2>
-  <p class="ds-note">Un onglet <code>.tab</code> suivi d'un caret <code>.tabs-dd-caret</code>, avec un menu <code>.tabs-dd-menu</code> (ouvert ici en statique).</p>
-  <div class="ds-demo" style="min-height:200px;">
-    <div class="tab-group open" style="display:inline-flex;">
-      <button type="button" class="tab tab-icon" title="Paramètres" aria-label="Paramètres"><span class="gi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span><span class="tabs-dd-caret">▾</span></button>
-      <div class="tabs-dd-menu" role="menu" style="display:flex;">
-        <button type="button" class="tabs-dd-item active" role="menuitem"><span class="gi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="4" rx="1"/><rect x="3" y="17" width="6" height="4" rx="1"/><rect x="15" y="17" width="6" height="4" rx="1"/><path d="M12 7v5M6 17v-5h12v5"/></svg></span>Adresses IP</button>
-        <button type="button" class="tabs-dd-item" role="menuitem"><span class="gi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="9" width="16" height="10" rx="1.5"/><path d="M8 9V6.5a4 4 0 0 1 8 0V9"/><line x1="9" y1="19" x2="9" y2="21"/><line x1="15" y1="19" x2="15" y2="21"/></svg></span>Types de port</button>
-        <button type="button" class="tabs-dd-item" role="menuitem"><span class="gi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></span>Notifications</button>
+  <h2>Niveau 2 — la barre de vues (.views-bar)</h2>
+  <p class="ds-note">Pattern <b>unique</b> de sous-navigation : elle remplace à la fois l'ancien groupe déroulant « Paramètres » et les liens d'en-tête de toutes les autres sous-vues. Pastilles <code>.view-tab</code>, séparateur interne <code>.view-sep</code>, badge de comptage <code>.tab-count</code> (autorisé ici : une vue est terminale). Masquée quand le domaine n'a qu'une vue.</p>
+  <div class="ds-demo ds-tight" style="padding:0;overflow:hidden;">
+    <div class="views-bar" role="tablist">
+      <button type="button" class="view-tab active" role="tab" aria-selected="true">Équipements</button>
+      <button type="button" class="view-tab" role="tab" aria-selected="false">Groupes</button>
+      <button type="button" class="view-tab" role="tab" aria-selected="false">Spares</button>
+      <button type="button" class="view-tab" role="tab" aria-selected="false">Images de façade<span class="tab-count">12</span></button>
+      <i class="view-sep" aria-hidden="true"></i>
+      <button type="button" class="view-tab" role="tab" aria-selected="false">VMs</button>
+      <button type="button" class="view-tab" role="tab" aria-selected="false">Clusters</button>
+      <i class="view-sep" aria-hidden="true"></i>
+      <button type="button" class="view-tab" role="tab" aria-selected="false">Wifi</button>
+    </div>
+  </div>
+  <div class="ds-variant-title">Fil d'Ariane d'en-tête de vue (.view-crumb) — remplace le bouton « ← retour »</div>
+  <div class="ds-demo">
+    <div class="view-header">
+      <div>
+        <div class="view-crumb"><span class="view-crumb-domain">Exploitation</span><span class="view-crumb-sep" aria-hidden="true">›</span><span>Interventions</span></div>
+        <div class="view-title"><span>▸</span> Interventions</div>
       </div>
+      <div class="view-actions"><button type="button" class="btn btn-primary">+ Intervention</button></div>
     </div>
   </div>
 </section>
 
 <section class="ds-section">
-  <h2>Menu déroulant responsive (.tabs-dd)</h2>
-  <p class="ds-note">Sur petit écran, la barre d'onglets cède la place à ce déclencheur unique (<code>.tabs-dd-trigger</code>) + menu global (groupes aplatis). Forcé visible ici (masqué &gt; 760 px dans l'app).</p>
-  <div class="ds-demo" style="min-height:260px;">
-    <div class="tabs-dd open" style="display:flex;max-width:280px;">
-      <button type="button" class="tabs-dd-trigger" aria-haspopup="menu">
-        <span class="tabs-dd-label">Datacenter</span>
-        <span class="tabs-dd-caret">▾</span>
-      </button>
-      <div class="tabs-dd-menu" role="menu" style="display:flex;">
-        <button type="button" class="tabs-dd-item active" role="menuitem">Datacenter</button>
-        <button type="button" class="tabs-dd-item" role="menuitem">Netmap</button>
-        <div class="tabs-dd-group">Paramètres</div>
-        <button type="button" class="tabs-dd-item tabs-dd-item--child" role="menuitem">Adresses IP</button>
-        <button type="button" class="tabs-dd-item tabs-dd-item--child" role="menuitem">Types de port</button>
+  <h2>Tiroir responsive (.nav-drawer)</h2>
+  <p class="ds-note">Sous 760 px, les deux barres cèdent au <b>burger</b> et à ce tiroir : un accordéon par domaine, contenant <b>toutes</b> ses vues — sous-vues comprises, ce que l'ancien menu aplati omettait. En-tête = pastille utilisateur + nom + état de sauvegarde ; pied = annuler / rétablir / réglages. Cibles ≥ 44 px. 🚨 Aucun badge sur un en-tête d'accordéon ni sur le burger.</p>
+  <div class="ds-demo" style="min-height:420px;">
+    <div style="position:relative;height:400px;max-width:360px;border:1px solid var(--line-2);overflow:hidden;">
+      <div class="nav-drawer" style="position:absolute;">
+        <div class="nav-drawer-panel">
+          <div class="nav-drawer-head">
+            <button type="button" class="nav-drawer-user" aria-label="Marie-Claire Delaunay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M5 21v-1a7 7 0 0 1 14 0v1"/></svg></button>
+            <div class="nav-drawer-who">
+              <div class="nav-drawer-name">Marie-Claire Delaunay</div>
+              <div class="nav-drawer-save"><span class="save-state-icon dirty"></span><span>Non enregistré</span></div>
+            </div>
+            <button type="button" class="nav-drawer-close" aria-label="Fermer le menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>
+          </div>
+          <div class="nav-drawer-body">
+            <div class="nav-acc">
+              <button type="button" class="nav-acc-head" aria-expanded="false"><span class="gi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><line x1="7" y1="7.5" x2="7.02" y2="7.5"/><line x1="7" y1="16.5" x2="7.02" y2="16.5"/></svg></span><span class="nav-acc-label">Inventaire</span><span class="nav-acc-caret" aria-hidden="true">▾</span></button>
+              <div class="nav-acc-body"></div>
+            </div>
+            <div class="nav-acc open">
+              <button type="button" class="nav-acc-head" aria-expanded="true"><span class="gi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.66 5.66l-6.7 6.7a1.5 1.5 0 0 0 2.12 2.12l6.7-6.7a4 4 0 0 0 5.66-5.66l-2.83 2.83-2.12-.71-.71-2.12z"/></svg></span><span class="nav-acc-label">Exploitation</span><span class="nav-acc-caret" aria-hidden="true">▾</span></button>
+              <div class="nav-acc-body">
+                <button type="button" class="nav-acc-item active"><span class="nav-acc-item-label">Interventions</span><span class="tab-count err">3</span></button>
+                <button type="button" class="nav-acc-item"><span class="nav-acc-item-label">Certificats</span><span class="tab-count warn">6</span></button>
+              </div>
+            </div>
+            <div class="nav-acc">
+              <button type="button" class="nav-acc-head" aria-expanded="false"><span class="gi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span><span class="nav-acc-label">Paramètres</span><span class="nav-acc-caret" aria-hidden="true">▾</span></button>
+              <div class="nav-acc-body"></div>
+            </div>
+          </div>
+          <div class="nav-drawer-foot">
+            <button type="button" class="btn btn-ghost btn-sm nav-drawer-act">Annuler</button>
+            <button type="button" class="btn btn-ghost btn-sm nav-drawer-act">Rétablir</button>
+            <button type="button" class="btn btn-ghost btn-sm nav-drawer-act">Réglages</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>

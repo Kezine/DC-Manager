@@ -446,6 +446,25 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   faisceaux — TOUS sous le prédicat injecté `LabelPrintDialog.available()` ;
   section « Mode local » — scan OK dans les deux modes, génération/impression = mode API seulement
   (setup injecté par main.ts, patron injection nulle)).
+- [`navigation.md`](docs/navigation.md) — **menu à DEUX NIVEAUX** (re-design 2026-08-20, maquette
+  Claude Design) : modèle PUR `app/NavModel` (ni DOM ni Shell — le Shell ne fait que PEINDRE ce
+  qu'il RÉSOUT), catalogue `NAV_DOMAINS` = source unique du rattachement vue → domaine avec VERROU
+  d'exhaustivité relisant les sources de `main.ts` (une vue non rattachée n'aurait plus AUCUN chemin
+  dans le menu) ; un domaine est un REGROUPEMENT, pas une vue — ni section, ni corps, ni hash
+  (piège ① de l'ancien `kind:"group"`, qui DISPARAÎT, « Paramètres » devenant un domaine ordinaire) ;
+  règles de DÉGRADÉ sous droits partiels (domaine vide → disparaît · une seule vue → onglet direct ·
+  un seul domaine → niveau 1 effacé · séparateur en tête → supprimé) ; 🚨 **RÈGLE (A) — les compteurs
+  ne vivent que sur les entrées TERMINALES** (décision utilisateur qui TRANCHE CONTRE la note
+  « badges qui remontent » de la maquette : aucune agrégation sur un domaine, un en-tête d'accordéon
+  ou le burger), appliquée à la CONSTRUCTION et non au câblage — le rendu LIT un booléen `badge`
+  qu'il n'a aucune règle à ré-appliquer, et le `badge` d'un domaine est DÉRIVÉ de la règle sur ses
+  enfants réels, donc prouvé par le test plutôt qu'affirmé par le type ; ⚠ conséquence ASSUMÉE — une
+  alerte n'est visible que si la barre de vues de son domaine l'est (tension avec la douleur n°4 du
+  carton : une remontée devra passer par un porteur HORS MENU, jamais par un badge sur un parent) ;
+  disparaissent aussi les liens d'en-tête, le bouton « ← retour » (→ fil d'Ariane) et le menu
+  responsive aplati (→ tiroir à accordéons exposant TOUTES les vues, sous-vues comprises) ; INCHANGÉS :
+  deep-links `#nom`, gating `visible()`, mécanisme `count()`, logo et marque (le logo de SUBSTITUTION
+  de la maquette est ignoré) ; section « Mode local » — aucun écart, injection nulle).
 
 ## Points d'architecture à connaître
 

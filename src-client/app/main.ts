@@ -822,7 +822,7 @@ async function boot(): Promise<void> {
   const listViewsByCollection = new Map<string, () => ListView | null>();
   type FormFn = (id: string | null, onSaved: () => void) => void;
   interface TabOpts {
-    title?: string; subtitle?: string; form?: FormFn; addLabel?: string; kind?: "primary" | "secondary"; parent?: string; links?: string[]; icon?: string;
+    title?: string; subtitle?: string; form?: FormFn; addLabel?: string; kind?: "primary" | "secondary"; parent?: string; icon?: string;
     onAdd?: () => void; onDel?: (id: string, reRender: () => void) => void; locate?: "equipment" | "rack" | "cable"; manage?: boolean;
     /** Supprime le bouton « + créer » de l'en-tête TOUT EN gardant l'édition en ligne. Sans lui, fournir `form`
         (pour l'action « éditer ») ferait apparaître un « + » par défaut. Cas d'usage : le listing des
@@ -874,7 +874,7 @@ async function boot(): Promise<void> {
     const canUpdateRow = () => access.canUpdateCollection(cfg.collection);
     const canDeleteRow = () => access.canDeleteCollection(cfg.collection);
     const container = shell.addView({
-      name, label, title: opts.title, subtitle: opts.subtitle, kind: opts.kind || "primary", parent: opts.parent, links: opts.links,
+      name, label, title: opts.title, subtitle: opts.subtitle, kind: opts.kind || "primary", parent: opts.parent,
       icon: opts.icon,   // icône d'onglet (barre desktop = icône seule ; menus = icône + libellé)
       visible: canReadTab,   // onglet masqué sans le droit de LECTURE de sa collection (carte partagée)
       extraActions: opts.extraActions,   // boutons secondaires d'en-tête (ex. « Réseaux virtuels… » sur l'onglet VMs)
@@ -980,7 +980,7 @@ async function boot(): Promise<void> {
     icon: Icons.EQUIPMENT,
     subtitle: I18n.t("tabs.equipements.subtitle"),
     form: (id, done) => Forms.equipment(store, formHost, id, done), addLabel: I18n.t("app.add.equipment"),
-    links: ["groupes", "faceimages", "spares", "sousequipements", "applications", "attachments"], locate: "equipment",
+    locate: "equipment",
     // « Imprimer l'étiquette » de ligne (lot E étiquettes QR) : geste UNITAIRE — la planche s'obtient par
     // la BAIE (« Planche du contenu »), la sélection multiple des listings est DIFFÉRÉE (décision E).
     onPrint: (id) => {
@@ -1048,8 +1048,6 @@ async function boot(): Promise<void> {
       { label: I18n.t("app.vm.sync"), title: I18n.t("app.vm.syncTitle"), visible: () => access.has("vm:sync"), onClick: (btn) => { void VmForms.sync(client, btn, () => { void clustersView?.reload(); }); } },
     );
   }
-  // L'onglet VMs expose le lien « Clusters » vers son sous-onglet — MODE API uniquement (masqué en mode fichier/viewer).
-  const vmLinks = (REST_MODE && vmSyncClient) ? ["clusters"] : undefined;
   // « Localiser en 3D » sur une ligne de VM : une VM n'est PAS un objet de la scène — on localise son
   // ÉQUIPEMENT HÔTE. Version SOBRE (choix utilisateur) : le prédicat PARTAGÉ `VmLocate.hostEquipmentId`
   // rend `null` dès que la localisation ne peut pas aboutir (VM non rapprochée, hôte supprimé, hôte non
@@ -1062,7 +1060,7 @@ async function boot(): Promise<void> {
     // — le gating « manuelles seulement » est donc préservé. La SUPPRESSION passe par le chemin GÉNÉRIQUE (Dialog +
     // store.remove, cascade standard) : aucun `onDel` spécifique n'est nécessaire.
     form: (id, done) => VmForms.manual(store, formHost, id, done), addLabel: I18n.t("app.add.vm"),
-    extraActions: VIEWER ? undefined : vmExtraActions, links: vmLinks,
+    extraActions: VIEWER ? undefined : vmExtraActions,
     locate: "equipment", locateTarget: (id) => VmLocate.hostEquipmentId(store.get("vms", id), store),
   });
   // Sous-onglet « Clusters » : vue PERSONNALISÉE (non-liste) enregistrée comme les vues Netmap/Datacenters
@@ -1125,7 +1123,7 @@ async function boot(): Promise<void> {
     icon: Icons.CABLE,
     subtitle: I18n.t("tabs.cables.subtitle"),
     form: (id, done) => Forms.cable(store, formHost, id, done), addLabel: I18n.t("app.add.cable"),
-    links: ["reseaux", "porttypes", "cabletypes", "faisceaux"], locate: "cable",
+    locate: "cable",
     // « Imprimer l'étiquette » de ligne (retour terrain 2026-08-20 : l'action manquait ici). Elle
     // rejoue le geste PRINCIPAL de la fiche câble — DEUX drapeaux identiques, un par extrémité
     // (décision E) — plutôt qu'un seul : un câble s'étiquette par paire, la ligne n'a aucune raison
@@ -1144,7 +1142,6 @@ async function boot(): Promise<void> {
     icon: Icons.IPAM,
     title: I18n.t("tabs.ipaddresses.title"), subtitle: I18n.t("tabs.ipaddresses.subtitle"),
     form: (id, done) => Forms.ipAddress(store, formHost, id, done), addLabel: I18n.t("app.add.ipAddress"),
-    links: ["ipnetworks", "dhcpranges"],
   });
 
   // Netmap (GraphView) — « Netmap » est un NOM DE FONCTIONNALITÉ, conservé tel quel dans les deux langues (cf. catalogues).
@@ -1172,7 +1169,7 @@ async function boot(): Promise<void> {
 
   // Datacenters (vue 3D — tranche-pilote : caméra orbitale + salle/baies)
   let dcView: DatacenterView;
-  const dcContainer = shell.addView({ name: "datacenter", label: I18n.t("tabs.datacenter.label"), subtitle: I18n.t("tabs.datacenter.subtitle"), icon: Icons.DATACENTER, links: ["salles", "etages", "sites"], visible: () => canSeeView("datacenter"), onShow: () => dcView.show() });
+  const dcContainer = shell.addView({ name: "datacenter", label: I18n.t("tabs.datacenter.label"), subtitle: I18n.t("tabs.datacenter.subtitle"), icon: Icons.DATACENTER, visible: () => canSeeView("datacenter"), onShow: () => dcView.show() });
   const dcStage = document.createElement("div");
   dcStage.className = "dc-stage";
   dcStage.style.cssText = "position:relative;flex:1 1 auto;min-height:560px;background:var(--bg-2);overflow:hidden";
@@ -1282,7 +1279,7 @@ async function boot(): Promise<void> {
     let view: ListView | null = null;
     const container = shell.addView({
       name: "faceimages", label: I18n.t("tabs.faceimages.label"), subtitle: I18n.t("tabs.faceimages.subtitle"),
-      kind: "secondary", parent: "equipements", links: [], icon: Icons.IMAGE,
+      kind: "secondary", parent: "equipements", icon: Icons.IMAGE,
       count: () => imageStore.count(),
       // Les images de façade sont la pseudo-collection `images`, rattachée à `dc.site` par la carte
       // partagée : la LECTURE ouvre la page, la MISE À JOUR autorise l'ajout et l'import.
@@ -1392,23 +1389,25 @@ async function boot(): Promise<void> {
   });
   // CONTACTS : carnet des destinataires des NOTIFICATIONS (email/sms), tenu PAR DOCUMENT. Le module serveur
   // notify/ route ses alertes via `repo.getOne("contacts", id)` (référence souple `contact_id`, HORS document).
-  // SOUS-PAGE du groupe « Paramètres » (S6, cf. cadrage notifications 2026-07-14 §3) : vraie vue `kind:"secondary"`
-  // rattachée au groupe `parametres`, atteinte par son menu déroulant (et bookmarkable via #contacts). Décision Q4 :
-  // contacts PAR DOCUMENT.
+  // Vue du domaine « Paramètres » (S6, cf. cadrage notifications 2026-07-14 §3), bookmarkable via #contacts.
+  // Décision Q4 : contacts PAR DOCUMENT. ⚠ AUCUN `parent` : le rattachement au menu vient de `NAV_DOMAINS`
+  // depuis le re-design (le GROUPE « parametres » n'existe plus, cf. docs/navigation.md) — un `parent`
+  // pointant vers lui serait une référence pendante.
   addListTab("contacts", I18n.t("tabs.contacts.label"), ListConfigs.contacts, {
     icon: Icons.USER,
     title: I18n.t("tabs.contacts.title"), subtitle: I18n.t("tabs.contacts.subtitle"),
     form: (id, done) => Forms.contact(store, formHost, id, done), addLabel: I18n.t("app.add.contact"),
-    kind: "secondary", parent: "parametres",
+    kind: "secondary",
   });
   // NOTIFICATIONS (S7) : page d'ADMINISTRATION du module serveur notify/ (canaux, abonnements, rappels, alertes
-  // actives, historique, tests d'envoi). SOUS-PAGE du groupe « Paramètres » (vue custom, pattern VmClustersView).
-  // TOUJOURS enregistrée (visible dans le menu Paramètres, même en mode fichier) : `notifyClient` est null hors
+  // actives, historique, tests d'envoi). Vue du domaine « Paramètres » (vue custom, pattern VmClustersView).
+  // TOUJOURS enregistrée (visible dans le domaine Paramètres, même en mode fichier) : `notifyClient` est null hors
   // mode API → la vue affiche un message « nécessite le mode API/serveur » au lieu d'appeler le réseau (feature
   // AMOVIBLE : retirer S7 = supprimer NotificationsAdminView + NotifyClient + ces lignes).
+  // ⚠ AUCUN `parent` : cf. la note de l'onglet Contacts ci-dessus (le groupe `parametres` n'existe plus).
   let notificationsView: NotificationsAdminView;
   const notifyContainer = shell.addView({
-    name: "notifications", label: I18n.t("tabs.notifications.label"), kind: "secondary", parent: "parametres",
+    name: "notifications", label: I18n.t("tabs.notifications.label"), kind: "secondary",
     icon: Icons.NOTIFICATION,
     visible: () => canSeeView("notifications"),
     title: I18n.t("tabs.notifications.label"), subtitle: I18n.t("tabs.notifications.subtitle"),
@@ -1701,9 +1700,10 @@ async function boot(): Promise<void> {
       if (mods.has("certs")) { invalidateCertsListCache(); void refreshCertsCount(); }   // un autre client a modifié les certs → cache de rapprochement périmé
     }, 400);
   };
-  // GROUPE « Paramètres » : onglet TOUJOURS DÉROULANT (jamais une vue) regroupant les pages rarement visitées.
-  // EN DERNIER (après les onglets métier ET l'onglet Certificats).
-  shell.addGroup({ name: "parametres", label: I18n.t("tabs.parametres.label"), kind: "group", icon: Icons.SETTINGS, children: ["contacts", "notifications"] });
+  // ⚠ Il n'y a PLUS de déclaration de menu ici. Le rattachement de chaque vue à son domaine (dont
+  // « Paramètres », qui était l'unique GROUPE déroulant) vit dans `NAV_DOMAINS` (`app/NavModel`) : un
+  // verrou de test relit CETTE source et échoue en nommant toute vue enregistrée sans domaine
+  // (cf. docs/navigation.md § 2). L'ordre d'enregistrement ci-dessus ne fixe donc plus l'ordre du menu.
 
   shell.build();
   shell.setDataSource(REST_MODE ? "api" : "local");   // position du toggle = mode EFFECTIF
