@@ -364,9 +364,9 @@
   .icon-btn.topbar-burger { display: none; }
   /* Déclencheur des RÉGLAGES (topbar) : dernier bouton VISIBLE hors responsive — le burger le suit
      dans le DOM mais y est masqué, si bien que `.icon-btn:last-child` le désigne encore, LUI, et
-     laisserait aux réglages un liseré collé au bord de l'écran. On le retire donc explicitement ;
-     sous le breakpoint le burger réapparaît derrière et le liseré redevient un vrai séparateur
-     (rétabli dans le bloc @media 760px). */
+     laisserait aux réglages un liseré collé au bord de l'écran. On le retire donc explicitement.
+     (Sous le breakpoint, ce bouton disparaît à son tour — le pied du tiroir porte les réglages ;
+     seul l'écran d'accueil l'y conserve, cf. @media 760px.) */
   .icon-btn.topbar-settings { border-right: none; }
 
   .topbar-actions { display: flex; align-items: stretch; flex-shrink: 0; border-left: 1px solid var(--line); }
@@ -2660,14 +2660,20 @@
   @media (max-width: 760px) {
     .brand-name, .doc-name { display: none; }
     /* Topbar mobile = marque · loupe · scanner · (actions fichier) · réglages · BURGER. Ce qui a un
-       équivalent DE PREMIÈRE CLASSE dans le tiroir en sort : la pastille utilisateur (en-tête du tiroir)
-       et annuler/rétablir (pied du tiroir). Les actions FICHIER et les réglages restent, eux : le tiroir
+       équivalent DE PREMIÈRE CLASSE dans le tiroir en sort : la pastille utilisateur (en-tête du tiroir),
+       annuler/rétablir et les RÉGLAGES (pied du tiroir). Les actions FICHIER restent, elles : le tiroir
        n'en offre pas de copie, et le mode fichier doit rester entièrement utilisable sur petit écran
        (principe n°15). */
     .user-chip { display: none; }
     .topbar-actions .icon-btn.topbar-burger { display: inline-flex; }
-    /* Le burger réapparaît DERRIÈRE les réglages : leur liseré redevient un séparateur utile. */
-    .topbar-actions .icon-btn.topbar-settings { border-right: 1px solid var(--line); }
+    /* Déclencheur des RÉGLAGES : le pied du tiroir en offre un, en toutes lettres — deux boutons pour
+       le même panneau ne se justifient plus depuis qu'ils ouvrent la MÊME modale (avant, le popover
+       était ancré à celui-ci, qui devait donc rester affiché).
+       🚨 EXCEPTION, l'écran d'ACCUEIL : le tiroir y est INERTE (`topbar-needs-doc` — on ne navigue pas
+       dans une application sans document). Sans cette exception, un petit écran SANS document ouvert
+       n'aurait plus AUCUN accès aux réglages, donc aucun moyen de changer la source de données, l'URL
+       de l'API ou la langue — précisément ce qu'on vient y faire. */
+    body:not(.welcome-active) .topbar-actions .icon-btn.topbar-settings { display: none; }
     /* CONTRÔLES COLLÉS AU BORD DROIT. Au-dessus du breakpoint, c'est `.tabs` (flex:1) qui pousse la
        rangée d'actions à droite ; ici la barre d'onglets est `display:none` — sans ce `margin-left`
        automatique, les contrôles se tassent contre la marque, à GAUCHE, et le burger n'est plus au

@@ -146,12 +146,19 @@ une porte ouverte) disparaît avec sa classe de bugs.
 
 Le burger et le tiroir prennent le relais des deux barres. Sortent aussi de la topbar les contrôles
 que le tiroir reprend **de première classe** : la **pastille utilisateur** (en-tête du tiroir, qui
-ouvre la même modale d'infos) et **annuler/rétablir** (pied du tiroir).
+ouvre la même modale d'infos), **annuler/rétablir** et les **réglages** (pied du tiroir).
 
-Restent en topbar, à dessein : les actions **fichier** (nouveau / ouvrir / enregistrer / copie) et le
-déclencheur des **réglages**. Le tiroir n'en offre pas de copie, et le mode fichier doit rester
-entièrement utilisable sur petit écran (principe n°15). C'est un écart assumé à la maquette, dont la
-topbar mobile ne portait que marque, loupe, scanner et burger.
+Restent en topbar, à dessein : les actions **fichier** (nouveau / ouvrir / enregistrer / copie). Le
+tiroir n'en offre pas de copie, et le mode fichier doit rester entièrement utilisable sur petit écran
+(principe n°15). C'est un écart assumé à la maquette, dont la topbar mobile ne portait que marque,
+loupe, scanner et burger.
+
+> 🚨 **Le déclencheur des réglages sort de la topbar sous 760 px — sauf sur l'écran d'accueil.** Deux
+> boutons pour le même panneau ne se justifient plus depuis qu'ils ouvrent la **même modale** (du temps
+> du popover, ancré à ce bouton, il devait rester affiché). Mais le tiroir est **inerte** tant qu'aucun
+> document n'est ouvert (`topbar-needs-doc`, § ci-dessous) : sans l'exception `body:not(.welcome-active)`,
+> un petit écran sans document n'aurait plus **aucun** accès aux réglages — donc aucun moyen de changer
+> la source de données, l'URL de l'API ou la langue, ce qu'on vient précisément y faire.
 
 **Les contrôles restent collés au bord DROIT.** Au-dessus du breakpoint, c'est `.tabs` (`flex:1`) qui
 pousse la rangée d'actions à droite ; sous 760 px la barre d'onglets est `display:none` et cet appui
