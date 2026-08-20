@@ -658,51 +658,42 @@ module.exports = async () => {
   }
   });
 
-  await section("ShellNav : navigation d'onglets (groupe déroulant, hash, menu responsive)", async () => {
+  await section("ShellNav : rattachement historique et résolution de hash (menu à deux niveaux)", async () => {
   {
-    // Modèle représentatif : un primaire + sa sous-vue ; un GROUPE (« parametres ») + sa sous-vue enfant.
+    /* Ce qui reste de `ShellNav` après le re-design du menu (2026-08-20, cf. docs/navigation.md) : la
+       STRUCTURE du menu est passée à `app/NavModel` (domaines ▸ vues, testée par test-nav-model.js), et
+       avec elle ont disparu `ancestorGroup` et `responsiveMenu` — le mécanisme de GROUPE déroulant et le
+       menu responsive APLATI n'existent plus (le tiroir à accordéons les remplace). Subsistent ici les
+       trois helpers que le Shell appelle encore.
+
+       Carte représentative : un ancien primaire + sa sous-vue, et un DOMAINE (« parametres ») avec une
+       vue qui lui est rattachée par `NAV_DOMAINS` — donc SANS `parent` (le groupe n'existe plus, un
+       `parent` pointant vers lui serait une référence pendante ; cf. la déclaration de `contacts`). */
     const lookup = {
       equipements: { kind: "primary" },
       groupes: { parent: "equipements", kind: "secondary" },
-      parametres: { kind: "group" },
-      contacts: { parent: "parametres", kind: "secondary" },
+      parametres: { kind: "domain" },
+      contacts: { kind: "secondary" },
     };
 
-    // ---- activeTab : onglet principal à surligner (parent d'une sous-vue, sinon la vue elle-même) ----
-    ck.eq(ShellNav.activeTab({ name: "equipements" }), "equipements", "activeTab : primaire → lui-même");
-    ck.eq(ShellNav.activeTab({ name: "groupes", parent: "equipements" }), "equipements", "activeTab : sous-vue → parent");
-    ck.eq(ShellNav.activeTab({ name: "contacts", parent: "parametres" }), "parametres", "activeTab : enfant de groupe → le groupe");
+    // ---- activeTab : rattachement HISTORIQUE (repli du Shell quand une vue n'a pas de domaine visible) ----
+    ck.eq(ShellNav.activeTab({ name: "equipements" }), "equipements", "activeTab : vue sans parent → elle-même");
+    ck.eq(ShellNav.activeTab({ name: "groupes", parent: "equipements" }), "equipements", "activeTab : sous-vue → sa vue parente");
+    ck.eq(ShellNav.activeTab({ name: "contacts" }), "contacts", "activeTab : vue rattachée par NAV_DOMAINS (aucun parent) → elle-même");
 
-    // ---- ancestorGroup : le groupe ancêtre à surligner quand un enfant est actif (piège ①) ----
-    ck.eq(ShellNav.ancestorGroup("contacts", lookup), "parametres", "ancestorGroup : enfant actif → son groupe (surligné)");
-    ck.eq(ShellNav.ancestorGroup("equipements", lookup), null, "ancestorGroup : primaire → aucun groupe");
-    ck.eq(ShellNav.ancestorGroup("groupes", lookup), null, "ancestorGroup : sous-vue de primaire → pas un groupe");
-    ck.eq(ShellNav.ancestorGroup("parametres", lookup), null, "ancestorGroup : le groupe lui-même → pas d'ancêtre groupe");
-
-    // ---- navigabilité / résolution de hash (piège ① : groupe sans hash · piège ⑤ : enfant bookmarkable) ----
+    // ---- navigabilité / résolution de hash (piège ① : domaine sans hash · piège ⑤ : sous-vue bookmarkable) ----
     ck.eq(ShellNav.isNavigable("contacts", lookup), true, "isNavigable : sous-vue → oui");
-    ck.eq(ShellNav.isNavigable("parametres", lookup), false, "isNavigable : GROUPE → non (ne navigue jamais — piège ①)");
+    ck.eq(ShellNav.isNavigable("parametres", lookup), false, "isNavigable : DOMAINE → non (il ne navigue jamais — piège ①)");
     ck.eq(ShellNav.isNavigable("inconnu", lookup), false, "isNavigable : nom inconnu → non");
     ck.eq(ShellNav.resolveHash("#contacts", lookup), "contacts", "resolveHash : #contacts → sous-page (bookmarkable — piège ⑤)");
-    ck.eq(ShellNav.resolveHash("#parametres", lookup), null, "resolveHash : #<groupe> → null (le groupe n'a pas de hash — piège ①)");
+    ck.eq(ShellNav.resolveHash("#parametres", lookup), null, "🚨 resolveHash : #<domaine> → null (un domaine n'a PAS de hash — piège ①)");
+    ck.eq(ShellNav.resolveHash("#groupes", lookup), "groupes", "resolveHash : une sous-vue garde son deep-link INCHANGÉ (contrainte dure du re-design)");
     ck.eq(ShellNav.resolveHash("contacts", lookup), "contacts", "resolveHash : tolère l'absence de # de tête");
     ck.eq(ShellNav.resolveHash("", lookup), null, "resolveHash : hash vide → null");
 
-    // ---- structure du menu responsive : primaires + groupe (en-tête) + enfants indentés (piège ②) ----
-    const views = [
-      { name: "equipements", label: "Équipements", kind: "primary" },
-      { name: "groupes", label: "Groupes", kind: "secondary", parent: "equipements" },
-      { name: "parametres", label: "Paramètres", kind: "group", children: ["contacts", "ghost"] },
-      { name: "contacts", label: "Contacts", kind: "secondary", parent: "parametres" },
-    ];
-    const menu = ShellNav.responsiveMenu(views);
-    ck.eq(menu.length, 3, "responsiveMenu : 3 entrées (primaire + en-tête groupe + 1 enfant ; « ghost » absent ignoré)");
-    ck(menu[0].role === "item" && menu[0].name === "equipements" && menu[0].depth === 0, "responsiveMenu : primaire = item depth 0");
-    ck(menu.some((e) => e.role === "group" && e.name === "parametres"), "responsiveMenu : en-tête de groupe présent");
-    const child = menu.find((e) => e.role === "item" && e.name === "contacts");
-    ck(child && child.depth === 1, "responsiveMenu : enfant de groupe = item indenté (depth 1 — accessible en mobile, piège ②)");
-    ck(!menu.some((e) => e.name === "groupes"), "responsiveMenu : sous-vue de PRIMAIRE omise (atteinte par lien d'en-tête)");
-    ck(!menu.some((e) => e.name === "ghost"), "responsiveMenu : enfant déclaré mais non enregistré → ignoré");
+    // ---- les helpers du mécanisme de GROUPE ont bien DISPARU (pas seulement cessé d'être appelés) ----
+    ck.eq(typeof ShellNav.ancestorGroup, "undefined", "ancestorGroup RETIRÉ avec le mécanisme de groupe déroulant");
+    ck.eq(typeof ShellNav.responsiveMenu, "undefined", "responsiveMenu RETIRÉ avec le menu responsive aplati (→ tiroir à accordéons)");
   }
   });
 

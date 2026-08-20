@@ -316,49 +316,48 @@
   .tab-count.warn { background: transparent; border-color: var(--warn); color: var(--warn); }
   .tab-count.err { background: transparent; border-color: var(--err); color: var(--err); }
 
-  /* Onglet en ICÔNE (barre desktop) : l'icône (span .gi) remplace le texte ; taille alignée sur les autres icônes
-     de la topbar (.icon-btn svg = 16px). Le libellé reste porté par title + aria-label (a11y). Le soulignement de
-     l'onglet actif (::after, en absolu), le badge .tab-count et le caret des groupes ne sont pas affectés. */
-  .tab.tab-icon { display: inline-flex; align-items: center; }
   .tab .gi svg { width: 16px; height: 16px; }
 
-  /* Onglets en MENU DEROULANT custom (responsive) — pas un <select> natif. Masque en grand ecran. */
-  .tabs-dd { position: relative; display: none; align-items: stretch; flex: 1; min-width: 0; }
-  .tabs-dd-trigger {
-    display: flex; align-items: center; gap: 8px; width: 100%;
-    background: transparent; border: none; border-right: 1px solid var(--line);
-    color: var(--fg); font-family: var(--mono); font-size: 12px; letter-spacing: 0.13em;
-    text-transform: uppercase; padding: 0 16px; cursor: pointer;
-  }
-  .tabs-dd-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
-  .tabs-dd-caret { color: var(--fg-dim); flex: 0 0 auto; }
-  .tabs-dd-menu {
-    position: absolute; top: 100%; left: 0; min-width: 240px; max-width: 84vw; max-height: 70vh; overflow: auto;
-    display: none; flex-direction: column;
-    background: var(--bg-2); border: 1px solid var(--line);
-    box-shadow: 0 8px 24px rgba(0,0,0,0.4); z-index: 200;
-  }
-  .tabs-dd.open .tabs-dd-menu { display: flex; }
-  .tabs-dd-item {
-    display: flex; align-items: center; gap: 6px;
-    background: transparent; border: none; border-bottom: 1px solid var(--line);
-    color: var(--fg-dim); font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em;
-    text-transform: uppercase; padding: 12px 16px; cursor: pointer; text-align: left;
-  }
-  .tabs-dd-item:last-child { border-bottom: none; }
-  .tabs-dd-item:hover { color: var(--fg); background: var(--bg-3); }
-  .tabs-dd-item.active { color: var(--accent-text); }   /* libellé d'onglet actif = texte accent → --accent-text */
-  /* En-tête de GROUPE dans le menu responsive (non cliquable) + ses enfants indentés (piège ②) — RÉUTILISE le
-     gabarit .tabs-dd-menu/.tabs-dd-item, on n'ajoute que le repère de section et le décalage. */
-  .tabs-dd-group { padding: 10px 16px 4px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--fg-dimmer); border-bottom: 1px solid var(--line); }
-  .tabs-dd-item--child { padding-left: 28px; }
+  /* ---- NIVEAU 1 : les DOMAINES (menu à deux niveaux, cf. docs/navigation.md) ----
+     Icône + LIBELLÉ, le libellé toujours visible : la maquette tranche « libellés > icônes », l'icône
+     seule n'est plus le régime normal (elle exigeait de mémoriser onze pictogrammes). Sous ~1000 px le
+     libellé cède (cf. bloc responsive) ; sous 760 px la barre entière cède au TIROIR. */
+  .tab.tab-domain { display: inline-flex; align-items: center; gap: 8px; }
+  .tab-label { white-space: nowrap; }
 
-  /* Onglet GROUPE (toujours déroulant, ex. « Paramètres ») : bouton .tab (mêmes styles que les autres onglets) +
-     menu réutilisant .tabs-dd-menu/.tabs-dd-item. Placé HORS de .tabs (sinon son overflow rognerait le menu). */
-  .tab-group { position: relative; display: flex; align-items: stretch; flex: 0 0 auto; }
-  .tab-group > .tab { display: inline-flex; align-items: center; gap: 6px; }
-  .tab-group .tabs-dd-menu { right: 0; left: auto; }   /* dernier onglet : menu aligné à droite pour ne pas déborder */
-  .tab-group.open .tabs-dd-menu { display: flex; }
+  /* ---- NIVEAU 2 : la BARRE DE VUES ----
+     Pattern UNIQUE de sous-navigation : elle remplace À LA FOIS l'ancien groupe déroulant
+     « Paramètres » et les liens d'en-tête de toutes les autres sous-vues. NON sticky (la barre de
+     statut occupe déjà `top:56px` ; deux collants au même offset se chevaucheraient au défilement). */
+  .views-bar {
+    display: flex; align-items: center; gap: 0;
+    min-height: 38px; padding: 0 6px;
+    background: var(--bg); border-bottom: 1px solid var(--line);
+    overflow-x: auto; overflow-y: hidden;
+  }
+  .view-tab {
+    display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto;
+    min-height: 30px; padding: 0 11px; margin: 4px 1px;
+    background: transparent; border: 1px solid transparent; border-radius: var(--radius-pill);
+    color: var(--fg-dim); font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em;
+    text-transform: uppercase; cursor: pointer; white-space: nowrap;
+  }
+  .view-tab:hover { color: var(--fg); background: var(--bg-3); }
+  /* Pastille ACTIVE : texte accent + fond/bordure teintés par color-mix des tokens (aucune couleur en
+     dur — les deux thèmes suivent leurs propres valeurs de --accent). */
+  .view-tab.active {
+    color: var(--accent-text);
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+  /* Séparateur INTERNE au domaine (regroupement visuel, ex. `… | VMs · Clusters | Wifi`). */
+  .view-sep { width: 1px; height: 18px; background: var(--line); margin: 0 8px; flex: 0 0 auto; }
+  /* La pastille de comptage garde sa `margin-left` historique (héritée des onglets en flux INLINE) ;
+     dans ces conteneurs FLEX c'est le `gap` qui espace — sinon l'écart est compté deux fois. */
+  .tab-domain .tab-count, .view-tab .tab-count, .nav-acc-item .tab-count { margin-left: 0; }
+
+  /* ---- BURGER (responsive) : masqué au-dessus du breakpoint, révélé par le bloc @media 760px ---- */
+  .topbar-burger { display: none; }
 
   .topbar-actions { display: flex; align-items: stretch; flex-shrink: 0; border-left: 1px solid var(--line); }
   /* Pastille utilisateur = BOUTON (clic → modale d'infos) : réinitialise l'apparence bouton, ne garde
@@ -487,6 +486,12 @@
     margin-bottom: 16px;
     flex-wrap: wrap;
   }
+  /* FIL D'ARIANE « domaine › vue » (menu à deux niveaux) : REPÈRE, pas une navigation — il remplace le
+     bouton « ← retour », qui ne disait que d'où l'on venait. Non cliquable : un domaine n'est pas une
+     destination (il n'a pas de vue à lui). */
+  .view-crumb { display: flex; align-items: center; gap: 6px; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--fg-dimmer); margin-bottom: 4px; }
+  .view-crumb-domain { color: var(--fg-dim); }
+  .view-crumb-sep { color: var(--line-2); }
   .view-title { font-size: 16px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700; }
   .view-title span { color: var(--accent-text); }   /* titre de vue (accent) → --accent-text */
   .view-sub { font-size: 11px; color: var(--fg-dim); margin-top: 2px; letter-spacing: 0.04em; text-transform: none; }
@@ -2573,19 +2578,93 @@
     background: var(--bg-2); border-radius: 4px; text-align: left;
   }
 
-  /* contrÃ´les tributaires d'un document : neutralisÃ©s tant que l'Ã©cran d'accueil est actif */
+  /* ============ TIROIR DE NAVIGATION (responsive) — src-client/app/ShellDrawer.ts ============
+     Il REMPLACE l'ancien menu déroulant aplati, qui OMETTAIT les sous-vues des primaires (Groupes,
+     Spares, Sous-équipements…) : elles n'étaient atteignables qu'en passant par leur vue parente. Ici
+     un accordéon par domaine expose TOUTES ses vues. Cibles ≥ 44 px, fermeture au doigt (voile, croix,
+     Échap). Le voile est en position FIXE et couvre l'écran : il vit hors de la topbar. */
+  /* z-index 150 : AU-DESSUS de la topbar (100) et de l'écran d'accueil (80) — le tiroir doit couvrir la
+     barre qui l'a ouvert —, mais SOUS la modale (200) et le dialogue (300). Un menu de navigation ne
+     passe jamais devant une tâche en cours ; de toute façon, l'overlay d'une modale recouvre le burger,
+     donc le tiroir ne peut pas s'ouvrir par-dessus. */
+  .nav-drawer { position: fixed; inset: 0; z-index: 150; background: rgba(0,0,0,0.62); }
+  [data-theme="light"] .nav-drawer { background: rgba(0,0,0,0.38); }
+  .nav-drawer-panel {
+    position: absolute; top: 0; right: 0; bottom: 0;
+    width: 88%; max-width: 320px;
+    display: flex; flex-direction: column;
+    background: var(--bg-2); border-left: 1px solid var(--line-2);
+    box-shadow: -16px 0 40px rgba(0,0,0,0.5);
+  }
+  .nav-drawer-head { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  .nav-drawer-user, .nav-drawer-close {
+    display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+    width: 44px; height: 44px; padding: 0;
+    background: transparent; border: none; color: var(--fg-dim); cursor: pointer;
+  }
+  .nav-drawer-user:hover, .nav-drawer-close:hover { color: var(--fg); background: var(--bg-3); }
+  .nav-drawer-user svg, .nav-drawer-close svg { width: 18px; height: 18px; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .nav-drawer-who { flex: 1 1 auto; min-width: 0; }
+  .nav-drawer-name { font-size: 12px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nav-drawer-save { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-dim); }
+  .nav-drawer-body { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
+  .nav-acc { border-bottom: 1px solid var(--line); }
+  .nav-acc-head {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    min-height: 48px; padding: 0 12px;
+    background: transparent; border: none; color: var(--fg);
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+    cursor: pointer; text-align: left;
+  }
+  .nav-acc-head .gi { display: inline-flex; flex: 0 0 auto; color: var(--fg-dim); }
+  .nav-acc-head .gi svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .nav-acc-label { flex: 1 1 auto; }
+  .nav-acc-caret { flex: 0 0 auto; color: var(--fg-dimmer); font-size: 11px; transition: transform .16s; }
+  .nav-acc.open > .nav-acc-head { color: var(--accent-text); background: var(--bg-3); }
+  .nav-acc.open > .nav-acc-head .gi { color: var(--accent); }
+  .nav-acc.open > .nav-acc-head .nav-acc-caret { transform: rotate(180deg); }
+  .nav-acc-body { display: none; flex-direction: column; padding: 4px 0 8px; background: var(--bg); }
+  .nav-acc.open > .nav-acc-body { display: flex; }
+  .nav-acc-item {
+    display: flex; align-items: center; gap: 9px;
+    min-height: 44px; padding: 0 12px 0 38px;
+    background: transparent; border: none; border-left: 2px solid transparent;
+    color: var(--fg-dim); font-family: var(--mono); font-size: 12px; text-align: left; cursor: pointer;
+  }
+  .nav-acc-item:hover { color: var(--fg); background: var(--bg-3); }
+  .nav-acc-item.active { color: var(--accent-text); border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .nav-acc-item-label { flex: 1 1 auto; }
+  .nav-drawer-foot { flex: 0 0 auto; display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); }
+  .nav-drawer-act { flex: 1 1 0; justify-content: center; min-height: 44px; }
+
+  /* contrÃ´les tributaires d'un document : neutralisÃ©s tant que l'Ã©cran d'accueil est actif.
+     🚨 TOUT chemin de navigation doit y figurer — sinon, écran d'accueil affiché, on peut naviguer dans
+     une app SANS document chargé. Les DEUX barres du menu, le burger et le tiroir portent en plus la
+     classe `topbar-needs-doc` (posée par le Shell) : la liste ci-dessous n'a donc pas à s'allonger à
+     chaque nouvel élément de nav. */
   body.welcome-active .statusbar > .status-stat { visibility: hidden; }
-  body.welcome-active .tab,
-  body.welcome-active .tabs-dd-trigger,
-  body.welcome-active .tab-group,
+  body.welcome-active .tabs,
+  body.welcome-active .views-bar,
   body.welcome-active #doc-name,
   body.welcome-active .topbar-needs-doc { opacity: 0.4; pointer-events: none; }
 
+  /* Barre de niveau 1 en ICÔNES SEULES sous ~1000 px : la topbar de DC Manager porte, en plus des
+     domaines, la marque, le nom de document et jusqu'à huit boutons d'action — cinq tuiles libellées n'y
+     tiennent plus bien avant le breakpoint du tiroir. Le libellé reste en title/aria-label. */
+  @media (max-width: 1000px) {
+    .tab-label { display: none; }
+    .tab.tab-domain { gap: 0; }
+  }
+
   @media (max-width: 760px) {
     .brand-name, .doc-name { display: none; }
-    /* Pastille utilisateur : le NOM disparaît, l'icône reste (le nom passe en tooltip/aria-label ; le
-       clic ouvre la modale d'infos). Même geste qu'en grand écran, juste plus compact. */
-    .user-chip-name { display: none; }
+    /* Topbar mobile = marque · loupe · scanner · (actions fichier) · réglages · BURGER. Ce qui a un
+       équivalent DE PREMIÈRE CLASSE dans le tiroir en sort : la pastille utilisateur (en-tête du tiroir)
+       et annuler/rétablir (pied du tiroir). Les actions FICHIER et les réglages restent, eux : le tiroir
+       n'en offre pas de copie, et le mode fichier doit rester entièrement utilisable sur petit écran
+       (principe n°15). */
+    .user-chip { display: none; }
+    .topbar-actions .icon-btn.topbar-burger { display: inline-flex; }
     /* marges latérales MINIMALES → largeur utile maximale */
     main { padding: 10px 4px; }
     main:has(#view-datacenter.active), main:has(#view-graph.active) { padding: 6px 2px; }
@@ -2599,11 +2678,14 @@
     .list-chrome .lc-search, .list-chrome .lc-searchpop { flex-basis: 100%; }
     .list-chrome .lc-right { margin-left: 0; }
     .view-header { margin-bottom: 10px; }
-    /* Onglets → MENU DEROULANT (gain de place, accessible au pouce) : la barre d'onglets cède la place au déclencheur.
-       Les boutons de GROUPE (dans .tabs) disparaissent aussi — leurs enfants sont aplatis dans le menu global (piège ②). */
+    /* Annuler / Rétablir quittent la topbar : le PIED du tiroir les porte (et en mode API ils sont déjà
+       masqués par `setRestMode` — les deux règles se composent sans se contredire). */
+    .topbar-history { display: none; }
+    /* MENU → TIROIR (gain de place, tout au pouce) : les DEUX barres cèdent, le burger prend le relais.
+       Contrairement à l'ancien menu aplati, rien ne se perd au passage : le tiroir liste TOUTES les vues
+       de TOUS les domaines, sous-vues comprises (cf. docs/navigation.md § 1, douleur n°3). */
     .tabs { display: none; }
-    .tab-group { display: none; }
-    .tabs-dd { display: flex; }
+    .views-bar { display: none; }
     /* MODALE PLEIN ÉCRAN, SYSTÉMATIQUE sous le breakpoint de bascule des onglets : sur petit écran une
        modale « flottante » à marges gâche l'espace utile → elle occupe TOUT l'écran. MIROIR EXACT du bloc
        `html[data-modal-fs]` (préférence desktop) près des règles `.modal` — garder les deux synchronisés.
@@ -2676,6 +2758,9 @@
     .cell-actions .row-btn { width: 44px; height: 44px; margin-left: 8px; }
     /* pagination (⋮ overflow relève de .icon-action ci-dessus) */
     .page-btn { min-width: 44px; height: 44px; }
+    /* pastilles de la barre de vues (niveau 2) : visibles au-dessus de 760 px, donc atteignables au
+       doigt sur une tablette en paysage — elles passent à 44 px comme le reste du tactile. */
+    .view-tab { min-height: 44px; }
     /* sélecteur de date : input + boutons alignés à 44 px (l'input suit pour ne pas dépareiller la rangée) */
     .date-ctrl-btn { height: 44px; }
     .date-ctrl-btn.date-ctrl-icon { width: 44px; }

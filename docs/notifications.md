@@ -72,7 +72,7 @@ le même que `vm/`) ; le câblage concret tient en quelques lignes dans `index.t
 
 | Fichier | Rôle |
 |---|---|
-| `views/NotificationsAdminView.ts` | **Page d'administration** « Notifications » (sous-page du groupe « Paramètres »). Classe DÉDIÉE et AUTONOME (pattern `VmClustersView`, ne dérive PAS de `Forms`) : 5 onglets internes (Canaux, Abonnements, Rappels, Alertes actives, Historique) + bouton de test. `client` null (mode fichier) → message « mode API requis » ; 503 → bandeau actionnable. Le jeton d'un canal n'est JAMAIS réaffiché (écriture seule). |
+| `views/NotificationsAdminView.ts` | **Page d'administration** « Notifications » (vue du domaine « Paramètres », cf. `docs/navigation.md`). Classe DÉDIÉE et AUTONOME (pattern `VmClustersView`, ne dérive PAS de `Forms`) : 5 onglets internes (Canaux, Abonnements, Rappels, Alertes actives, Historique) + bouton de test. `client` null (mode fichier) → message « mode API requis » ; 503 → bandeau actionnable. Le jeton d'un canal n'est JAMAIS réaffiché (écriture seule). |
 | `views/forms/NotifyClient.ts` | **Client REST** du module `notify/` + `NotifyError` (code HTTP + `detail`). DTOs = **MIROIRS** commentés des formes serveur (duplication assumée, principe n°3 — préserve l'amovibilité). ⚠ Routes **GLOBALES** (`<apiRoot>/notify/…`, PAS scopées par document, contrairement à `VmSyncClient`) : le document courant n'est qu'un **paramètre** (`?docId`, `doc_id` du corps). |
 | `core/NotifyFormat.ts` | Logique **PURE** de la page admin (aucun DOM) : conversions d'intervalle de rappel **HEURES ⟷ SECONDES** (l'UI raisonne en heures, le serveur en secondes), libellé lisible d'un intervalle (`intervalLabel`), résolution SOUPLE d'un libellé de contact (`contactLabel`, garde-fou « contact introuvable »). Constantes `DEFAULT_REMIND_HOURS`/`MIN_REMIND_SEC` = MIROIRS commentés des bornes serveur ; `EVENT_TYPE_SUGGESTIONS` (autocomplétion). Testée dans `Tests/modules`. |
 | `models/Contact.ts` | Entité `contacts` (S5) — carnet des destinataires (`name` requis, `email`/`phone`/`notes` optionnels), tenu **PAR DOCUMENT**. Collection INDÉPENDANTE du module notify (cf. « Amovibilité »). |
@@ -371,8 +371,9 @@ erreur. Aucune réponse ne porte de jeton.
 
 ## Page d'administration (« Paramètres → Notifications »)
 
-Sous-page du groupe « Paramètres » (`kind:"secondary"`, `parent:"parametres"`),
-barre segmentée à 5 onglets internes + actions globales (Actualiser, Envoyer une
+Vue du **domaine « Paramètres »** — rattachement déclaré dans `NAV_DOMAINS` (`app/NavModel`), et
+non plus par un `parent` : le GROUPE déroulant a disparu avec le re-design du menu
+(cf. `docs/navigation.md`). Barre segmentée à 5 onglets internes + actions globales (Actualiser, Envoyer une
 notification de test). Rafraîchissement **manuel** (pas de SSE en v1) : l'état vit
 côté serveur, on tire à la demande.
 
@@ -414,8 +415,9 @@ l'importe jamais ; côté client tout vit dans les fichiers dédiés ci-dessous)
    - la collection **`contacts`** (S5, modèle `Contact` + schéma + validation) — un
      simple carnet du document, sans dépendance à notify ; à retirer séparément si
      voulu (aucune cascade : rien dans le document ne pointe vers un contact) ;
-   - le groupe **« Paramètres »** (S6) — conteneur de navigation générique ; s'il ne
-     reste que `contacts` dedans, il continue de fonctionner (ajuster ses `children`) ;
+   - le **domaine « Paramètres »** (S6) — regroupement de navigation générique ; il suffit de
+     retirer `"notifications"` de ses `views` dans `NAV_DOMAINS`, `contacts` y reste seul (le
+     domaine devient alors un onglet DIRECT, sans barre de vues — dégradé automatique) ;
    - l'interface `ProblemReporter` dans `vm/VmSyncService.ts` — **optionnelle**, inerte
      sans pont ; on peut la laisser (le producteur ne signale simplement plus rien).
 

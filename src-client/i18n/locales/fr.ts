@@ -48,5 +48,6 @@ import { search } from "./fr/search";
 import { attachment } from "./fr/attachment";
 import { scan } from "./fr/scan";
 import { labels } from "./fr/labels";
+import { nav } from "./fr/nav";
 
-export const fr = { tabs, interventions, ui, shell, app, graph, lists, forms, cable, ipam, domain, rack, equipment, detail, face, dc, vm, wifi, tracker, notify, certs, analysis, subEquipment, search, attachment, scan, labels } as const;
+export const fr = { tabs, interventions, ui, shell, app, graph, lists, forms, cable, ipam, domain, rack, equipment, detail, face, dc, vm, wifi, tracker, notify, certs, analysis, subEquipment, search, attachment, scan, labels, nav } as const;

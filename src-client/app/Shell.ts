@@ -8,29 +8,34 @@ export interface ShellView {
   title?: string;
   /** Sous-titre (view-sub) de l'en-tête. */
   subtitle?: string;
-  /** "primary" = onglet de la topbar · "secondary" = sous-vue (atteinte par un lien d'en-tête) ·
-      "group" = onglet TOUJOURS DÉROULANT (ne navigue pas — cf. `children` ; enregistré via `addGroup`). */
-  kind?: "primary" | "secondary" | "group";
-  /** Onglet principal à surligner quand cette (sous-)vue est active + cible du « ← retour ». */
+  /** ⚠ VESTIGE du menu à UN niveau : depuis le re-design (cf. docs/navigation.md), c'est `NAV_DOMAINS`
+      qui décide où une vue apparaît — toutes les vues sont peintes dans la barre de niveau 2 de leur
+      domaine, sans distinction. Le champ ne sert plus qu'à documenter le RANG historique de la vue
+      (« était un onglet primaire » / « était une sous-vue »). Aucun rendu n'en dépend.
+      Le troisième cas, "group", A DISPARU avec le mécanisme de groupe déroulant. */
+  kind?: "primary" | "secondary";
+  /** Vue de rattachement HISTORIQUE d'une sous-vue. Le surlignage passe désormais par le DOMAINE
+      (`NavModel.activeDomain`) ; `parent` n'est plus qu'un REPLI, utilisé quand une vue n'est rattachée
+      à aucun domaine — anomalie que le verrou d'exhaustivité interdit, mais que le rendu doit traverser
+      sans planter (cf. `ShellNav.activeTab`). */
   parent?: string;
-  /** Pour kind:"group" : noms des sous-vues (kind:"secondary", parent = ce groupe) déroulées par l'onglet. */
-  children?: string[];
   /** Compteur affiché en badge (onglet topbar + tout lien qui pointe vers cette vue). Badge MASQUÉ à 0
       (pas de pastille « 0 » : bruit / pas d'alerte). */
   count?: () => number;
   /** Teinte d'ALERTE de la pastille (null = neutre) : "warn" (attention) ou "err" (critique). Évaluée à chaque
       `refreshCounts`. Ex. interventions ouvertes CRITIQUES → err ; certificats expirés → err, expirants → warn. */
   countClass?: () => string | null;
-  /** Icône SVG (constante du registre `ui/Icons`) de l'onglet. Sur la barre DESKTOP elle REMPLACE le texte
-      (onglet icône seule → `title` + `aria-label` = `label`) ; dans les menus déroulants (responsive, groupes)
-      elle PRÉCÈDE le libellé texte. Absente → repli sur le texte (comportement historique). */
+  /** Icône SVG (constante du registre `ui/Icons`) de la vue. Peinte dans le tiroir responsive et, quand
+      un seul domaine est visible (`flattened`), dans la barre de niveau 1. La barre de VUES (niveau 2)
+      est volontairement TEXTUELLE : la maquette tranche « libellés > icônes » — l'icône seule n'est plus
+      le régime normal. Absente → simplement pas de glyphe. */
   icon?: string;
-  /** Noms de sous-vues exposées comme boutons-liens dans l'en-tête de CETTE vue. */
-  links?: string[];
   /** Prédicat de VISIBILITÉ de la vue — droit de LECTURE (cf. docs/auth.md § « Gating côté client »).
-      Faux ⇒ l'onglet de la topbar, l'entrée du menu responsive, l'entrée du menu de groupe ET les
-      boutons-liens d'en-tête qui y mènent DISPARAISSENT, et `switchView` refuse d'y aller (repli sur
-      la première vue visible). Réévalué à chaque `refreshCounts()` — exactement comme les pastilles de
+      Faux ⇒ la vue disparaît de TOUS les chemins du menu (barre de niveau 2, barre de niveau 1 quand elle
+      est aplatie, tiroir responsive) — et `switchView` refuse d'y aller (repli sur la première vue
+      visible). Le masquage n'est plus un `display:none` posé après coup mais une ABSENCE dans la
+      structure résolue : c'est `NavModel.resolve` qui écarte la vue, donc aucun chemin ne peut être
+      oublié. Réévalué à chaque `refreshCounts()` — exactement comme les pastilles de
       comptage et les `extraActions[].visible`, donc à chaque changement d'onglet, à chaque
       rafraîchissement de vue et à chaque changement de droits.
       ABSENT = toujours visible. En mode FICHIER/visualiseur, l'état d'autorisation est « tout permis »
@@ -119,30 +124,45 @@ import { Icons } from "../ui/Icons";
 import { FieldFacet } from "../core/FieldFacet";
 import { I18n, type LocalePreference } from "../i18n/I18n";
 import { ShellNav } from "./ShellNav";
-import type { ShellNavView, ShellNavLookup } from "./ShellNav";
+import type { ShellNavLookup } from "./ShellNav";
+import { NavModel, NAV_DOMAINS } from "./NavModel";
+import type { ResolvedNav, ResolvedNavView, NavViewDecl } from "./NavModel";
+import { ShellDrawer } from "./ShellDrawer";
+import type { ShellDrawerHost } from "./ShellDrawer";
 
 const SVG = "http://www.w3.org/2000/svg";
 const svgIcon = (paths: string): SVGElement => {
   const s = document.createElementNS(SVG, "svg"); s.setAttribute("viewBox", "0 0 24 24"); s.innerHTML = paths; return s;
 };
 
-interface ViewEntry { def: ShellView; section: HTMLElement; header: HTMLElement; body: HTMLElement; tabBtn?: HTMLButtonElement; }
-/** Onglet GROUPE (kind:"group") : PAS une vue (ni section ni hash — piège ①), juste un bouton déroulant + son menu. */
-interface GroupEntry { def: ShellView; tabBtn?: HTMLButtonElement; ddEl?: HTMLElement; }
+interface ViewEntry { def: ShellView; section: HTMLElement; header: HTMLElement; body: HTMLElement; }
 
 /* =============================================================================
-   SHELL — ossature complète, fidèle au monolithe :
-     · TOPBAR : logo + marque + nom de document + onglets PRINCIPAUX + actions
-       fichier (nouveau / ouvrir / enregistrer / copie / annuler / rétablir) + réglages ;
+   SHELL — ossature complète :
+     · TOPBAR : logo + marque + nom de document + DOMAINES (niveau 1) + actions
+       fichier (nouveau / ouvrir / enregistrer / copie / annuler / rétablir) + réglages
+       + burger (responsive) ;
      · STATUSBAR : état de sauvegarde, fichier, release, source, nb d'entités, dernière save ;
-     · MAIN : une <section> par vue, chacune avec son `.view-header` (titre ▸ + sous-titre +
-       actions : liens de sous-vues / bouton « ← retour » / bouton « + … ») et son corps.
-   Les SOUS-VUES ne sont PLUS un bandeau : elles vivent dans l'en-tête de leur domaine.
+     · BARRE DE VUES (niveau 2) : les vues du domaine actif, en pastilles ;
+     · MAIN : une <section> par vue, chacune avec son `.view-header` (fil d'Ariane
+       « domaine › vue » + titre ▸ + actions : boutons secondaires / bouton « + … ») et son corps.
+
+   🚨 MENU À DEUX NIVEAUX (re-design 2026-08-20, cf. docs/navigation.md). Le Shell ne
+   PORTE plus la structure du menu : il la reçoit RÉSOLUE de `app/NavModel` (module PUR,
+   testé) et se contente de la PEINDRE. Conséquences à connaître avant de toucher à ce
+   fichier :
+     · un DOMAINE n'est PAS une vue — ni <section>, ni corps, ni hash ; cliquer un
+       domaine active sa PREMIÈRE VUE VISIBLE (piège ① de l'ancien `kind:"group"`) ;
+     · le masquage par droits n'est plus un `display:none` posé après coup : une vue
+       invisible est ABSENTE de la structure résolue, donc de tous les chemins à la fois ;
+     · 🚨 RÈGLE (A) — un badge de comptage n'appartient qu'à une entrée TERMINALE. Le
+       rendu ci-dessous LIT le booléen `badge` de chaque entrée et n'écrit JAMAIS de
+       condition du genre « si c'est un domaine, pas de badge » : la règle a UNE seule
+       source, `NavModel.allowsBadge`, et elle est prouvée par test.
    ============================================================================= */
 export class Shell {
-  private tabsEl: HTMLElement;
-  private tabsDdEl: HTMLElement | null = null;        // menu déroulant des onglets (responsive)
-  private tabsDdLabelEl: HTMLElement | null = null;   // libellé de l'onglet actif dans le déclencheur du menu
+  private tabsEl: HTMLElement;                        // barre de NIVEAU 1 (domaines, ou vues si `flattened`)
+  private viewsBarEl: HTMLElement;                    // barre de NIVEAU 2 (vues du domaine actif)
   private mainEl: HTMLElement;
   private docNameEl: HTMLInputElement;
   private undoBtn!: HTMLButtonElement;
@@ -187,26 +207,40 @@ export class Shell {
   private statusEls: Record<string, HTMLElement> = {};
   private statusbarEl!: HTMLElement;              // barre de statut (masquée en mode API — inutile)
   private views = new Map<string, ViewEntry>();
-  private groups = new Map<string, GroupEntry>();     // onglets déroulants (kind:"group") — hors this.views (pas de vue)
-  private order: string[] = [];                        // ordre d'enregistrement (vues ET groupes) → ordre des onglets
-  private tabDropdowns: HTMLElement[] = [];            // TOUS les menus déroulants d'onglets (responsive + groupes)
-  private tabGroupEls: HTMLElement[] = [];             // wrappers .tab-group insérés en topbar (retirés/reconstruits par build)
-  private countBadges: Array<{ name: string; el: HTMLElement }> = [];
+  private order: string[] = [];                        // ordre d'ENREGISTREMENT des vues (l'ordre d'AFFICHAGE vient de NAV_DOMAINS)
+  private burgerBtn!: HTMLButtonElement;               // ouverture du tiroir responsive (masqué au-dessus du breakpoint)
+  private settingsBtn!: HTMLButtonElement;             // déclencheur du panneau Réglages (le tiroir lui DÉLÈGUE, il n'en a pas de copie)
+  private drawer!: ShellDrawer;                        // tiroir à accordéons (responsive) — classe à part, principe n°2
+  /** Structure de navigation RÉSOLUE en cours d'affichage. Recalculée par `renderNav()` à chaque
+      `refreshCounts()` : les droits peuvent changer à chaud, et la structure avec eux. */
+  private nav: ResolvedNav = { domains: [], flattened: false };
+  /** SIGNATURE de la structure peinte (domaines × vues × aplatissement). On ne reconstruit les barres
+      que si elle CHANGE : `refreshCounts()` est appelée très souvent (chaque bascule d'onglet, chaque
+      rafraîchissement de vue, chaque comptage résolu) et reconstruire le DOM à chaque fois volerait le
+      focus clavier au milieu d'une navigation. */
+  private navSignature = "";
+  /** Domaine dont la barre de niveau 2 est actuellement peinte (null = aucune barre). */
+  private viewsBarDomain: string | null = null;
+  /** Pastilles de comptage de la barre de NIVEAU 1 : NON VIDE seulement quand la structure est aplatie
+      (un seul domaine visible ⇒ ce sont des VUES, donc des entrées terminales — règle (A)). */
+  private badgesLevel1: Array<{ name: string; el: HTMLElement }> = [];
+  /** Pastilles de comptage de la barre de NIVEAU 2 (les vues du domaine actif). */
+  private badgesLevel2: Array<{ name: string; el: HTMLElement }> = [];
   /** Boutons d'en-tête à visibilité CONDITIONNELLE (`ViewDef.extraActions[].visible`, `ViewDef.canAdd`) —
       réévalués par `refreshCounts()`, exactement comme les pastilles de comptage. Reconstruit par `build()`. */
   private conditionalActions: Array<{ el: HTMLElement; visible: () => boolean }> = [];
-  /** TOUS les éléments de NAVIGATION vers une vue (onglet topbar, entrée du menu responsive, entrée d'un
-      menu de groupe, bouton-lien d'en-tête) : masqués ENSEMBLE quand `ViewDef.visible` rend faux. Un
-      registre plutôt qu'une requête DOM parce que le même nom de vue est atteignable par PLUSIEURS
-      chemins — en oublier un laisserait une porte ouverte sur une vue censée être invisible.
-      Reconstruit par `build()`. */
-  private viewNavEls: Array<{ name: string; el: HTMLElement }> = [];
-  /** Repères de GROUPE (bouton d'onglet déroulant, en-tête du menu responsive) : masqués quand AUCUN de
-      leurs enfants n'est visible — un groupe vide n'est pas une navigation, c'est un cul-de-sac. */
-  private groupNavEls: Array<{ children: string[]; el: HTMLElement }> = [];
   /** Garde de ré-entrance du REPLI (`switchView` rappelle `refreshCounts`, qui re-teste la visibilité).
       Le repli converge de lui-même — cette garde protège d'un prédicat non déterministe, pas du cas normal. */
   private fallbackInProgress = false;
+  /** États du chrome MÉMORISÉS parce que le TIROIR les redemande (il peint sa propre pastille de
+      sauvegarde et ses propres boutons annuler/rétablir) : le Shell est leur seule source. */
+  private saveStateValue = "mem";
+  private canUndoValue = false;
+  private canRedoValue = false;
+  private restMode = false;
+  /** Nom affichable de l'utilisateur connecté (null = non connecté / mode fichier) — repeint par
+      `setUser`, relu par le tiroir pour son en-tête. */
+  private userName: string | null = null;
   private host: ShellHost;
   current: string | null = null;
 
@@ -265,6 +299,10 @@ export class Shell {
     actions.appendChild(this.fileActionsEl);
     this.undoBtn = iconBtn(I18n.t("shell.topbar.undo"), '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-5"/>', () => this.host.onUndo?.()); this.undoBtn.disabled = true;
     this.redoBtn = iconBtn(I18n.t("shell.topbar.redo"), '<path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h5"/>', () => this.host.onRedo?.()); this.redoBtn.disabled = true;
+    // `topbar-history` : ces deux-là quittent la topbar en responsive — le PIED du tiroir les reprend
+    // (cf. @media 760px). Une classe plutôt qu'un style inline : `setRestMode` pilote déjà leur `display`,
+    // et deux commandes inline sur la même propriété s'écraseraient l'une l'autre.
+    this.undoBtn.classList.add("topbar-history"); this.redoBtn.classList.add("topbar-history");
     actions.append(this.undoBtn, this.redoBtn);
     // pastille utilisateur (mode API) : « connecté en tant que … » — masquée par défaut. BOUTON (et non
     // un simple <span>) : le clic ouvre la modale d'infos (le nom disparaît en responsive, seule l'icône
@@ -275,6 +313,18 @@ export class Shell {
     this.userChip.onclick = () => this.host.onUserInfo?.();
     actions.appendChild(this.userChip);
     actions.appendChild(this.buildSettingsMenu());
+    // BURGER (responsive) : DERNIER de la rangée, donc au bord de l'écran — le pouce y arrive sans
+    // traverser la topbar. Masqué au-dessus du breakpoint par le CSS (jamais par un style inline : la
+    // bascule est purement une question de largeur, aucun état applicatif ne la commande).
+    // 🚨 Règle (A) : AUCUN badge dessus — il ne représente rien de terminal (la maquette en proposait
+    // un, agrégé ; la décision utilisateur du 2026-08-20 tranche contre).
+    this.burgerBtn = document.createElement("button"); this.burgerBtn.type = "button";
+    this.burgerBtn.className = "icon-btn topbar-burger topbar-needs-doc";
+    this.burgerBtn.innerHTML = Icons.MENU;
+    this.burgerBtn.title = I18n.t("shell.nav.menu"); this.burgerBtn.setAttribute("aria-label", I18n.t("shell.nav.menu"));
+    this.burgerBtn.setAttribute("aria-haspopup", "dialog");
+    this.burgerBtn.onclick = () => this.drawer.toggle();
+    actions.appendChild(this.burgerBtn);
 
     topbar.append(brand, tabs, actions);
 
@@ -290,16 +340,53 @@ export class Shell {
     this.statusEls.entities = stat(I18n.t("shell.status.entitiesLabel") + ' <strong>0</strong>').querySelector("strong")!;
     this.statusEls.lastSave = stat(I18n.t("shell.status.lastSaveLabel") + ' <strong>—</strong>').querySelector("strong")!;
 
+    // ---- BARRE DE VUES (niveau 2) ----
+    // Posée APRÈS la barre de statut : en mode API celle-ci est masquée, la barre de vues vient donc
+    // directement sous la topbar comme dans la maquette ; en mode fichier le mince bandeau de statut
+    // s'intercale. Elle N'EST PAS sticky — la barre de statut l'est déjà à `top:56px` et deux collants
+    // au même offset se chevaucheraient au défilement (l'ancienne sous-navigation, en en-tête de vue,
+    // défilait elle aussi).
+    const viewsBar = document.createElement("div");
+    viewsBar.className = "views-bar topbar-needs-doc";   // neutralisée tant qu'aucun document n'est ouvert
+    viewsBar.setAttribute("role", "tablist");
+    viewsBar.setAttribute("aria-label", I18n.t("shell.nav.views"));
+    viewsBar.style.display = "none";                     // peinte par renderNav() dès qu'il y a un domaine actif
+
     const main = document.createElement("main");   // styles pilotés par dc-manager.css (padding, max-width, :has full-bleed)
 
-    root.append(topbar, statusbar, main, this.buildWelcome());
-    this.tabsEl = tabs; this.mainEl = main; this.docNameEl = docName;
-    // fermeture des menus déroulants d'onglets au clic à l'extérieur (piège ③) : UN SEUL écouteur GÉNÉRALISÉ à
-    // TOUS les menus (responsive + groupes) — ferme chaque menu dont la cible du clic n'est pas un descendant.
-    document.addEventListener("click", (e) => { const t = e.target as Node; this.tabDropdowns.forEach((dd) => { if (!dd.contains(t)) dd.classList.remove("open"); }); });
+    root.append(topbar, statusbar, viewsBar, main, this.buildWelcome());
+    this.tabsEl = tabs; this.viewsBarEl = viewsBar; this.mainEl = main; this.docNameEl = docName;
+    // TIROIR responsive : instancié ici (une seule fois) et branché par son interface hôte — le Shell
+    // n'en connaît que `element` / `toggle` / `close` / `refresh` (principe n°2).
+    this.drawer = new ShellDrawer(this.drawerHost());
+    root.appendChild(this.drawer.element);
     // navigation par l'URL (#nom) : back/forward du navigateur ou hash édité → bascule d'onglet (si ≠ courant).
-    // `resolveHash` EXCLUT les groupes (piège ①) et accepte les sous-vues (piège ⑤ : #contacts ouvre la sous-page).
+    // `resolveHash` EXCLUT les DOMAINES (piège ① : un domaine n'a pas de hash) et accepte les sous-vues
+    // (piège ⑤ : #contacts ouvre la sous-page).
     window.addEventListener("hashchange", () => { const v = ShellNav.resolveHash(location.hash, this.navLookup()); if (v && v !== this.current) this.switchView(v); });
+  }
+
+  /** Contrat du TIROIR (cf. `ShellDrawer`) : tout ce qu'il a le droit de demander, et rien de plus. Il ne
+      voit ni le registre des vues, ni les droits, ni le Store — seulement la structure déjà résolue. */
+  private drawerHost(): ShellDrawerHost {
+    return {
+      nav: () => this.nav,
+      currentView: () => this.current,
+      goToView: (name) => this.switchView(name),
+      viewBadge: (name) => this.badgeValue(name),
+      userLabel: () => this.userName,
+      onUserInfo: () => this.host.onUserInfo?.(),
+      saveState: () => this.saveStateValue,
+      saveVisible: () => !this.restMode,
+      historyVisible: () => !this.restMode,
+      canUndo: () => this.canUndoValue,
+      canRedo: () => this.canRedoValue,
+      onUndo: () => this.host.onUndo?.(),
+      onRedo: () => this.host.onRedo?.(),
+      // Le tiroir DÉLÈGUE au déclencheur de la topbar (qui reste affiché en responsive) : le panneau des
+      // réglages est ancré à ce bouton, l'ouvrir autrement le peindrait hors de l'écran.
+      onSettings: () => this.settingsBtn?.click(),
+    };
   }
 
   /** Fabrique un toggle SLIDER `.mode-switch` (case cachée + piste) — contrôle PARTAGÉ par la source de
@@ -322,6 +409,7 @@ export class Shell {
   private buildSettingsMenu(): HTMLElement {
     const wrap = document.createElement("div"); wrap.className = "settings-menu";
     const btn = document.createElement("button"); btn.type = "button"; btn.className = "icon-btn"; btn.title = I18n.t("shell.settings.title"); btn.setAttribute("aria-haspopup", "menu");
+    this.settingsBtn = btn;   // le pied du TIROIR responsive délègue à ce bouton (panneau ancré à lui)
     // Réglages UI/utilisateur : icône « double slider empilé » (deux curseurs horizontaux à positions distinctes) —
     // le rouage denté est désormais réservé au groupe « Paramètres » (contacts + notifications), cf. Icons.SETTINGS.
     btn.appendChild(svgIcon('<line x1="3" y1="8" x2="14" y2="8"/><line x1="18" y1="8" x2="21" y2="8"/><circle cx="16" cy="8" r="2"/><line x1="3" y1="16" x2="8" y2="16"/><line x1="12" y1="16" x2="21" y2="16"/><circle cx="10" cy="16" r="2"/>'));
@@ -581,171 +669,217 @@ export class Shell {
     return body;
   }
 
-  /** Enregistre un GROUPE d'onglet (kind:"group") : bouton d'onglet TOUJOURS DÉROULANT qui liste ses `children`
-      (de vraies sous-vues `kind:"secondary"` déclarées à part avec `parent` = ce groupe). Le groupe N'EST PAS une
-      vue : ni <section>, ni corps, ni hash (piège ①) — cliquer son bouton déroule le menu, seuls ses enfants
-      naviguent. À appeler comme `addView` (avant `build`) ; l'ordre d'enregistrement fixe la position de l'onglet. */
-  addGroup(def: ShellView): void {
-    this.groups.set(def.name, { def });
-    this.order.push(def.name);
-  }
-
-  /** Déclarations de navigation (vues + groupes) dans l'ordre des onglets — alimente les helpers PURS `ShellNav`. */
-  private orderedDecls(): ShellNavView[] {
-    return this.order.map((nm) => {
-      const g = this.groups.get(nm);
-      if (g) return { name: nm, label: g.def.label, kind: "group", parent: g.def.parent, children: g.def.children };
-      const v = this.views.get(nm)!;
-      return { name: nm, label: v.def.label, kind: v.def.kind, parent: v.def.parent };
-    });
-  }
-
-  /** Carte `nom → { parent, kind }` (vues + groupes) pour remonter aux ancêtres / résoudre un hash (cf. ShellNav). */
+  /** Carte `nom → { parent, kind }` (vues + DOMAINES) pour résoudre un hash (cf. ShellNav).
+      🚨 Les DOMAINES y figurent avec `kind:"domain"` — non pas parce qu'ils navigueraient, mais
+      justement pour que `resolveHash` les REFUSE EXPLICITEMENT : un `#reseau` bookmarké ne doit
+      ouvrir aucune vue. S'en remettre à leur simple absence de la carte marcherait tant qu'aucun
+      domaine ne porte le nom d'une vue — une coïncidence qu'on ne veut pas avoir à surveiller. */
   private navLookup(): ShellNavLookup {
     const m: ShellNavLookup = {};
     this.views.forEach((v, n) => { m[n] = { parent: v.def.parent, kind: v.def.kind }; });
-    this.groups.forEach((g, n) => { m[n] = { parent: g.def.parent, kind: "group" }; });
+    for (const d of NAV_DOMAINS) m[d.name] = { kind: "domain" };
     return m;
   }
 
-  /** Construit la topbar (onglets principaux) et toutes les en-têtes de vue. À appeler après tous les addView. */
+  /** Ce que `NavModel` a besoin de savoir des vues ENREGISTRÉES (sous-ensemble de `ShellView`).
+      `hasCount` dit seulement que la vue DÉCLARE un compteur : la VALEUR reste lue ici, au rendu. */
+  private navViewDecls(): NavViewDecl[] {
+    const out: NavViewDecl[] = [];
+    this.views.forEach((v, name) => out.push({ name, label: v.def.label, icon: v.def.icon, hasCount: !!v.def.count }));
+    return out;
+  }
+
+  /** Structure du menu RÉSOLUE pour les droits COURANTS (les prédicats `visible` sont relus à chaque appel). */
+  private resolveNav(): ResolvedNav {
+    return NavModel.resolve(NAV_DOMAINS, this.navViewDecls(), (name) => this.isViewVisible(name));
+  }
+
+  /** Construit le menu (niveaux 1 et 2) et toutes les en-têtes de vue. À appeler après tous les addView. */
   build(): void {
-    this.tabsEl.innerHTML = "";
-    this.countBadges = [];
     this.conditionalActions = [];                        // réenregistrés par buildHeader (les anciens boutons partent avec l'en-tête)
-    this.viewNavEls = []; this.groupNavEls = [];         // idem : le registre de VISIBILITÉ suit les nœuds qu'on reconstruit
-    this.tabDropdowns = [];                              // réinitialisé : le listener de clic extérieur lit ce tableau
-    this.tabGroupEls.forEach((el) => el.remove()); this.tabGroupEls = [];   // purge d'un éventuel build précédent
-    // onglets principaux (vues non secondaires, hors GROUPES), dans l'ordre d'enregistrement
-    this.order.forEach((nm) => {
-      if (this.groups.has(nm)) return;                  // les groupes sont rendus HORS .tabs (leur menu déborde du clip overflow)
-      const v = this.views.get(nm)!; if (v.def.kind === "secondary") return;
-      const btn = document.createElement("button"); btn.type = "button"; btn.className = "tab"; btn.dataset.view = nm;
-      // Barre DESKTOP : ICÔNE SEULE si la vue en déclare une (le libellé passe en title + aria-label — a11y
-      // obligatoire pour un bouton sans texte) ; sinon repli sur le TEXTE (comportement historique).
-      if (v.def.icon) {
-        btn.classList.add("tab-icon");
-        btn.innerHTML = '<span class="gi" aria-hidden="true">' + v.def.icon + "</span>";
-        btn.setAttribute("aria-label", v.def.label); btn.title = v.def.label;
-      } else {
-        btn.appendChild(document.createTextNode(v.def.label + " "));
-      }
-      if (v.def.count) { const badge = document.createElement("span"); badge.className = "tab-count"; btn.appendChild(badge); this.countBadges.push({ name: nm, el: badge }); }
-      btn.onclick = () => this.switchView(nm);
-      v.tabBtn = btn; this.tabsEl.appendChild(btn);
-      this.viewNavEls.push({ name: nm, el: btn });   // masquable par `ViewDef.visible` (droit de lecture)
-    });
-    this.buildTabsDropdown();   // version « menu déroulant » des mêmes onglets + enfants de groupes (affichée en responsive)
-    this.buildTabGroups();      // boutons d'onglet GROUPE (déroulants) — insérés en topbar, hors du clip de .tabs
-    // en-têtes de vue
-    this.views.forEach((v) => this.buildHeader(v));
-    this.refreshCounts();
+    this.navSignature = "";                              // force une reconstruction complète des barres
+    this.views.forEach((v) => this.buildHeader(v));      // en-têtes de vue (fil d'Ariane + actions)
+    this.refreshCounts();                                // → renderNav() peint les deux barres
   }
 
-  /** Menu déroulant CUSTOM (pas un <select> natif) reprenant les onglets principaux — affiché à la place de la
-      barre d'onglets en responsive (gain de place, accessible au pouce). Synchronisé par switchView/refreshCounts.
-      Les GROUPES y sont APLATIS (piège ② : en-tête non cliquable + enfants indentés) — sinon leurs sous-pages
-      seraient inaccessibles en mobile (la barre .tabs, qui porte les boutons de groupe, est masquée). */
-  private buildTabsDropdown(): void {
-    if (this.tabsDdEl) { this.tabsDdEl.remove(); this.tabsDdEl = null; this.tabsDdLabelEl = null; }
-    const dd = document.createElement("div"); dd.className = "tabs-dd";
-    const trigger = document.createElement("button"); trigger.type = "button"; trigger.className = "tabs-dd-trigger"; trigger.setAttribute("aria-haspopup", "menu");
-    const lbl = document.createElement("span"); lbl.className = "tabs-dd-label"; lbl.textContent = I18n.t("shell.tabs.menu");
-    const caret = document.createElement("span"); caret.className = "tabs-dd-caret"; caret.textContent = "▾";
-    trigger.append(lbl, caret);
-    const menu = document.createElement("div"); menu.className = "tabs-dd-menu"; menu.setAttribute("role", "menu");
-    ShellNav.responsiveMenu(this.orderedDecls()).forEach((e) => {
-      if (e.role === "group") {   // en-tête de groupe : repère non navigable (le groupe n'est pas une vue)
-        const head = document.createElement("div"); head.className = "tabs-dd-group"; head.textContent = e.label; menu.appendChild(head);
-        this.groupNavEls.push({ children: this.groups.get(e.name)?.def.children || [], el: head });   // en-tête masqué si tous ses enfants le sont
-        return;
-      }
-      const it = document.createElement("button"); it.type = "button"; it.className = "tabs-dd-item" + (e.depth ? " tabs-dd-item--child" : ""); it.dataset.view = e.name; it.setAttribute("role", "menuitem");
-      const src = this.views.get(e.name);   // source de l'icône ET du badge de comptage (recollé par nom)
-      if (src && src.def.icon) { const gi = document.createElement("span"); gi.className = "gi"; gi.setAttribute("aria-hidden", "true"); gi.innerHTML = src.def.icon; it.appendChild(gi); }   // menu : icône + libellé
-      it.appendChild(document.createTextNode(e.label + " "));
-      if (src && src.def.count) { const badge = document.createElement("span"); badge.className = "tab-count"; it.appendChild(badge); this.countBadges.push({ name: e.name, el: badge }); }
-      it.onclick = () => { dd.classList.remove("open"); this.switchView(e.name); };
-      menu.appendChild(it);
-      this.viewNavEls.push({ name: e.name, el: it });   // même masquage que l'onglet desktop correspondant
-    });
-    trigger.onclick = (e) => { e.stopPropagation(); this.closeOtherDropdowns(dd); dd.classList.toggle("open"); };
-    dd.append(trigger, menu);
-    this.tabsEl.insertAdjacentElement("afterend", dd);
-    this.tabsDdEl = dd; this.tabsDdLabelEl = lbl;
-    this.tabDropdowns.push(dd);
+  /* ============================================================================
+     RENDU DU MENU — deux barres, une seule vérité (`NavModel`).
+     ============================================================================ */
+
+  /** SIGNATURE de la structure résolue : domaines × vues × aplatissement. Deux structures de même
+      signature se peignent à l'identique, donc rien à reconstruire. */
+  private static signatureOf(nav: ResolvedNav): string {
+    return (nav.flattened ? "flat|" : "") + nav.domains.map((d) => d.name + ">" + d.views.map((v) => v.name).join(",")).join(";");
   }
 
-  /** Boutons d'onglet des GROUPES (kind:"group") : un bouton `.tab` + un caret + un menu déroulant listant les
-      sous-vues enfants. Insérés en TOPBAR après le menu responsive (donc HORS de `.tabs` : son `overflow` rognerait
-      le menu qui déborde vers le bas). Le bouton NE NAVIGUE PAS (piège ①) — il déroule ; seuls les enfants naviguent. */
-  private buildTabGroups(): void {
-    let anchor: Element = this.tabsDdEl || this.tabsEl;
-    this.order.forEach((nm) => {
-      const g = this.groups.get(nm); if (!g) return;
-      const wrap = document.createElement("div"); wrap.className = "tab-group";
-      const btn = document.createElement("button"); btn.type = "button"; btn.className = "tab"; btn.dataset.group = nm; btn.setAttribute("aria-haspopup", "menu");
-      // Onglet GROUPE sur la barre desktop : ICÔNE SEULE (+ caret) si déclarée ; libellé porté par title + aria-label.
-      if (g.def.icon) {
-        btn.classList.add("tab-icon");
-        btn.innerHTML = '<span class="gi" aria-hidden="true">' + g.def.icon + "</span>";
-        btn.setAttribute("aria-label", g.def.label); btn.title = g.def.label;
-      } else {
-        btn.appendChild(document.createTextNode(g.def.label + " "));
-      }
-      const caret = document.createElement("span"); caret.className = "tabs-dd-caret"; caret.textContent = "▾"; btn.appendChild(caret);
-      const menu = document.createElement("div"); menu.className = "tabs-dd-menu"; menu.setAttribute("role", "menu");
-      (g.def.children || []).forEach((childName) => {
-        const cv = this.views.get(childName); if (!cv) return;   // enfant absent (mode-dépendant) → simplement omis
-        const it = document.createElement("button"); it.type = "button"; it.className = "tabs-dd-item"; it.dataset.view = childName; it.setAttribute("role", "menuitem");
-        if (cv.def.icon) { const gi = document.createElement("span"); gi.className = "gi"; gi.setAttribute("aria-hidden", "true"); gi.innerHTML = cv.def.icon; it.appendChild(gi); }   // menu de groupe : icône + libellé
-        it.appendChild(document.createTextNode(cv.def.label + " "));
-        if (cv.def.count) { const badge = document.createElement("span"); badge.className = "tab-count"; it.appendChild(badge); this.countBadges.push({ name: childName, el: badge }); }
-        it.onclick = () => { wrap.classList.remove("open"); this.switchView(childName); };
-        menu.appendChild(it);
-        this.viewNavEls.push({ name: childName, el: it });   // enfant de groupe : masqué comme partout ailleurs
-      });
-      // toggle : ferme les AUTRES menus puis bascule le sien ; stopPropagation évite la fermeture immédiate par le
-      // listener document (piège ③ — sinon le clic du bouton refermerait aussitôt le menu qu'il vient d'ouvrir).
-      btn.onclick = (e) => { e.stopPropagation(); this.closeOtherDropdowns(wrap); wrap.classList.toggle("open"); };
-      wrap.append(btn, menu);
-      anchor.insertAdjacentElement("afterend", wrap); anchor = wrap;
-      g.tabBtn = btn; g.ddEl = wrap;
-      this.tabDropdowns.push(wrap); this.tabGroupEls.push(wrap);
-      this.groupNavEls.push({ children: g.def.children || [], el: wrap });   // onglet-groupe masqué si aucun enfant n'est lisible
-    });
+  /** Recalcule la structure et met les barres en phase. Appelée par `refreshCounts()`, donc à chaque
+      bascule de vue, rafraîchissement et changement de droits — d'où la reconstruction CONDITIONNELLE
+      (cf. `navSignature`) : reconstruire le DOM à chaque appel volerait le focus clavier. */
+  private renderNav(): void {
+    this.nav = this.resolveNav();
+    const signature = Shell.signatureOf(this.nav);
+    const structureChanged = signature !== this.navSignature;
+    if (structureChanged) { this.navSignature = signature; this.buildDomainBar(); this.viewsBarDomain = null; }
+    // Domaine ACTIF = celui de la vue courante ; à défaut (aucune vue active encore, ou vue rattachée à
+    // rien) le premier domaine visible — la barre de vues ne reste jamais vide sans raison.
+    const active = this.activeDomainName();
+    if (structureChanged || active !== this.viewsBarDomain) { this.viewsBarDomain = active; this.buildViewsBar(); }
+    this.applyNavActive();
   }
 
-  /** Ferme tous les menus déroulants d'onglets SAUF celui passé (exclusivité mutuelle à l'ouverture). */
-  private closeOtherDropdowns(keep: HTMLElement): void {
-    this.tabDropdowns.forEach((dd) => { if (dd !== keep) dd.classList.remove("open"); });
+  /** Nom du domaine à surligner / dont peindre la barre de vues (null si plus aucun domaine visible). */
+  private activeDomainName(): string | null {
+    const current = this.current;
+    if (current) {
+      const direct = NavModel.activeDomain(current, this.nav);
+      if (direct) return direct;
+      // REPLI : la vue active n'est rattachée à aucun domaine visible — anomalie que le verrou
+      // d'exhaustivité de `NavModel` interdit, mais que le rendu doit traverser sans planter. On se
+      // rabat sur le domaine de sa vue PARENTE historique (`ShellNav.activeTab`), qui reste déclarée.
+      const def = this.views.get(current)?.def;
+      if (def) {
+        const viaParent = NavModel.activeDomain(ShellNav.activeTab(def), this.nav);
+        if (viaParent) return viaParent;
+      }
+    }
+    return this.nav.domains[0] ? this.nav.domains[0].name : null;
+  }
+
+  /** BARRE DE NIVEAU 1. Nominalement les DOMAINES (icône + libellé TOUJOURS visible — la maquette
+      tranche « libellés > icônes » : l'icône seule n'est plus le régime normal, elle ne revient que
+      sous ~1000 px, par le CSS). Quand un SEUL domaine est visible (`flattened`), le niveau 1 s'efface
+      et ce sont ses VUES qu'on peint ici : un utilisateur à droits réduits ne doit pas se voir imposer
+      un niveau de menu qui n'offre aucun choix. */
+  private buildDomainBar(): void {
+    this.tabsEl.innerHTML = "";
+    this.badgesLevel1 = [];
+    if (this.nav.flattened) {
+      // 🚨 Ce sont des VUES : elles sont terminales, leur badge est licite — on LIT `v.badge`.
+      for (const view of this.nav.domains[0].views) this.tabsEl.appendChild(this.buildLevel1Button(view.label, view.icon, () => this.switchView(view.name), view.name, view.badge, this.badgesLevel1));
+      return;
+    }
+    for (const domain of this.nav.domains) {
+      // Cliquer un DOMAINE n'ouvre pas une « vue domaine » (il n'y en a pas) : il active sa PREMIÈRE
+      // VUE VISIBLE — piège ① de l'ancien `kind:"group"`, qui déroulait sans jamais naviguer.
+      const first = domain.views[0];
+      // 🚨 Règle (A) : `domain.badge` vaut FAUX par construction (un domaine a des enfants). On le lit
+      // quand même plutôt que d'écrire `false` : la règle n'a qu'une source, et elle n'est pas ici.
+      this.tabsEl.appendChild(this.buildLevel1Button(I18n.t(domain.label), domain.icon, () => this.switchView(first.name), domain.name, domain.badge, this.badgesLevel1));
+    }
+  }
+
+  /** Bouton de la barre de niveau 1 (domaine ou, en régime aplati, vue). `key` = nom porté par
+      `data-nav`, utilisé par `applyNavActive` pour poser l'état actif sans reconstruire. */
+  private buildLevel1Button(label: string, iconName: string | undefined, onClick: () => void, key: string, badge: boolean, registry: Array<{ name: string; el: HTMLElement }>): HTMLButtonElement {
+    const btn = document.createElement("button"); btn.type = "button"; btn.className = "tab tab-domain"; btn.dataset.nav = key;
+    // Deux provenances d'icône, volontairement distinguées par leur FORME plutôt que par un drapeau :
+    // un DOMAINE porte le NOM d'une constante (`NAV_DOMAINS`, module pur — il ne peut pas importer le
+    // registre), une VUE porte le SVG déjà résolu par `main.ts`. Un nom inconnu rend "" (pastille sans
+    // glyphe) au lieu d'écrire le nom en clair dans le DOM.
+    const icon = iconName && iconName.startsWith("<svg") ? iconName : Icons.byName(iconName);
+    if (icon) { const gi = document.createElement("span"); gi.className = "gi"; gi.setAttribute("aria-hidden", "true"); gi.innerHTML = icon; btn.appendChild(gi); }
+    const text = document.createElement("span"); text.className = "tab-label"; text.textContent = label; btn.appendChild(text);
+    // Le libellé est aussi porté en `title`/`aria-label` : sous ~1000 px le CSS masque `.tab-label` et
+    // le bouton devient une icône nue — un bouton sans texte accessible serait muet aux lecteurs d'écran.
+    btn.title = label; btn.setAttribute("aria-label", label);
+    if (badge) { const el = document.createElement("span"); el.className = "tab-count"; btn.appendChild(el); registry.push({ name: key, el }); }
+    btn.onclick = onClick;
+    return btn;
+  }
+
+  /** BARRE DE NIVEAU 2 — les vues du domaine actif, en pastilles, séparateurs compris. C'est le pattern
+      UNIQUE de sous-navigation : il remplace À LA FOIS l'ancien groupe déroulant « Paramètres » et les
+      liens d'en-tête de toutes les autres sous-vues. Masquée quand elle n'a rien à dire : domaine
+      `direct` (une seule vue) ou structure `flattened` (les vues sont déjà au niveau 1). */
+  private buildViewsBar(): void {
+    this.viewsBarEl.innerHTML = "";
+    this.badgesLevel2 = [];
+    const domain = this.nav.flattened ? null : this.nav.domains.find((d) => d.name === this.viewsBarDomain);
+    if (!domain || domain.direct) { this.viewsBarEl.style.display = "none"; return; }
+    this.viewsBarEl.style.display = "";
+    for (const view of domain.views) {
+      // Séparateur : regroupement visuel INTERNE au domaine (ex. `… | VMs · Clusters | Wifi`). Jamais en
+      // tête de barre — `NavModel` l'a déjà normalisé, on se contente de le peindre.
+      if (view.separatorBefore) { const sep = document.createElement("i"); sep.className = "view-sep"; sep.setAttribute("aria-hidden", "true"); this.viewsBarEl.appendChild(sep); }
+      this.viewsBarEl.appendChild(this.buildViewPill(view));
+    }
+    // Navigation CLAVIER d'un `role="tablist"` : ←/→ pour parcourir, Origine/Fin pour les extrémités.
+    this.viewsBarEl.onkeydown = (e: KeyboardEvent) => this.onViewsBarKey(e);
+  }
+
+  private buildViewPill(view: ResolvedNavView): HTMLButtonElement {
+    const btn = document.createElement("button"); btn.type = "button"; btn.className = "view-tab"; btn.dataset.nav = view.name;
+    btn.setAttribute("role", "tab");
+    btn.setAttribute("aria-controls", "view-" + view.name);
+    const text = document.createElement("span"); text.textContent = view.label; btn.appendChild(text);
+    // 🚨 Règle (A) : `view.badge` — une vue est terminale, son badge est licite. Aucune condition maison.
+    if (view.badge) { const el = document.createElement("span"); el.className = "tab-count"; btn.appendChild(el); this.badgesLevel2.push({ name: view.name, el }); }
+    btn.onclick = () => this.switchView(view.name);
+    return btn;
+  }
+
+  /** Parcours clavier de la barre de vues (contrat ARIA d'un `tablist` horizontal). */
+  private onViewsBarKey(e: KeyboardEvent): void {
+    const keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
+    if (!keys.includes(e.key)) return;
+    const pills = Array.from(this.viewsBarEl.querySelectorAll<HTMLButtonElement>(".view-tab"));
+    if (!pills.length) return;
+    const at = pills.indexOf(document.activeElement as HTMLButtonElement);
+    const next = e.key === "Home" ? 0
+      : e.key === "End" ? pills.length - 1
+      : e.key === "ArrowLeft" ? (at <= 0 ? pills.length - 1 : at - 1)
+      : (at < 0 || at >= pills.length - 1 ? 0 : at + 1);
+    e.preventDefault();
+    pills[next].focus();
+    pills[next].click();   // activation SUIVANT le focus : c'est le comportement attendu d'un tablist simple
+  }
+
+  /** Pose l'état ACTIF sur les deux barres (sans rien reconstruire) + la classe de section. */
+  private applyNavActive(): void {
+    const domain = this.activeDomainName();
+    // Niveau 1 : en régime aplati les boutons portent des NOMS DE VUE (c'est la vue courante qu'on
+    // surligne) ; sinon des noms de DOMAINE.
+    const level1Key = this.nav.flattened ? this.current : domain;
+    this.tabsEl.querySelectorAll<HTMLElement>(".tab").forEach((el) => {
+      const on = !!level1Key && el.dataset.nav === level1Key;
+      el.classList.toggle("active", on);
+      if (on) el.setAttribute("aria-current", "page"); else el.removeAttribute("aria-current");
+    });
+    this.viewsBarEl.querySelectorAll<HTMLElement>(".view-tab").forEach((el) => {
+      const on = el.dataset.nav === this.current;
+      el.classList.toggle("active", on);
+      el.setAttribute("aria-selected", on ? "true" : "false");
+      // Un seul point d'entrée clavier dans le tablist (contrat ARIA) : seule la pastille active est tabulable.
+      el.setAttribute("tabindex", on ? "0" : "-1");
+    });
   }
 
   private buildHeader(v: ViewEntry): void {
     const def = v.def;
     v.header.innerHTML = "";
     const left = document.createElement("div");
+    // FIL D'ARIANE « domaine › vue » (§ 02 de la maquette). Il REMPLACE le bouton « ← retour » : celui-ci
+    // ne disait que « d'où je viens », alors que la barre de vues rend le retour trivial et que la vraie
+    // question, sur une app à 28 vues, est « où suis-je ». Simple REPÈRE, non cliquable : le domaine n'est
+    // pas une destination (il n'a pas de vue à lui — piège ①).
+    const domain = NavModel.domainOf(def.name, NAV_DOMAINS);
+    if (domain) {
+      const decl = NAV_DOMAINS.find((d) => d.name === domain)!;
+      const crumb = document.createElement("div"); crumb.className = "view-crumb";
+      const dom = document.createElement("span"); dom.className = "view-crumb-domain"; dom.textContent = I18n.t(decl.label);
+      const sep = document.createElement("span"); sep.className = "view-crumb-sep"; sep.setAttribute("aria-hidden", "true"); sep.textContent = I18n.t("shell.nav.crumbSeparator");
+      const leaf = document.createElement("span"); leaf.textContent = def.label;
+      crumb.append(dom, sep, leaf);
+      left.appendChild(crumb);
+    }
     const title = document.createElement("div"); title.className = "view-title";
     const caret = document.createElement("span"); caret.textContent = "▸"; title.append(caret, document.createTextNode(" " + (def.title || def.label)));
     left.appendChild(title);
     // Légendes d'onglet (sous-titres) RETIRÉES de l'UI : elles surchargeaient l'en-tête. Le `subtitle` reste
     // disponible dans la définition (documentation des vues) mais n'est plus affiché sous le titre.
     const acts = document.createElement("div"); acts.className = "view-actions";
-    // bouton « ← retour » (sous-vue → parent)
-    if (def.parent && this.views.has(def.parent)) {
-      const p = this.views.get(def.parent)!.def;
-      const back = document.createElement("button"); back.type = "button"; back.className = "btn btn-ghost"; back.textContent = I18n.t("shell.header.back", { label: p.label }); back.title = I18n.t("shell.header.backTitle", { label: p.label });
-      back.onclick = () => this.switchView(def.parent!); acts.appendChild(back);
-    }
-    // liens vers les sous-vues du domaine (avec badge de comptage)
-    (def.links || []).forEach((ln) => {
-      const target = this.views.get(ln); if (!target) return;
-      const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-ghost"; b.title = target.def.label;
-      b.appendChild(document.createTextNode(target.def.label + " "));
-      if (target.def.count) { const badge = document.createElement("span"); badge.className = "tab-count"; b.appendChild(badge); this.countBadges.push({ name: ln, el: badge }); }
-      b.onclick = () => this.switchView(ln); acts.appendChild(b);
-      this.viewNavEls.push({ name: ln, el: b });   // lien d'en-tête : c'est AUSSI une navigation vers la sous-vue
-    });
+    // ⚠ Ni bouton « ← retour », ni liens de sous-vues : la BARRE DE VUES (niveau 2) les remplace
+    // intégralement (décision § 05-2 de la maquette — un seul mécanisme de sous-navigation).
     // boutons secondaires (ghost) — ex. « Ouvrir un fichier de faces »
     (def.extraActions || []).forEach((a) => {
       const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-ghost"; b.textContent = a.label; if (a.title) b.title = a.title;
@@ -773,23 +907,18 @@ export class Shell {
     try { return !!v.def.visible(); } catch (e) { console.error(e); return false; }
   }
 
-  /** Première vue ACCESSIBLE dans l'ordre des onglets — cible du repli. Les onglets PRINCIPAUX priment
-      (c'est une barre de navigation, pas une sous-page) ; à défaut, n'importe quelle vue visible fait
-      l'affaire — un utilisateur qui n'a le droit de lire qu'une sous-page doit tout de même la voir.
+  /** Première vue ACCESSIBLE — cible du repli. L'ordre de référence est celui du MENU (domaines puis
+      vues, cf. `NAV_DOMAINS`), pas l'ordre d'enregistrement : le repli doit atterrir là où l'utilisateur
+      s'attend à arriver, c'est-à-dire sur la première entrée qu'il VOIT.
+      Repli du repli : une vue enregistrée mais rattachée à aucun domaine (anomalie interdite par le
+      verrou d'exhaustivité) reste tout de même atteignable — mieux vaut une navigation étrange qu'une
+      application vide.
       PUBLIQUE depuis le correctif « droits partiels » : l'hôte s'en sert pour la restauration de vue
       d'après-droits (`core/ViewRestoration`), qui pose la MÊME question que le repli interne. */
   firstVisibleView(): string | null {
-    const registered = this.order.filter((nm) => this.views.has(nm));
-    const primary = registered.find((nm) => this.views.get(nm)!.def.kind !== "secondary" && this.isViewVisible(nm));
-    return primary || registered.find((nm) => this.isViewVisible(nm)) || null;
-  }
-
-  /** Applique la visibilité de TOUS les chemins de navigation (onglets, menus, liens d'en-tête) puis des
-      repères de groupe. Appelée par `refreshCounts()`, donc à chaque changement d'onglet, de vue et de
-      droits — aucun point d'appel supplémentaire à retenir. */
-  private applyViewVisibility(): void {
-    this.viewNavEls.forEach(({ name, el }) => { el.style.display = this.isViewVisible(name) ? "" : "none"; });
-    this.groupNavEls.forEach(({ children, el }) => { el.style.display = children.some((c) => this.isViewVisible(c)) ? "" : "none"; });
+    const first = NavModel.firstVisibleView(this.resolveNav());
+    if (first) return first;
+    return this.order.find((nm) => this.views.has(nm) && this.isViewVisible(nm)) || null;
   }
 
   /** REPLI : l'onglet actif vient d'être masqué (droits retirés à chaud, ou bascule de politique) → on
@@ -804,7 +933,7 @@ export class Shell {
   }
 
   switchView(name: string): void {
-    if (!this.views.has(name)) return;   // seules les VUES naviguent ; un groupe (kind:"group") n'est pas dans this.views (piège ①)
+    if (!this.views.has(name)) return;   // seules les VUES naviguent ; un DOMAINE n'est pas dans this.views (piège ①)
     // Vue MASQUÉE (droit de lecture absent) : on ne l'affiche pas — on se replie sur la première vue
     // accessible. Le cas se produit aussi bien sur un #hash bookmarké que sur une navigation
     // programmatique (« Localiser » vers le Datacenter, retour après ouverture d'un document). Aucune
@@ -816,19 +945,11 @@ export class Shell {
     }
     this.current = name;
     const active = this.views.get(name)!;
-    const activeTab = ShellNav.activeTab(active.def);
-    this.views.forEach((v, n) => {
-      if (v.tabBtn) v.tabBtn.classList.toggle("active", n === activeTab);
-      v.section.classList.toggle("active", n === name);
-    });
-    // surlignage de l'onglet GROUPE : l'état « actif » d'un groupe = l'un de ses enfants est la vue active (piège ①).
-    const group = ShellNav.ancestorGroup(name, this.navLookup());
-    this.groups.forEach((g, gname) => { if (g.tabBtn) g.tabBtn.classList.toggle("active", gname === group); });
-    // synchronise le menu déroulant (responsive) : libellé du déclencheur + item actif. Le libellé reflète l'onglet
-    // parent (une sous-vue de primaire → le primaire ; un enfant de groupe → le groupe) ; l'item actif = la vue courante.
-    const av = this.views.get(activeTab) || (group ? this.groups.get(group) : undefined);
-    if (this.tabsDdLabelEl && av) this.tabsDdLabelEl.textContent = av.def.label;
-    if (this.tabsDdEl) this.tabsDdEl.querySelectorAll(".tabs-dd-item").forEach((it) => { const dv = (it as HTMLElement).dataset.view; it.classList.toggle("active", dv === activeTab || dv === name); });
+    this.views.forEach((v, n) => { v.section.classList.toggle("active", n === name); });
+    // Le TIROIR se ferme sur toute navigation, y compris programmatique (« Localiser en 3D » depuis une
+    // fiche, retour d'un deep-link) : un panneau resté ouvert par-dessus la vue qu'on vient d'ouvrir est
+    // le défaut classique des menus mobiles.
+    this.drawer.close();
     if (active.def.onShow) { try { active.def.onShow(active.body); } catch (e) { console.error(e); } }
     this.refreshCounts();
     // reflète l'onglet ACTIF dans l'URL (#nom) → bookmarkable. Le listener hashchange (constructeur) ne re-switche
@@ -847,21 +968,36 @@ export class Shell {
     this.refreshCounts();
   }
 
-  /** Met à jour tous les badges de comptage (onglets topbar + liens d'en-tête) : valeur, teinte d'alerte
-      (warn/err) et VISIBILITÉ (masqué à 0 — pas de pastille « 0 »). */
+  /** Valeur + teinte du badge d'une vue, ou null s'il n'y a RIEN à peindre (pas de `count()`, ou compte
+      à 0 — pas de pastille « 0 » : c'est du bruit, jamais une alerte). Point de lecture UNIQUE du
+      comptage : les deux barres et le tiroir passent tous par ici. */
+  private badgeValue(name: string): { count: number; tone: string | null } | null {
+    const v = this.views.get(name);
+    if (!v || !v.def.count) return null;
+    let n = 0;
+    try { n = v.def.count(); } catch (e) { console.error(e); return null; }
+    if (!(n > 0)) return null;
+    let tone: string | null = null;
+    if (v.def.countClass) { try { tone = v.def.countClass(); } catch (e) { console.error(e); } }
+    return { count: n, tone };
+  }
+
+  /** Met le menu et toutes les pastilles en phase : STRUCTURE (les droits peuvent avoir changé),
+      compteurs, tiroir ouvert, boutons d'en-tête conditionnels — puis repli si la vue active vient
+      d'être masquée. Appelée à chaque bascule d'onglet, rafraîchissement de vue et changement de droits :
+      un seul moment d'évaluation pour tout ce qui est conditionnel. */
   refreshCounts(): void {
-    // VISIBILITÉ des vues (droits de LECTURE) d'abord : les pastilles et actions qui suivent portent
-    // sur des chemins de navigation dont on vient de fixer l'affichage. Voir `applyViewVisibility`.
-    this.applyViewVisibility();
-    this.countBadges.forEach(({ name, el }) => {
-      const v = this.views.get(name); if (!v || !v.def.count) return;
-      const n = v.def.count();
-      el.textContent = String(n);
-      el.style.display = n > 0 ? "" : "none";   // pastille masquée à 0 (bruit / aucune alerte)
-      const cls = v.def.countClass ? v.def.countClass() : null;
-      el.classList.toggle("warn", cls === "warn");
-      el.classList.toggle("err", cls === "err");
+    // STRUCTURE d'abord : les pastilles qui suivent vivent dans des barres que `renderNav` peut venir
+    // de reconstruire (une vue masquée disparaît de la structure, elle n'est plus « masquée après coup »).
+    this.renderNav();
+    [...this.badgesLevel1, ...this.badgesLevel2].forEach(({ name, el }) => {
+      const badge = this.badgeValue(name);
+      el.textContent = badge ? String(badge.count) : "";
+      el.style.display = badge ? "" : "none";
+      el.classList.toggle("warn", !!badge && badge.tone === "warn");
+      el.classList.toggle("err", !!badge && badge.tone === "err");
     });
+    this.drawer.refresh();   // no-op tiroir fermé
     // Boutons d'en-tête CONDITIONNELS : même moment d'évaluation que les pastilles (un prédicat qui
     // jette ne doit pas faire tomber le rafraîchissement → repli « masqué », journalisé).
     this.conditionalActions.forEach(({ el, visible }) => {
@@ -881,10 +1017,17 @@ export class Shell {
     if (s.entities != null && this.statusEls.entities) this.statusEls.entities.textContent = String(s.entities);
     if (s.lastSave != null && this.statusEls.lastSave) this.statusEls.lastSave.textContent = s.lastSave;
   }
-  setUndoRedo(canUndo: boolean, canRedo: boolean): void { this.undoBtn.disabled = !canUndo; this.redoBtn.disabled = !canRedo; }
+  setUndoRedo(canUndo: boolean, canRedo: boolean): void {
+    this.undoBtn.disabled = !canUndo; this.redoBtn.disabled = !canRedo;
+    // Mémorisé : le PIED du tiroir responsive peint ses propres boutons annuler/rétablir et redemande
+    // ces deux états (le Shell reste leur unique source).
+    this.canUndoValue = canUndo; this.canRedoValue = canRedo;
+    this.drawer.refresh();
+  }
   /** Pastille d'état de sauvegarde : "mem" | "clean" | "dirty" | "dirty-on". */
   setSaveState(state: string): void {
     this.saveDot.className = "save-state-icon " + state;
+    this.saveStateValue = state; this.drawer.refresh();   // l'en-tête du tiroir porte la MÊME pastille
     // bouton « Enregistrer » mis en évidence (`has-unsaved`) dès qu'il y a des modifications non enregistrées
     // (dirty ou dirty-on), comme la référence — pour signaler qu'un save est en attente même avec auto-save actif.
     if (this.saveBtn) this.saveBtn.classList.toggle("has-unsaved", state === "dirty" || state === "dirty-on");
@@ -909,7 +1052,7 @@ export class Shell {
   /** Pastille utilisateur (mode API). `user` = objet SSO (login/nom/prénom/eMail…) ; null = non connecté ; undefined = masquer. */
   setUser(user: { name?: string; prenom?: string; nom?: string; login?: string; email?: string; eMail?: string } | null | undefined): void {
     if (!this.userChip) return;
-    if (user === undefined) { this.userChip.style.display = "none"; return; }
+    if (user === undefined) { this.userChip.style.display = "none"; this.userName = null; this.drawer.refresh(); return; }
     this.userChip.style.display = "";
     // L'ICÔNE est TOUJOURS présente ; le NOM vit dans un `.user-chip-name` que le CSS masque sous le
     // breakpoint responsive de la topbar (comme `.brand-name`/`.doc-name`) — reste alors l'icône seule,
@@ -919,15 +1062,21 @@ export class Shell {
       this.userChip.innerHTML = `<span class="gi">${Icons.USER}</span><span class="user-chip-name">${Html.escape(who)}</span>`;
       this.userChip.title = I18n.t("shell.user.connectedAs", { who }); this.userChip.setAttribute("aria-label", I18n.t("shell.user.connectedAs", { who }));
       this.userChip.classList.remove("user-chip--off");
+      this.userName = who;
     } else {
       const label = I18n.t("shell.user.notConnected");
       this.userChip.innerHTML = `<span class="gi">${Icons.USER}</span><span class="user-chip-name">${Html.escape(label)}</span>`;
       this.userChip.title = I18n.t("shell.user.noSession"); this.userChip.setAttribute("aria-label", I18n.t("shell.user.noSession"));
       this.userChip.classList.add("user-chip--off");
+      this.userName = null;
     }
+    this.drawer.refresh();   // l'en-tête du tiroir affiche la MÊME identité
   }
   /** Mode API : masque Enregistrer/Enregistrer-sous + réglages fichier ; Nouveau/Ouvrir gèrent les documents serveur. */
   setRestMode(on: boolean): void {
+    // Mémorisé pour le TIROIR : il n'affiche ni l'état de sauvegarde ni annuler/rétablir en mode API,
+    // exactement comme la topbar et la barre de statut ci-dessous — même vérité, un seul drapeau.
+    this.restMode = on; this.drawer.refresh();
     // Barre de statut MASQUÉE en mode API : ses champs (fichier, source, dernière sauvegarde) n'ont pas de sens
     // côté serveur (sauvegarde continue, pas de fichier local) → on libère l'espace vertical. Elle n'est plus
     // peuplée non plus (cf. refreshChrome dans main.ts, qui saute setStatus en mode API).

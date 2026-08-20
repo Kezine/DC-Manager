@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="fr" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Menu de l'app — proposition de réorganisation</title>
+<style>
+:root{
+  --bg:#0a0a0a;--bg-2:#111;--bg-3:#161616;--line:#222;--line-2:#2d2d2d;
+  --fg:#e8e8e3;--fg-dim:#9a9a92;--fg-dimmer:#6a6a62;
+  --accent-fill:oklch(0.67 0.19 46);--accent:oklch(0.72 0.175 50);--accent-text:oklch(0.80 0.15 62);--accent-2:#ffaa00;
+  --ok:oklch(0.78 0.15 152);--warn:oklch(0.80 0.13 78);--err:oklch(0.68 0.19 25);--info:oklch(0.72 0.13 240);
+  --mono:ui-monospace,"SF Mono","Menlo","Consolas","Cascadia Mono","Roboto Mono",monospace;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --radius-pill:5px;--control-h:36px;--focus:var(--accent-text);
+}
+[data-theme="light"]{
+  --bg:#f4f4f1;--bg-2:#fff;--bg-3:#ebebe6;--line:#d9d9d3;--line-2:#bcbcb4;
+  --fg:#0a0a0a;--fg-dim:#54544e;--fg-dimmer:#84847c;
+  --accent-fill:oklch(0.57 0.18 42);--accent:oklch(0.58 0.17 45);--accent-text:oklch(0.55 0.18 45);--accent-2:#aa6600;
+  --ok:oklch(0.50 0.13 152);--warn:oklch(0.53 0.12 78);--err:oklch(0.52 0.19 25);--info:oklch(0.50 0.13 240);
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);background-size:24px 24px;opacity:.5}
+a{color:var(--accent-text)}a:hover{color:var(--accent-2)}
+button{font-family:var(--mono)}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:3px}
+svg{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+/* ---------- page de doc ---------- */
+.wrap{position:relative;z-index:1;max-width:1320px;margin:0 auto;padding:26px 18px 90px}
+.doc-head{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;justify-content:space-between;border-bottom:1px solid var(--line);padding-bottom:16px}
+h1{font-size:19px;letter-spacing:.13em;text-transform:uppercase;margin:0}
+h1 span{color:var(--accent-text)}
+.sub{font-family:var(--sans);color:var(--fg-dim);font-size:13px;margin-top:6px;max-width:70ch;letter-spacing:0}
+h2{font-size:13px;letter-spacing:.15em;text-transform:uppercase;margin:0;color:var(--accent-text)}
+.sec{margin-top:40px}
+.sec-head{display:flex;align-items:baseline;gap:12px;margin-bottom:6px}
+.sec-head .n{font-size:11px;color:var(--fg-dimmer)}
+.sec-note{font-family:var(--sans);color:var(--fg-dim);letter-spacing:0;max-width:82ch;margin:6px 0 16px}
+.sec-note b{color:var(--fg)}
+.card{border:1px solid var(--line);background:var(--bg-2);border-radius:8px;overflow:hidden}
+.card+.card{margin-top:16px}
+.card-lb{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg-dimmer)}
+.card-lb .tag{padding:1px 7px;border-radius:var(--radius-pill);border:1px solid var(--line-2);color:var(--fg-dim)}
+.card-lb .tag.bad{color:var(--err);border-color:color-mix(in srgb,var(--err) 45%,transparent)}
+.card-lb .tag.good{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+.tools{display:flex;gap:8px;align-items:center}
+.ghost{height:32px;padding:0 12px;background:transparent;border:1px solid var(--line);border-radius:4px;color:var(--fg-dim);font-size:11px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer}
+.ghost:hover{color:var(--fg);border-color:var(--fg)}
+.ghost.on{color:var(--accent-text);border-color:color-mix(in srgb,var(--accent) 60%,transparent);background:color-mix(in srgb,var(--accent) 14%,transparent)}
+
+/* ============ TOPBAR (proposition) ============ */
+.app{background:var(--bg);position:relative}
+.bar{display:flex;align-items:stretch;height:48px;background:var(--bg-2);border-bottom:1px solid var(--line);gap:0}
+.brand{display:flex;align-items:center;gap:9px;padding:0 14px;border-right:1px solid var(--line);font-weight:700;letter-spacing:.14em;text-transform:uppercase;font-size:12px;white-space:nowrap;flex:none}
+.brand svg{width:20px;height:20px;color:var(--accent)}
+.doms{display:flex;align-items:stretch;flex:1 1 auto;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+.doms::-webkit-scrollbar{display:none}
+.dom{position:relative;display:flex;align-items:center;gap:8px;padding:0 15px;min-height:44px;background:transparent;border:none;border-right:1px solid var(--line);color:var(--fg-dim);font-size:11px;letter-spacing:.12em;text-transform:uppercase;cursor:pointer;white-space:nowrap}
+.dom svg{width:16px;height:16px;flex:none}
+.dom:hover{color:var(--fg);background:var(--bg-3)}
+.dom.active{color:var(--fg);background:var(--bg)}
+.dom.active::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--accent)}
+.dom .lb{display:inline}
+.bar .spacer{flex:0 0 8px;border-right:1px solid var(--line)}
+.search{display:flex;align-items:center;justify-content:center;align-self:center;height:var(--control-h);flex:0 0 auto;width:var(--control-h);min-width:44px;margin:0 6px;padding:0;background:var(--bg);border:1px solid var(--line-2);border-radius:4px;color:var(--fg-dimmer);font-size:12px;cursor:pointer;text-align:left}
+.search:hover{border-color:var(--accent);color:var(--fg-dim)}
+.search svg{width:15px;height:15px;flex:none}
+
+@container (max-width:1140px){.save{font-size:0;gap:0;padding:0 10px}}
+
+@container (max-width:900px){.dom{padding:0 11px;letter-spacing:.06em}}
+.app{container-type:inline-size}
+.stage{overflow:hidden;position:relative}
+.stage>.app{width:1440px;transform-origin:top left}
+.stage-hint{display:flex;justify-content:flex-end;gap:8px;padding:6px 10px;border-top:1px solid var(--line);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--fg-dimmer)}
+.kbd{display:inline-flex;align-items:center;padding:1px 6px;border:1px solid var(--line-2);border-bottom-width:2px;border-radius:4px;background:var(--bg-3);color:var(--fg-dim);font-size:10px;white-space:nowrap}
+.acts{display:flex;align-items:stretch;flex:none;border-left:1px solid var(--line)}
+.ib{display:flex;align-items:center;justify-content:center;min-width:44px;padding:0 10px;background:transparent;border:none;border-right:1px solid var(--line);color:var(--fg-dim);cursor:pointer;position:relative}
+.ib:hover{color:var(--fg);background:var(--bg-3)}
+.ib:last-child{border-right:none}
+.ib svg{width:16px;height:16px}
+.ib[disabled]{opacity:.3;cursor:not-allowed}
+.ib.avatar span{display:flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:color-mix(in srgb,var(--accent) 22%,transparent);border:1px solid color-mix(in srgb,var(--accent) 55%,transparent);color:var(--accent-text);font-size:10px;letter-spacing:.04em}
+.save{display:flex;align-items:center;gap:7px;padding:0 12px;border-right:1px solid var(--line);color:var(--fg-dim);font-size:10px;letter-spacing:.1em;text-transform:uppercase;white-space:nowrap}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--ok);flex:none}
+.dot.dirty{background:var(--accent);animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+/* badge de comptage — identique dans tous les régimes */
+.cnt{display:inline-flex;align-items:center;justify-content:center;min-width:17px;height:17px;padding:0 5px;border-radius:var(--radius-pill);background:var(--bg-3);border:1px solid var(--line-2);color:var(--fg-dim);font-size:10px;font-variant-numeric:tabular-nums;letter-spacing:0}
+.cnt.err{color:var(--err);border-color:color-mix(in srgb,var(--err) 50%,transparent);background:color-mix(in srgb,var(--err) 14%,transparent)}
+.cnt.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 50%,transparent);background:color-mix(in srgb,var(--warn) 14%,transparent)}
+
+/* ---- niveau 2 : barre de vues (pattern UNIFIÉ de sous-navigation) ---- */
+.views{display:flex;align-items:center;gap:0;height:38px;background:var(--bg);border-bottom:1px solid var(--line);padding:0 6px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+.views::-webkit-scrollbar{display:none}
+.view{display:flex;align-items:center;gap:7px;height:30px;padding:0 11px;margin:0 1px;background:transparent;border:1px solid transparent;border-radius:var(--radius-pill);color:var(--fg-dim);font-size:11px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;white-space:nowrap;flex:none}
+.view:hover{color:var(--fg);background:var(--bg-3)}
+.view.active{color:var(--accent-text);background:color-mix(in srgb,var(--accent) 15%,transparent);border-color:color-mix(in srgb,var(--accent) 55%,transparent)}
+.vsep{width:1px;height:18px;background:var(--line);margin:0 8px;flex:none}
+.api{font-size:9px;padding:0 4px;border:1px dashed var(--line-2);border-radius:3px;color:var(--fg-dimmer)}
+
+/* ---- corps factice ---- */
+.body{padding:18px 16px 26px;min-height:180px}
+.crumb{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg-dimmer)}
+.crumb b{color:var(--fg-dim);font-weight:400}
+.vtitle{font-size:16px;letter-spacing:.1em;text-transform:uppercase;margin-top:6px}
+.vhash{font-size:11px;color:var(--fg-dimmer);margin-top:4px}
+.skel{margin-top:16px;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--bg-2)}
+.srow{display:flex;gap:14px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--line)}
+.srow:last-child{border-bottom:none}
+.sb{height:8px;border-radius:3px;background:var(--bg-3)}
+
+/* ---- AVANT ---- */
+.old .bar{background:var(--bg)}
+.old .oldtab{min-width:36px;padding:0 8px}
+.old .save{padding:0 8px;font-size:0;gap:0}
+.oldtab{display:flex;align-items:center;justify-content:center;min-width:44px;padding:0 12px;background:transparent;border:none;border-right:1px solid var(--line);color:var(--fg-dim);cursor:pointer;position:relative}
+.oldtab svg{width:16px;height:16px}
+.oldtab.active{color:var(--fg)}
+.oldtab.active::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--accent)}
+.oldtab .cnt{position:absolute;top:5px;right:3px;transform:scale(.82)}
+.oldname{padding:0 10px;max-width:150px;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;font-size:11px;color:var(--fg-dim);white-space:nowrap;border-left:1px solid var(--line)}
+.hdlinks{display:flex;flex-wrap:wrap;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);font-size:11px;color:var(--fg-dim)}
+.hdlinks a{text-decoration:none;border-bottom:1px dotted currentColor}
+
+/* ---- responsive demo ---- */
+.phones{display:flex;flex-wrap:wrap;gap:18px}
+.phone{width:360px;max-width:100%;flex:0 1 360px;border:1px solid var(--line-2);border-radius:14px;overflow:hidden;background:var(--bg);position:relative;height:620px}
+.phone .bar{height:52px}
+.phone .brand{border-right:none;padding:0 12px}
+.phone .ib{min-width:46px}
+.pbody{padding:14px 12px;position:relative}
+.drawer{position:absolute;inset:0;background:color-mix(in srgb,#000 62%,transparent);display:none;z-index:5}
+[data-theme="light"] .drawer{background:rgba(0,0,0,.38)}
+.drawer.open{display:block}
+.dpanel{position:absolute;top:0;right:0;bottom:0;width:88%;max-width:320px;background:var(--bg-2);border-left:1px solid var(--line-2);display:flex;flex-direction:column;box-shadow:-16px 0 40px rgba(0,0,0,.5)}
+.dhead{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line);flex:none}
+.dhead .who{flex:1;min-width:0}
+.dhead .who .nm{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dhead .who .st{font-size:10px;color:var(--fg-dim);letter-spacing:.08em;text-transform:uppercase;display:flex;align-items:center;gap:6px;margin-top:2px}
+.dscroll{flex:1;overflow-y:auto;overscroll-behavior:contain}
+.acc{border-bottom:1px solid var(--line)}
+.acch{display:flex;align-items:center;gap:10px;width:100%;min-height:48px;padding:0 12px;background:transparent;border:none;color:var(--fg);font-size:11px;letter-spacing:.12em;text-transform:uppercase;cursor:pointer;text-align:left}
+.acch>svg{width:16px;height:16px;color:var(--fg-dim);flex:none}
+.dpanel svg{width:16px;height:16px;flex:none}
+.acch .lb{flex:1}
+.acch .car{transition:transform .16s;color:var(--fg-dimmer);font-size:11px}
+.acc.open .acch{color:var(--accent-text);background:var(--bg-3)}
+.acc.open .acch>svg{color:var(--accent)}
+.acc.open .car{transform:rotate(180deg)}
+.accb{display:none;flex-direction:column;padding:4px 0 8px;background:var(--bg)}
+.acc.open .accb{display:flex}
+.ditem{display:flex;align-items:center;gap:9px;min-height:44px;padding:0 12px 0 38px;background:transparent;border:none;border-left:2px solid transparent;color:var(--fg-dim);font-size:12px;text-align:left;cursor:pointer}
+.ditem:hover{color:var(--fg);background:var(--bg-3)}
+.ditem.active{color:var(--accent-text);border-left-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}
+.ditem .lb{flex:1}
+.dfoot{flex:none;display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--line)}
+.dfoot .ghost{flex:1;text-align:center}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:var(--bg-2);border-top:1px solid var(--line-2);border-radius:12px 12px 0 0;padding:14px;display:none;z-index:6}
+.sheet.open{display:block}
+.sheet .rowk{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line);font-size:12px}
+.sheet .rowk:last-of-type{border-bottom:none}
+.sheet .rowk span{color:var(--fg-dim)}
+
+/* ---- droits partiels ---- */
+.grid3{display:grid;grid-template-columns:1fr;gap:14px}
+
+/* ---- notes ---- */
+.notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+.note{border:1px solid var(--line);border-left:2px solid var(--accent);background:var(--bg-2);border-radius:6px;padding:13px 15px}
+.note h3{margin:0 0 6px;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--accent-text)}
+.note p{margin:0;font-family:var(--sans);letter-spacing:0;color:var(--fg-dim)}
+.note p+p{margin-top:8px}
+.note b{color:var(--fg)}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line)}
+th{font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--fg-dimmer);font-weight:400}
+td.n{text-align:right;font-variant-numeric:tabular-nums}
+code{background:var(--bg-3);border:1px solid var(--line);border-radius:3px;padding:0 4px;font-size:11px}
+@container (max-width:760px){.dom .lb{display:none}.dom{padding:0 12px}}
+@media(max-width:760px){.dom .lb{display:none}.dom{padding:0 12px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="doc-head">
+  <div>
+    <h1>Menu de l'app — <span>réorganisation</span></h1>
+    <div class="sub">Proposition tranchée : 11 onglets primaires → <b>5 domaines libellés</b>, un seul pattern de sous-navigation (barre de vues niveau 2), topbar en 3 zones, et un tiroir responsive qui expose <b>toutes</b> les vues. Deep-links <code>#nom</code> inchangés.</div>
+  </div>
+  <div class="tools">
+    <button type="button" class="ghost" id="themeBtn">Thème clair</button>
+  </div>
+</div>
+
+<!-- 1 · AVANT / APRÈS -->
+<section class="sec">
+  <div class="sec-head"><span class="n">01</span><h2>Avant / après la barre</h2></div>
+  <p class="sec-note">L'existant demande de <b>mémoriser 11 icônes</b> et cache les sous-vues dans des liens d'en-tête. La proposition remet des <b>libellés</b> (5 tuiles seulement, ça tient) et sort la sous-navigation au grand jour.</p>
+
+  <div class="card old">
+    <div class="card-lb"><span class="tag bad">Avant</span> 11 icônes · sous-vues en liens d'en-tête · nom complet dans la topbar</div>
+    <div class="stage"><div class="app">
+      <div class="bar">
+        <div class="brand"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="7" height="16" rx="1"/><rect x="14" y="4" width="7" height="16" rx="1"/><path d="M5 8h3M16 8h3M5 12h3M16 12h3"/></svg>DC Manager</div>
+        <nav class="doms" id="oldTabs" style="flex:0 0 auto"></nav>
+        <div class="spacer"></div>
+        <div class="acts">
+          <button type="button" class="ib" title="Recherche"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
+          <button type="button" class="ib" title="Annuler"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12H9"/></svg></button>
+          <button type="button" class="ib" title="Rétablir"><svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h5"/></svg></button>
+          <div class="save"><i class="dot dirty"></i>Non sauvé</div>
+          <div class="oldname" title="marie-claire.delaunay@exploitation.fr">marie-claire.delaunay@exploitation.fr</div>
+          <button type="button" class="ib" title="Réglages"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4z"/></svg></button>
+        </div>
+      </div>
+      <div class="hdlinks">Sous-vues : <a href="#">Groupes</a><a href="#">Spares</a><a href="#">Sous-équipements</a><a href="#">Applications</a><a href="#">Pièces jointes</a><a href="#">Images de façade</a></div>
+    </div></div>
+    <div class="stage-hint">rendu à 1440 px, mis à l'échelle</div>
+  </div>
+
+  <div class="card">
+    <div class="card-lb"><span class="tag good">Après</span> 5 domaines libellés · barre de vues niveau 2 · avatar au lieu du nom complet</div>
+    <div class="stage"><div class="app" id="afterStatic"></div></div>
+    <div class="stage-hint">rendu à 1440 px, mis à l'échelle</div>
+  </div>
+</section>
+
+<!-- 2 · WIDE -->
+<section class="sec">
+  <div class="sec-head"><span class="n">02</span><h2>Wide screen — navigation vivante</h2></div>
+  <p class="sec-note">Cliquez les domaines et les vues. <b>Niveau 1</b> = domaine (5 max, libellé toujours visible). <b>Niveau 2</b> = toutes les vues du domaine, dans une barre de pastilles horizontale — c'est le pattern unique qui remplace à la fois le groupe déroulant « Paramètres » et les liens d'en-tête. Les badges d'alerte <b>remontent</b> sur le domaine (sévérité max) et restent sur la vue.</p>
+  <div class="card">
+    <div class="card-lb">Simulation · écran PC 16/9 (1440 px), mis à l'échelle</div>
+    <div class="stage"><div class="app" id="wide"></div></div>
+  </div>
+</section>
+
+<!-- 3 · RESPONSIVE -->
+<section class="sec">
+  <div class="sec-head"><span class="n">03</span><h2>Responsive — tiroir à accordéons</h2></div>
+  <p class="sec-note">Topbar mobile : marque · loupe · scanner · <b>burger</b> (badge d'alerte agrégé dessus, l'alerte ne disparaît jamais). Le tiroir liste les 5 domaines en accordéons contenant <b>toutes les vues, sous-vues incluses</b> — le trou de l'actuel menu aplati. En-tête du tiroir = avatar + nom + état de sauvegarde ; pied = annuler/rétablir + réglages. Cibles ≥ 44 px, fermeture au doigt (voile, croix, Échap).</p>
+  <div class="phones">
+    <div class="card" style="flex:0 1 auto">
+      <div class="card-lb">Vue fermée + tiroir</div>
+      <div class="phone" id="phone"></div>
+    </div>
+    <div class="notes" style="flex:1 1 260px;align-content:start">
+      <div class="note"><h3>Zone utilisateur</h3><p>Le nom complet quitte la topbar dans les <b>deux</b> régimes : avatar (initiales) → modale d'infos (identité, rôle, droits, déconnexion). Testez le bouton dans le tiroir.</p></div>
+      <div class="note"><h3>Scanner d'étiquette</h3><p>Icône dédiée à côté de la loupe, priorité haute sur mobile (terrain). Masquée sans caméra — la topbar se recompose sans trou.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 4 · DROITS PARTIELS -->
+<section class="sec">
+  <div class="sec-head"><span class="n">04</span><h2>Droits partiels — la barre reste cohérente</h2></div>
+  <p class="sec-note">Règles de dégradé, appliquées mécaniquement : un domaine sans vue visible <b>disparaît</b> ; un domaine réduit à une vue devient un <b>onglet direct</b> (pas de barre de vues) ; s'il ne reste <b>qu'un</b> domaine, le niveau 1 s'efface et ses vues deviennent le niveau 1.</p>
+  <div class="grid3" id="perms"></div>
+</section>
+
+<!-- 5 · DÉCISIONS -->
+<section class="sec">
+  <div class="sec-head"><span class="n">05</span><h2>Décisions tranchées</h2></div>
+  <div class="notes">
+    <div class="note"><h3>1 · Cinq domaines, pas onze onglets</h3><p>Inventaire · Implantation · Réseau · Exploitation · Paramètres. Regroupement par <b>objet métier</b>, pas par fréquence : chaque ancienne primaire garde sa place et son deep-link, elle devient une vue de niveau 2.</p></div>
+    <div class="note"><h3>2 · Un seul mécanisme de sous-nav</h3><p>Le groupe déroulant « Paramètres » <b>est supprimé</b> : il devient un domaine comme les autres. Les liens d'en-tête aussi : tout passe par la barre de vues. Un seul geste à apprendre, tout est visible sans clic.</p></div>
+    <div class="note"><h3>3 · Libellés &gt; icônes</h3><p>5 tuiles libellées tiennent dès ~900 px. Sous 760 px on retombe sur l'icône seule, puis sur le tiroir. L'icône seule n'est plus le régime <em>normal</em>.</p></div>
+    <div class="note"><h3>4 · Badges qui remontent</h3><p>Un badge sur une vue se propage au domaine (couleur = sévérité max, nombre = somme) et au burger en mobile. Mécanisme <code>count()</code> inchangé, agrégation ajoutée par-dessus.</p></div>
+    <div class="note"><h3>5 · Topbar en 3 zones</h3><p>Gauche : identité + navigation. Centre : recherche (icône seule, <code>Ctrl+K</code>) + scanner. Droite : undo/redo, état de sauvegarde, avatar, réglages. Le centre est ce qui se comprime en premier.</p></div>
+    <div class="note"><h3>6 · Extensibilité</h3><p>Un nouveau domaine = une entrée de plus dans la même structure ; une nouvelle vue = une pastille dans un domaine. Au-delà de 6 domaines, la barre passe en défilement plutôt qu'en icônes.</p></div>
+  </div>
+</section>
+
+<!-- 6 · MAPPING -->
+<section class="sec">
+  <div class="sec-head"><span class="n">06</span><h2>Où va chaque entrée actuelle</h2></div>
+  <p class="sec-note">Aucun <code>#nom</code> ne change : seule la <b>place dans le menu</b> bouge. Les vues API-seulement sont marquées.</p>
+  <div class="card"><div style="overflow-x:auto"><table id="map"></table></div></div>
+</section>
+
+</div>
+
+<script>
+const ICONS={
+  box:'<svg viewBox="0 0 24 24"><path d="M3 8l9-5 9 5v8l-9 5-9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>',
+  rack:'<svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="1.5"/><path d="M7 7h10M7 11h10M7 15h10"/></svg>',
+  net:'<svg viewBox="0 0 24 24"><circle cx="5" cy="6" r="2"/><circle cx="19" cy="8" r="2"/><circle cx="11" cy="18" r="2"/><path d="M6.8 6.9 9.4 16.2M17.2 9.4 12.6 16.4M6.9 6.4 17.1 7.7"/></svg>',
+  wrench:'<svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.66 5.66l-6.7 6.7a1.5 1.5 0 0 0 2.12 2.12l6.7-6.7a4 4 0 0 0 5.66-5.66l-2.83 2.83-2.12-.71-.71-2.12z"/></svg>',
+  gear:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4z"/></svg>',
+  search:'<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
+  scan:'<svg viewBox="0 0 24 24"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/><path d="M7.5 12h9"/></svg>',
+  undo:'<svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12H9"/></svg>',
+  redo:'<svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h5"/></svg>',
+  burger:'<svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>',
+  close:'<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+  logo:'<svg viewBox="0 0 24 24"><rect x="3" y="4" width="7" height="16" rx="1"/><rect x="14" y="4" width="7" height="16" rx="1"/><path d="M5 8h3M16 8h3M5 12h3M16 12h3"/></svg>'
+};
+const NAV=[
+  {id:'inventaire',label:'Inventaire',icon:'box',views:[
+    {id:'equipements',label:'Équipements'},{id:'groupes',label:'Groupes'},{id:'spares',label:'Spares'},
+    {id:'sous-equipements',label:'Sous-équipements'},{id:'applications',label:'Applications'},
+    {id:'pieces-jointes',label:'Pièces jointes'},{id:'images-facade',label:'Images de façade',cnt:12},
+    {id:'vms',label:'VMs',sep:1},{id:'clusters',label:'Clusters',api:1},{id:'wifi',label:'Wifi',sep:1}]},
+  {id:'implantation',label:'Implantation',icon:'rack',views:[
+    {id:'racks',label:'Racks'},{id:'datacenters',label:'Datacenters',sep:1},{id:'sites',label:'Sites'},
+    {id:'salles',label:'Salles'},{id:'etages',label:'Étages'}]},
+  {id:'reseau',label:'Réseau',icon:'net',views:[
+    {id:'cables',label:'Câbles'},{id:'faisceaux',label:'Faisceaux'},{id:'reseaux',label:'Réseaux'},
+    {id:'types-cable',label:'Types de câble'},{id:'types-port',label:'Types de port'},
+    {id:'ipam',label:'Adresses IP',sep:1},{id:'reseaux-ip',label:'Réseaux IP'},{id:'plages-dhcp',label:'Plages DHCP'},
+    {id:'netmap',label:'Netmap',sep:1}]},
+  {id:'exploitation',label:'Exploitation',icon:'wrench',views:[
+    {id:'interventions',label:'Interventions',cnt:3,tone:'err'},{id:'certificats',label:'Certificats',cnt:6,tone:'warn',api:1}]},
+  {id:'parametres',label:'Paramètres',icon:'gear',views:[
+    {id:'preferences',label:'Préférences'},{id:'contacts',label:'Contacts'},{id:'notifications',label:'Notifications',api:1}]}
+];
+const OLD=[['Équipements','box'],['VMs','box'],['Wifi','net'],['Racks','rack'],['Câbles','net'],['IPAM','net'],['Netmap','net'],['Datacenters','rack'],['Interventions','wrench'],['Certificats','rack'],['Paramètres','gear']];
+const TONE={err:2,warn:1};
+function agg(d){let n=0,t='';d.views.forEach(v=>{if(v.tone){n+=v.cnt;if((TONE[v.tone]||0)>(TONE[t]||0))t=v.tone}});return n?{n,t}:null}
+const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+
+/* ---- AVANT : onglets icônes ---- */
+document.getElementById('oldTabs').innerHTML=OLD.map((o,i)=>{
+  const badge=o[0]==='Interventions'?'<span class="cnt err">3</span>':o[0]==='Certificats'?'<span class="cnt warn">6</span>':'';
+  return `<button type="button" class="oldtab${i===0?' active':''}" title="${o[0]}" aria-label="${o[0]}">${ICONS[o[1]]}${badge}${o[0]==='Paramètres'?'<span style="font-size:10px;margin-left:4px">▾</span>':''}</button>`}).join('');
+
+/* ---- gabarit topbar + barre de vues ---- */
+function acts(){return `<div class="acts">
+  <button type="button" class="ib" title="Annuler (Ctrl+Z)">${ICONS.undo}</button>
+  <button type="button" class="ib" title="Rétablir">${ICONS.redo}</button>
+  <div class="save"><i class="dot dirty"></i>Non sauvé</div>
+  <button type="button" class="ib avatar" title="Marie-Claire Delaunay — infos"><span>MD</span></button>
+  <button type="button" class="ib" title="Réglages">${ICONS.gear}</button></div>`}
+function topbar(nav,cur){
+  const doms=nav.map(d=>{const a=agg(d);return `<button type="button" class="dom${d.id===cur.dom?' active':''}" data-dom="${d.id}">${ICONS[d.icon]}<span class="lb">${d.label}</span>${a?`<span class="cnt ${a.t}">${a.n}</span>`:''}</button>`}).join('');
+  return `<div class="bar"><div class="brand">${ICONS.logo}DC Manager</div><nav class="doms">${doms}</nav><div class="spacer"></div>
+  <button type="button" class="search" title="Rechercher (Ctrl+K)" aria-label="Rechercher">${ICONS.search}</button>
+  <button type="button" class="ib" title="Scanner une étiquette" style="border-left:1px solid var(--line)">${ICONS.scan}</button>${acts()}</div>`}
+function viewsbar(d,cur){
+  if(d.views.length<2)return '';
+  return `<div class="views" role="tablist">${d.views.map(v=>`${v.sep?'<i class="vsep"></i>':''}<button type="button" class="view${v.id===cur.view?' active':''}" data-view="${v.id}" role="tab">${v.label}${v.api?'<span class="api">API</span>':''}${v.cnt?`<span class="cnt ${v.tone||''}">${v.cnt}</span>`:''}</button>`).join('')}</div>`}
+function bodyOf(d,v){
+  return `<div class="body"><div class="crumb"><b>${d.label}</b> › ${v.label}</div><div class="vtitle">${v.label}</div>
+  <div class="vhash">deep-link inchangé : <code>#${v.id}</code></div>
+  <div class="skel">${[62,48,70,40].map(w=>`<div class="srow"><div class="sb" style="width:${w}px"></div><div class="sb" style="flex:1"></div><div class="sb" style="width:54px"></div></div>`).join('')}</div></div>`}
+function render(el,nav,cur){
+  const d=nav.find(x=>x.id===cur.dom)||nav[0];
+  const v=d.views.find(x=>x.id===cur.view)||d.views[0];cur.dom=d.id;cur.view=v.id;
+  el.innerHTML=topbar(nav,cur)+viewsbar(d,cur)+bodyOf(d,v);
+  el.querySelectorAll('[data-dom]').forEach(b=>b.onclick=()=>{const nd=nav.find(x=>x.id===b.dataset.dom);render(el,nav,{dom:nd.id,view:nd.views[0].id});if(window.fitStages)fitStages()});
+  el.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{render(el,nav,{dom:cur.dom,view:b.dataset.view});if(window.fitStages)fitStages()});
+}
+render(document.getElementById('wide'),NAV,{dom:'reseau',view:'cables'});
+render(document.getElementById('afterStatic'),NAV,{dom:'inventaire',view:'equipements'});
+function fitStages(){document.querySelectorAll('.stage').forEach(st=>{const app=st.firstElementChild,s=Math.min(1,st.clientWidth/1440);app.style.transform='scale('+s+')';st.style.height=(app.offsetHeight*s)+'px'})}
+new ResizeObserver(fitStages).observe(document.body);fitStages();
+
+/* ---- responsive ---- */
+const phone=document.getElementById('phone');
+const state={dom:'exploitation',view:'interventions',open:false,acc:'exploitation',sheet:false};
+function renderPhone(){
+  const d=NAV.find(x=>x.id===state.dom),v=d.views.find(x=>x.id===state.view);
+  let tot=0,tone='';NAV.forEach(x=>{const a=agg(x);if(a){tot+=a.n;if((TONE[a.t]||0)>(TONE[tone]||0))tone=a.t}});
+  phone.innerHTML=`<div class="bar"><div class="brand">${ICONS.logo}DC</div><div class="spacer" style="border:none"></div>
+    <div class="acts"><button type="button" class="ib">${ICONS.search}</button><button type="button" class="ib">${ICONS.scan}</button>
+    <button type="button" class="ib" id="burger" aria-label="Menu">${ICONS.burger}<span class="cnt ${tone}" style="position:absolute;top:6px;right:4px;transform:scale(.8)">${tot}</span></button></div></div>
+  <div class="views">${d.views.length>1?d.views.map(x=>`<button type="button" class="view${x.id===state.view?' active':''}" data-view="${x.id}">${x.label}${x.cnt?`<span class="cnt ${x.tone||''}">${x.cnt}</span>`:''}</button>`).join(''):''}</div>
+  <div class="pbody"><div class="crumb"><b>${d.label}</b> › ${v.label}</div><div class="vtitle" style="font-size:14px">${v.label}</div>
+    <div class="skel">${[1,2,3,4,5].map(()=>`<div class="srow"><div class="sb" style="width:40px"></div><div class="sb" style="flex:1"></div></div>`).join('')}</div></div>
+  <div class="drawer${state.open?' open':''}" id="drawer"><div class="dpanel">
+    <div class="dhead"><button type="button" class="ib avatar" id="who" style="border:none"><span>MD</span></button>
+      <div class="who"><div class="nm">Marie-Claire Delaunay</div><div class="st"><i class="dot dirty"></i>Non sauvé · Exploitation</div></div>
+      <button type="button" class="ib" id="closeD" aria-label="Fermer" style="border:none">${ICONS.close}</button></div>
+    <div class="dscroll">${NAV.map(x=>{const a=agg(x);return `<div class="acc${state.acc===x.id?' open':''}"><button type="button" class="acch" data-acc="${x.id}">${ICONS[x.icon]}<span class="lb">${x.label}</span>${a?`<span class="cnt ${a.t}">${a.n}</span>`:''}<span class="car">▾</span></button>
+      <div class="accb">${x.views.map(y=>`<button type="button" class="ditem${y.id===state.view?' active':''}" data-go="${x.id}|${y.id}"><span class="lb">${y.label}</span>${y.api?'<span class="api">API</span>':''}${y.cnt?`<span class="cnt ${y.tone||''}">${y.cnt}</span>`:''}</button>`).join('')}</div></div>`}).join('')}</div>
+    <div class="dfoot"><button type="button" class="ghost">${'Annuler'}</button><button type="button" class="ghost">Rétablir</button><button type="button" class="ghost">Réglages</button></div>
+  </div></div>
+  <div class="sheet${state.sheet?' open':''}" id="sheet"><div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><span class="ib avatar" style="border:none"><span>MD</span></span><div><div style="font-size:13px">Marie-Claire Delaunay</div><div style="font-size:11px;color:var(--fg-dim)">marie-claire.delaunay@exploitation.fr</div></div></div>
+    <div class="rowk"><span>Rôle</span>Exploitation</div><div class="rowk"><span>Droits</span>Lecture/écriture · 4 domaines</div><div class="rowk"><span>Session</span>API · depuis 09:12</div>
+    <div style="display:flex;gap:8px;margin-top:12px"><button type="button" class="ghost" style="flex:1" id="sheetClose">Fermer</button><button type="button" class="ghost" style="flex:1">Se déconnecter</button></div></div>`;
+  phone.querySelector('#burger').onclick=()=>{state.open=true;renderPhone()};
+  phone.querySelector('#closeD').onclick=()=>{state.open=false;renderPhone()};
+  phone.querySelector('#drawer').onclick=e=>{if(e.target.id==='drawer'){state.open=false;renderPhone()}};
+  phone.querySelector('#who').onclick=()=>{state.sheet=true;renderPhone()};
+  phone.querySelector('#sheetClose').onclick=()=>{state.sheet=false;renderPhone()};
+  phone.querySelectorAll('[data-acc]').forEach(b=>b.onclick=()=>{state.acc=state.acc===b.dataset.acc?'':b.dataset.acc;renderPhone()});
+  phone.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{const[a,c]=b.dataset.go.split('|');state.dom=a;state.view=c;state.open=false;renderPhone()});
+  phone.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{state.view=b.dataset.view;renderPhone()});
+}
+renderPhone();
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&(state.open||state.sheet)){state.open=false;state.sheet=false;renderPhone()}});
+
+/* ---- droits partiels ---- */
+const CASES=[
+  {t:'Technicien terrain',d:'Réseau en lecture seule, Exploitation complet',nav:NAV.filter(x=>['reseau','exploitation'].includes(x.id)),cur:{dom:'exploitation',view:'interventions'}},
+  {t:'Domaine réduit à une vue',d:'Implantation → Racks seulement : onglet direct, pas de barre de vues',nav:[NAV[0],{...NAV[1],views:[NAV[1].views[0]]},NAV[3]],cur:{dom:'implantation',view:'racks'}},
+  {t:'Un seul domaine visible',d:'Le niveau 1 s’efface, ses vues deviennent le niveau 1',nav:[{...NAV[3],solo:1}],cur:{dom:'exploitation',view:'certificats'}}
+];
+document.getElementById('perms').innerHTML=CASES.map((c,i)=>`<div class="card"><div class="card-lb"><span class="tag">${c.t}</span>${c.d}</div><div class="stage"><div class="app" id="perm${i}"></div></div></div>`).join('');
+CASES.forEach((c,i)=>{
+  const el=document.getElementById('perm'+i);
+  if(c.nav[0].solo){
+    const d=c.nav[0];
+    el.innerHTML=`<div class="bar"><div class="brand">${ICONS.logo}DC Manager</div><nav class="doms">${d.views.map(v=>`<button type="button" class="dom${v.id===c.cur.view?' active':''}" data-view="${v.id}">${ICONS[d.icon]}<span class="lb">${v.label}</span>${v.cnt?`<span class="cnt ${v.tone||''}">${v.cnt}</span>`:''}</button>`).join('')}</nav><div class="spacer"></div>${acts()}</div>`;
+  }else render(el,c.nav,{...c.cur});
+});
+fitStages();
+
+/* ---- mapping ---- */
+document.getElementById('map').innerHTML=`<thead><tr><th>Entrée actuelle</th><th>Type actuel</th><th>Domaine proposé</th><th>Niveau</th><th>Deep-link</th></tr></thead><tbody>`+
+NAV.flatMap(d=>d.views.map(v=>{
+  const prim=['equipements','vms','wifi','racks','cables','ipam','netmap','datacenters','interventions','certificats'].includes(v.id);
+  const type=v.id==='preferences'?'nouveau (réglages)':prim?'onglet primaire':'sous-vue (lien d’en-tête)';
+  return `<tr><td>${v.label}${v.api?' <span class="api">API</span>':''}</td><td style="color:var(--fg-dim)">${type}</td><td>${d.label}</td><td class="n">2</td><td><code>#${v.id}</code></td></tr>`})).join('')+`</tbody>`;
+
+/* ---- thème ---- */
+const tb=document.getElementById('themeBtn');
+tb.onclick=()=>{const l=document.documentElement.dataset.theme==='light';document.documentElement.dataset.theme=l?'dark':'light';tb.textContent=l?'Thème clair':'Thème sombre'};
+</script>
+</body>
+</html>

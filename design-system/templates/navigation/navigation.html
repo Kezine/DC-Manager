@@ -1,53 +1,91 @@
-<!-- @dsCard group="Navigation" name="Navigation" subtitle="barre d'onglets (icône + actif), onglet groupe, menu déroulant, pagination" -->
-<!-- DÉRIVÉ de src-client/app/Shell.ts (barre d'onglets : .tab.tab-icon avec <span class="gi">,
-     .tab.active, .tab-count ; .tab-group + caret ; .tabs-dd responsive) et de
-     src-client/views/ListView.ts (pagination : .page-btn + select.page-size). -->
+<!-- @dsCard group="Navigation" name="Navigation" subtitle="domaines (niveau 1), barre de vues (niveau 2), fil d'Ariane, tiroir responsive, pagination" -->
+<!-- DÉRIVÉ de src-client/app/Shell.ts (barre de niveau 1 : .tab.tab-domain avec <span class="gi"> +
+     .tab-label, .tab.active, .tab-count ; barre de niveau 2 : .views-bar / .view-tab / .view-sep ;
+     fil d'Ariane : .view-crumb), de src-client/app/ShellDrawer.ts (tiroir responsive : .nav-drawer*,
+     .nav-acc*) et de src-client/views/ListView.ts (pagination : .page-btn + select.page-size).
+     Menu à DEUX NIVEAUX — cf. docs/navigation.md. -->
 <section class="ds-section">
-  <h2>Barre d'onglets (desktop, icônes seules)</h2>
-  <p class="ds-note">Sur desktop, chaque onglet est une ICÔNE seule (libellé porté par <code>title</code> + <code>aria-label</code>). L'onglet actif est souligné (<code>.tab.active::after</code>). Le badge de comptage est un <code>.tab-count</code>.</p>
+  <h2>Niveau 1 — les domaines (.tab.tab-domain)</h2>
+  <p class="ds-note">Cinq domaines libellés remplacent les onze onglets en icône seule : <b>libellés &gt; icônes</b>, l'icône seule n'est plus le régime normal (elle ne revient que sous ~1000 px, le libellé restant en <code>title</code> + <code>aria-label</code>). Un domaine <b>ne navigue pas vers lui-même</b> : le cliquer active sa première vue visible. 🚨 Jamais de <code>.tab-count</code> sur un domaine — un badge n'appartient qu'à une entrée <b>terminale</b>.</p>
   <div class="ds-demo ds-tight" style="padding:0;overflow:hidden;">
     <div class="topbar" style="position:static;">
       <nav class="tabs">
-        <button type="button" class="tab tab-icon active" title="Datacenter" aria-label="Datacenter"><span class="gi" aria-hidden="true">{{ICON:DATACENTER}}</span></button>
-        <button type="button" class="tab tab-icon" title="Netmap" aria-label="Netmap"><span class="gi" aria-hidden="true">{{ICON:GRAPH}}</span></button>
-        <button type="button" class="tab tab-icon" title="Câbles" aria-label="Câbles"><span class="gi" aria-hidden="true">{{ICON:CABLE}}</span></button>
-        <button type="button" class="tab tab-icon" title="Certificats" aria-label="Certificats"><span class="gi" aria-hidden="true">{{ICON:CERTIFICATE}}</span><span class="tab-count warn">6</span></button>
-        <button type="button" class="tab tab-icon" title="Interventions" aria-label="Interventions"><span class="gi" aria-hidden="true">{{ICON:INTERVENTION}}</span><span class="tab-count err">3</span></button>
+        <button type="button" class="tab tab-domain active" title="Inventaire" aria-label="Inventaire"><span class="gi" aria-hidden="true">{{ICON:EQUIPMENT}}</span><span class="tab-label">Inventaire</span></button>
+        <button type="button" class="tab tab-domain" title="Implantation" aria-label="Implantation"><span class="gi" aria-hidden="true">{{ICON:DATACENTER}}</span><span class="tab-label">Implantation</span></button>
+        <button type="button" class="tab tab-domain" title="Réseau" aria-label="Réseau"><span class="gi" aria-hidden="true">{{ICON:NETWORK}}</span><span class="tab-label">Réseau</span></button>
+        <button type="button" class="tab tab-domain" title="Exploitation" aria-label="Exploitation"><span class="gi" aria-hidden="true">{{ICON:INTERVENTION}}</span><span class="tab-label">Exploitation</span></button>
+        <button type="button" class="tab tab-domain" title="Paramètres" aria-label="Paramètres"><span class="gi" aria-hidden="true">{{ICON:SETTINGS}}</span><span class="tab-label">Paramètres</span></button>
       </nav>
     </div>
   </div>
 </section>
 
 <section class="ds-section">
-  <h2>Onglet groupe (déroulant, .tab-group)</h2>
-  <p class="ds-note">Un onglet <code>.tab</code> suivi d'un caret <code>.tabs-dd-caret</code>, avec un menu <code>.tabs-dd-menu</code> (ouvert ici en statique).</p>
-  <div class="ds-demo" style="min-height:200px;">
-    <div class="tab-group open" style="display:inline-flex;">
-      <button type="button" class="tab tab-icon" title="Paramètres" aria-label="Paramètres"><span class="gi" aria-hidden="true">{{ICON:SETTINGS}}</span><span class="tabs-dd-caret">▾</span></button>
-      <div class="tabs-dd-menu" role="menu" style="display:flex;">
-        <button type="button" class="tabs-dd-item active" role="menuitem"><span class="gi" aria-hidden="true">{{ICON:IPAM}}</span>Adresses IP</button>
-        <button type="button" class="tabs-dd-item" role="menuitem"><span class="gi" aria-hidden="true">{{ICON:PORT}}</span>Types de port</button>
-        <button type="button" class="tabs-dd-item" role="menuitem"><span class="gi" aria-hidden="true">{{ICON:NOTIFICATION}}</span>Notifications</button>
+  <h2>Niveau 2 — la barre de vues (.views-bar)</h2>
+  <p class="ds-note">Pattern <b>unique</b> de sous-navigation : elle remplace à la fois l'ancien groupe déroulant « Paramètres » et les liens d'en-tête de toutes les autres sous-vues. Pastilles <code>.view-tab</code>, séparateur interne <code>.view-sep</code>, badge de comptage <code>.tab-count</code> (autorisé ici : une vue est terminale). Masquée quand le domaine n'a qu'une vue.</p>
+  <div class="ds-demo ds-tight" style="padding:0;overflow:hidden;">
+    <div class="views-bar" role="tablist">
+      <button type="button" class="view-tab active" role="tab" aria-selected="true">Équipements</button>
+      <button type="button" class="view-tab" role="tab" aria-selected="false">Groupes</button>
+      <button type="button" class="view-tab" role="tab" aria-selected="false">Spares</button>
+      <button type="button" class="view-tab" role="tab" aria-selected="false">Images de façade<span class="tab-count">12</span></button>
+      <i class="view-sep" aria-hidden="true"></i>
+      <button type="button" class="view-tab" role="tab" aria-selected="false">VMs</button>
+      <button type="button" class="view-tab" role="tab" aria-selected="false">Clusters</button>
+      <i class="view-sep" aria-hidden="true"></i>
+      <button type="button" class="view-tab" role="tab" aria-selected="false">Wifi</button>
+    </div>
+  </div>
+  <div class="ds-variant-title">Fil d'Ariane d'en-tête de vue (.view-crumb) — remplace le bouton « ← retour »</div>
+  <div class="ds-demo">
+    <div class="view-header">
+      <div>
+        <div class="view-crumb"><span class="view-crumb-domain">Exploitation</span><span class="view-crumb-sep" aria-hidden="true">›</span><span>Interventions</span></div>
+        <div class="view-title"><span>▸</span> Interventions</div>
       </div>
+      <div class="view-actions"><button type="button" class="btn btn-primary">+ Intervention</button></div>
     </div>
   </div>
 </section>
 
 <section class="ds-section">
-  <h2>Menu déroulant responsive (.tabs-dd)</h2>
-  <p class="ds-note">Sur petit écran, la barre d'onglets cède la place à ce déclencheur unique (<code>.tabs-dd-trigger</code>) + menu global (groupes aplatis). Forcé visible ici (masqué &gt; 760 px dans l'app).</p>
-  <div class="ds-demo" style="min-height:260px;">
-    <div class="tabs-dd open" style="display:flex;max-width:280px;">
-      <button type="button" class="tabs-dd-trigger" aria-haspopup="menu">
-        <span class="tabs-dd-label">Datacenter</span>
-        <span class="tabs-dd-caret">▾</span>
-      </button>
-      <div class="tabs-dd-menu" role="menu" style="display:flex;">
-        <button type="button" class="tabs-dd-item active" role="menuitem">Datacenter</button>
-        <button type="button" class="tabs-dd-item" role="menuitem">Netmap</button>
-        <div class="tabs-dd-group">Paramètres</div>
-        <button type="button" class="tabs-dd-item tabs-dd-item--child" role="menuitem">Adresses IP</button>
-        <button type="button" class="tabs-dd-item tabs-dd-item--child" role="menuitem">Types de port</button>
+  <h2>Tiroir responsive (.nav-drawer)</h2>
+  <p class="ds-note">Sous 760 px, les deux barres cèdent au <b>burger</b> et à ce tiroir : un accordéon par domaine, contenant <b>toutes</b> ses vues — sous-vues comprises, ce que l'ancien menu aplati omettait. En-tête = pastille utilisateur + nom + état de sauvegarde ; pied = annuler / rétablir / réglages. Cibles ≥ 44 px. 🚨 Aucun badge sur un en-tête d'accordéon ni sur le burger.</p>
+  <div class="ds-demo" style="min-height:420px;">
+    <div style="position:relative;height:400px;max-width:360px;border:1px solid var(--line-2);overflow:hidden;">
+      <div class="nav-drawer" style="position:absolute;">
+        <div class="nav-drawer-panel">
+          <div class="nav-drawer-head">
+            <button type="button" class="nav-drawer-user" aria-label="Marie-Claire Delaunay">{{ICON:USER}}</button>
+            <div class="nav-drawer-who">
+              <div class="nav-drawer-name">Marie-Claire Delaunay</div>
+              <div class="nav-drawer-save"><span class="save-state-icon dirty"></span><span>Non enregistré</span></div>
+            </div>
+            <button type="button" class="nav-drawer-close" aria-label="Fermer le menu">{{ICON:CLOSE}}</button>
+          </div>
+          <div class="nav-drawer-body">
+            <div class="nav-acc">
+              <button type="button" class="nav-acc-head" aria-expanded="false"><span class="gi" aria-hidden="true">{{ICON:EQUIPMENT}}</span><span class="nav-acc-label">Inventaire</span><span class="nav-acc-caret" aria-hidden="true">▾</span></button>
+              <div class="nav-acc-body"></div>
+            </div>
+            <div class="nav-acc open">
+              <button type="button" class="nav-acc-head" aria-expanded="true"><span class="gi" aria-hidden="true">{{ICON:INTERVENTION}}</span><span class="nav-acc-label">Exploitation</span><span class="nav-acc-caret" aria-hidden="true">▾</span></button>
+              <div class="nav-acc-body">
+                <button type="button" class="nav-acc-item active"><span class="nav-acc-item-label">Interventions</span><span class="tab-count err">3</span></button>
+                <button type="button" class="nav-acc-item"><span class="nav-acc-item-label">Certificats</span><span class="tab-count warn">6</span></button>
+              </div>
+            </div>
+            <div class="nav-acc">
+              <button type="button" class="nav-acc-head" aria-expanded="false"><span class="gi" aria-hidden="true">{{ICON:SETTINGS}}</span><span class="nav-acc-label">Paramètres</span><span class="nav-acc-caret" aria-hidden="true">▾</span></button>
+              <div class="nav-acc-body"></div>
+            </div>
+          </div>
+          <div class="nav-drawer-foot">
+            <button type="button" class="btn btn-ghost btn-sm nav-drawer-act">Annuler</button>
+            <button type="button" class="btn btn-ghost btn-sm nav-drawer-act">Rétablir</button>
+            <button type="button" class="btn btn-ghost btn-sm nav-drawer-act">Réglages</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
