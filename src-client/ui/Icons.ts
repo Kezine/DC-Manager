@@ -349,8 +349,15 @@ export class Icons {
   /** Thème SOMBRE : lune (croissant). Repère de droite (état coché) de la bascule de thème. */
   static readonly MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>';
 
-  /** Plein écran : quatre coins qui s'écartent. Repère de la bascule « modales en plein écran ». */
+  /** Plein écran : quatre coins qui s'écartent. Repère DROIT (état coché) de la bascule « modales en
+      plein écran » — c'est aussi l'icône du raccourci `.modal-fs` de l'en-tête des modales. */
   static readonly FULLSCREEN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>';
+
+  /** Modale FLOTTANTE : une petite fenêtre posée AU CENTRE d'un écran plus grand. Repère GAUCHE (état
+      décoché) de la bascule « modales en plein écran » — l'opposé exact de `FULLSCREEN`, qui montre
+      des coins qui s'écartent. Les marges visibles tout autour de la fenêtre intérieure SONT le sens
+      de l'icône : c'est l'espace que le plein écran fait disparaître. */
+  static readonly MODAL_FLOATING = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="15" rx="2"/><rect x="7" y="8" width="10" height="8" rx="1.5"/></svg>';
 
   /** Résolution d'une icône par le NOM de sa constante (`"EQUIPMENT"` → le SVG correspondant).
       POURQUOI : les modules PURS qui décrivent de l'UI sans la peindre (cf. `app/NavModel`, dont le

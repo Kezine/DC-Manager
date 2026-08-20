@@ -197,6 +197,38 @@ En **mode visualiseur**, la barre d'actions ne garde que ce déclencheur (`.topb
 burger** (`.topbar-burger`) : sous 760 px le tiroir est le seul chemin de navigation, le masquer
 laisserait une application sans menu du tout.
 
+#### Les bascules du panneau
+
+Toutes les préférences binaires du panneau (scan ×2, débogage, auto-save, modales plein écran) sont
+le **même interrupteur** — la primitive partagée [`ui/ModeSwitch`](../src-client/ui/ModeSwitch.ts),
+`binary()` — posé à droite d'un intitulé qui est un vrai `<label for>` (cliquer les mots bascule le
+réglage). Les rares repères d'icône (soleil/lune, fenêtre flottante / plein écran) vivent **collés au
+toggle** dans un bloc `.settings-switch-group` aligné à droite : une légende renvoyée à l'autre bout
+de la ligne ne se rattache plus visuellement au contrôle qu'elle décrit.
+
+Le **thème** est le seul réglage à trois positions (`ModeSwitch.tri()`) : **clair · auto · sombre**,
+« auto » au milieu — la seule place qui garde le glissement clair → sombre monotone, et celle que
+signale le repère « A » de la piste (masqué quand la position est justement choisie, le pouce le
+recouvrant).
+
+> 🚨 **Préférence ≠ thème appliqué.** `ThemePreference` (« light » | « auto » | « dark ») est ce que
+> l'utilisateur choisit et qu'on persiste ; `ThemeName` (« light » | « dark ») est ce qui atterrit dans
+> `data-theme`. Les confondre écrirait `data-theme="auto"` — un thème qu'aucune feuille de style ne
+> connaît. La résolution est un **module pur testé**,
+> [`core/ThemeResolution`](../src-client/core/ThemeResolution.ts) : le bootstrap lui passe ce que
+> répond `prefers-color-scheme`, il ne le lit jamais lui-même. Même distinction que `I18n.preference`
+> ⇄ locale effective (cf. [i18n.md](i18n.md)).
+>
+> Trois entrées mènent au thème — le toggle, l'action « Basculer le thème » de la palette, et le
+> **suivi du système** (l'OS peut basculer en cours de session) — mais **un seul point d'écriture**,
+> `applyThemePreference` dans `main.ts` : persistance, attribut sur `<html>`, position du toggle et
+> `dcView.onThemeChanged()`. Un chemin qui oublierait le dernier laisserait une scène 3D aux couleurs
+> de l'ancien thème. Le suivi du système ne s'applique **que** si la préférence est « auto » : un thème
+> choisi à la main ne se fait pas écraser par l'horloge de l'OS. Et « Basculer » depuis « auto » épingle
+> l'**inverse de ce qui est affiché** — l'utilisateur demande un changement visible, pas un aller-retour.
+> Le défaut reste **sombre** : passer le défaut à « auto » changerait le thème des postes neufs selon
+> leur OS, ce qui est une décision de produit, pas un effet de bord de l'ajout du mode.
+
 ### Écran d'accueil : la navigation doit rester inerte
 
 Tant qu'aucun document n'est ouvert (`body.welcome-active`), tout chemin de navigation est neutralisé.

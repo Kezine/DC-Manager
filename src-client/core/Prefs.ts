@@ -5,14 +5,14 @@
    utilise le RestAdapter (serveur REST multi-documents, cf. main.ts restBootstrap).
    ============================================================================= */
 import { FieldFacet } from "./FieldFacet";
+import { ThemeResolution, type ThemePreference } from "./ThemeResolution";
 
-export type ThemeName = "dark" | "light";
 export type DataSource = "local" | "api";
 export type FileAccessMode = "file" | "directory";   // accès FS : 1 autorisation par fichier · 1 autorisation pour le dossier
 /** Source de décodage DEMANDÉE au moteur de scan (cf. core/BarcodeDetection) : `auto` = natif si
     utilisable sinon wasm ; `wasm` = zxing-wasm forcé (décode plus de styles de QR). */
 export type ScanEngineMode = "auto" | "wasm";
-export interface AppPrefs { theme: ThemeName; autosave: boolean; autosaveInterval: number; dataSource: DataSource; dataSourceUserSet: boolean; apiBaseUrl: string; loginUrl: string; fileAccessMode: FileAccessMode; debugLog: boolean; uiScale: number; autocompleteMaxResults: number; modalFullscreen: boolean; lastRestDocId: string; scanAllFields: boolean; scanForceButtons: boolean; scanEngine: ScanEngineMode; }
+export interface AppPrefs { theme: ThemePreference; autosave: boolean; autosaveInterval: number; dataSource: DataSource; dataSourceUserSet: boolean; apiBaseUrl: string; loginUrl: string; fileAccessMode: FileAccessMode; debugLog: boolean; uiScale: number; autocompleteMaxResults: number; modalFullscreen: boolean; lastRestDocId: string; scanAllFields: boolean; scanForceButtons: boolean; scanEngine: ScanEngineMode; }
 
 export class Prefs {
   static readonly KEY = "dcmanager.prefs";
@@ -31,7 +31,7 @@ export class Prefs {
     { value: 1.1, labelKey: "shell.settings.scaleEnlarged" },
   ];
 
-  private data: AppPrefs = { theme: "dark", autosave: false, autosaveInterval: Prefs.INTERVAL_DEFAULT, dataSource: "local", dataSourceUserSet: false, apiBaseUrl: "", loginUrl: "", fileAccessMode: "file", debugLog: false, uiScale: Prefs.UI_SCALE_DEFAULT, autocompleteMaxResults: FieldFacet.MAX_RESULTS_DEFAULT, modalFullscreen: false, lastRestDocId: "", scanAllFields: false, scanForceButtons: false, scanEngine: "auto" };
+  private data: AppPrefs = { theme: ThemeResolution.DEFAULT, autosave: false, autosaveInterval: Prefs.INTERVAL_DEFAULT, dataSource: "local", dataSourceUserSet: false, apiBaseUrl: "", loginUrl: "", fileAccessMode: "file", debugLog: false, uiScale: Prefs.UI_SCALE_DEFAULT, autocompleteMaxResults: FieldFacet.MAX_RESULTS_DEFAULT, modalFullscreen: false, lastRestDocId: "", scanAllFields: false, scanForceButtons: false, scanEngine: "auto" };
 
   constructor() { this.load(); }
 
@@ -39,7 +39,9 @@ export class Prefs {
     try {
       const raw = window.localStorage.getItem(Prefs.KEY); if (!raw) return;
       const p = JSON.parse(raw); if (!p || typeof p !== "object") return;
-      if (p.theme === "light" || p.theme === "dark") this.data.theme = p.theme;
+      // Préférence de THÈME : « auto » compris depuis l'ajout du suivi système. Une valeur inconnue
+      // (ou absente) laisse la valeur courante en place — cf. `ThemeResolution.normalize`.
+      const theme = ThemeResolution.normalize(p.theme); if (theme) this.data.theme = theme;
       this.data.autosave = !!p.autosave;
       if (typeof p.autosaveInterval === "number" && p.autosaveInterval > 0) this.data.autosaveInterval = p.autosaveInterval;
       if (p.dataSource === "local" || p.dataSource === "api") this.data.dataSource = p.dataSource;
@@ -59,8 +61,10 @@ export class Prefs {
   }
   save(): void { try { window.localStorage.setItem(Prefs.KEY, JSON.stringify(this.data)); } catch (e) { console.warn("Prefs.save a échoué", e); } }
 
-  get theme(): ThemeName { return this.data.theme; }
-  set theme(v: ThemeName) { this.data.theme = v; this.save(); }
+  /** PRÉFÉRENCE de thème (« light » | « auto » | « dark ») — le thème EFFECTIF s'en déduit par
+      `ThemeResolution.effective`, qui seul regarde ce que préfère le système. */
+  get theme(): ThemePreference { return this.data.theme; }
+  set theme(v: ThemePreference) { this.data.theme = v; this.save(); }
   get autosave(): boolean { return this.data.autosave; }
   set autosave(v: boolean) { this.data.autosave = v; this.save(); }
   get autosaveInterval(): number { return this.data.autosaveInterval; }

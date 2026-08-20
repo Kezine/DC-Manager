@@ -41,6 +41,7 @@ import { HydrationState } from "../core/HydrationState";   // état d'hydratatio
 import { LAZY_COLLECTIONS_API } from "../core/LazyCollections";   // LA liste des collections chargées paresseusement (vague 1 : contacts)
 import { TargetLabelResolution } from "../core/TargetLabelResolution";   // résolution GROUPÉE des libellés de cibles d'intervention (vague 4)
 import { Prefs } from "../core/Prefs";
+import { ThemeResolution, type ThemePreference } from "../core/ThemeResolution";   // préférence clair/auto/sombre → thème EFFECTIF (module pur, testé)
 import { AccessState } from "../core/AccessState";   // état d'AUTORISATION du client (lot 2 auth/ACL — `ALL` en mode fichier : injection nulle)
 import { ViewAccess } from "../core/ViewAccess";     // vues NON-listing → leur permission de lecture (les listings, eux, dérivent de leur collection)
 import { ViewRestoration } from "../core/ViewRestoration";   // QUELLE vue activer (boot, arrivée des droits, ouverture de document) — décision PURE
@@ -185,8 +186,18 @@ const DEFAULT_VIEW = "equipements";
 /** Le document est-il « non vide » (au-delà des seuls catalogues fermés réinjectés) ? */
 function hasUserData(): boolean { return store.totalCount() > store.all("portTypes").length + store.all("cableTypes").length; }
 
-function applyTheme(theme: string): void {
-  if (theme === "light") document.documentElement.setAttribute("data-theme", "light");
+/** Ce que préfère le SYSTÈME (OS / navigateur). Interrogé UNE fois et gardé : l'objet `MediaQueryList`
+    reste vivant — son `.matches` suit l'état courant, et c'est LUI qui notifie un changement en cours
+    de session (bascule nuit automatique). `null` si `matchMedia` manque : on retombe alors sur le
+    thème sombre, celui que la feuille de style applique en l'absence d'attribut. */
+const systemDarkQuery: MediaQueryList | null = (typeof window.matchMedia === "function") ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+const systemPrefersDark = (): boolean => !!(systemDarkQuery && systemDarkQuery.matches);
+
+/** Applique une PRÉFÉRENCE de thème au document. La préférence (« light » | « auto » | « dark ») n'est
+    JAMAIS écrite telle quelle dans `data-theme` : `ThemeResolution.effective` la résout d'abord en
+    thème réel, le système n'étant consulté que pour « auto » (cf. core/ThemeResolution). */
+function applyTheme(pref: ThemePreference): void {
+  if (ThemeResolution.effective(pref, systemPrefersDark()) === "light") document.documentElement.setAttribute("data-theme", "light");
   else document.documentElement.removeAttribute("data-theme");
 }
 /** Applique l'échelle d'interface (zoom global piloté par --ui-scale, cf. dc-manager.css `body { zoom }`). */
@@ -641,6 +652,19 @@ async function boot(): Promise<void> {
   };
 
   // ---- services FICHIER / GLOBAUX (topbar) ----
+  /* PRÉFÉRENCE DE THÈME — point de passage UNIQUE. Trois entrées y mènent : le toggle à trois
+     positions des réglages, l'action « Basculer le thème » de la palette, et le suivi du système
+     quand la préférence est « auto ». Chacune ne fait que CHOISIR une préférence ; ce qui s'ensuit
+     (persistance, attribut sur <html>, position du toggle, couleurs de la vue 3D) est écrit ici, une
+     seule fois — un chemin qui oublierait `dcView.onThemeChanged()` laisserait une scène aux couleurs
+     de l'ancien thème. */
+  const applyThemePreference = (pref: ThemePreference): void => {
+    prefs.theme = pref;
+    applyTheme(pref);
+    shell.setTheme(pref);
+    dcView.onThemeChanged();
+  };
+
   const shellHost: ShellHost = {
     // Ouverture d'une modale de la pile STANDARD, injectée au Shell (même patron que `ScanControl.setup`
     // et `LabelPrintDialog.setup`) : les RÉGLAGES sont désormais une modale ordinaire (`app/SettingsPanel`),
@@ -674,7 +698,11 @@ async function boot(): Promise<void> {
     // pour les prochains formulaires (le greffon relit les préférences à chaque attachement).
     onScanAllFields: (on) => { prefs.scanAllFields = on; shell.setScanPrefs(prefs.scanAllFields, prefs.scanForceButtons); },
     onScanForceButtons: (on) => { prefs.scanForceButtons = on; shell.setScanPrefs(prefs.scanAllFields, prefs.scanForceButtons); },
-    onToggleTheme: () => { prefs.theme = (prefs.theme === "light") ? "dark" : "light"; applyTheme(prefs.theme); shell.setTheme(prefs.theme); dcView.onThemeChanged(); },
+    // Toggle à TROIS positions des réglages : la préférence arrive telle quelle (« light » | « auto » | « dark »).
+    onThemePreference: (pref) => applyThemePreference(pref),
+    // Action « Basculer le thème » de la palette : elle demande un changement VISIBLE, pas un aller-retour.
+    // Depuis « auto », on épingle donc l'inverse de ce qui est AFFICHÉ (décision pure, cf. ThemeResolution.toggled).
+    onToggleTheme: () => applyThemePreference(ThemeResolution.toggled(prefs.theme, systemPrefersDark())),
     onUiScale: (value) => { prefs.uiScale = value; applyUiScale(prefs.uiScale); shell.setUiScale(prefs.uiScale); },
     onModalFullscreen: (on) => { prefs.modalFullscreen = on; applyModalFullscreen(prefs.modalFullscreen); shell.setModalFullscreen(prefs.modalFullscreen); },   // une modale DÉJÀ ouverte s'adapte par le CSS seul
     onAutocompleteMax: (value) => { prefs.autocompleteMaxResults = value; shell.setAutocompleteMax(prefs.autocompleteMaxResults); },
@@ -1716,7 +1744,12 @@ async function boot(): Promise<void> {
   shell.setFileAccessMode(prefs.fileAccessMode);
   shell.setDebugLog(prefs.debugLog); Log.setEnabled(prefs.debugLog);
   shell.setUiScale(prefs.uiScale);
-  shell.setTheme(prefs.theme);   // position de la bascule thème = thème EFFECTIF (coché = sombre)
+  shell.setTheme(prefs.theme);   // position du toggle à trois états = la PRÉFÉRENCE (« auto » reste « auto »)
+  // SUIVI DU SYSTÈME. Le thème de l'OS peut changer EN COURS DE SESSION (bascule nuit automatique) : on
+  // re-applique alors, mais UNIQUEMENT si la préférence est « auto » — un thème choisi à la main ne se
+  // fait pas écraser par l'horloge du système. Posé ici, après `dcView`, parce que la ré-application
+  // repeint aussi la scène 3D.
+  if (systemDarkQuery) systemDarkQuery.addEventListener("change", () => { if (prefs.theme === "auto") applyThemePreference("auto"); });
   shell.setModalFullscreen(prefs.modalFullscreen);
   shell.setAutocompleteMax(prefs.autocompleteMaxResults);
   shell.setRestMode(REST_MODE);   // mode API : masque les contrôles fichier

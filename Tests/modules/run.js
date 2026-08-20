@@ -20,6 +20,7 @@ const DOMAINS = [
   "./test-ui-modalstack.js",     // primitives UI : politique de la PILE de modales (core/ModalStack)
   "./test-session-expiry.js",    // contrôle d'accès : verrou « session expirée (401) → retour au login » (core/SessionExpiry)
   "./test-ui-draglist.js",       // primitives UI : glisser-déposer de liste (ui/DragList — seule la décision de dépôt est pure)
+  "./test-theme.js",             // PRÉFÉRENCE de thème (core/ThemeResolution) : trois positions clair · auto · sombre — défaut sombre (= absence de `data-theme`), ordre du toggle (auto au MILIEU), lecture tolérante des préférences persistées (celles d'avant le mode auto comprises), un choix EXPLICITE jamais écrasé par `prefers-color-scheme`, et bascule de la palette qui quitte « auto » vers un changement VISIBLE
   "./test-float-placement.js",   // primitives UI : règle de PLACEMENT des surfaces flottantes ancrées (core/FloatPlacement — paramétrages SearchPop portail / Autocomplete / RowMenu + politique tooltip)
   "./test-nav-model.js",         // MENU à deux niveaux (app/NavModel, re-design 2026-08-20) : 🚨 règle (A) « compteurs sur les entrées TERMINALES uniquement » appliquée à la construction, règles de dégradé sous droits partiels (domaine vide → disparaît, une vue → onglet direct, un seul domaine → niveau 1 effacé), séparateurs jamais orphelins, et VERROU d'exhaustivité « aucune vue de main.ts orpheline du menu »
   "./test-sync.js",              // rechargement granulaire REST

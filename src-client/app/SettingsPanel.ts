@@ -34,7 +34,9 @@
 
 import { Prefs } from "../core/Prefs";
 import { Icons } from "../ui/Icons";
+import { ModeSwitch, type TriSwitch } from "../ui/ModeSwitch";
 import { FieldFacet } from "../core/FieldFacet";
+import { ThemeResolution, type ThemePreference } from "../core/ThemeResolution";
 import { I18n, type LocalePreference } from "../i18n/I18n";
 import type { ModalOptions } from "../ui/Modal";
 
@@ -52,7 +54,10 @@ export interface SettingsPanelHost {
       l'icône des champs déclarés. Persistance et application = bootstrap (Prefs + ScanControl). */
   onScanAllFields?(on: boolean): void;
   onScanForceButtons?(on: boolean): void;
-  onToggleTheme?(): void;
+  /** PRÉFÉRENCE de thème choisie au toggle à trois positions : « light » | « auto » | « dark ». C'est
+      la préférence BRUTE qui remonte — la résolution en thème effectif (et la lecture de ce que
+      préfère le système) appartient au bootstrap, cf. `core/ThemeResolution`. */
+  onThemePreference?(pref: ThemePreference): void;
   onResetViewPrefs?(): void;
   /** Changement d'échelle d'interface (zoom global, taille du texte). */
   onUiScale?(value: number): void;
@@ -88,7 +93,7 @@ export class SettingsPanel {
   private root: HTMLElement;
 
   private dataSourceSwitch!: HTMLInputElement;     // toggle slider Local ⟷ API (coché = API)
-  private themeSwitch!: HTMLInputElement;          // toggle slider thème clair ⟷ sombre (coché = sombre)
+  private themeSwitch!: TriSwitch;                 // toggle à 3 positions : thème clair · auto · sombre
   private apiUrlInput!: HTMLInputElement;          // URL de base de l'API (mode API)
   private apiUrlRow!: HTMLElement;                 // ligne URL (masquée en mode Local)
   private apiLoginInput!: HTMLInputElement;        // URL de connexion SSO (bouton « Connexion » du welcome)
@@ -126,23 +131,9 @@ export class SettingsPanel {
   }
 
   /* ------------------------------------------------------------------ construction -- */
-
-  /** Fabrique un toggle SLIDER `.mode-switch` (case cachée + piste) — contrôle PARTAGÉ par la source de
-      données, le thème et les modales plein écran (principe n°3 : un seul idiome pour toutes les bascules
-      slider). L'anneau focus-visible et les transitions sont portés par le CSS `.mode-switch`. Le câblage
-      `onchange` et l'étiquetage (côtés/icônes, aria-label) restent à la charge de l'appelant. */
-  private static modeSwitch(): { label: HTMLLabelElement; input: HTMLInputElement } {
-    const label = document.createElement("label"); label.className = "mode-switch";
-    const input = document.createElement("input"); input.type = "checkbox";
-    const track = document.createElement("span"); track.className = "mode-switch-track"; track.setAttribute("aria-hidden", "true");
-    label.append(input, track);
-    return { label, input };
-  }
-
-  /** Petite pastille d'ICÔNE flanquant un toggle slider (légende décorative, cf. soleil/lune du thème). */
-  private static modeSwitchIcon(svg: string): HTMLElement {
-    const s = document.createElement("span"); s.className = "mode-switch-icon"; s.setAttribute("aria-hidden", "true"); s.innerHTML = svg; return s;
-  }
+  /* Les BASCULES elles-mêmes (slider à deux ou trois positions, pastilles d'icône) viennent de la
+     primitive partagée `ui/ModeSwitch` — principe n°14 : on ne réinvente pas un contrôle, et celui-ci
+     n'a rien qui appartienne aux réglages (aucune persistance, aucune préférence lue). */
 
   private build(): HTMLElement {
     const panel = document.createElement("div"); panel.className = "settings-panel";
@@ -152,7 +143,11 @@ export class SettingsPanel {
     const src = section(I18n.t("shell.settings.dataSource"));
     const srcRow = document.createElement("div"); srcRow.className = "mode-switch-row";
     const lblLocal = document.createElement("span"); lblLocal.className = "mode-switch-side"; lblLocal.textContent = I18n.t("shell.settings.local");
-    const dsSwitch = SettingsPanel.modeSwitch(); this.dataSourceSwitch = dsSwitch.input;
+    const dsSwitch = ModeSwitch.binary(); this.dataSourceSwitch = dsSwitch.input;
+    // Ses deux légendes LOCAL/API sont des `<span>` décoratifs : la bascule n'aurait, sans ceci, AUCUN
+    // nom accessible (les autres lignes tiennent le leur d'un `<label for>` — ici la disposition centrée
+    // ne s'y prête pas). On lui donne le titre de la section.
+    this.dataSourceSwitch.setAttribute("aria-label", I18n.t("shell.settings.dataSource"));
     this.dataSourceSwitch.onchange = () => { this.updateApiUrlVisibility(); this.host.onDataSource?.(this.dataSourceSwitch.checked ? "api" : "local"); };
     const lblApi = document.createElement("span"); lblApi.className = "mode-switch-side"; lblApi.textContent = I18n.t("shell.settings.api");
     srcRow.append(lblLocal, dsSwitch.label, lblApi); src.appendChild(srcRow);
@@ -183,15 +178,13 @@ export class SettingsPanel {
     faRow.append(faLbl, this.fileAccessSel); fa.appendChild(faRow);
     const faNote = document.createElement("div"); faNote.className = "settings-row-note"; faNote.textContent = I18n.t("shell.settings.fileAccessNote"); fa.appendChild(faNote);
 
-    // -- Auto-save (toggle + fréquence + état) --
+    // -- Auto-save (bascule OUI/NON + fréquence + état) --
+    // ⚠ Section MASQUÉE en mode API (`fileOnlySections`) : c'était la DERNIÈRE case à cocher du panneau,
+    // et la seule qu'on ne voit pas quand on travaille sur serveur. Passée au même interrupteur que le
+    // scan et le débogage — un panneau où le même geste prend deux apparences se lit deux fois.
     const as = section(I18n.t("shell.settings.autosave"));
-    const asRow = document.createElement("div"); asRow.className = "settings-toggle-row";
-    const asLabel = document.createElement("label"); asLabel.className = "settings-toggle";
-    this.autosaveChk = document.createElement("input"); this.autosaveChk.type = "checkbox";
-    this.autosaveChk.onchange = () => this.host.onAutosaveToggle?.(this.autosaveChk.checked);
-    asLabel.append(this.autosaveChk, document.createTextNode(I18n.t("shell.settings.autosaveEnable")));
-    asRow.appendChild(asLabel); as.appendChild(asRow);
-    const freqRow = document.createElement("div"); freqRow.className = "settings-row"; freqRow.style.marginTop = "10px";
+    this.autosaveChk = this.switchRow(as, I18n.t("shell.settings.autosaveEnable"), (on) => this.host.onAutosaveToggle?.(on));
+    const freqRow = document.createElement("div"); freqRow.className = "settings-row";
     const freqLbl = document.createElement("label"); freqLbl.className = "settings-row-label"; freqLbl.textContent = I18n.t("shell.settings.frequency");
     this.autosaveIntervalSel = document.createElement("select"); this.autosaveIntervalSel.className = "settings-row-select";
     Prefs.INTERVAL_OPTIONS.forEach((n) => { const o = document.createElement("option"); o.value = String(n); o.textContent = n + " s"; this.autosaveIntervalSel.appendChild(o); });
@@ -201,45 +194,53 @@ export class SettingsPanel {
     this.fileOnlySections.push(fa, as);   // sections propres au mode fichier → masquées en mode API
 
     // -- Scan (caméra) : préférences du greffon de scan (chantier QR, cf. docs/qr-scan.md § UI) --
-    // Deux bascules : greffon GÉNÉRIQUE sur tous les champs texte, et FORÇAGE de l'icône des champs
-    // déclarés sur desktop (par défaut elle n'apparaît qu'en tactile/écran étroit — pas d'icône morte).
+    // Deux bascules OUI/NON : greffon GÉNÉRIQUE sur tous les champs texte, et FORÇAGE de l'icône des
+    // champs déclarés sur desktop (par défaut elle n'apparaît qu'en tactile/écran étroit — pas d'icône
+    // morte). Aucune icône de légende : un interrupteur à deux états n'a rien à désambiguïser.
     const sc = section(I18n.t("shell.settings.scan"));
-    const scAllRow = document.createElement("div"); scAllRow.className = "settings-toggle-row";
-    const scAllLabel = document.createElement("label"); scAllLabel.className = "settings-toggle";
-    this.scanAllChk = document.createElement("input"); this.scanAllChk.type = "checkbox";
-    this.scanAllChk.onchange = () => this.host.onScanAllFields?.(this.scanAllChk.checked);
-    scAllLabel.append(this.scanAllChk, document.createTextNode(I18n.t("shell.settings.scanAllFields")));
-    scAllRow.appendChild(scAllLabel); sc.appendChild(scAllRow);
-    const scForceRow = document.createElement("div"); scForceRow.className = "settings-toggle-row";
-    const scForceLabel = document.createElement("label"); scForceLabel.className = "settings-toggle";
-    this.scanForceChk = document.createElement("input"); this.scanForceChk.type = "checkbox";
-    this.scanForceChk.onchange = () => this.host.onScanForceButtons?.(this.scanForceChk.checked);
-    scForceLabel.append(this.scanForceChk, document.createTextNode(I18n.t("shell.settings.scanForce")));
-    scForceRow.appendChild(scForceLabel); sc.appendChild(scForceRow);
+    this.scanAllChk = this.switchRow(sc, I18n.t("shell.settings.scanAllFields"), (on) => this.host.onScanAllFields?.(on));
+    this.scanForceChk = this.switchRow(sc, I18n.t("shell.settings.scanForce"), (on) => this.host.onScanForceButtons?.(on));
     const scNote = document.createElement("div"); scNote.className = "settings-row-note"; scNote.textContent = I18n.t("shell.settings.scanNote"); sc.appendChild(scNote);
 
     // -- Apparence -- (seule section « cosmétique » conservée en mode visualiseur ; cf. body.viewer-mode)
     const app = section(I18n.t("shell.settings.appearance")); app.classList.add("settings-cosmetic");
-    // -- Thème clair / sombre : toggle SLIDER (même contrôle que la source de données) flanqué du SOLEIL (thème
-    //    clair, à gauche = décoché) et de la LUNE (thème sombre, à droite = coché) — sens du mode-switch (le pouce
-    //    glisse à droite quand coché). Comportement inchangé : l'appui BASCULE (host.onToggleTheme, persistance via
-    //    Prefs) ; la position est reflétée par setTheme (boot + après bascule). aria-label/title localisés ; l'anneau
-    //    focus-visible du mode-switch s'applique. --
-    const themeRow = document.createElement("div"); themeRow.className = "mode-switch-row mode-switch-row--spread";
-    const themeSwitch = SettingsPanel.modeSwitch(); this.themeSwitch = themeSwitch.input;
-    this.themeSwitch.setAttribute("aria-label", I18n.t("shell.settings.toggleTheme")); this.themeSwitch.title = I18n.t("shell.settings.toggleTheme");
-    this.themeSwitch.onchange = () => this.host.onToggleTheme?.();
-    themeRow.append(SettingsPanel.modeSwitchIcon(Icons.SUN), themeSwitch.label, SettingsPanel.modeSwitchIcon(Icons.MOON)); app.appendChild(themeRow);
-    // -- Modales en plein écran (préférence DESKTOP) : MÊME toggle mode-switch, JUSTE SOUS le thème. Le libellé nomme
-    //    la préférence (gauche) ; l'icône « plein écran » marque l'état ACTIF (droite = coché = plein écran), un seul
-    //    côté iconé suffit ici (bascule binaire, contrairement au thème à deux états nommés). Toujours actif sous le
-    //    breakpoint responsive (CSS seul) ; ici on ne pilote QUE l'effet desktop (attribut data-modal-fs). --
-    const mfsRow = document.createElement("div"); mfsRow.className = "mode-switch-row mode-switch-row--spread"; mfsRow.style.marginTop = "12px";
-    const mfsLabel = document.createElement("span"); mfsLabel.className = "mode-switch-label"; mfsLabel.textContent = I18n.t("shell.settings.modalFs");
-    const mfsSwitch = SettingsPanel.modeSwitch(); this.modalFsChk = mfsSwitch.input;
-    this.modalFsChk.setAttribute("aria-label", I18n.t("shell.settings.modalFs")); this.modalFsChk.title = I18n.t("shell.settings.modalFs");
+    // -- Thème : toggle à TROIS positions — clair · AUTO · sombre. « Auto » au MILIEU : c'est la seule place
+    //    qui garde le glissement clair → sombre monotone de gauche à droite, et elle est flanquée du SOLEIL et
+    //    de la LUNE, collés au contrôle (les repères disent les EXTRÊMES ; le milieu porte son « A »). L'ordre
+    //    des positions vient de `ThemeResolution.OPTIONS` — source unique, jamais re-listée ici.
+    //    Ce toggle ne BASCULE pas : il CHOISIT une préférence, remontée telle quelle à l'hôte. --
+    const themeRow = document.createElement("div"); themeRow.className = "settings-row";
+    const themeLbl = document.createElement("span"); themeLbl.className = "settings-row-label"; themeLbl.textContent = I18n.t("shell.settings.theme");
+    const themeLabels: Record<ThemePreference, string> = {
+      light: I18n.t("shell.settings.themeLight"),
+      auto: I18n.t("shell.settings.themeAuto"),
+      dark: I18n.t("shell.settings.themeDark"),
+    };
+    this.themeSwitch = ModeSwitch.tri({
+      groupLabel: I18n.t("shell.settings.theme"),
+      options: ThemeResolution.OPTIONS.map((value) => ({ value, label: themeLabels[value] })),
+      // Repère du CENTRE : l'initiale du libellé « auto » localisé (« A » en fr comme en en). Dérivée
+      // plutôt que codée en dur — une clé i18n dont la valeur serait la même des deux côtés n'apprendrait
+      // rien, et une lettre en dur mentirait dans une langue où « auto » ne commence pas par A.
+      mark: themeLabels.auto.trim().charAt(0).toUpperCase(),
+      onChange: (value) => this.host.onThemePreference?.(value as ThemePreference),
+    });
+    const themeGroup = document.createElement("div"); themeGroup.className = "settings-switch-group";
+    themeGroup.append(ModeSwitch.icon(Icons.SUN), this.themeSwitch.root, ModeSwitch.icon(Icons.MOON));
+    themeRow.append(themeLbl, themeGroup); app.appendChild(themeRow);
+    const themeNote = document.createElement("div"); themeNote.className = "settings-row-note"; themeNote.textContent = I18n.t("shell.settings.themeNote"); app.appendChild(themeNote);
+    // -- Modales en plein écran (préférence DESKTOP) : bascule OUI/NON, flanquée de ses deux états — fenêtre
+    //    FLOTTANTE à gauche (décoché), PLEIN ÉCRAN à droite (coché). Les deux repères sont COLLÉS au toggle
+    //    dans un même bloc aligné à droite : une icône posée à l'autre bout de la ligne ne se rattache plus
+    //    visuellement au contrôle qu'elle légende. Toujours actif sous le breakpoint responsive (CSS seul) ;
+    //    ici on ne pilote QUE l'effet desktop (attribut data-modal-fs). --
+    const mfsRow = document.createElement("div"); mfsRow.className = "settings-row"; mfsRow.style.marginTop = "12px";
+    const mfsSwitch = ModeSwitch.binary(); this.modalFsChk = mfsSwitch.input;
     this.modalFsChk.onchange = () => this.host.onModalFullscreen?.(this.modalFsChk.checked);
-    mfsRow.append(mfsLabel, mfsSwitch.label, SettingsPanel.modeSwitchIcon(Icons.FULLSCREEN)); app.appendChild(mfsRow);
+    const mfsLbl = document.createElement("label"); mfsLbl.className = "settings-row-label"; mfsLbl.htmlFor = this.modalFsChk.id; mfsLbl.textContent = I18n.t("shell.settings.modalFs");
+    const mfsGroup = document.createElement("div"); mfsGroup.className = "settings-switch-group";
+    mfsGroup.append(ModeSwitch.icon(Icons.MODAL_FLOATING), mfsSwitch.label, ModeSwitch.icon(Icons.FULLSCREEN));
+    mfsRow.append(mfsLbl, mfsGroup); app.appendChild(mfsRow);
     const mfsNote = document.createElement("div"); mfsNote.className = "settings-row-note"; mfsNote.textContent = I18n.t("shell.settings.modalFsNote"); app.appendChild(mfsNote);
     // -- Taille du texte (échelle d'interface) : compense les mobiles qui grossissent les polices --
     const fsRow = document.createElement("div"); fsRow.className = "settings-row"; fsRow.style.marginTop = "10px";
@@ -289,17 +290,26 @@ export class SettingsPanel {
     const purgeBtn = document.createElement("button"); purgeBtn.type = "button"; purgeBtn.className = "btn btn-ghost btn-sm"; purgeBtn.style.width = "100%"; purgeBtn.textContent = I18n.t("shell.settings.cleanImages");
     purgeBtn.onclick = () => this.host.onPurgeImages?.(); mnt.appendChild(purgeBtn);
     const mntNote = document.createElement("div"); mntNote.className = "settings-row-note"; mntNote.textContent = I18n.t("shell.settings.maintenanceNote"); mnt.appendChild(mntNote);
-    // -- Débogage --
+    // -- Débogage -- (bascule OUI/NON, même facture que les deux réglages de scan)
     const dbg = section(I18n.t("shell.settings.debug"));
-    const dbgRow = document.createElement("div"); dbgRow.className = "settings-toggle-row";
-    const dbgLabel = document.createElement("label"); dbgLabel.className = "settings-toggle";
-    this.debugLogChk = document.createElement("input"); this.debugLogChk.type = "checkbox";
-    this.debugLogChk.onchange = () => this.host.onDebugLog?.(this.debugLogChk.checked);
-    dbgLabel.append(this.debugLogChk, document.createTextNode(I18n.t("shell.settings.debugLogs")));
-    dbgRow.appendChild(dbgLabel); dbg.appendChild(dbgRow);
+    this.debugLogChk = this.switchRow(dbg, I18n.t("shell.settings.debugLogs"), (on) => this.host.onDebugLog?.(on));
     const dbgNote = document.createElement("div"); dbgNote.className = "settings-row-note"; dbgNote.textContent = I18n.t("shell.settings.debugNote"); dbg.appendChild(dbgNote);
 
     return panel;
+  }
+
+  /** Ligne « intitulé à gauche · bascule OUI/NON à droite », posée dans `section`. Le libellé est un
+      vrai `<label for>` : cliquer les quelques mots de l'intitulé bascule le réglage — cible autrement
+      plus confortable que le pouce de 18 px, au doigt comme à la souris. Renvoie la case (cachée) pour
+      que le reflet (`setScanPrefs`, `setDebugLog`) la coche sans repasser par le rappel. */
+  private switchRow(section: HTMLElement, label: string, onChange: (on: boolean) => void): HTMLInputElement {
+    const row = document.createElement("div"); row.className = "settings-row";
+    const sw = ModeSwitch.binary();
+    sw.input.onchange = () => onChange(sw.input.checked);
+    const lbl = document.createElement("label"); lbl.className = "settings-row-label"; lbl.htmlFor = sw.input.id; lbl.textContent = label;
+    row.append(lbl, sw.label);
+    section.appendChild(row);
+    return sw.input;
   }
 
   /* --------------------------------------------------------------------- reflets -- */
@@ -317,8 +327,10 @@ export class SettingsPanel {
   setDebugLog(on: boolean): void { if (this.debugLogChk) this.debugLogChk.checked = on; }
   /** Reflète l'échelle d'interface dans le sélecteur des réglages (sans déclencher onUiScale). */
   setUiScale(v: number): void { if (this.uiScaleSel) this.uiScaleSel.value = String(v); }
-  /** Reflète le thème courant dans la bascule des réglages (coché = sombre) — sans déclencher onToggleTheme. */
-  setTheme(theme: string): void { if (this.themeSwitch) this.themeSwitch.checked = (theme === "dark"); }
+  /** Reflète la PRÉFÉRENCE de thème dans le toggle à trois positions — sans déclencher `onThemePreference`.
+      C'est bien la préférence qui est peinte, pas le thème effectif : « auto » doit rester « auto » à
+      l'écran, même quand le système le résout en sombre. */
+  setTheme(pref: string): void { if (this.themeSwitch) this.themeSwitch.setValue(pref); }
   /** Reflète la préférence « modales en plein écran » dans la bascule (sans déclencher onModalFullscreen). */
   setModalFullscreen(on: boolean): void { if (this.modalFsChk) this.modalFsChk.checked = on; }
   /** Reflète le nb max de suggestions d'autocomplétion dans le sélecteur des réglages. */

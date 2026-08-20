@@ -75,6 +75,10 @@ export interface ShellHost extends SettingsPanelHost {
   /** SCANNER UNE ÉTIQUETTE (viseur caméra en mode libre — chantier QR, cf. docs/qr-scan.md § UI).
       Bouton révélé par `setScanAvailable` quand une caméra existe. */
   onScanGlobal?(): void;
+  /** BASCULE du thème — commande GLOBALE (action « Basculer le thème » de la palette Ctrl+K), et non
+      un réglage : elle ne choisit pas une préférence, elle demande l'inverse de ce qui est affiché.
+      Le toggle des réglages, lui, passe par `onThemePreference` (cf. `SettingsPanelHost`). */
+  onToggleTheme?(): void;
   /** Ouverture de la modale d'INFOS UTILISATEUR (clic sur la pastille de la topbar — icône seule en
       responsive, nom + icône en grand écran : MÊME geste). L'implémentation (bootstrap) y injecte
       l'identité `/me` et l'état d'autorisation DÉJÀ connus — aucun appel serveur. */

@@ -2485,9 +2485,20 @@
   }
   .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .settings-row + .settings-row { margin-top: 10px; }
+  /* `flex: 1 1 auto; min-width: 0` : les intitulés de BASCULE sont des phrases (« Bouton scan sur tous les
+     champs texte ») — sans ça elles pousseraient le contrôle hors de la colonne au lieu de passer à la
+     ligne. Les lignes à `<select>` ne bougent pas : le sélecteur garde son `min-width`. */
   .settings-row-label {
     font-size: 12px; color: var(--fg); display: inline-flex; align-items: center; gap: 6px;
+    flex: 1 1 auto; min-width: 0;
   }
+  /* Intitulé CLIQUABLE : une ligne de bascule met son texte dans un `<label for>` — le curseur doit le dire. */
+  label.settings-row-label { cursor: pointer; }
+  /* Bloc de DROITE d'une ligne de réglage : les repères (icônes) restent COLLÉS au toggle, et c'est le
+     bloc ENTIER que le `space-between` de `.settings-row` pousse au bord droit. Une icône laissée aux
+     extrémités de la ligne (ancien `.mode-switch-row--spread`) ne se rattachait plus visuellement au
+     contrôle qu'elle légende. */
+  .settings-switch-group { display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; }
   .settings-row-select {
     background: var(--bg-3); color: var(--fg); border: 1px solid var(--line-2);
     font-family: var(--mono); font-size: 12px; padding: 5px 8px; border-radius: var(--radius-pill);
@@ -2495,17 +2506,17 @@
   }
   .settings-row-select:disabled { opacity: 0.5; cursor: not-allowed; }
   .settings-row-select option:disabled { color: var(--fg-dimmer); }
-  /* Toggle SLIDER GÉNÉRIQUE (source de données Local ⟷ API, thème clair ⟷ sombre, modales plein écran).
-     Les sélecteurs `.mode-switch*` ne portent AUCUNE spécificité métier → réutilisés tels quels par les
-     trois bascules. Variantes de LÉGENDE : `.mode-switch-side` (texte majuscule, ex. LOCAL/API),
-     `.mode-switch-icon` (pastille SVG, ex. soleil/lune/plein écran), `.mode-switch-label` (libellé casse
-     normale). `--spread` répartit la légende aux extrémités (toggle centré, deux repères de part et d'autre). */
+  /* Toggle SLIDER GÉNÉRIQUE — source de données, modales plein écran, préférences de scan, débogage,
+     auto-save (et, à trois positions, le thème : cf. `.mode-switch3` plus bas). Les sélecteurs
+     `.mode-switch*` ne portent AUCUNE spécificité métier → réutilisés tels quels par toutes les bascules,
+     et fabriqués en un seul point (`ui/ModeSwitch`). Variantes de LÉGENDE : `.mode-switch-side` (texte
+     majuscule, ex. LOCAL/API) et `.mode-switch-icon` (pastille SVG, ex. soleil/lune/plein écran).
+     Le libellé d'une ligne de réglage, lui, n'est plus une légende du toggle mais l'intitulé de la
+     LIGNE (`.settings-row-label`, à gauche), le toggle vivant dans le bloc de droite. */
   .mode-switch-row { display: flex; align-items: center; justify-content: center; gap: 12px; }
-  .mode-switch-row--spread { justify-content: space-between; }
   .mode-switch-side { font-size: 12px; color: var(--fg-dim); letter-spacing: 0.06em; text-transform: uppercase; }
   .mode-switch-icon { display: inline-flex; align-items: center; color: var(--fg-dim); flex: 0 0 auto; }
   .mode-switch-icon svg { width: 16px; height: 16px; }
-  .mode-switch-label { font-size: 12px; color: var(--fg); }
   .mode-switch { position: relative; display: inline-block; width: 46px; height: 24px; flex: 0 0 auto; cursor: pointer; }
   .mode-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
   .mode-switch-track { position: absolute; inset: 0; background: var(--bg-3); border: 1px solid var(--line-2); border-radius: 999px; transition: background .15s, border-color .15s; }
@@ -2513,9 +2524,33 @@
   .mode-switch input:checked + .mode-switch-track { background: var(--bg-3); border-color: var(--accent); }
   .mode-switch input:checked + .mode-switch-track::before { transform: translateX(22px); background: var(--accent); }
   .mode-switch input:focus-visible + .mode-switch-track { outline: 2px solid var(--focus); outline-offset: 2px; }   /* aligné sur l'anneau de focus global (--focus) */
-  .settings-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-  .settings-toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; color: var(--fg); }
-  .settings-toggle input { width: 15px; height: 15px; cursor: pointer; accent-color: var(--accent); }
+
+  /* ---- Toggle à TROIS positions (`.mode-switch3`, cf. ui/ModeSwitch.tri) ----
+     Même piste, même pouce, même durée d'animation que `.mode-switch` : c'est le MÊME contrôle, avec une
+     position de plus. Sous la piste vivent trois RADIOS cachées (le vrai contrôle) et, par-dessus, trois
+     `<label for>` en zones cliquables — d'où les deux `z-index` : la piste est décor, les zones captent.
+     🚨 Le pouce est placé PAR RANG (`input:nth-of-type(n):checked`), jamais par valeur : aucune sémantique
+     métier (« auto », « dark »…) n'entre dans cette feuille, et le contrôle reste réutilisable tel quel.
+     Le pouce est ACCENTUÉ dans les trois positions, contrairement au toggle binaire dont le gris signale
+     l'état « non » : ici aucune position n'est un « éteint », ce sont trois choix de même rang.
+     Géométrie : piste 68 px (66 px hors bordures), pouce 18 px à 2 px du bord → pas de 22 px, marge de
+     2 px identique aux deux extrémités. */
+  .mode-switch3 { position: relative; display: inline-block; width: 68px; height: 24px; flex: 0 0 auto; }
+  .mode-switch3 input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .mode-switch3-track { position: absolute; inset: 0; background: var(--bg-3); border: 1px solid var(--line-2); border-radius: 999px; }
+  .mode-switch3-thumb { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; background: var(--accent); border-radius: 50%; transition: transform .15s; }
+  /* Repère du CENTRE (« A » d'auto) : visible tant que cette position n'est PAS choisie — sinon le pouce
+     le recouvrirait, et la position parle alors d'elle-même. */
+  .mode-switch3-mark { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-family: var(--mono); font-size: 9px; font-weight: 700; color: var(--fg-dimmer); transition: opacity .15s; }
+  .mode-switch3-hit { position: absolute; top: 0; bottom: 0; width: 33.34%; z-index: 1; cursor: pointer; }
+  .mode-switch3-hit:nth-of-type(1) { left: 0; }
+  .mode-switch3-hit:nth-of-type(2) { left: 33.33%; }
+  .mode-switch3-hit:nth-of-type(3) { left: 66.66%; }
+  .mode-switch3 input:nth-of-type(2):checked ~ .mode-switch3-track .mode-switch3-thumb { transform: translateX(22px); }
+  .mode-switch3 input:nth-of-type(3):checked ~ .mode-switch3-track .mode-switch3-thumb { transform: translateX(44px); }
+  .mode-switch3 input:nth-of-type(2):checked ~ .mode-switch3-track .mode-switch3-mark { opacity: 0; }
+  .mode-switch3 input:checked ~ .mode-switch3-track { border-color: var(--accent); }
+  .mode-switch3 input:focus-visible ~ .mode-switch3-track { outline: 2px solid var(--focus); outline-offset: 2px; }
   .settings-help-icon {
     display: inline-flex; align-items: center; justify-content: center;
     width: 14px; height: 14px; border-radius: 50%;
