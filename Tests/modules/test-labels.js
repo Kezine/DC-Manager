@@ -9,7 +9,8 @@
                           mise à l'échelle en mm ;
      - core/LabelHtml   : rendu HTML partagé aperçu ⇄ imprimé (structure, échappement,
                           répétitions du manchon, planche, document d'impression) + les COTES
-                          au millimètre (padding/gouttière posés inline depuis LabelLayout) ;
+                          au millimètre (padding/gouttière ET largeurs de case de manchon posés
+                          inline depuis LabelLayout — dont l'ÉGALITÉ STRICTE des cases) ;
      - core/LabelPrintPolicy : LA matrice de visibilité contextuelle (retours terrain 2026-08-20) —
                           offres par sujet, verdict (sujet × contenu × format × nombre), retombée
                           sur défaut d'un réglage mémorisé devenu invalide ;
@@ -59,12 +60,12 @@ module.exports = async () => {
     // Un QR plus grand DILATE le panneau (géométrie DÉRIVÉE du QR, jamais figée).
     const fb = LabelLayout.flagGeometry(28, true);
     ck(near(fb.pan, 28) && near(fb.w, 66) && near(fb.h, 28), "drapeau compact q28 : panneau 28 → 66 de large");
-    // MANCHON Ø 6, 25 mm, compact : 2 tours (2π·6) + 12 de recouvrement = 49,7 mm (spécimen maquette).
-    const sc = LabelLayout.sleeveGeometry(6, 25, true);
-    ck(near(sc.w, 49.7, 0.005), "manchon Ø6 compact : largeur 49,7 mm (2 tours + 12)");
+    // MANCHON — géométrie AMENDÉE le 2026-08-20 (cf. section dédiée plus bas pour les goldens
+    // par Ø et les invariants) : 1,5 tour, le demi-tour excédentaire SERT de recouvrement.
+    const sc = LabelLayout.sleeveGeometry(6, 25);
+    ck(near(sc.w, 28.274, 0.001), "manchon Ø6 : largeur 28,27 mm (1,5 tour)");
     ck(near(sc.turn, Math.PI * 6, 1e-9), "manchon : un tour = π·Ø");
     ck.eq(sc.h, 25, "manchon : hauteur = longueur le long du câble");
-    ck.eq(LabelLayout.sleeveGeometry(6, 25, false).overlap, 16, "manchon confort : recouvrement 16");
     // QR SEUL : carré (QR + marges), la bande propriétaire s'ajoute SOUS le carré. Compact = le QR
     // NU (padding nul, densités amendées) ; confort = les marges de la maquette.
     ck.eq(LabelLayout.qrOnlyGeometry(20, true, false).side, 20, "QR seul compact sans owner : le QR nu (20)");
@@ -75,7 +76,7 @@ module.exports = async () => {
     ck.eq(JSON.stringify(LabelLayout.labelDims(spec({ size: "custom", custom: { w: 38, h: 16 } }))), JSON.stringify([38, 16]), "dims personnalisé = cotes saisies");
     ck.eq(JSON.stringify(LabelLayout.labelDims(spec({ content: "qr", qr: 20 }))), JSON.stringify([20, 20]), "dims QR seul = carré");
     const sd = LabelLayout.labelDims(spec({ size: "cable", content: "strip" }));
-    ck(near(sd[0], 49.7, 0.005) && sd[1] === 25, "dims manchon = géométrie du manchon");
+    ck(near(sd[0], 28.274, 0.001) && sd[1] === 25, "dims manchon = géométrie du manchon (1,5 tour à Ø 6)");
     const fd = LabelLayout.labelDims(spec({ size: "cable", qr: 18 }));
     ck(near(fd[0], 54) && near(fd[1], 18), "dims drapeau compact = 54 × 18");
     // Classe de police du personnalisé : suit le gabarit le plus proche (frontières maquette).
@@ -191,8 +192,9 @@ module.exports = async () => {
     ck((flag.match(/class="pan/g) || []).length === 2 && flag.includes('class="wz"'), "drapeau : 2 panneaux + zone d'enroulement");
     ck((flag.match(/data-qr="1"/g) || []).length === 1, "drapeau QR+texte : UN QR (panneau A)");
     ck((LabelHtml.label(cable, spec({ size: "cable", content: "qr", qr: 18 }), allFields, qr).match(/data-qr="1"/g) || []).length === 2, "drapeau QR seul : QR des DEUX côtés");
-    ck.eq((LabelHtml.label(cable, spec({ size: "cable", content: "strip" }), allFields, "").match(/cell2/g) || []).length, 2, "manchon repère complet : 2 tours");
-    ck.eq((LabelHtml.label(cable, spec({ size: "cable", content: "id" }), allFields, "").match(/cell2/g) || []).length, 6, "manchon identifiant seul : ×6 sur le tour");
+    ck.eq((LabelHtml.label(cable, spec({ size: "cable", content: "strip" }), allFields, "").match(/cell2/g) || []).length, 2, "manchon repère complet : 2 panneaux");
+    // ×6 figé AVANT le retour terrain ; le compte est désormais DÉDUIT du Ø (4 cases à Ø 6).
+    ck.eq((LabelHtml.label(cable, spec({ size: "cable", content: "id" }), allFields, "").match(/cell2/g) || []).length, 4, "manchon identifiant seul à Ø 6 : 4 cases sur le tour");
     // Planche + document d'impression.
     const page = LabelHtml.sheetPage(["<i>a</i>", "<i>b</i>"], { cols: 4, cellH: 33 }, { source: "Baie B12 · contenu", headRight: "2 étiquettes", cuts: true });
     ck(page.includes("grid-template-columns:repeat(4,1fr)") && page.includes("a4-head"), "planche : grille + en-tête hors zone");
@@ -290,6 +292,130 @@ module.exports = async () => {
     const sheet = LabelHtml.printDocument({ title: "t", pageSize: "A4", pagesHtml: "<div class=\"a4\">x</div>" });
     ck(sheet.includes("@page{size:A4;margin:0}"), "planche : @page margin 0 (la marge de 8 mm est celle de la GRILLE, pas de la page)");
     ck(sheet.includes(".label-render .a4{width:210mm;height:297mm;background:#fff;padding:8mm"), "planche : les 8 mm de marge utile vivent dans la grille A4");
+  });
+
+  /* ============================================================================================
+     RETOURS TERRAIN DU 2026-08-20 (2e vague — sur ÉTIQUETTES IMPRIMÉES) : la GÉOMÉTRIE DES
+     MANCHONS. Deux volets, qui AMENDENT tous deux la maquette :
+       (1) ENROULEMENT — « 1.5 × le diamètre est OK sinon on a trop de papier à coller » : la
+           bande fait 1,5 TOUR et le demi-tour excédentaire EST le recouvrement (plus de zone
+           ajoutée en supplément) ; corollaire, la partie VISIBLE vaut exactement UN tour ;
+       (2) RÉPÉTITIONS — « la case de la dernière répétition est plus grande que les autres » :
+           le compte n'est plus figé à 6 mais DÉDUIT de la partie visible, et la largeur de case
+           (`visible / count`) est POSÉE EN MILLIMÈTRES dans le HTML, donc mesurable ici. C'est
+           l'égalité STRICTE des cases qui est la régression à verrouiller.
+     ============================================================================================ */
+
+  /** Largeurs de case (mm) LUES dans le HTML généré — c'est la cote POSÉE qu'on vérifie, pas
+      une répartition que le moteur de flexbox aurait faite dans le navigateur. */
+  const cellWidthsOf = (html) => {
+    const re = /class="cell2[^"]*"\s+style="width:([0-9.]+)mm"/g;
+    const out = []; let m;
+    while ((m = re.exec(html)) !== null) out.push(parseFloat(m[1]));
+    return out;
+  };
+
+  await section("labels : LabelLayout — manchon 1,5 tour (le demi-tour EST le recouvrement)", async () => {
+    // GOLDENS par Ø — les valeurs annoncées à l'utilisateur (Ø 6 → 28,3 · Ø 10 → 47,1 · Ø 20 → 94,2).
+    const golden = [
+      [3, 9.42478, 4.71239, 14.13717],
+      [6, 18.84956, 9.42478, 28.27433],
+      [10, 31.41593, 15.70796, 47.12389],
+      [20, 62.83185, 31.41593, 94.24778],
+    ];
+    for (const [dia, turn, overlap, w] of golden) {
+      const g = LabelLayout.sleeveGeometry(dia, 25);
+      ck(near(g.turn, turn, 1e-4), "Ø " + dia + " : un tour = π·Ø = " + turn.toFixed(2) + " mm");
+      ck(near(g.overlap, overlap, 1e-4), "Ø " + dia + " : recouvrement = le DEMI-tour (" + overlap.toFixed(2) + " mm)");
+      ck(near(g.w, w, 1e-4), "Ø " + dia + " : largeur déroulée = " + w.toFixed(2) + " mm");
+      // Les DEUX invariants du retour n°1, écrits comme tels (ils survivront à tout réglage de cote).
+      ck(near(g.w, 1.5 * g.turn, 1e-9), "Ø " + dia + " : INVARIANT w = 1,5 × tour");
+      ck(near(g.visible, g.turn, 1e-9), "Ø " + dia + " : INVARIANT partie visible = UN tour");
+      ck(near(g.w - g.overlap, g.visible, 1e-9), "Ø " + dia + " : …et visible = w − recouvrement");
+    }
+    // La DENSITÉ n'entre plus dans l'enroulement : c'est une géométrie physique, pas de l'aisance
+    // typographique — la fonction ne prend plus que Ø et longueur (un 3e argument serait ignoré).
+    ck.eq(LabelLayout.sleeveGeometry.length, 2, "sleeveGeometry ne prend plus que (Ø, longueur) — le paramètre de densité a disparu");
+    ck.eq(LabelLayout.sleeveGeometry(6, 25).h, 25, "la hauteur reste la longueur le long du câble");
+    ck.eq(LabelLayout.sleeveGeometry(6, 40).h, 40, "…et la suit");
+  });
+
+  await section("labels : LabelLayout — nombre de cases DÉDUIT de la partie visible (pas figé à 6)", async () => {
+    // Le pas cible donne l'ÉPAISSEUR d'une bande : le nom se lit dans l'axe du câble, la case ne
+    // porte que la hauteur de ligne (8 pt ≈ 3,1 mm mesurés au navigateur).
+    ck.eq(LabelLayout.SLEEVE_REPEAT_PITCH_MM, 5, "pas cible d'une case = 5 mm");
+    ck.eq(LabelLayout.SLEEVE_REPEAT_MIN, 2, "minimum 2 : un seul repère pourrait se retrouver SOUS le câble");
+    ck.eq(LabelLayout.SLEEVE_STRIP_PANELS, 2, "« repère complet » : 2 panneaux (le texte y est riche)");
+    // Un gros Ø porte PLUS de repères qu'un petit — c'est tout l'objet de la correction.
+    const casesFor = (dia) => LabelLayout.sleeveRepeats(LabelLayout.sleeveGeometry(dia, 25).visible);
+    ck.eq(casesFor(3), 2, "Ø 3 (tour 9,4 mm) : 2 cases");
+    ck.eq(casesFor(6), 4, "Ø 6 (tour 18,8 mm) : 4 cases");
+    ck.eq(casesFor(10), 6, "Ø 10 (tour 31,4 mm) : 6 cases");
+    ck.eq(casesFor(20), 13, "Ø 20 (tour 62,8 mm) : 13 cases");
+    ck.eq(casesFor(30), 19, "Ø 30 (le Ø max offert) : 19 cases — le plafond de 20 ne mord pas");
+    // BORNES : la fonction est PURE, donc TOTALE — elle répond à n'importe quelle entrée.
+    ck.eq(LabelLayout.sleeveRepeats(1), 2, "partie visible minuscule : plancher à 2");
+    ck.eq(LabelLayout.sleeveRepeats(0), 2, "zéro : plancher (jamais 0 case, jamais de division par zéro)");
+    ck.eq(LabelLayout.sleeveRepeats(-5), 2, "négatif : plancher");
+    ck.eq(LabelLayout.sleeveRepeats(NaN), 2, "non numérique : plancher (même politique que clampCustom)");
+    ck.eq(LabelLayout.sleeveRepeats(500), LabelLayout.SLEEVE_REPEAT_MAX, "démesuré : plafonné");
+    // La largeur de case n'a AUCUN reste, par construction : visible / count, exactement.
+    for (const dia of [3, 6, 10, 20]) {
+      const g = LabelLayout.sleeveGeometry(dia, 25);
+      const n = LabelLayout.sleeveRepeats(g.visible);
+      const cw = LabelLayout.sleeveCellWidth(g.visible, n);
+      ck(near(cw * n, g.visible, 1e-9), "Ø " + dia + " : " + n + " cases × " + cw.toFixed(3) + " mm = la partie visible, sans reste");
+      // …et le pas obtenu reste dans la fourchette qui justifie le choix de 5 mm.
+      ck(cw >= 3.2 && cw <= 6.3, "Ø " + dia + " : case de " + cw.toFixed(2) + " mm — au-dessus de la hauteur de ligne (3,1), sous le flottement");
+    }
+    ck(near(LabelLayout.sleeveCellWidth(12, 2), 6, 1e-9), "sleeveCellWidth : division exacte");
+    ck(near(LabelLayout.sleeveCellWidth(12, 0), 12, 1e-9), "sleeveCellWidth : jamais de division par zéro (retombe sur 1 case)");
+  });
+
+  await section("labels : LabelHtml — 🚨 les cases d'un manchon sont STRICTEMENT égales (le défaut signalé)", async () => {
+    const cable = { collection: "cables", id: "c1", name: "CBL-004821", endA: "SRV · P1", endB: "SW · Gi1/0/12", typeLabel: "Cat 6a · 3 m" };
+    const allFields = { location: true, type: true, serial: true, owner: true };
+
+    for (const dia of [3, 6, 10, 20]) {
+      const sp = spec({ size: "cable", content: "id", dia });
+      const g = LabelLayout.sleeveGeometry(dia, sp.len);
+      const expected = LabelLayout.sleeveRepeats(g.visible);
+      const html = LabelHtml.label(cable, sp, allFields, "");
+      const widths = cellWidthsOf(html);
+      ck.eq(widths.length, expected, "Ø " + dia + " : " + expected + " cases rendues (compte déduit, pas figé)");
+      // 🚨 LA régression à verrouiller : toutes les cases portent EXACTEMENT la même cote — plus
+      // aucun reste réparti par `flex:1`, donc plus de « dernière case plus grande ».
+      ck.eq(new Set(widths).size, 1, "Ø " + dia + " : une SEULE largeur de case dans tout le HTML");
+      ck(near(widths[0], g.visible / expected, 0.001), "Ø " + dia + " : et cette largeur vaut la partie visible / " + expected);
+      // La somme des cases + le recouvrement referme l'étiquette (au reste d'arrondi près, < 0,01 mm).
+      ck(near(widths[0] * expected + g.overlap, g.w, 0.01), "Ø " + dia + " : cases + recouvrement = la largeur déroulée");
+      // Filet de séparation : la DERNIÈRE case porte le repère de pli, et elle SEULE.
+      ck.eq((html.match(/cell2 fold/g) || []).length, 1, "Ø " + dia + " : une seule case marquée « fold » (le pli)");
+      ck(html.indexOf('class="cell2 fold"') > html.lastIndexOf('class="cell2"'), "Ø " + dia + " : c'est bien la DERNIÈRE case");
+    }
+
+    // Le recouvrement est posé en mm lui aussi (il n'est plus un forfait entier).
+    const h6 = LabelHtml.label(cable, spec({ size: "cable", content: "id", dia: 6 }), allFields, "");
+    ck(h6.includes('class="ov" style="width:9.42mm"'), "Ø 6 : la zone de recouvrement fait le demi-tour (9,42 mm)");
+    ck(h6.includes('style="width:28.27mm;height:25mm"'), "Ø 6 : l'étiquette fait 1,5 tour (28,27 × 25 mm)");
+    ck(h6.includes('style="width:4.712mm"'), "Ø 6 : cases de 4,712 mm, posées au millième (le reste cumulé resterait sous 0,01 mm)");
+
+    // « REPÈRE COMPLET » : 2 panneaux, sur la MÊME assiette (la partie visible) et EXACTEMENT égaux.
+    for (const dia of [6, 10]) {
+      const sp = spec({ size: "cable", content: "strip", dia });
+      const g = LabelLayout.sleeveGeometry(dia, sp.len);
+      const widths = cellWidthsOf(LabelHtml.label(cable, sp, allFields, ""));
+      ck.eq(widths.length, 2, "Ø " + dia + " repère complet : 2 panneaux");
+      ck.eq(new Set(widths).size, 1, "Ø " + dia + " repère complet : panneaux STRICTEMENT égaux");
+      ck(near(widths[0], g.visible / 2, 0.001), "Ø " + dia + " repère complet : chacun un DEMI-tour (" + (g.visible / 2).toFixed(3) + " mm)");
+    }
+
+    // Le filet du raccord n'est plus DOUBLÉ : c'est la dernière case qui le porte, plus la zone hachurée.
+    ck(!/\.ov\{[^}]*border-left/.test(LabelHtml.CSS), "zone hachurée : plus de border-left (le double trait au raccord a disparu)");
+    ck(/\.cell2\{[^}]*border-right:\.2mm dashed #ccc/.test(LabelHtml.CSS), "toutes les cases gardent le MÊME filet (boîtes rigoureusement identiques)");
+    ck(/\.cell2\.fold\{border-right-color:#999\}/.test(LabelHtml.CSS), "…seule la couleur change sur la case de pli");
+    // Et les cases ne sont plus laissées à `flex:1` : la cote est POSÉE, donc vérifiable (ci-dessus).
+    ck(/\.cell2\{flex:none/.test(LabelHtml.CSS), "cases en flex:none — leur largeur est une COTE, pas un reste réparti");
   });
 
   await section("labels : LabelPrintPolicy — offres par contexte (contenus, formats, défauts, cases)", async () => {

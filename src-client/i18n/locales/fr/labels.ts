@@ -63,7 +63,7 @@ export const labels = {
     statSheet: "{{count}} étiquettes · {{pages}} feuille{{s}} A4",
     qrOk: "QR {{mm}} mm — au-dessus du plancher de scannabilité.",
     qrLow: "QR {{mm}} mm — sous le plancher de 18 mm.",
-    sleeveHint: "Deux tours de Ø {{dia}} mm + recouvrement, {{len}} mm le long du câble — texte longitudinal.",
+    sleeveHint: "Un tour et demi de Ø {{dia}} mm — le demi-tour excédentaire ({{ov}} mm) sert de recouvrement ; {{len}} mm le long du câble, texte longitudinal.",
     print: "Imprimer",
     loading: "Génération des QR…",
     loadError: "Impossible d'obtenir les QR du serveur : {{msg}}",

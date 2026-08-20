@@ -59,6 +59,16 @@ export class LabelHtml {
       calculés par `LabelLayout` (table des densités, clamp anti-débordement) et
       posés INLINE par `label()` — les tests vérifient les cotes AU MILLIMÈTRE
       dans le HTML généré, ce qu'une règle CSS de classe rendrait invisible.
+      MÊME DOCTRINE pour les CASES DE MANCHON (`.cell2`), qui sont passées de
+      `flex:1` à `flex:none` + largeur posée inline : `flex:1` répartissait un
+      RESTE calculé par le moteur de flexbox — rien ne posait leur égalité, rien
+      ne pouvait la vérifier. Le filet de séparation reste, lui, dans le CSS
+      (c'est une décoration, pas une cote) : `border-right` sur TOUTES les cases
+      sans exception — retirer celui de la dernière élargirait sa boîte de
+      contenu de 0,2 mm et recréerait, en miniature, le défaut signalé. C'est la
+      zone hachurée `.ov` qui a perdu son `border-left` (plus de double trait au
+      raccord), la dernière case portant `fold` pour marquer le pli d'un filet
+      plus sombre — même géométrie, autre couleur.
       La typographie COMPACTE se resserre en fin de feuille (`.lab.compact`). */
   static readonly CSS = `
 .label-render{--lp-mono:ui-monospace,"SF Mono","Menlo","Consolas","Cascadia Mono","Roboto Mono",monospace;--lp-sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;color:#000}
@@ -92,10 +102,11 @@ export class LabelHtml {
 .label-render .lab.cable .l-loc,.label-render .lab.cable .l-meta,.label-render .lab.cable .l-own{font-size:5pt;white-space:normal;overflow-wrap:anywhere;line-height:1.2}
 .label-render .lab.cable .l-loc b{font-family:var(--lp-mono);font-weight:700;color:#000}
 .label-render .lab.cable.strip{align-items:stretch;gap:0;padding:0}
-.label-render .lab.cable.strip .cell2{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:1mm 0;overflow:hidden;border-right:.2mm dashed #ccc;writing-mode:vertical-rl}
+.label-render .lab.cable.strip .cell2{flex:none;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:1mm 0;overflow:hidden;border-right:.2mm dashed #ccc;writing-mode:vertical-rl}
+.label-render .lab.cable.strip .cell2.fold{border-right-color:#999}
 .label-render .lab.cable.strip .cell2 .l-id{font-size:8pt;letter-spacing:0;display:block;white-space:nowrap;text-overflow:ellipsis;max-width:100%}
 .label-render .lab.cable.strip .cell2 .l-loc,.label-render .lab.cable.strip .cell2 .l-own{font-size:5pt;white-space:normal;overflow-wrap:anywhere;text-align:start;max-height:100%}
-.label-render .lab.cable.strip .ov{flex:none;background:repeating-linear-gradient(45deg,#fff 0 1mm,#e9e9e9 1mm 2mm);border-left:.2mm dashed #999}
+.label-render .lab.cable.strip .ov{flex:none;background:repeating-linear-gradient(45deg,#fff 0 1mm,#e9e9e9 1mm 2mm)}
 .label-render .lab.compact .txt{gap:.2mm}
 .label-render .lab.compact .rule{margin:.4mm 0}
 .label-render .a4{width:210mm;height:297mm;background:#fff;padding:8mm;display:grid;gap:0;align-content:start}
@@ -118,19 +129,39 @@ export class LabelHtml {
     const cp = spec.compact;
     const own = fields.owner ? String(subject.owner || "").trim() : "";
     const mm = (v: number) => +v.toFixed(2);
+    // Les CASES de manchon se posent au MILLIÈME de mm, pas au centième comme les autres
+    // cotes : elles sont répétées jusqu'à 20 fois, et un arrondi au centième laisserait un
+    // reste cumulé allant jusqu'à 0,1 mm entre la somme des cases et la partie visible.
+    // Au millième le reste tombe sous 0,01 mm — très en dessous du pixel d'impression,
+    // et absorbé par l'`overflow:hidden` de l'étiquette.
+    const mm3 = (v: number) => +v.toFixed(3);
 
     if (spec.size === "cable") {
       if (spec.content === "strip" || spec.content === "id") {
-        // MANCHON sans QR : cellules d'un tour répétées (2 = repère complet en double,
-        // 6 = identifiant seul lisible sous tous les angles) + zone de recouvrement.
-        const g = LabelLayout.sleeveGeometry(spec.dia, spec.len, cp);
+        // MANCHON sans QR. Les cases se partagent la partie VISIBLE — soit EXACTEMENT un
+        // tour depuis l'amendement de l'enroulement (1,5 tour dont le demi-tour excédentaire
+        // EST le recouvrement, cf. LabelLayout.sleeveGeometry) — et leur nombre est DÉDUIT
+        // de cette longueur : un Ø 20 porte plus de repères qu'un Ø 3, au lieu de six cases
+        // figées dont la largeur variait du simple au septuple. Le « repère complet » garde
+        // ses deux panneaux (texte riche), sur la même assiette et à la même cote exacte.
+        const g = LabelLayout.sleeveGeometry(spec.dia, spec.len);
         const idOnly = spec.content === "id";
+        const count = idOnly ? LabelLayout.sleeveRepeats(g.visible) : LabelLayout.SLEEVE_STRIP_PANELS;
+        const cellW = mm3(LabelLayout.sleeveCellWidth(g.visible, count));
         const extra = idOnly ? "" :
           (fields.location && (subject.endA || subject.endB) ? `<div class="l-loc"><b>A</b> ${esc(subject.endA || "")}</div><div class="l-loc"><b>B</b> ${esc(subject.endB || "")}</div>` : "")
           + (fields.type && subject.typeLabel ? `<div class="l-loc">${esc(subject.typeLabel)}</div>` : "")
           + (own ? `<div class="l-own">${esc(own)}</div>` : "");
-        const cell = `<div class="cell2"><div class="l-id">${esc(subject.name)}</div>${extra}</div>`;
-        return `<div class="lab cable strip${cp ? " compact" : ""}" style="width:${mm(g.w)}mm;height:${mm(g.h)}mm">${cell.repeat(idOnly ? 6 : 2)}<div class="ov" style="width:${g.overlap}mm"></div></div>`;
+        // TOUTES les cases portent la MÊME largeur posée — l'égalité est une cote, pas un
+        // reste réparti. Seule la dernière ajoute `fold` : le filet qui la termine borne la
+        // partie visible (là où le manchon commence à se recouvrir), d'où sa couleur plus
+        // sombre ; c'est aussi pour ça que `.ov` n'a plus de bordure gauche (double trait).
+        let cells = "";
+        for (let i = 0; i < count; i++) {
+          cells += `<div class="cell2${i === count - 1 ? " fold" : ""}" style="width:${cellW}mm">`
+            + `<div class="l-id">${esc(subject.name)}</div>${extra}</div>`;
+        }
+        return `<div class="lab cable strip${cp ? " compact" : ""}" style="width:${mm(g.w)}mm;height:${mm(g.h)}mm">${cells}<div class="ov" style="width:${mm(g.overlap)}mm"></div></div>`;
       }
       // DRAPEAU : QR à gauche, texte (ou second QR — « scannable des deux faces ») à
       // droite, zone d'enroulement hachurée entre les deux. Géométrie dérivée du QR.

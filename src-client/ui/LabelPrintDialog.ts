@@ -328,7 +328,9 @@ export class LabelPrintDialog {
       fieldsBox.hidden = !vis.showFieldsSection;
       sheetBox.hidden = !vis.showSheetSection;
       sizeHint.textContent = sleeve
-        ? t("dialog.sleeveHint", { dia: sp.dia, len: sp.len })
+        // Le demi-tour excédentaire EST le recouvrement (cf. LabelLayout.sleeveGeometry) : on
+        // l'annonce en mm, c'est la seule cote que l'utilisateur ne lit pas dans « L × H ».
+        ? t("dialog.sleeveHint", { dia: sp.dia, ov: +LabelLayout.sleeveGeometry(sp.dia, sp.len).overlap.toFixed(1), len: sp.len })
         : (LabelLayout.qrSizeOf(sp) >= LabelLayout.QR_FLOOR_MM ? t("dialog.qrOk", { mm: LabelLayout.qrSizeOf(sp) }) : t("dialog.qrLow", { mm: LabelLayout.qrSizeOf(sp) }));
 
       // Colonnes de planche : reconstruites à chaque rendu (le plafond dépend du gabarit).

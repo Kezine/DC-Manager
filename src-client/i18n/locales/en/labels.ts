@@ -54,7 +54,7 @@ export const labels = {
     statSheet: "{{count}} labels · {{pages}} A4 sheet{{s}}",
     qrOk: "QR {{mm}} mm — above the scannability floor.",
     qrLow: "QR {{mm}} mm — below the 18 mm floor.",
-    sleeveHint: "Two turns of Ø {{dia}} mm + overlap, {{len}} mm along the cable — longitudinal text.",
+    sleeveHint: "One and a half turns of Ø {{dia}} mm — the extra half-turn ({{ov}} mm) acts as the overlap; {{len}} mm along the cable, longitudinal text.",
     print: "Print",
     loading: "Generating QR codes…",
     loadError: "Could not fetch QR codes from the server: {{msg}}",

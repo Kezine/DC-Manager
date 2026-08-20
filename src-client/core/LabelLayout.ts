@@ -5,8 +5,12 @@
    FOI : les cotes de ce module reprennent les valeurs EXACTES de son script
    (table `SIZES`, `cableGeom`, `stripGeom`, bornes des champs « Personnalisé »),
    AMENDÉES par les retours terrain du 2026-08-20 : densité COMPACTE = marges
-   nulles (seule la quiet zone du SVG garde le QR), et le QR d'un préréglage ne
-   déborde JAMAIS (cf. rectPadding / rectQrGeometry).
+   nulles (seule la quiet zone du SVG garde le QR), le QR d'un préréglage ne
+   déborde JAMAIS (cf. rectPadding / rectQrGeometry), et — retours des étiquettes
+   IMPRIMÉES — l'enroulement des MANCHONS passe de « 2 tours + recouvrement » à
+   **1,5 tour dont le demi-tour excédentaire EST le recouvrement** (cf.
+   sleeveGeometry), avec un nombre de répétitions DÉDUIT de la longueur visible
+   au lieu d'un 6 figé (cf. sleeveRepeats).
 
    Aucun DOM, aucun réseau, aucune chaîne traduite : les avertissements sont des
    CODES (`LabelWarning`), l'UI (ui/LabelPrintDialog) les traduit — même doctrine
@@ -105,6 +109,36 @@ export class LabelLayout {
       la vérité finale est l'aperçu). */
   static readonly SLEEVE_CHAR_MM = 1.75;
 
+  /** PAS CIBLE d'une case de manchon (mm) — l'ÉPAISSEUR d'une bande répétée, mesurée
+      EN TRAVERS du câble (le nom, lui, se lit dans l'axe du câble, d'où l'autre cote).
+      🚨 POURQUOI 5 mm (retour terrain 2026-08-20, mesuré au navigateur) : la ligne de
+      l'identifiant en 8 pt occupe **3,10 mm** en travers (corps 8 pt ≈ 2,82 mm ×
+      interligne 1,08, arrondi au pixel). À 4 mm de pas il ne resterait que 0,45 mm de
+      blanc de part et d'autre du filet — le texte le TOUCHE ; à 6 mm on retombe sur la
+      densité fautive d'aujourd'hui (le texte flotte au milieu, ce qui fait justement
+      lire la case comme surdimensionnée). À 5 mm, sur TOUTE la gamme de Ø offerte
+      (3 → 30 mm), la case reste dans **4,19 → 5,76 mm** au pas de saisie du champ
+      (0,5 mm), soit 1,35 à 1,86 fois la hauteur de ligne : jamais serrée, jamais
+      flottante. ⚠ L'arrondi laisse un pic à 6,25 mm (2,0 × la ligne) dans la seule
+      bascule 2 → 3 cases, autour de Ø 3,98 — assumé : c'est le prix de l'ARRONDI, et
+      un `ceil` qui plafonnerait la case à 5 mm la ferait tomber à 2,5 mm à deux cases,
+      SOUS la hauteur de ligne. On préfère un pic large à un plancher illisible. */
+  static readonly SLEEVE_REPEAT_PITCH_MM = 5;
+
+  /** Bornes du nombre de cases. Le MINIMUM (2) est une règle métier : « lisible sous
+      tous les angles » exige au moins deux repères sur le tour, sinon le seul repère
+      peut se retrouver EN DESSOUS du câble. Le MAXIMUM est un garde-fou de totalité de
+      la fonction (elle est PURE : elle doit répondre à n'importe quelle entrée) — il ne
+      mord PAS dans la gamme offerte, où Ø 30 plafonne à 19 cases. */
+  static readonly SLEEVE_REPEAT_MIN = 2;
+  static readonly SLEEVE_REPEAT_MAX = 20;
+
+  /** Manchon « repère complet » : DEUX panneaux sur la partie visible, pas davantage —
+      le texte y est riche (identifiant + extrémités A/B + type + propriétaire) et
+      s'empile EN TRAVERS du câble, il lui faut de la place ; deux panneaux par tour
+      suffisent à en avoir un lisible sous presque tout angle. */
+  static readonly SLEEVE_STRIP_PANELS = 2;
+
   /* ------------------------------- dimensions ------------------------------- */
 
   /** Taille de QR EFFECTIVE (mm) d'un réglage : les préréglages S/M/L/Baie imposent
@@ -178,13 +212,58 @@ export class LabelLayout {
     return { pad, wz, pan, h: qrMm + 2 * pad, w: 2 * pan + wz };
   }
 
-  /** Géométrie du MANCHON sans QR (maquette `stripGeom`) : la circonférence déroulée =
-      DEUX tours (2 π Ø) + un recouvrement selon la densité ; la hauteur = la longueur
-      LE LONG du câble (c'est là qu'est la place → texte longitudinal). */
-  static sleeveGeometry(diaMm: number, lenMm: number, compact: boolean): { turn: number; overlap: number; w: number; h: number } {
-    const overlap = compact ? 12 : 16;
+  /** Géométrie du MANCHON sans QR — 🚨 AMENDE la maquette (`stripGeom` : 2 tours + un
+      recouvrement forfaitaire de 12/16 mm selon la densité). Retour terrain sur
+      étiquettes IMPRIMÉES : « 1,5 × le diamètre est OK sinon on a trop de papier à
+      coller ».
+
+      RÈGLE : la bande déroulée fait **UN TOUR ET DEMI** de circonférence, et le
+      demi-tour excédentaire **EST** le recouvrement (auto-collant classique : le papier
+      se colle sur lui-même). Il n'y a donc PLUS de zone de recouvrement ajoutée en
+      supplément — d'où `overlap = turn / 2` et `w = 1,5 · turn`.
+
+      Corollaire consommé partout : la partie **VISIBLE** sur le câble (`w − overlap`)
+      vaut EXACTEMENT un tour — c'est l'assiette sur laquelle les cases se répartissent
+      (cf. sleeveRepeats), là où l'ancienne géométrie leur donnait DEUX tours, ce qui
+      contredisait l'intention de la maquette (« répété six fois **sur le tour** »).
+
+      ⚠ La DENSITÉ n'entre plus dans l'enroulement : celui-ci est une géométrie PHYSIQUE
+      (la circonférence d'un câble ne dépend pas de l'aisance typographique voulue) —
+      d'où la disparition du paramètre `compact`. La densité continue de piloter la
+      TYPOGRAPHIE du manchon via la classe `.lab.compact` (cf. core/LabelHtml).
+
+      La hauteur reste la longueur LE LONG du câble (c'est là qu'est la place → texte
+      longitudinal). */
+  static sleeveGeometry(diaMm: number, lenMm: number): { turn: number; overlap: number; visible: number; w: number; h: number } {
     const turn = Math.PI * diaMm;
-    return { turn, overlap, w: 2 * Math.PI * diaMm + overlap, h: lenMm };
+    const overlap = turn / 2;
+    return { turn, overlap, visible: turn, w: turn + overlap, h: lenMm };
+  }
+
+  /** Nombre de RÉPÉTITIONS de l'identifiant sur un manchon — DÉDUIT de la longueur
+      visible, jamais figé (retour terrain 2026-08-20 : « la case de la dernière
+      répétition est plus grande que les autres »). Le 6 de la maquette était constant
+      quel que soit le Ø : à Ø 3 la case tombait à 3,14 mm (le texte n'y tenait DÉJÀ
+      plus), à Ø 20 elle atteignait 20,94 mm (le texte flottait au milieu de 9 mm de
+      blanc de chaque côté). Un Ø 20 doit porter PLUS de repères qu'un Ø 3, pas des
+      repères plus gros.
+
+      `count = clamp(arrondi(visible / pas cible), min, max)` — et la largeur d'une case
+      est ENSUITE `visible / count` (cf. sleeveCellWidth), donc toutes égales par
+      construction et sans reste. */
+  static sleeveRepeats(visibleMm: number): number {
+    if (!Number.isFinite(visibleMm) || visibleMm <= 0) return LabelLayout.SLEEVE_REPEAT_MIN;
+    const wanted = Math.round(visibleMm / LabelLayout.SLEEVE_REPEAT_PITCH_MM);
+    return Math.max(LabelLayout.SLEEVE_REPEAT_MIN, Math.min(LabelLayout.SLEEVE_REPEAT_MAX, wanted));
+  }
+
+  /** Largeur EXACTE d'une case de manchon : la partie visible divisée par le nombre de
+      cases. Écrite ici plutôt que dans le rendu pour que l'égalité des cases soit une
+      propriété du MODULE PUR (donc testable) et non un effet de bord du moteur de
+      flexbox — c'était précisément le défaut signalé : `flex:1` répartissait un reste,
+      rien ne POSAIT l'égalité et rien ne pouvait la vérifier. */
+  static sleeveCellWidth(visibleMm: number, count: number): number {
+    return visibleMm / Math.max(1, count);
   }
 
   /** Géométrie « QR SEUL » : étiquette CARRÉE (QR + marges), une éventuelle bande
@@ -201,7 +280,7 @@ export class LabelLayout {
   static labelDims(spec: LabelSpec): [number, number] {
     if (spec.size === "cable") {
       if (spec.content === "strip" || spec.content === "id") {
-        const g = LabelLayout.sleeveGeometry(spec.dia, spec.len, spec.compact);
+        const g = LabelLayout.sleeveGeometry(spec.dia, spec.len);
         return [g.w, g.h];
       }
       const g = LabelLayout.flagGeometry(LabelLayout.qrSizeOf(spec), spec.compact);

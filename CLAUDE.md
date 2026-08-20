@@ -426,9 +426,11 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   PNG/SVG bornés `QrCodeParams`), `PUBLIC_BASE_URL` JAMAIS dérivée des en-têtes, 503 actionnable ;
   **ÉTIQUETTES IMPRIMABLES** (lot E — la maquette qr-etiquettes-imprimables FAIT FOI) : UN écran de
   sortie `ui/LabelPrintDialog` (pile standard, réglages mémorisés EN SESSION par contexte), géométrie
-  PURE `core/LabelLayout` (gabarits S/M/L/Baie/câble/personnalisé, drapeau DÉRIVÉ du QR, manchon
-  2 tours + recouvrement, 🚨 cellule de planche ≠ étiquette — M 4×8=32, plancher QR 18 mm signalé,
-  débordement en CODES ; DENSITÉS — compact = marges NULLES, la quiet zone du SVG suffit — et 🚨 le QR
+  PURE `core/LabelLayout` (gabarits S/M/L/Baie/câble/personnalisé, drapeau DÉRIVÉ du QR, 🚨 MANCHON
+  **1,5 tour dont le demi-tour excédentaire EST le recouvrement** — la partie visible vaut donc UN
+  tour, sur laquelle les cases se répartissent en nombre DÉDUIT (pas cible 5 mm, clamp 2–20) et de
+  largeur EXACTEMENT égale, posée en mm dans le HTML ; 🚨 cellule de planche ≠ étiquette — M 4×8=32,
+  plancher QR 18 mm signalé, débordement en CODES ; DENSITÉS — compact = marges NULLES, la quiet zone du SVG suffit — et 🚨 le QR
   d'un préréglage NE DÉBORDE JAMAIS : `rectQrGeometry` clampe, la MARGE cède avant la scannabilité,
   `renderQrMm` est le point de passage UNIQUE vers le SVG), 🚨 MATRICE DE VISIBILITÉ CONTEXTUELLE PURE
   `core/LabelPrintPolicy` (offres par sujet — kind `bundle` = faisceau, même anatomie que le câble —,

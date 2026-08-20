@@ -299,7 +299,7 @@ objet, les deux extrémités d'un câble, le contenu d'une baie).
 
 | Module | Rôle |
 |---|---|
-| `core/LabelLayout` | **Géométrie PURE** (mm) : table des gabarits (cotes EXACTES de la maquette), **densités** (padding/gouttière), drapeau **dérivé du QR**, manchon (2 tours + recouvrement), QR seul, **cellule de planche ≠ étiquette**, plafond de colonnes, capacité A4, bornes du personnalisé, **débordement en CODES** (`LabelWarning` — l'UI traduit) |
+| `core/LabelLayout` | **Géométrie PURE** (mm) : table des gabarits (cotes EXACTES de la maquette), **densités** (padding/gouttière), drapeau **dérivé du QR**, manchon (**1,5 tour, le demi-tour EST le recouvrement** + nombre de cases DÉDUIT), QR seul, **cellule de planche ≠ étiquette**, plafond de colonnes, capacité A4, bornes du personnalisé, **débordement en CODES** (`LabelWarning` — l'UI traduit) |
 | `core/LabelPrintPolicy` | **LA matrice de visibilité contextuelle** (pure) : contenus/formats/défauts/cases OFFERTS par sujet, **verdict** `visibility(sujet, contenu, format, nombre)` consommé tel quel par la modale, et `sanitize` qui fait RETOMBER un réglage mémorisé devenu invalide |
 | `core/LabelQrSvg` | Retravail PUR du SVG servi par `/qr` : **quiet zone vérifiée** (marge en modules lue dans le tracé) et **compensée par un padding blanc calculé** si < 4 modules (un `?size=` plus grand n'y changerait rien — propriété en modules, pas en pixels), mise à l'échelle en mm |
 | `core/LabelHtml` | Rendu HTML PUR **partagé aperçu ⇄ imprimé** (une seule source, fidélité par construction) : étiquette, page de planche, document d'impression. **Noir sur blanc, aucun token de thème** ; les COTES (padding/gouttière) sont posées INLINE depuis `LabelLayout` |
@@ -309,9 +309,9 @@ objet, les deux extrémités d'un câble, le contenu d'une baie).
 ### Gabarits et planche
 
 Préréglages S 50×20 (QR 18) / **M 50×30 (QR 20, défaut)** / L 70×40 (QR 28) / Baie 100×60 (QR 34) /
-Câble (drapeau dérivé du QR : compact 54×18, confort 62×22) + manchons SANS QR (repère complet ×2
-tours, ou identifiant ×6 lisible sous tous les angles) + Personnalisé (largeur 20–210, hauteur
-12–297, QR 12–60 mm ; Ø 3–30 et longueur 10–60 pour les manchons). Densité **compact (défaut)** /
+Câble (drapeau dérivé du QR : compact 54×18, confort 62×22) + manchons SANS QR (repère complet en
+2 panneaux, ou identifiant répété — cf. « Manchons » ci-dessous) + Personnalisé (largeur 20–210,
+hauteur 12–297, QR 12–60 mm ; Ø 3–30 et longueur 10–60 pour les manchons). Densité **compact (défaut)** /
 confort. Plancher de scannabilité **QR ≥ 18 mm** (signalé, jamais interdit) ; quiet zone 4 modules
 INTOUCHABLE (dans le SVG servi — vérifiée/compensée par `LabelQrSvg`). QR TOUJOURS à gauche.
 
@@ -332,6 +332,67 @@ sert au SVG **que** la cote de `LabelLayout.renderQrMm(...)` — point de passag
 comme de l'imprimé, de l'unitaire comme de la planche (où c'est la hauteur de CELLULE qui compte).
 Le gabarit « Personnalisé » n'est PAS clampé (l'utilisateur contrôle ses cotes) : il est **averti**
 (`qr-exceeds-label`), avec le padding réel de sa densité.
+
+### Manchons — enroulement et répétitions (🚨 AMENDENT la maquette)
+
+Les deux règles ci-dessous **amendent explicitement la maquette** (retours terrain du 2026-08-20,
+sur étiquettes **imprimées**, photos à l'appui). Elles vivent dans `core/LabelLayout`
+(`sleeveGeometry`, `sleeveRepeats`, `sleeveCellWidth`) et sont posées **inline** par `LabelHtml`.
+
+**① Enroulement : 1,5 tour, et le demi-tour excédentaire EST le recouvrement.** La maquette
+donnait « 2 tours + un recouvrement forfaitaire » (12 mm en compact, 16 en confort) — verbatim
+utilisateur : « 1.5 × le diamètre est OK sinon on a trop de papier à coller ». Désormais
+`tour = π·Ø`, `recouvrement = tour / 2`, `largeur = 1,5 · tour` : il n'y a **plus de zone de
+recouvrement ajoutée en supplément**, c'est le demi-tour en trop qui se colle sur lui-même
+(auto-collant classique). La zone hachurée `.ov` représente donc ce demi-tour, et la partie
+**VISIBLE** sur le câble (`largeur − recouvrement`) vaut **exactement un tour**.
+
+| Ø (mm) | tour | recouvrement | largeur AVANT (2 tours + forfait) | largeur APRÈS (1,5 tour) | cases |
+|---|---|---|---|---|---|
+| 3 | 9,42 | 4,71 | 30,85 | **14,14** | 2 |
+| 6 | 18,85 | 9,42 | 49,70 | **28,27** | 4 |
+| 10 | 31,42 | 15,71 | 74,83 | **47,12** | 6 |
+| 20 | 62,83 | 31,42 | 137,66 | **94,25** | 13 |
+
+⚠ La **densité n'entre plus** dans l'enroulement : celui-ci est une géométrie **physique** (la
+circonférence d'un câble ne dépend pas de l'aisance typographique voulue) — d'où la disparition du
+paramètre `compact` de `sleeveGeometry`. La densité continue de piloter la **typographie** du
+manchon via la classe `.lab.compact`.
+
+**② Répétitions : le nombre est DÉDUIT de la longueur visible, les cases sont toutes égales.** Le
+retour était « la case de la dernière répétition est plus grande que les autres ». Le diagnostic
+(mesuré au navigateur sur le HTML généré) a trouvé **deux défauts cumulés**, tous deux corrigés :
+
+- les 6 cases se partageaient `largeur − recouvrement` = **DEUX tours**, alors que la maquette dit
+  « le même identifiant répété six fois **sur le tour** » — soit 3 par tour au lieu de 6 ; et ce 6
+  était **figé quel que soit le Ø** : à Ø 3 la case tombait à 3,14 mm (le texte, 3,10 mm de hauteur
+  de ligne, n'y tenait déjà plus et se faisait rogner), à Ø 20 elle atteignait 20,94 mm (le texte
+  flottait au milieu de 9 mm de blanc de chaque côté — c'est ce qui fait *lire* une case comme
+  surdimensionnée) ;
+- la largeur des cases était laissée à `flex:1`, donc à un **reste réparti** par le moteur de
+  flexbox : rien ne posait leur égalité, et rien ne pouvait la vérifier.
+
+Règle retenue : `cases = clamp(arrondi(visible / 5 mm), 2, 20)`, puis **largeur de case =
+`visible / cases` EXACTEMENT** — égales par construction, sans reste. Le **pas cible de 5 mm** est
+l'épaisseur d'une bande mesurée *en travers* du câble (le nom, lui, se lit dans l'axe du câble) : la
+ligne d'identifiant en 8 pt occupe 3,10 mm en travers, un pas de 4 mm ne laisserait que 0,45 mm de
+blanc de part et d'autre du filet, un pas de 6 mm reproduirait le flottement fautif. À 5 mm la case
+reste entre **4,19 et 5,76 mm** sur toute la gamme de Ø offerte (au pas de saisie de 0,5 mm), soit
+1,35 à 1,86 fois la hauteur de ligne. Le minimum de 2 cases est une règle métier (« lisible sous
+tous les angles » exige au moins deux repères sur le tour) ; le maximum de 20 est un garde-fou de
+totalité de la fonction pure, il ne mord pas dans la gamme offerte (Ø 30 → 19 cases).
+
+Le variant **« repère complet »** garde ses **2 panneaux** (son texte est riche : identifiant +
+extrémités A/B + type + propriétaire), mais sur la **même assiette** — donc un **demi-tour chacun**,
+exactement égaux. ⚠ Limite assumée : ce texte empilé demande ≈ 9,4 mm en travers ; en dessous de
+**Ø 6** un panneau devient plus étroit que cela et les dernières lignes se font rogner — décocher un
+champ (ou passer à « identifiant seul ») est le remède.
+
+**Filets de séparation** : *toutes* les cases portent le même `border-right` (0,2 mm pointillé) —
+leurs boîtes sont ainsi rigoureusement identiques ; retirer celui de la dernière élargirait sa boîte
+de contenu de 0,2 mm et recréerait, en miniature, le défaut signalé. C'est la zone hachurée qui a
+perdu son `border-left` (fin du **double trait** au raccord), la dernière case portant la classe
+`fold` — filet plus sombre, même géométrie — pour marquer le début du recouvrement.
 
 **Planche A4** (dès 2 étiquettes) : marge 8 mm, en-tête hors zone (source · compte/date), colonnes
 2/3/4 **plafonnées par la largeur réelle**, traits de coupe pointillés 0,2 mm désactivables,
@@ -428,7 +489,10 @@ aucun test dispersé.
 
 Tests : `Tests/modules/test-labels.js` (gabarits golden, géométrie drapeau/manchon, cellule de
 planche et plafonds, bornes du personnalisé, codes de débordement, quiet zone du SVG, rendu HTML
-partagé — échappement, manchons ×2/×6, `@page`, zéro token de thème dans l'imprimé ; **densités
-amendées et NON-DÉBORDEMENT du QR sur tous les préréglages × les deux densités**, cotes retrouvées
-au millimètre dans le HTML, marges de la fenêtre d'impression, **la matrice de visibilité** — offres
-par sujet, verdict, retombée sur défaut — et le sujet FAISCEAU).
+partagé — échappement, `@page`, zéro token de thème dans l'imprimé ; **densités amendées et
+NON-DÉBORDEMENT du QR sur tous les préréglages × les deux densités**, cotes retrouvées au millimètre
+dans le HTML, marges de la fenêtre d'impression, **la matrice de visibilité** — offres par sujet,
+verdict, retombée sur défaut — et le sujet FAISCEAU ; **manchons** : goldens de l'enroulement par Ø
+(3/6/10/20), invariants « largeur = 1,5 × tour » et « visible = un tour », dérivation et bornes du
+nombre de cases, et 🚨 **égalité STRICTE des cases mesurée dans le HTML généré** — la régression du
+retour terrain).
