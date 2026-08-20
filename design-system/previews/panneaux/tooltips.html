@@ -356,8 +356,18 @@
      dans ces conteneurs FLEX c'est le `gap` qui espace — sinon l'écart est compté deux fois. */
   .tab-domain .tab-count, .view-tab .tab-count, .nav-acc-item .tab-count { margin-left: 0; }
 
-  /* ---- BURGER (responsive) : masqué au-dessus du breakpoint, révélé par le bloc @media 760px ---- */
-  .topbar-burger { display: none; }
+  /* ---- BURGER (responsive) : masqué au-dessus du breakpoint, révélé par le bloc @media 760px ----
+     🚨 Le sélecteur DOIT porter `.icon-btn` : à spécificité ÉGALE (0,1,0), c'est la règle la plus
+     TARDIVE qui gagne, et `.icon-btn { display: inline-flex }` est déclarée plus bas — un simple
+     `.topbar-burger { display: none }` était donc écrasé, et le burger apparaissait sur GRAND écran
+     à côté des deux barres d'onglets qu'il est censé remplacer. */
+  .icon-btn.topbar-burger { display: none; }
+  /* Déclencheur des RÉGLAGES (topbar) : dernier bouton VISIBLE hors responsive — le burger le suit
+     dans le DOM mais y est masqué, si bien que `.icon-btn:last-child` le désigne encore, LUI, et
+     laisserait aux réglages un liseré collé au bord de l'écran. On le retire donc explicitement ;
+     sous le breakpoint le burger réapparaît derrière et le liseré redevient un vrai séparateur
+     (rétabli dans le bloc @media 760px). */
+  .icon-btn.topbar-settings { border-right: none; }
 
   .topbar-actions { display: flex; align-items: stretch; flex-shrink: 0; border-left: 1px solid var(--line); }
   /* Pastille utilisateur = BOUTON (clic → modale d'infos) : réinitialise l'apparence bouton, ne garde
@@ -1872,8 +1882,10 @@
   body.viewer-mode .dc-side .btn-primary,        /* boutons d'ajout du panneau 3D (+ Salle / + OOB / + Cable…) */
   body.viewer-mode .welcome-screen { display: none !important; }
   body.viewer-mode #doc-name, body.viewer-mode .doc-name { pointer-events: none; }
-  /* barre d'actions de la topbar : tout masque SAUF le menu Reglages */
-  body.viewer-mode .topbar-actions > :not(.settings-menu) { display: none !important; }
+  /* Barre d'actions de la topbar : tout masqué SAUF le déclencheur des RÉGLAGES et le BURGER — le
+     visualiseur reste NAVIGABLE, et sous 760 px le tiroir est le seul chemin de navigation (les deux
+     barres d'onglets y cèdent). Masquer le burger y laisserait une application sans menu du tout. */
+  body.viewer-mode .topbar-actions > :not(.topbar-settings):not(.topbar-burger) { display: none !important; }
   /* Reglages : en viewer, on ne garde QUE les sections COSMETIQUES (theme, taille du texte) — on masque source de
      donnees, acces fichiers, auto-save, affichage 3D, EXPORT, debogage. */
   body.viewer-mode .settings-section:not(.settings-cosmetic) { display: none !important; }
@@ -2461,31 +2473,20 @@
   #view-graph:fullscreen .view-header { display: none; }
   #view-graph:fullscreen .graph-stage { flex: 1 1 auto; height: auto; }
 
-  /* ============ SETTINGS MENU (popover) ============ */
-  .settings-menu { position: relative; display: flex; align-items: stretch; }
-  .settings-menu .icon-btn { border-right: none; }
+  /* ============ RÉGLAGES — corps de la MODALE dédiée (cf. app/SettingsPanel) ============
+     Le panneau ne flotte plus sous la topbar : il est le CORPS d'une modale de la pile standard
+     (centrée, défilante toute seule, plein écran sous le breakpoint responsive, fermable par
+     Échap / ✕ / clic hors-modale, focus piégé). Il n'a donc plus ni position, ni ombre, ni
+     plafond de hauteur, ni état `.open` — la modale porte tout ça. Ne reste ici que la mise en
+     page INTERNE (sections, rangées, notes), strictement identique à celle du popover.
+     La COLONNE est plafonnée puis centrée : les rangées sont dessinées pour ~320 px (libellé à
+     gauche, contrôle à droite) et s'étireraient mal sur les 720 px d'une modale standard. Le
+     padding horizontal, lui, disparaît : `.modal-body` en pose déjà un. */
+  .settings-panel { width: min(100%, 460px); margin: 0 auto; text-transform: none; letter-spacing: normal; }
   .icon-btn.active { color: var(--fg); background: var(--bg-2); }
-  .settings-popover {
-    position: absolute;
-    top: calc(100% + 1px);
-    right: 0;
-    z-index: 200;
-    display: none;
-    width: 320px;
-    max-width: calc(100vw - 24px);
-    max-height: calc(100vh - 80px);
-    max-height: calc(100dvh - 80px);
-    overflow-y: auto;
-    background: var(--bg-2);
-    border: 1px solid var(--line-2);
-    box-shadow: 0 16px 48px rgba(0,0,0,0.5);
-    padding: 6px 0;
-    text-transform: none;
-    letter-spacing: normal;
-  }
-  .settings-popover.open { display: block; }
-  .settings-section { padding: 12px 16px; border-bottom: 1px solid var(--line); }
-  .settings-section:last-child { border-bottom: none; }
+  .settings-section { padding: 14px 0; border-bottom: 1px solid var(--line); }
+  .settings-section:first-child { padding-top: 0; }
+  .settings-section:last-child { border-bottom: none; padding-bottom: 0; }
   .settings-section-title {
     font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
     color: var(--fg-dim); font-weight: 700; margin-bottom: 10px;
@@ -2665,6 +2666,14 @@
        (principe n°15). */
     .user-chip { display: none; }
     .topbar-actions .icon-btn.topbar-burger { display: inline-flex; }
+    /* Le burger réapparaît DERRIÈRE les réglages : leur liseré redevient un séparateur utile. */
+    .topbar-actions .icon-btn.topbar-settings { border-right: 1px solid var(--line); }
+    /* CONTRÔLES COLLÉS AU BORD DROIT. Au-dessus du breakpoint, c'est `.tabs` (flex:1) qui pousse la
+       rangée d'actions à droite ; ici la barre d'onglets est `display:none` — sans ce `margin-left`
+       automatique, les contrôles se tassent contre la marque, à GAUCHE, et le burger n'est plus au
+       bord de l'écran (là où le pouce l'atteint). La marge auto se résorbe d'elle-même quand la
+       topbar est pleine : aucun risque de débordement sur écran très étroit. */
+    .topbar-actions { margin-left: auto; }
     /* marges latérales MINIMALES → largeur utile maximale */
     main { padding: 10px 4px; }
     main:has(#view-datacenter.active), main:has(#view-graph.active) { padding: 6px 2px; }

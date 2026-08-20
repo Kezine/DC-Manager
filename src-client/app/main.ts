@@ -642,6 +642,10 @@ async function boot(): Promise<void> {
 
   // ---- services FICHIER / GLOBAUX (topbar) ----
   const shellHost: ShellHost = {
+    // Ouverture d'une modale de la pile STANDARD, injectée au Shell (même patron que `ScanControl.setup`
+    // et `LabelPrintDialog.setup`) : les RÉGLAGES sont désormais une modale ordinaire (`app/SettingsPanel`),
+    // plus un popover ancré à la topbar. Le Shell n'ouvre donc aucun overlay maison.
+    openModal: (o) => formHost.openModal(o),
     onNew: async () => {
       if (REST_MODE) { const n = await Dialog.prompt(I18n.t("app.main.newDocPromptTitle"), "Document"); if (n) await rest!.newDocument(n); return; }
       if (hasUserData()) {

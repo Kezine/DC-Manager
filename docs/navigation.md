@@ -150,10 +150,45 @@ ouvre la même modale d'infos) et **annuler/rétablir** (pied du tiroir).
 
 Restent en topbar, à dessein : les actions **fichier** (nouveau / ouvrir / enregistrer / copie) et le
 déclencheur des **réglages**. Le tiroir n'en offre pas de copie, et le mode fichier doit rester
-entièrement utilisable sur petit écran (principe n°15). Le bouton « Réglages » du pied du tiroir
-**délègue** au déclencheur de la topbar — le panneau y est ancré, l'ouvrir autrement le peindrait hors
-de l'écran. C'est un écart assumé à la maquette, dont la topbar mobile ne portait que marque, loupe,
-scanner et burger.
+entièrement utilisable sur petit écran (principe n°15). C'est un écart assumé à la maquette, dont la
+topbar mobile ne portait que marque, loupe, scanner et burger.
+
+**Les contrôles restent collés au bord DROIT.** Au-dessus du breakpoint, c'est `.tabs` (`flex:1`) qui
+pousse la rangée d'actions à droite ; sous 760 px la barre d'onglets est `display:none` et cet appui
+disparaît — d'où le `margin-left:auto` posé sur `.topbar-actions` dans le bloc responsive. Sans lui
+les contrôles se tassaient contre la marque, et le burger quittait le bord de l'écran, là où le pouce
+l'atteint.
+
+> ⚠ **Piège de spécificité (corrigé).** La règle qui masque le burger hors responsive doit porter
+> `.icon-btn.topbar-burger`, pas `.topbar-burger` seul : à spécificité égale (0,1,0), c'est la règle
+> la plus **tardive** qui gagne, et `.icon-btn { display:inline-flex }` est déclarée plus bas dans la
+> feuille. Le burger s'affichait donc sur grand écran, à côté des deux barres qu'il est censé
+> remplacer.
+
+### Les réglages : une modale dédiée, deux déclencheurs
+
+Le panneau des **réglages** vit dans `app/SettingsPanel` — sa **propre classe, son propre fichier**
+(principe n°2, même raison que le tiroir), couplé par l'interface injectée `SettingsPanelHost`, que
+`ShellHost` **étend** : le bootstrap ne fabrique qu'un seul objet d'hôte et le Shell le passe tel quel.
+
+Ce panneau est le **corps d'une modale de la pile standard** (niveau `info`, `stackKey: "settings"`),
+plus un popover ancré à la topbar. Le popover était `position:absolute` dans la topbar, plafonné en
+hauteur et refermé par tout clic au document ; surtout, il n'avait qu'**un** point d'ouverture
+possible — son ancre. Le pied du tiroir devait donc **simuler un clic** sur le bouton de la topbar
+(`settingsBtn.click()`) faute de pouvoir le peindre ailleurs. Les deux déclencheurs — bouton de la
+topbar et bouton « Réglages » du pied du tiroir — ouvrent désormais **la même instance** par un appel
+direct, sans dépendance invisible à un bouton tiers.
+
+> 🚨 **Le corps du panneau est construit UNE fois et gardé vivant** (détaché entre deux ouvertures).
+> C'est ce qui permet aux reflets (`setTheme`, `setUiScale`, `setAutosave`, `setExportAllowed`…)
+> d'être posés **à tout moment** par le bootstrap, modale fermée comprise — exactement comme du temps
+> du popover, qui vivait en permanence dans le DOM. `Modal` ne détruit jamais le corps d'un niveau,
+> l'invariant tient. Le reconstruire à chaque ouverture obligerait à rejouer tout l'état au bon
+> moment, et une seule omission ferait mentir un contrôle.
+
+En **mode visualiseur**, la barre d'actions ne garde que ce déclencheur (`.topbar-settings`) **et le
+burger** (`.topbar-burger`) : sous 760 px le tiroir est le seul chemin de navigation, le masquer
+laisserait une application sans menu du tout.
 
 ### Écran d'accueil : la navigation doit rester inerte
 

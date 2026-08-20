@@ -62,8 +62,11 @@ export interface ShellView {
   onShow?: (body: HTMLElement) => void;
 }
 
-/** Services applicatifs de la topbar (fichier / global), câblés par le bootstrap. */
-export interface ShellHost {
+/** Services applicatifs de la topbar (fichier / global), câblés par le bootstrap.
+    ÉTEND `SettingsPanelHost` : tout ce qui concerne les RÉGLAGES est déclaré une seule fois, dans
+    le module qui les porte (`app/SettingsPanel`). Le bootstrap ne fabrique donc qu'UN objet d'hôte,
+    que le Shell passe tel quel au panneau — aucune liste de rappels à tenir en double. */
+export interface ShellHost extends SettingsPanelHost {
   onNew?(): void; onOpen?(): void; onSave?(): void; onSaveAs?(): void;
   onUndo?(): void; onRedo?(): void;
   /** Ouverture de la RECHERCHE GLOBALE (palette) — loupe de la topbar ET raccourci Ctrl+K (le
@@ -72,63 +75,32 @@ export interface ShellHost {
   /** SCANNER UNE ÉTIQUETTE (viseur caméra en mode libre — chantier QR, cf. docs/qr-scan.md § UI).
       Bouton révélé par `setScanAvailable` quand une caméra existe. */
   onScanGlobal?(): void;
-  /** Préférences du SCAN (réglages) : greffon générique « tous les champs texte » / forçage de
-      l'icône des champs déclarés. Persistance et application = bootstrap (Prefs + ScanControl). */
-  onScanAllFields?(on: boolean): void;
-  onScanForceButtons?(on: boolean): void;
   /** Ouverture de la modale d'INFOS UTILISATEUR (clic sur la pastille de la topbar — icône seule en
       responsive, nom + icône en grand écran : MÊME geste). L'implémentation (bootstrap) y injecte
       l'identité `/me` et l'état d'autorisation DÉJÀ connus — aucun appel serveur. */
   onUserInfo?(): void;
-  onToggleTheme?(): void; onResetViewPrefs?(): void;
-  /** Changement d'échelle d'interface (zoom global, taille du texte). */
-  onUiScale?(value: number): void;
-  /** Bascule « modales en plein écran » (préférence desktop ; toujours actif sous le breakpoint responsive). */
-  onModalFullscreen?(on: boolean): void;
-  /** Changement du nombre max de suggestions d'autocomplétion des formulaires. */
-  onAutocompleteMax?(value: number): void;
-  /** Nettoyage des images de façade NON UTILISÉES (purge bibliothèque ; mode API : + compactage serveur). */
-  onPurgeImages?(): void;
   onRenameDoc?(name: string): void;
-  /** Bascule de la source de données ("local" | "api") — applique au rechargement. */
-  onDataSource?(value: string): void;
-  /** Changement de l'URL de base de l'API (mode API) — applique au rechargement. */
-  onApiBaseUrl?(value: string): void;
-  /** Changement de l'URL de connexion SSO (bouton « Connexion » du welcome). */
-  onLoginUrl?(value: string): void;
-  /** Bascule du mode d'accès FS ("file" | "directory"). */
-  onFileAccessMode?(value: string): void;
   /** Ouverture en FORÇANT un mode d'accès ("file" | "directory") — depuis l'écran d'accueil. */
   onOpenMode?(mode: string): void;
-  /** Active/désactive les logs de débogage console. */
-  onDebugLog?(on: boolean): void;
-  /** Activation/désactivation de l'auto-save (Promise → état effectif appliqué). */
-  onAutosaveToggle?(on: boolean): void;
-  /** Changement de fréquence d'auto-save (secondes). */
-  onAutosaveInterval?(seconds: number): void;
   /** Réouverture du dernier fichier (raccroche au handle FS — geste utilisateur). */
   onReopenLast?(): void;
-  /** Export du document en JSON autonome (téléchargement) — tous modes. */
-  onExportJson?(): void;
-  /** Export en VISUALISEUR autonome (HTML lecture seule, document embarqué). */
-  onExportStandalone?(): void;
 }
 
 /** Champs de la barre de statut. */
 export interface ShellStatus { file?: string; release?: string; source?: string; entities?: number | string; lastSave?: string; }
 
-import { Prefs } from "../core/Prefs";
 import { Html } from "../core/Html";
 import { UserIdentity } from "../core/UserIdentity";
 import { Icons } from "../ui/Icons";
-import { FieldFacet } from "../core/FieldFacet";
-import { I18n, type LocalePreference } from "../i18n/I18n";
+import { I18n } from "../i18n/I18n";
 import { ShellNav } from "./ShellNav";
 import type { ShellNavLookup } from "./ShellNav";
 import { NavModel, NAV_DOMAINS } from "./NavModel";
 import type { ResolvedNav, ResolvedNavView, NavViewDecl } from "./NavModel";
 import { ShellDrawer } from "./ShellDrawer";
 import type { ShellDrawerHost } from "./ShellDrawer";
+import { SettingsPanel } from "./SettingsPanel";
+import type { SettingsPanelHost } from "./SettingsPanel";
 
 const SVG = "http://www.w3.org/2000/svg";
 const svgIcon = (paths: string): SVGElement => {
@@ -169,31 +141,12 @@ export class Shell {
   private redoBtn!: HTMLButtonElement;
   private saveBtn!: HTMLButtonElement;
   private saveDot!: HTMLElement;
-  private dataSourceSwitch!: HTMLInputElement;     // toggle slider Local ⟷ API (coché = API)
-  private themeSwitch!: HTMLInputElement;          // toggle slider thème clair ⟷ sombre (coché = sombre)
-  private apiUrlInput!: HTMLInputElement;          // URL de base de l'API (mode API)
-  private apiUrlRow!: HTMLElement;                 // ligne URL (masquée en mode Local)
-  private apiLoginInput!: HTMLInputElement;        // URL de connexion SSO (bouton « Connexion » du welcome)
-  private apiLoginRow!: HTMLElement;
-  private fileAccessSel!: HTMLSelectElement;
-  private debugLogChk!: HTMLInputElement;
-  private uiScaleSel!: HTMLSelectElement;          // échelle d'interface (taille du texte)
-  private modalFsChk!: HTMLInputElement;           // bascule « modales en plein écran » (préférence desktop)
-  private acMaxSel!: HTMLSelectElement;            // nb max de suggestions d'autocomplétion (formulaires)
   private searchBtn!: HTMLButtonElement;          // loupe « Recherche globale » (Ctrl+F) — masquée sans aucune lecture documentaire
   private scanBtn!: HTMLButtonElement;            // « Scanner une étiquette » (viseur caméra) — masqué sans caméra (cf. setScanAvailable)
-  private scanAllChk!: HTMLInputElement;          // pref « bouton scan sur tous les champs texte » (réglages Scan)
-  private scanForceChk!: HTMLInputElement;        // pref « toujours afficher le bouton scan » (réglages Scan)
   private newBtn!: HTMLButtonElement;             // « Nouveau » (fichier ou document serveur)
   private openBtn!: HTMLButtonElement;            // « Ouvrir » (fichier ou sélecteur de documents)
   private fileActionsEl!: HTMLElement;            // Enregistrer/Enregistrer-sous (masqués en mode API)
-  private fileOnlySections: HTMLElement[] = [];   // sections de réglages propres au mode fichier (auto-save, accès fichiers)
-  private maintenanceSection: HTMLElement | null = null;   // section « Maintenance » des réglages (permission `maintenance:run`)
-  private exportSection: HTMLElement | null = null;        // section « Export » des réglages (lecture de TOUTES les collections)
   private userChip!: HTMLElement;                 // pastille « connecté en tant que … » (mode API)
-  private autosaveChk!: HTMLInputElement;
-  private autosaveIntervalSel!: HTMLSelectElement;
-  private autosaveStatusEl!: HTMLElement;
   private welcomeEl!: HTMLElement;
   private welcomeReopenBtn!: HTMLButtonElement;
   private welcomeOpenDirBtn!: HTMLButtonElement;
@@ -209,7 +162,8 @@ export class Shell {
   private views = new Map<string, ViewEntry>();
   private order: string[] = [];                        // ordre d'ENREGISTREMENT des vues (l'ordre d'AFFICHAGE vient de NAV_DOMAINS)
   private burgerBtn!: HTMLButtonElement;               // ouverture du tiroir responsive (masqué au-dessus du breakpoint)
-  private settingsBtn!: HTMLButtonElement;             // déclencheur du panneau Réglages (le tiroir lui DÉLÈGUE, il n'en a pas de copie)
+  private settingsBtn!: HTMLButtonElement;             // déclencheur des Réglages en topbar (ouvre la MODALE, plus aucun popover ancré)
+  private settings!: SettingsPanel;                    // panneau des Réglages (modale dédiée) — classe à part, principe n°2
   private drawer!: ShellDrawer;                        // tiroir à accordéons (responsive) — classe à part, principe n°2
   /** Structure de navigation RÉSOLUE en cours d'affichage. Recalculée par `renderNav()` à chaque
       `refreshCounts()` : les droits peuvent changer à chaud, et la structure avec eux. */
@@ -312,7 +266,16 @@ export class Shell {
     (this.userChip as HTMLButtonElement).type = "button";
     this.userChip.onclick = () => this.host.onUserInfo?.();
     actions.appendChild(this.userChip);
-    actions.appendChild(this.buildSettingsMenu());
+    // RÉGLAGES : le panneau vit dans une MODALE dédiée (`app/SettingsPanel`), plus dans un popover
+    // ancré à ce bouton. Le bouton n'est donc qu'un DÉCLENCHEUR parmi d'autres — le pied du tiroir
+    // responsive en est un second, qui ouvre la MÊME instance sans passer par un `.click()` simulé.
+    // Icône « double slider empilé » (deux curseurs horizontaux à positions distinctes) : le rouage
+    // denté est réservé au groupe « Paramètres » (contacts + notifications), cf. Icons.SETTINGS.
+    this.settings = new SettingsPanel(host);
+    this.settingsBtn = iconBtn(I18n.t("shell.settings.title"), '<line x1="3" y1="8" x2="14" y2="8"/><line x1="18" y1="8" x2="21" y2="8"/><circle cx="16" cy="8" r="2"/><line x1="3" y1="16" x2="8" y2="16"/><line x1="12" y1="16" x2="21" y2="16"/><circle cx="10" cy="16" r="2"/>', () => this.settings.open());
+    this.settingsBtn.classList.add("topbar-settings");   // repère du masquage « viewer » (cf. body.viewer-mode)
+    this.settingsBtn.setAttribute("aria-haspopup", "dialog");
+    actions.appendChild(this.settingsBtn);
     // BURGER (responsive) : DERNIER de la rangée, donc au bord de l'écran — le pouce y arrive sans
     // traverser la topbar. Masqué au-dessus du breakpoint par le CSS (jamais par un style inline : la
     // bascule est purement une question de largeur, aucun état applicatif ne la commande).
@@ -383,196 +346,12 @@ export class Shell {
       canRedo: () => this.canRedoValue,
       onUndo: () => this.host.onUndo?.(),
       onRedo: () => this.host.onRedo?.(),
-      // Le tiroir DÉLÈGUE au déclencheur de la topbar (qui reste affiché en responsive) : le panneau des
-      // réglages est ancré à ce bouton, l'ouvrir autrement le peindrait hors de l'écran.
-      onSettings: () => this.settingsBtn?.click(),
+      // Le tiroir ouvre DIRECTEMENT la modale des réglages — la MÊME instance de panneau que le
+      // bouton de la topbar (une seule implémentation, cf. `app/SettingsPanel`). L'ancien montage
+      // simulait un `.click()` sur ce bouton, faute de pouvoir peindre ailleurs un popover qui lui
+      // était ancré : cette dépendance invisible a disparu avec le popover.
+      onSettings: () => this.settings.open(),
     };
-  }
-
-  /** Fabrique un toggle SLIDER `.mode-switch` (case cachée + piste) — contrôle PARTAGÉ par la source de
-      données, le thème et les modales plein écran (principe n°3 : un seul idiome pour toutes les bascules
-      slider). L'anneau focus-visible et les transitions sont portés par le CSS `.mode-switch`. Le câblage
-      `onchange` et l'étiquetage (côtés/icônes, aria-label) restent à la charge de l'appelant. */
-  private buildModeSwitch(): { label: HTMLLabelElement; input: HTMLInputElement } {
-    const label = document.createElement("label"); label.className = "mode-switch";
-    const input = document.createElement("input"); input.type = "checkbox";
-    const track = document.createElement("span"); track.className = "mode-switch-track"; track.setAttribute("aria-hidden", "true");
-    label.append(input, track);
-    return { label, input };
-  }
-
-  /** Petite pastille d'ICÔNE flanquant un toggle slider (légende décorative, cf. soleil/lune du thème). */
-  private static modeSwitchIcon(svg: string): HTMLElement {
-    const s = document.createElement("span"); s.className = "mode-switch-icon"; s.setAttribute("aria-hidden", "true"); s.innerHTML = svg; return s;
-  }
-
-  private buildSettingsMenu(): HTMLElement {
-    const wrap = document.createElement("div"); wrap.className = "settings-menu";
-    const btn = document.createElement("button"); btn.type = "button"; btn.className = "icon-btn"; btn.title = I18n.t("shell.settings.title"); btn.setAttribute("aria-haspopup", "menu");
-    this.settingsBtn = btn;   // le pied du TIROIR responsive délègue à ce bouton (panneau ancré à lui)
-    // Réglages UI/utilisateur : icône « double slider empilé » (deux curseurs horizontaux à positions distinctes) —
-    // le rouage denté est désormais réservé au groupe « Paramètres » (contacts + notifications), cf. Icons.SETTINGS.
-    btn.appendChild(svgIcon('<line x1="3" y1="8" x2="14" y2="8"/><line x1="18" y1="8" x2="21" y2="8"/><circle cx="16" cy="8" r="2"/><line x1="3" y1="16" x2="8" y2="16"/><line x1="12" y1="16" x2="21" y2="16"/><circle cx="10" cy="16" r="2"/>'));
-    const pop = document.createElement("div"); pop.className = "settings-popover"; pop.setAttribute("role", "menu");
-    const section = (title: string) => { const s = document.createElement("div"); s.className = "settings-section"; const t = document.createElement("div"); t.className = "settings-section-title"; t.textContent = title; s.appendChild(t); pop.appendChild(s); return s; };
-
-    // -- Source de données : toggle SLIDER Local ⟷ API (+ URL d'API en mode API) --
-    const src = section(I18n.t("shell.settings.dataSource"));
-    const srcRow = document.createElement("div"); srcRow.className = "mode-switch-row";
-    const lblLocal = document.createElement("span"); lblLocal.className = "mode-switch-side"; lblLocal.textContent = I18n.t("shell.settings.local");
-    const dsSwitch = this.buildModeSwitch(); this.dataSourceSwitch = dsSwitch.input;
-    this.dataSourceSwitch.onchange = () => { this.updateApiUrlVisibility(); this.host.onDataSource?.(this.dataSourceSwitch.checked ? "api" : "local"); };
-    const lblApi = document.createElement("span"); lblApi.className = "mode-switch-side"; lblApi.textContent = I18n.t("shell.settings.api");
-    srcRow.append(lblLocal, dsSwitch.label, lblApi); src.appendChild(srcRow);
-    // ligne URL d'API (visible en mode API uniquement)
-    this.apiUrlRow = document.createElement("div"); this.apiUrlRow.className = "settings-row"; this.apiUrlRow.style.marginTop = "10px";
-    const urlLbl = document.createElement("label"); urlLbl.className = "settings-row-label"; urlLbl.textContent = I18n.t("shell.settings.apiUrl");
-    this.apiUrlInput = document.createElement("input"); this.apiUrlInput.type = "text"; this.apiUrlInput.className = "settings-row-select"; this.apiUrlInput.placeholder = "api"; this.apiUrlInput.spellcheck = false;
-    this.apiUrlInput.onchange = () => this.host.onApiBaseUrl?.(this.apiUrlInput.value);
-    this.apiUrlRow.append(urlLbl, this.apiUrlInput); src.appendChild(this.apiUrlRow);
-    // ligne URL de CONNEXION (SSO) — utilisée pour le bouton « Connexion » de l'écran d'accueil (non connecté)
-    this.apiLoginRow = document.createElement("div"); this.apiLoginRow.className = "settings-row"; this.apiLoginRow.style.marginTop = "10px";
-    const loginLbl = document.createElement("label"); loginLbl.className = "settings-row-label"; loginLbl.textContent = I18n.t("shell.settings.loginUrl");
-    this.apiLoginInput = document.createElement("input"); this.apiLoginInput.type = "text"; this.apiLoginInput.className = "settings-row-select"; this.apiLoginInput.placeholder = I18n.t("shell.settings.loginUrlPlaceholder"); this.apiLoginInput.spellcheck = false;
-    this.apiLoginInput.onchange = () => this.host.onLoginUrl?.(this.apiLoginInput.value);
-    this.apiLoginRow.append(loginLbl, this.apiLoginInput); src.appendChild(this.apiLoginRow);
-    const loginNote = document.createElement("div"); loginNote.className = "settings-row-note"; loginNote.textContent = I18n.t("shell.settings.loginNote"); src.appendChild(loginNote);
-    const srcNote = document.createElement("div"); srcNote.className = "settings-row-note"; srcNote.textContent = I18n.t("shell.settings.sourceNote"); src.appendChild(srcNote);
-
-    // -- Accès aux fichiers (par fichier / par dossier) --
-    const fa = section(I18n.t("shell.settings.fileAccess"));
-    const faRow = document.createElement("div"); faRow.className = "settings-row";
-    const faLbl = document.createElement("label"); faLbl.className = "settings-row-label"; faLbl.textContent = I18n.t("shell.settings.mode");
-    this.fileAccessSel = document.createElement("select"); this.fileAccessSel.className = "settings-row-select";
-    const oFile = document.createElement("option"); oFile.value = "file"; oFile.textContent = I18n.t("shell.settings.file");
-    const oDir = document.createElement("option"); oDir.value = "directory"; oDir.textContent = I18n.t("shell.settings.directory");
-    this.fileAccessSel.append(oFile, oDir);
-    this.fileAccessSel.onchange = () => this.host.onFileAccessMode?.(this.fileAccessSel.value);
-    faRow.append(faLbl, this.fileAccessSel); fa.appendChild(faRow);
-    const faNote = document.createElement("div"); faNote.className = "settings-row-note"; faNote.textContent = I18n.t("shell.settings.fileAccessNote"); fa.appendChild(faNote);
-
-    // -- Auto-save (toggle + fréquence + état) --
-    const as = section(I18n.t("shell.settings.autosave"));
-    const asRow = document.createElement("div"); asRow.className = "settings-toggle-row";
-    const asLabel = document.createElement("label"); asLabel.className = "settings-toggle";
-    this.autosaveChk = document.createElement("input"); this.autosaveChk.type = "checkbox";
-    this.autosaveChk.onchange = () => this.host.onAutosaveToggle?.(this.autosaveChk.checked);
-    asLabel.append(this.autosaveChk, document.createTextNode(I18n.t("shell.settings.autosaveEnable")));
-    asRow.appendChild(asLabel); as.appendChild(asRow);
-    const freqRow = document.createElement("div"); freqRow.className = "settings-row"; freqRow.style.marginTop = "10px";
-    const freqLbl = document.createElement("label"); freqLbl.className = "settings-row-label"; freqLbl.textContent = I18n.t("shell.settings.frequency");
-    this.autosaveIntervalSel = document.createElement("select"); this.autosaveIntervalSel.className = "settings-row-select";
-    Prefs.INTERVAL_OPTIONS.forEach((n) => { const o = document.createElement("option"); o.value = String(n); o.textContent = n + " s"; this.autosaveIntervalSel.appendChild(o); });
-    this.autosaveIntervalSel.onchange = () => this.host.onAutosaveInterval?.(parseInt(this.autosaveIntervalSel.value, 10));
-    freqRow.append(freqLbl, this.autosaveIntervalSel); as.appendChild(freqRow);
-    this.autosaveStatusEl = document.createElement("div"); this.autosaveStatusEl.className = "settings-status-line"; as.appendChild(this.autosaveStatusEl);
-    this.fileOnlySections.push(fa, as);   // sections propres au mode fichier → masquées en mode API
-
-    // -- Scan (caméra) : préférences du greffon de scan (chantier QR, cf. docs/qr-scan.md § UI) --
-    // Deux bascules : greffon GÉNÉRIQUE sur tous les champs texte, et FORÇAGE de l'icône des champs
-    // déclarés sur desktop (par défaut elle n'apparaît qu'en tactile/écran étroit — pas d'icône morte).
-    const sc = section(I18n.t("shell.settings.scan"));
-    const scAllRow = document.createElement("div"); scAllRow.className = "settings-toggle-row";
-    const scAllLabel = document.createElement("label"); scAllLabel.className = "settings-toggle";
-    this.scanAllChk = document.createElement("input"); this.scanAllChk.type = "checkbox";
-    this.scanAllChk.onchange = () => this.host.onScanAllFields?.(this.scanAllChk.checked);
-    scAllLabel.append(this.scanAllChk, document.createTextNode(I18n.t("shell.settings.scanAllFields")));
-    scAllRow.appendChild(scAllLabel); sc.appendChild(scAllRow);
-    const scForceRow = document.createElement("div"); scForceRow.className = "settings-toggle-row";
-    const scForceLabel = document.createElement("label"); scForceLabel.className = "settings-toggle";
-    this.scanForceChk = document.createElement("input"); this.scanForceChk.type = "checkbox";
-    this.scanForceChk.onchange = () => this.host.onScanForceButtons?.(this.scanForceChk.checked);
-    scForceLabel.append(this.scanForceChk, document.createTextNode(I18n.t("shell.settings.scanForce")));
-    scForceRow.appendChild(scForceLabel); sc.appendChild(scForceRow);
-    const scNote = document.createElement("div"); scNote.className = "settings-row-note"; scNote.textContent = I18n.t("shell.settings.scanNote"); sc.appendChild(scNote);
-
-    // -- Apparence -- (seule section « cosmétique » conservée en mode visualiseur ; cf. body.viewer-mode)
-    const app = section(I18n.t("shell.settings.appearance")); app.classList.add("settings-cosmetic");
-    // -- Thème clair / sombre : toggle SLIDER (même contrôle que la source de données) flanqué du SOLEIL (thème
-    //    clair, à gauche = décoché) et de la LUNE (thème sombre, à droite = coché) — sens du mode-switch (le pouce
-    //    glisse à droite quand coché). Comportement inchangé : l'appui BASCULE (host.onToggleTheme, persistance via
-    //    Prefs) ; la position est reflétée par setTheme (boot + après bascule). aria-label/title localisés ; l'anneau
-    //    focus-visible du mode-switch s'applique. --
-    const themeRow = document.createElement("div"); themeRow.className = "mode-switch-row mode-switch-row--spread";
-    const themeSwitch = this.buildModeSwitch(); this.themeSwitch = themeSwitch.input;
-    this.themeSwitch.setAttribute("aria-label", I18n.t("shell.settings.toggleTheme")); this.themeSwitch.title = I18n.t("shell.settings.toggleTheme");
-    this.themeSwitch.onchange = () => this.host.onToggleTheme?.();
-    themeRow.append(Shell.modeSwitchIcon(Icons.SUN), themeSwitch.label, Shell.modeSwitchIcon(Icons.MOON)); app.appendChild(themeRow);
-    // -- Modales en plein écran (préférence DESKTOP) : MÊME toggle mode-switch, JUSTE SOUS le thème. Le libellé nomme
-    //    la préférence (gauche) ; l'icône « plein écran » marque l'état ACTIF (droite = coché = plein écran), un seul
-    //    côté iconé suffit ici (bascule binaire, contrairement au thème à deux états nommés). Remplace l'ANCIENNE case
-    //    à cocher (pas de doublon de contrôle pour la même préférence). Toujours actif sous le breakpoint responsive
-    //    (CSS seul) ; ici on ne pilote QUE l'effet desktop (attribut data-modal-fs). --
-    const mfsRow = document.createElement("div"); mfsRow.className = "mode-switch-row mode-switch-row--spread"; mfsRow.style.marginTop = "12px";
-    const mfsLabel = document.createElement("span"); mfsLabel.className = "mode-switch-label"; mfsLabel.textContent = I18n.t("shell.settings.modalFs");
-    const mfsSwitch = this.buildModeSwitch(); this.modalFsChk = mfsSwitch.input;
-    this.modalFsChk.setAttribute("aria-label", I18n.t("shell.settings.modalFs")); this.modalFsChk.title = I18n.t("shell.settings.modalFs");
-    this.modalFsChk.onchange = () => this.host.onModalFullscreen?.(this.modalFsChk.checked);
-    mfsRow.append(mfsLabel, mfsSwitch.label, Shell.modeSwitchIcon(Icons.FULLSCREEN)); app.appendChild(mfsRow);
-    const mfsNote = document.createElement("div"); mfsNote.className = "settings-row-note"; mfsNote.textContent = I18n.t("shell.settings.modalFsNote"); app.appendChild(mfsNote);
-    // -- Taille du texte (échelle d'interface) : compense les mobiles qui grossissent les polices --
-    const fsRow = document.createElement("div"); fsRow.className = "settings-row"; fsRow.style.marginTop = "10px";
-    const fsLbl = document.createElement("label"); fsLbl.className = "settings-row-label"; fsLbl.textContent = I18n.t("shell.settings.textSize");
-    this.uiScaleSel = document.createElement("select"); this.uiScaleSel.className = "settings-row-select";
-    Prefs.UI_SCALE_OPTIONS.forEach((o) => { const op = document.createElement("option"); op.value = String(o.value); op.textContent = I18n.t(o.labelKey); this.uiScaleSel.appendChild(op); });
-    this.uiScaleSel.onchange = () => this.host.onUiScale?.(parseFloat(this.uiScaleSel.value));
-    fsRow.append(fsLbl, this.uiScaleSel); app.appendChild(fsRow);
-    // -- Suggestions d'autocomplétion (formulaires) : nb max de valeurs proposées (Marque/Modèle/Nom/Personne…) --
-    const acRow = document.createElement("div"); acRow.className = "settings-row"; acRow.style.marginTop = "10px";
-    const acLbl = document.createElement("label"); acLbl.className = "settings-row-label"; acLbl.textContent = I18n.t("shell.settings.suggestionsMax");
-    acLbl.title = I18n.t("shell.settings.suggestionsMaxTitle", { max: FieldFacet.MAX_RESULTS_ABS });
-    this.acMaxSel = document.createElement("select"); this.acMaxSel.className = "settings-row-select";
-    FieldFacet.MAX_RESULTS_OPTIONS.forEach((n) => { const op = document.createElement("option"); op.value = String(n); op.textContent = String(n); this.acMaxSel.appendChild(op); });
-    this.acMaxSel.onchange = () => this.host.onAutocompleteMax?.(parseInt(this.acMaxSel.value, 10));
-    acRow.append(acLbl, this.acMaxSel); app.appendChild(acRow);
-    // -- Langue / Language : préférence de LOCALISATION (auto = langue du navigateur ; repli français). Le TITRE de
-    //    section reste BILINGUE (seul repli pour retrouver le sélecteur quelle que soit la langue active) ; le reste
-    //    du panneau est localisé. Une bascule PERSISTE la préférence puis RECHARGE l'app (cf. I18n.setPreference / docs/i18n.md). --
-    const lang = section(I18n.t("shell.settings.language"));
-    const langSel = document.createElement("select"); langSel.className = "settings-row-select"; langSel.style.width = "100%";
-    // valeur → libellé affiché ; « auto » suit navigator.language (cf. I18n.resolve). Les endonymes « Français » /
-    // « English » restent identiques dans les deux langues (nom de langue dans sa propre langue).
-    ([["auto", I18n.t("shell.settings.langAuto")], ["fr", I18n.t("shell.settings.langFr")], ["en", I18n.t("shell.settings.langEn")]] as Array<[LocalePreference, string]>).forEach(([value, label]) => {
-      const op = document.createElement("option"); op.value = value; op.textContent = label; langSel.appendChild(op);
-    });
-    langSel.value = I18n.preference;   // reflète la préférence PERSISTÉE (pas la locale effective) : « auto » reste « auto »
-    langSel.onchange = () => I18n.setPreference(langSel.value as LocalePreference);
-    lang.appendChild(langSel);
-    const langNote = document.createElement("div"); langNote.className = "settings-row-note"; langNote.textContent = I18n.t("shell.settings.languageNote"); lang.appendChild(langNote);
-    // -- Affichage 3D --
-    const v3d = section(I18n.t("shell.settings.view3d"));
-    const resetBtn = document.createElement("button"); resetBtn.type = "button"; resetBtn.className = "btn btn-ghost btn-sm"; resetBtn.style.width = "100%"; resetBtn.textContent = I18n.t("shell.settings.resetViewPrefs");
-    resetBtn.onclick = () => this.host.onResetViewPrefs?.(); v3d.appendChild(resetBtn);
-    // -- Export (tous modes, y compris API) : JSON autonome + visualiseur HTML hors-ligne --
-    const exp = section(I18n.t("shell.settings.export"));
-    this.exportSection = exp;   // masquée sans la lecture de TOUTES les collections (mode API) — cf. setExportAllowed
-    const expJsonBtn = document.createElement("button"); expJsonBtn.type = "button"; expJsonBtn.className = "btn btn-ghost btn-sm"; expJsonBtn.style.width = "100%"; expJsonBtn.textContent = I18n.t("shell.settings.exportJson");
-    expJsonBtn.onclick = () => this.host.onExportJson?.();
-    const expHtmlBtn = document.createElement("button"); expHtmlBtn.type = "button"; expHtmlBtn.className = "btn btn-ghost btn-sm"; expHtmlBtn.style.cssText = "width:100%;margin-top:8px"; expHtmlBtn.textContent = I18n.t("shell.settings.exportStandalone");
-    expHtmlBtn.onclick = () => this.host.onExportStandalone?.();
-    exp.append(expJsonBtn, expHtmlBtn);
-    const expNote = document.createElement("div"); expNote.className = "settings-row-note"; expNote.textContent = I18n.t("shell.settings.exportNote"); exp.appendChild(expNote);
-    // -- Maintenance (tous modes) : purge des images de façade non utilisées (+ compactage serveur en mode API) --
-    const mnt = section(I18n.t("shell.settings.maintenance"));
-    this.maintenanceSection = mnt;   // masquée sans la permission `maintenance:run` (mode API) — cf. setMaintenanceAllowed
-    const purgeBtn = document.createElement("button"); purgeBtn.type = "button"; purgeBtn.className = "btn btn-ghost btn-sm"; purgeBtn.style.width = "100%"; purgeBtn.textContent = I18n.t("shell.settings.cleanImages");
-    purgeBtn.onclick = () => this.host.onPurgeImages?.(); mnt.appendChild(purgeBtn);
-    const mntNote = document.createElement("div"); mntNote.className = "settings-row-note"; mntNote.textContent = I18n.t("shell.settings.maintenanceNote"); mnt.appendChild(mntNote);
-    // -- Débogage --
-    const dbg = section(I18n.t("shell.settings.debug"));
-    const dbgRow = document.createElement("div"); dbgRow.className = "settings-toggle-row";
-    const dbgLabel = document.createElement("label"); dbgLabel.className = "settings-toggle";
-    this.debugLogChk = document.createElement("input"); this.debugLogChk.type = "checkbox";
-    this.debugLogChk.onchange = () => this.host.onDebugLog?.(this.debugLogChk.checked);
-    dbgLabel.append(this.debugLogChk, document.createTextNode(I18n.t("shell.settings.debugLogs")));
-    dbgRow.appendChild(dbgLabel); dbg.appendChild(dbgRow);
-    const dbgNote = document.createElement("div"); dbgNote.className = "settings-row-note"; dbgNote.textContent = I18n.t("shell.settings.debugNote"); dbg.appendChild(dbgNote);
-
-    btn.onclick = (e) => { e.stopPropagation(); pop.classList.toggle("open"); };
-    document.addEventListener("click", () => pop.classList.remove("open"));
-    pop.addEventListener("click", (e) => e.stopPropagation());
-    wrap.append(btn, pop);
-    return wrap;
   }
 
   /** Écran d'accueil (overlay) : rouvrir le dernier fichier (raccroche le handle) / ouvrir / nouveau. */
@@ -1032,23 +811,19 @@ export class Shell {
     // (dirty ou dirty-on), comme la référence — pour signaler qu'un save est en attente même avec auto-save actif.
     if (this.saveBtn) this.saveBtn.classList.toggle("has-unsaved", state === "dirty" || state === "dirty-on");
   }
-  setDataSource(value: string): void { if (this.dataSourceSwitch) this.dataSourceSwitch.checked = (value === "api"); this.updateApiUrlVisibility(); }
-  /** Reflète l'URL de l'API dans le champ des réglages. */
-  setApiBaseUrl(url: string): void { if (this.apiUrlInput) this.apiUrlInput.value = url || ""; }
-  /** Reflète l'URL de connexion SSO dans le champ des réglages. */
-  setLoginUrl(url: string): void { if (this.apiLoginInput) this.apiLoginInput.value = url || ""; }
-  /** Affiche les lignes API (URL + connexion) uniquement quand le mode API est sélectionné. */
-  private updateApiUrlVisibility(): void { const on = (this.dataSourceSwitch && this.dataSourceSwitch.checked) ? "" : "none"; if (this.apiUrlRow) this.apiUrlRow.style.display = on; if (this.apiLoginRow) this.apiLoginRow.style.display = on; }
-  setFileAccessMode(value: string): void { this.fileAccessSel.value = value; }
-  setDebugLog(on: boolean): void { this.debugLogChk.checked = on; }
-  /** Reflète l'échelle d'interface dans le sélecteur des réglages (sans déclencher onUiScale). */
-  setUiScale(v: number): void { if (this.uiScaleSel) this.uiScaleSel.value = String(v); }
-  /** Reflète le thème courant dans la bascule des réglages (coché = sombre) — sans déclencher onToggleTheme. */
-  setTheme(theme: string): void { if (this.themeSwitch) this.themeSwitch.checked = (theme === "dark"); }
-  /** Reflète la préférence « modales en plein écran » dans la bascule des réglages (sans déclencher onModalFullscreen). */
-  setModalFullscreen(on: boolean): void { if (this.modalFsChk) this.modalFsChk.checked = on; }
-  /** Reflète le nb max de suggestions d'autocomplétion dans le sélecteur des réglages. */
-  setAutocompleteMax(v: number): void { if (this.acMaxSel) this.acMaxSel.value = String(FieldFacet.clampLimit(v)); }
+  /* ---- réglages : le Shell DÉLÈGUE au panneau (`app/SettingsPanel`) ----
+     Ces méthodes restent sur le Shell parce que le bootstrap n'y voit qu'UN interlocuteur de chrome ;
+     leur implémentation, elle, vit là où vivent les contrôles. Le corps du panneau existe en
+     permanence (détaché entre deux ouvertures) : un reflet posé modale FERMÉE est donc bien pris. */
+  setDataSource(value: string): void { this.settings.setDataSource(value); }
+  setApiBaseUrl(url: string): void { this.settings.setApiBaseUrl(url); }
+  setLoginUrl(url: string): void { this.settings.setLoginUrl(url); }
+  setFileAccessMode(value: string): void { this.settings.setFileAccessMode(value); }
+  setDebugLog(on: boolean): void { this.settings.setDebugLog(on); }
+  setUiScale(v: number): void { this.settings.setUiScale(v); }
+  setTheme(theme: string): void { this.settings.setTheme(theme); }
+  setModalFullscreen(on: boolean): void { this.settings.setModalFullscreen(on); }
+  setAutocompleteMax(v: number): void { this.settings.setAutocompleteMax(v); }
   /** Pastille utilisateur (mode API). `user` = objet SSO (login/nom/prénom/eMail…) ; null = non connecté ; undefined = masquer. */
   setUser(user: { name?: string; prenom?: string; nom?: string; login?: string; email?: string; eMail?: string } | null | undefined): void {
     if (!this.userChip) return;
@@ -1087,11 +862,9 @@ export class Shell {
     // serveur est implémenté un jour.
     if (this.undoBtn) this.undoBtn.style.display = on ? "none" : "";
     if (this.redoBtn) this.redoBtn.style.display = on ? "none" : "";
-    this.fileOnlySections.forEach((s) => { if (s) s.style.display = on ? "none" : ""; });
     if (this.newBtn) this.newBtn.title = I18n.t("shell.topbar.new");
     if (this.openBtn) this.openBtn.title = on ? I18n.t("shell.topbar.docsOpen") : I18n.t("shell.topbar.open");
-    if (on && this.dataSourceSwitch) this.dataSourceSwitch.checked = true;
-    this.updateApiUrlVisibility();
+    this.settings.setRestMode(on);   // sections propres au mode FICHIER + position du toggle de source
   }
   /** Loupe de RECHERCHE GLOBALE : visible dès qu'il existe AU MOINS UNE lecture documentaire — la même règle
       que la garde serveur de `GET /search`, dont l'assiette est de toute façon restreinte à ce que l'appelant
@@ -1102,25 +875,22 @@ export class Shell {
       webcam ne voit jamais le bouton (cf. core/ScanAffordance). */
   setScanAvailable(on: boolean): void { if (this.scanBtn) this.scanBtn.style.display = on ? "" : "none"; }
   /** Reflète les préférences de scan dans les bascules des réglages (sans déclencher les rappels). */
-  setScanPrefs(allFields: boolean, force: boolean): void {
-    if (this.scanAllChk) this.scanAllChk.checked = allFields;
-    if (this.scanForceChk) this.scanForceChk.checked = force;
-  }
+  setScanPrefs(allFields: boolean, force: boolean): void { this.settings.setScanPrefs(allFields, force); }
   /** Bouton « Nouveau » de la topbar : en mode API il CRÉE un document serveur (`documents:manage`) ; en mode
       fichier il repart d'un document local, et l'état « tout permis » le laisse visible (injection nulle). */
   setNewDocumentAllowed(on: boolean): void { if (this.newBtn) this.newBtn.style.display = on ? "" : "none"; }
-  /** Section « Maintenance » du panneau Réglages (purge des binaires orphelins + compactage) : geste
+  /** Section « Maintenance » des Réglages (purge des binaires orphelins + compactage) : geste
       d'ADMINISTRATION, masqué sans la permission `maintenance:run` (cf. docs/auth.md § « Gating côté client »). En mode
       FICHIER la purge est purement locale et l'état d'autorisation « tout permis » la laisse visible —
       injection nulle, aucun test de mode ici. */
-  setMaintenanceAllowed(on: boolean): void { if (this.maintenanceSection) this.maintenanceSection.style.display = on ? "" : "none"; }
-  /** Section « Export » du panneau Réglages (JSON autonome + visualiseur HTML) : les deux portent le
+  setMaintenanceAllowed(on: boolean): void { this.settings.setMaintenanceAllowed(on); }
+  /** Section « Export » des Réglages (JSON autonome + visualiseur HTML) : les deux portent le
       document ENTIER, et sous droits partiels le cache ne le contient PLUS (l'assiette de chargement est
       intersectée avec le lisible, cf. docs/auth.md § 10.6). Un export y serait une copie silencieusement
       AMPUTÉE — donc masqué, jamais proposé puis tronqué. En mode FICHIER, « tout permis » le laisse
       visible : injection nulle, aucun test de mode ici. */
-  setExportAllowed(on: boolean): void { if (this.exportSection) this.exportSection.style.display = on ? "" : "none"; }
-  /** Reflète l'état auto-save dans le popover (case + fréquence). */
-  setAutosave(on: boolean, interval: number): void { this.autosaveChk.checked = on; this.autosaveIntervalSel.value = String(interval); }
-  setAutosaveStatus(html: string): void { this.autosaveStatusEl.innerHTML = html; }
+  setExportAllowed(on: boolean): void { this.settings.setExportAllowed(on); }
+  /** Reflète l'état auto-save dans les Réglages (case + fréquence). */
+  setAutosave(on: boolean, interval: number): void { this.settings.setAutosave(on, interval); }
+  setAutosaveStatus(html: string): void { this.settings.setAutosaveStatus(html); }
 }
