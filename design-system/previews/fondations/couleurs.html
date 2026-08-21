@@ -59,14 +59,19 @@
   }
   /* ============ VARIABLES / THEME ============ */
   :root {
-    --bg: #0a0a0a;
-    --bg-2: #111111;
-    --bg-3: #161616;
-    --line: #222222;
-    --line-2: #2d2d2d;
-    --fg: #e8e8e8;
-    --fg-dim: #9a9aa2;   /* AA : ex-#888 relevé/refroidi → meilleur contraste du texte secondaire sur fond sombre */
-    --fg-dimmer: #555555;
+    /* ===== BASE SOMBRE « ATTÉNUÉE » (charbon neutre) — exploration « fondations couleurs », variante B =====
+       Le noir d'origine (#0a0a0a) tenait l'esprit console mais COLLAIT les surfaces : les trois niveaux
+       (bg / bg-2 / bg-3) tenaient dans ~8 % de luminosité, si bien que cartes, entêtes de table et panneaux ne
+       se distinguaient QUE par leurs bordures. La base remonte de deux paliers et la hiérarchie s'élargit ;
+       l'orange, le monospace et le pas de grille de 24 px sont CONSERVÉS tels quels (non négociables). */
+    --bg: #141618;
+    --bg-2: #1b1d20;
+    --bg-3: #232629;
+    --line: #2e3237;
+    --line-2: #3b4045;
+    --fg: #e9eaec;
+    --fg-dim: #a4aab2;   /* AA : relevé/refroidi d'un cran de plus pour COMPENSER le fond relevé */
+    --fg-dimmer: #6a7078;
     /* ===== RAMPE ACCENT (identité orange DÉCLINÉE en 3 rôles — revue design lot A) =====
        L'orange reste l'identité de l'app ; on le décline en trois tokens selon l'USAGE, pour concilier
        punch visuel et contraste (AA). RÈGLE, à respecter par les prochains contributeurs :
@@ -76,30 +81,43 @@
                            câbles, waypoints, graphe…). Même teinte perçue que l'ex-#ff5500, un cheveu
                            plus clair/doux pour rester lisible en trait fin. En cas de doute → ce token.
          • --accent-text : PETIT TEXTE, liens, titres de section, badges textuels ≤ ~13px. Décliné plus
-                           CLAIR en thème sombre (ici) et plus FONCÉ en thème clair → contraste AA garanti. */
-    --accent-fill: oklch(0.67 0.19 46);
-    --accent: oklch(0.72 0.175 50);
-    --accent-text: oklch(0.80 0.15 62);
+                           CLAIR en thème sombre (ici) et plus FONCÉ en thème clair → contraste AA garanti.
+       ⚠ Les trois valeurs sont abaissées de 0,01 L par rapport au thème noir d'origine : sur un fond RELEVÉ, la
+         même luminosité produit un halo. La teinte perçue (l'ex-#ff5500) est inchangée. */
+    --accent-fill: oklch(0.66 0.19 46);
+    --accent: oklch(0.71 0.175 50);
+    --accent-text: oklch(0.79 0.15 62);
     --accent-2: #ffaa00;
     /* Sémantiques HARMONISÉES en OKLCH : même luminosité/chroma perçus d'un état à l'autre → langage
        d'état cohérent (statuts, toasts, pills, dialogues). --info (bleu) formalisé en token. */
-    --ok: oklch(0.76 0.15 152);
-    --warn: oklch(0.82 0.14 88);
-    --err: oklch(0.66 0.19 27);
-    --info: oklch(0.72 0.12 240);
+    --ok: oklch(0.74 0.15 152);
+    --warn: oklch(0.80 0.14 88);
+    --err: oklch(0.65 0.19 27);
+    --info: oklch(0.70 0.12 240);
     /* Rôles réseau : teinte CONSERVÉE (mgmt = bleu, data = vert, power = ambre) mais alignés sur la même
        logique L/C que les sémantiques ci-dessus, pour s'harmoniser visuellement avec elles. */
-    --role-mgmt: oklch(0.74 0.13 236);
-    --role-data: oklch(0.76 0.15 152);
-    --role-power: oklch(0.77 0.15 68);
-    --role-poe: oklch(0.82 0.15 102);   /* POE = data+énergie : or/lime entre data(152) et power(68), tirant vers le power */
+    --role-mgmt: oklch(0.72 0.13 236);
+    --role-data: oklch(0.74 0.15 152);
+    --role-power: oklch(0.75 0.15 68);
+    --role-poe: oklch(0.80 0.15 102);   /* POE = data+énergie : or/lime entre data(152) et power(68), tirant vers le power */
     /* Anneau de focus clavier (cf. règle :focus-visible globale) = couleur du petit texte accent (AA).
        Défini une seule fois : var(--accent-text) se résout par thème là où l'anneau est appliqué. */
     --focus: var(--accent-text);
     /* pastille d'équipement (liaisons/localisation) — bleu */
     --viz-equip-bg: #0c447c;
     --viz-equip-fg: #b5d4f4;
+    /* Pas de la GRILLE TECHNIQUE (24 px). Il n'y a plus de grille de FOND D'APP (régime « canvas seul », cf. le
+       commentaire de `body` plus bas) : ce token reste la RÉFÉRENCE du pas — grilles de canvas, maquettes, vides. */
     --grid-size: 24px;
+    /* ÉLÉVATION sur base relevée : une ombre NOIRE ne porte plus sur un fond gris. Le relief des contrôles, des
+       cartes et des boîtes est donc porté par un LISERÉ INTERNE HAUT (la lumière vient d'en haut) ; les ombres
+       portées restent, mais réservées aux overlays. Valeur COMPOSABLE (jamais `none`) : elle peut s'ajouter à
+       une liste de box-shadow existante sans invalider la déclaration. En thème clair, no-op transparent. */
+    --lift: inset 0 1px 0 rgba(255,255,255,0.04);
+    /* Encre des VOILES plein écran (modale, dialogue, tiroir, traitement). Le noir PUR troue un fond relevé :
+       l'encre est TEINTÉE comme le fond. Token de TEINTE seule (triplet r,g,b) — chaque voile garde sa propre
+       opacité, cf. `rgba(var(--scrim-ink), …)`. */
+    --scrim-ink: 8, 9, 10;
     --radius-pill: 5px;
     /* Hauteur de CONTRÔLE unifiée des barres de listing (revue design lot C) : recherche, boutons, « + Filtre »,
        Réinitialiser… partagent cette hauteur → une barre visuellement homogène (fini le mélange de hauteurs). */
@@ -141,6 +159,10 @@
     --role-poe: oklch(0.54 0.14 102);
     --viz-equip-bg: #e6f1fb;
     --viz-equip-fg: #0c447c;
+    /* Pas de liseré d'élévation en thème clair (le relief y vient des ombres) : no-op TRANSPARENT et non
+       `none`, pour rester composable dans les listes de box-shadow. */
+    --lift: inset 0 1px 0 rgba(0,0,0,0);
+    --scrim-ink: 0, 0, 0;
   }
 
   * { box-sizing: border-box; }
@@ -159,33 +181,18 @@
     line-height: 1.5;
     min-height: 100vh;
   }
-  /* Grille de fond (repère d'alignement, purement décoratif). Portée par ::before — couche DÉDIÉE — pour que
-     l'opacité et le masque n'affectent QUE la grille, jamais le contenu (un mask posé sur <body> rognerait le texte).
-     • opacity 0.35 → grille discrète (« adoucie »).
-     • masque radial depuis le haut → grille CONFINÉE en haut-centre puis fondue ; REMPLACE l'ancien vignettage
-       opaque superposé (qui repeignait --bg par-dessus au lieu de simplement estomper la grille).
-     position:fixed + z-index:0 → grille fixe au défilement, SOUS le contenu (main = z-index 1). */
-  body::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    z-index: 0;
-    pointer-events: none;
-    background-image:
-      linear-gradient(var(--line) 1px, transparent 1px),
-      linear-gradient(90deg, var(--line) 1px, transparent 1px);
-    background-size: var(--grid-size) var(--grid-size);
-    background-position: -1px -1px;
-    background-attachment: fixed;
-    opacity: 0.35;
-    -webkit-mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, #000, transparent 80%);
-    mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, #000, transparent 80%);
-  }
-  /* Sur écran tactile (pas de survol), background-attachment:fixed provoque des saccades au défilement :
-     on repasse la grille en `scroll`. */
-  @media (hover: none) {
-    body::before { background-attachment: scroll; }
-  }
+  /* PAS DE GRILLE DE FOND D'APP — régime « CANVAS SEUL ». Deux grilles cohabitaient : celle des CANVAS,
+     FONCTIONNELLE (échelle, alignement des U, aimantation), et celle du FOND D'APP, purement décorative, qui
+     courait sous les tables, les panneaux et les formulaires. La seconde est RETIRÉE (elle était portée par
+     `body::before`, couche fixe sous `main`) : à 24 px elle croisait en permanence le texte mono, et sur la
+     base relevée « atténuée » elle devenait plus visible, pas moins. La grille cesse d'être un papier peint et
+     redevient un SIGNE : « surface manipulable ».
+     Ce qui reste — et qui NE DOIT PAS être retiré :
+       • `.dc-grid-line` (plan 2D), le décor `floorgrid` de la scène Three.js, les grilles de baie/capot :
+         grilles FONCTIONNELLES, elles portent l'échelle et l'aimantation ;
+       • `.face-stage.empty` : grille posée sur un VIDE — elle y dit « ici on pose quelque chose ».
+     L'identité « plan technique » est reprise sans elle par le monospace, les bordures franches à 1 px (qui
+     gagnent en présence sur fond gris) et l'orange : on passe du papier millimétré au schéma au trait. */
   a { color: var(--accent-text); }   /* lien = petit texte accent → --accent-text (contraste AA) */
 
   /* Anneau de focus CLAVIER uniquement (:focus-visible, jamais :focus → le focus SOURIS reste inchangé).
@@ -521,6 +528,7 @@
     display: inline-flex;
     align-items: center;
     gap: 8px;
+    box-shadow: var(--lift);
   }
   .btn:hover { border-color: var(--fg); background: var(--bg-3); }
   .btn:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -535,7 +543,13 @@
   .btn-sm { padding: 4px 10px; font-size: 10px; }
 
   /* ============ TABLE / PAGINATION ============ */
-  .table-wrap { background: var(--bg-2); border: 1px solid var(--line); overflow: auto; }
+  /* ZONES DE DONNÉES sur --bg, le fond le PLUS CALME du jeu (règle de la base « atténuée ») : la donnée reste
+     au fond, les CHROMES qui l'entourent (barres, panneaux, fiches, entêtes de table) montent d'un cran. C'est
+     de cette inversion que la hiérarchie tire le plus. Même règle pour .dc-stage / .graph-stage (canvas).
+     ⚠ Le thème CLAIR garde la table sur --bg-2 (#fff) : là, --bg EST déjà le fond de page, et la table perdrait
+     son effet de carte — la maquette ne traitait que le sombre. */
+  .table-wrap { background: var(--bg); border: 1px solid var(--line); overflow: auto; }
+  [data-theme="light"] .table-wrap { background: var(--bg-2); }
   table { width: 100%; border-collapse: collapse; font-size: 12px; }
   th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
   /* mode COMPACT : cellules plus serrées (densité accrue) — le tableau reste pleine largeur (width:100%). */
@@ -828,6 +842,7 @@
     flex: 1;
     max-width: 420px;
     outline: none;
+    box-shadow: var(--lift);
   }
   .search-input:focus { border-color: var(--accent); }
   .search-input::placeholder { color: var(--fg-dimmer); }
@@ -860,6 +875,7 @@
     padding: 8px 10px;
     outline: none;
     transition: border-color .15s;
+    box-shadow: var(--lift);
   }
   .form-field input:focus,
   .form-field textarea:focus,
@@ -1122,15 +1138,15 @@
   #view-datacenter.active { display: flex; flex-direction: column; }
   #view-datacenter.active .dc-layout { flex: 1 1 auto; min-height: 0; }
   .dc-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
-  .dc-select { background: var(--bg-2); border: 1px solid var(--line-2); color: var(--fg); font-family: var(--mono); font-size: 12px; padding: 6px 10px; min-width: 180px; }
+  .dc-select { background: var(--bg-2); border: 1px solid var(--line-2); color: var(--fg); font-family: var(--mono); font-size: 12px; padding: 6px 10px; min-width: 180px; box-shadow: var(--lift); }
   .dc-tb-sep { width: 1px; height: 22px; background: var(--line-2); margin: 0 4px; }
   .dc-subviews { display: flex; gap: 4px; flex-wrap: wrap; }
   .dc-layout { display: flex; gap: 12px; align-items: stretch; }
-  .dc-stage { position: relative; flex: 1 1 auto; min-width: 320px; background: var(--bg-2); border: 1px solid var(--line); overflow: hidden; touch-action: none; }
+  .dc-stage { position: relative; flex: 1 1 auto; min-width: 320px; background: var(--bg); border: 1px solid var(--line); overflow: hidden; touch-action: none; }
   .dc-stage svg.dc-svg { width: 100%; height: 100%; display: block; cursor: grab; }
   .dc-stage svg.dc-svg.panning { cursor: grabbing; }
   .dc-side { flex: 0 0 420px; display: flex; flex-direction: column; gap: 10px; overflow: auto; }
-  .dc-card { background: var(--bg-3); border: 1px solid var(--line); padding: 10px; }
+  .dc-card { background: var(--bg-3); border: 1px solid var(--line); padding: 10px; box-shadow: var(--lift); }
   /* bouton-icÃ´ne (Å“il afficher / masquer) dans les listes de rÃ©seaux */
   .dc-eye-btn { padding: 3px 6px; display: inline-flex; align-items: center; }
   .dc-eye-btn svg { width: 14px; height: 14px; display: block; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
@@ -1140,7 +1156,9 @@
   .dc-pool-row { display: flex; align-items: center; gap: 8px; }
   .dc-pool-row .grow { flex: 1 1 auto; min-width: 0; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dc-placeholder { display: flex; align-items: center; justify-content: center; height: 100%; padding: 32px; text-align: center; color: var(--fg-dim); font-size: 12px; line-height: 1.7; font-family: var(--sans); }   /* état vide / intro (prose) → --sans */
-  .dc-room { fill: var(--bg); stroke: var(--line-2); stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
+  /* Sol de salle / plateau d'étage : --bg-2, comme le `floor` de la scène Three.js (readTheme) — le stage
+     étant passé à --bg, un sol sur --bg s'y confondrait. Les deux vues disent enfin la même chose. */
+  .dc-room { fill: var(--bg-2); stroke: var(--line-2); stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
   .dc-grid-line { stroke: var(--line); stroke-width: 1px; vector-effect: non-scaling-stroke; }
   /* v68 â€” cases INACCESSIBLES (hachurÃ©es) + overlay d'Ã©dition + cote (coordonnÃ©es en m) */
   .dc-cell-blocked { fill: var(--err); fill-opacity: 0.18; stroke: var(--err); stroke-opacity: 0.5; stroke-width: 1px; vector-effect: non-scaling-stroke; pointer-events: none; }
@@ -1385,7 +1403,7 @@
   .dc-level-label { fill: var(--fg-dim); font-family: var(--mono); pointer-events: none; }
   .dc-bldg-label { fill: var(--fg); font-family: var(--mono); font-weight: 700; letter-spacing: 0.08em; pointer-events: none; }
   /* vue 3D (SVG, peintre) */
-  .dc-floor3d { fill: var(--bg); stroke: var(--line-2); stroke-width: 1px; vector-effect: non-scaling-stroke; }
+  .dc-floor3d { fill: var(--bg-2); stroke: var(--line-2); stroke-width: 1px; vector-effect: non-scaling-stroke; }
   .dc-rack3d { stroke: var(--fg-dim); stroke-width: 1px; vector-effect: non-scaling-stroke; cursor: pointer; }
   .dc-rack3d.face-top { fill: var(--bg-3); fill-opacity: 1; }
   .dc-rack3d.face-bottom { fill: var(--bg); fill-opacity: 0.16; }
@@ -1471,7 +1489,7 @@
   /* ============ MODAL ============ */
   .modal-overlay {
     position: fixed; inset: 0;
-    background: rgba(0,0,0,0.75);
+    background: rgba(var(--scrim-ink), 0.7);
     z-index: 200;
     display: none;
     align-items: flex-start;
@@ -1480,14 +1498,14 @@
     padding: 40px 20px;
     backdrop-filter: blur(2px);
   }
-  [data-theme="light"] .modal-overlay { background: rgba(0,0,0,0.4); }
+  [data-theme="light"] .modal-overlay { background: rgba(var(--scrim-ink), 0.4); }
   .modal-overlay.open { display: flex; }
   .modal {
     background: var(--bg-2);
     border: 1px solid var(--line-2);
     width: 100%;
     max-width: 720px;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5), var(--lift);
     animation: slideUp .2s;
     max-height: calc(100vh - 80px);
     max-height: calc(100dvh - 80px);
@@ -1631,7 +1649,7 @@
   /* ============ DIALOG ============ */
   .dialog-overlay {
     position: fixed; inset: 0;
-    background: rgba(0,0,0,0.55);
+    background: rgba(var(--scrim-ink), 0.55);
     z-index: 300;
     display: flex;
     align-items: flex-start;
@@ -1641,14 +1659,14 @@
     backdrop-filter: blur(2px);
     animation: dialogFadeIn 0.12s ease-out;
   }
-  [data-theme="light"] .dialog-overlay { background: rgba(0,0,0,0.35); }
+  [data-theme="light"] .dialog-overlay { background: rgba(var(--scrim-ink), 0.35); }
   @keyframes dialogFadeIn { from { opacity: 0; } to { opacity: 1; } }
   .dialog-box {
     background: var(--bg-2);
     border: 1px solid var(--line-2);
     width: 100%;
     max-width: 480px;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5), var(--lift);
     animation: dialogSlideIn 0.18s ease-out;
     max-height: calc(100vh - 100px);
     max-height: calc(100dvh - 100px);
@@ -1790,7 +1808,7 @@
     position: fixed; inset: 0;
     z-index: 2500;
     display: flex; align-items: center; justify-content: center;
-    background: rgba(0,0,0,0.35);
+    background: rgba(var(--scrim-ink), 0.35);
     cursor: progress;
   }
   .busy-box {
@@ -1798,7 +1816,7 @@
     background: var(--bg-3);
     border: 1px solid var(--line-2);
     padding: 20px 28px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4), var(--lift);
   }
   .busy-spinner {
     width: 28px; height: 28px;
@@ -2055,7 +2073,7 @@
      ÉCHELLE DE Z-INDEX DE L'APP (documentation de l'existant — du BAS vers le HAUT). Poser un
      nouvel overlay = choisir sa marche ICI plutot que d'inventer une valeur au hasard. Les couches
      mesurees, de la plus basse a la plus haute :
-       0     grille de fond (`body::before`)            1     contenu `main`
+       1     contenu `main` (plus de grille de fond : regime « canvas seul »)
        100   barre d'en-tete (header)
        200   `.modal-overlay`, `.row-menu`, panneaux ancres aux barres (menus de champ)
        300   `.dialog-overlay` (dialogues, s'empilent PAR-DESSUS une modale)
@@ -2278,7 +2296,7 @@
     position: relative;
     width: 100%;
     height: 640px;
-    background: var(--bg-2);
+    background: var(--bg);
     border: 1px solid var(--line);
     overflow: hidden;
     touch-action: none;
@@ -2405,7 +2423,7 @@
   /* cadres de regroupement */
   .gframe rect.frame-bg { rx: 8; }
   .gframe text.frame-label { font-family: var(--mono); font-size: 12px; font-weight: 600; }
-  .gframe .frame-handle { fill: var(--bg); stroke-width: 1.5; cursor: nwse-resize; }
+  .gframe .frame-handle { fill: var(--bg-2); stroke-width: 1.5; cursor: nwse-resize; }
   .gframe.dim { opacity: 0.3; }
   /* ---- MINI-GRAPHE de tracé (fiches détail câble/faisceau — views/RouteMiniGraph.ts) ----
      Réutilise .gnode/.gedge (corps, atténuation .dim au survol) ; ici : conteneur défilable,
@@ -2623,8 +2641,8 @@
      barre qui l'a ouvert —, mais SOUS la modale (200) et le dialogue (300). Un menu de navigation ne
      passe jamais devant une tâche en cours ; de toute façon, l'overlay d'une modale recouvre le burger,
      donc le tiroir ne peut pas s'ouvrir par-dessus. */
-  .nav-drawer { position: fixed; inset: 0; z-index: 150; background: rgba(0,0,0,0.62); }
-  [data-theme="light"] .nav-drawer { background: rgba(0,0,0,0.38); }
+  .nav-drawer { position: fixed; inset: 0; z-index: 150; background: rgba(var(--scrim-ink), 0.62); }
+  [data-theme="light"] .nav-drawer { background: rgba(var(--scrim-ink), 0.38); }
   .nav-drawer-panel {
     position: absolute; top: 0; right: 0; bottom: 0;
     width: 88%; max-width: 320px;
@@ -2780,7 +2798,7 @@
     .dc-side-modal { display: none; }
     .dc-row.show-side .dc-side-backdrop {
       display: block; position: fixed; inset: 0;
-      background: rgba(0,0,0,0.5); z-index: 1000;
+      background: rgba(var(--scrim-ink), 0.5); z-index: 1000;
     }
     .dc-row.show-side .dc-side-modal {
       display: flex; flex-direction: column;
@@ -2866,7 +2884,7 @@
   .gs-kbd { display: inline-flex; align-items: center; gap: 2px; padding: 1px 6px; border: 1px solid var(--line-2); border-bottom-width: 2px; border-radius: 4px; background: var(--bg-3); color: var(--fg-dim); font-size: 10px; font-family: var(--mono); white-space: nowrap; }
 
   /* -- overlay + panneau -- */
-  .gs-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.75); backdrop-filter: blur(2px); z-index: 240; display: none; align-items: flex-start; justify-content: center; padding: clamp(12px, 8vh, 96px) 16px 16px; }
+  .gs-overlay { position: fixed; inset: 0; background: rgba(var(--scrim-ink), 0.75); backdrop-filter: blur(2px); z-index: 240; display: none; align-items: flex-start; justify-content: center; padding: clamp(12px, 8vh, 96px) 16px 16px; }
   .gs-overlay.open { display: flex; }
   .gsearch { width: 100%; max-width: 760px; max-height: min(76vh, 660px); background: var(--bg-2); border: 1px solid var(--line-2); border-radius: 10px; box-shadow: 0 24px 70px rgba(0,0,0,0.55); display: flex; flex-direction: column; overflow: hidden; animation: gs-slide-up 0.16s ease; }
   @keyframes gs-slide-up { from { transform: translateY(-10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
@@ -3327,52 +3345,52 @@
   <p class="ds-note">Colonnes : pastille du thème SOMBRE · pastille du thème CLAIR · nom du token · valeurs (sombre · clair, « hérité » = non redéfini en clair, donc identique).</p>
   <div class="ds-swhead"><span>Sombre</span><span>Clair</span><span>Token</span><span>Valeurs</span></div><div class="ds-variant-title">Fonds</div>
       <div class="ds-swrow">
-        <span class="ds-chip" style="background:#0a0a0a" title="#0a0a0a"></span>
+        <span class="ds-chip" style="background:#141618" title="#141618"></span>
         <span class="ds-chip" style="background:#f4f4f1" title="#f4f4f1"></span>
         <code class="ds-swname">--bg</code>
-        <span class="ds-swval">#0a0a0a<span class="ds-sep">·</span>#f4f4f1</span>
+        <span class="ds-swval">#141618<span class="ds-sep">·</span>#f4f4f1</span>
       </div>
       <div class="ds-swrow">
-        <span class="ds-chip" style="background:#111111" title="#111111"></span>
+        <span class="ds-chip" style="background:#1b1d20" title="#1b1d20"></span>
         <span class="ds-chip" style="background:#ffffff" title="#ffffff"></span>
         <code class="ds-swname">--bg-2</code>
-        <span class="ds-swval">#111111<span class="ds-sep">·</span>#ffffff</span>
+        <span class="ds-swval">#1b1d20<span class="ds-sep">·</span>#ffffff</span>
       </div>
       <div class="ds-swrow">
-        <span class="ds-chip" style="background:#161616" title="#161616"></span>
+        <span class="ds-chip" style="background:#232629" title="#232629"></span>
         <span class="ds-chip" style="background:#ebebe6" title="#ebebe6"></span>
         <code class="ds-swname">--bg-3</code>
-        <span class="ds-swval">#161616<span class="ds-sep">·</span>#ebebe6</span>
+        <span class="ds-swval">#232629<span class="ds-sep">·</span>#ebebe6</span>
       </div><div class="ds-variant-title">Lignes</div>
       <div class="ds-swrow">
-        <span class="ds-chip" style="background:#222222" title="#222222"></span>
+        <span class="ds-chip" style="background:#2e3237" title="#2e3237"></span>
         <span class="ds-chip" style="background:#d6d6d0" title="#d6d6d0"></span>
         <code class="ds-swname">--line</code>
-        <span class="ds-swval">#222222<span class="ds-sep">·</span>#d6d6d0</span>
+        <span class="ds-swval">#2e3237<span class="ds-sep">·</span>#d6d6d0</span>
       </div>
       <div class="ds-swrow">
-        <span class="ds-chip" style="background:#2d2d2d" title="#2d2d2d"></span>
+        <span class="ds-chip" style="background:#3b4045" title="#3b4045"></span>
         <span class="ds-chip" style="background:#b8b8b0" title="#b8b8b0"></span>
         <code class="ds-swname">--line-2</code>
-        <span class="ds-swval">#2d2d2d<span class="ds-sep">·</span>#b8b8b0</span>
+        <span class="ds-swval">#3b4045<span class="ds-sep">·</span>#b8b8b0</span>
       </div><div class="ds-variant-title">Textes</div>
       <div class="ds-swrow">
-        <span class="ds-chip" style="background:#e8e8e8" title="#e8e8e8"></span>
+        <span class="ds-chip" style="background:#e9eaec" title="#e9eaec"></span>
         <span class="ds-chip" style="background:#0a0a0a" title="#0a0a0a"></span>
         <code class="ds-swname">--fg</code>
-        <span class="ds-swval">#e8e8e8<span class="ds-sep">·</span>#0a0a0a</span>
+        <span class="ds-swval">#e9eaec<span class="ds-sep">·</span>#0a0a0a</span>
       </div>
       <div class="ds-swrow">
-        <span class="ds-chip" style="background:#9a9aa2" title="#9a9aa2"></span>
+        <span class="ds-chip" style="background:#a4aab2" title="#a4aab2"></span>
         <span class="ds-chip" style="background:#555555" title="#555555"></span>
         <code class="ds-swname">--fg-dim</code>
-        <span class="ds-swval">#9a9aa2<span class="ds-sep">·</span>#555555</span>
+        <span class="ds-swval">#a4aab2<span class="ds-sep">·</span>#555555</span>
       </div>
       <div class="ds-swrow">
-        <span class="ds-chip" style="background:#555555" title="#555555"></span>
+        <span class="ds-chip" style="background:#6a7078" title="#6a7078"></span>
         <span class="ds-chip" style="background:#888888" title="#888888"></span>
         <code class="ds-swname">--fg-dimmer</code>
-        <span class="ds-swval">#555555<span class="ds-sep">·</span>#888888</span>
+        <span class="ds-swval">#6a7078<span class="ds-sep">·</span>#888888</span>
       </div><div class="ds-variant-title">Accents &amp; états</div>
       <div class="ds-swrow">
         <span class="ds-chip" style="background:#ffaa00" title="#ffaa00"></span>
@@ -3391,7 +3409,7 @@
         <span class="ds-chip" style="background:#0c447c" title="#0c447c"></span>
         <code class="ds-swname">--viz-equip-fg</code>
         <span class="ds-swval">#b5d4f4<span class="ds-sep">·</span>#0c447c</span>
-      </div><div class="ds-variant-title">Rayons &amp; divers (non-couleur)</div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--accent-fill</code><span class="ds-swval">oklch(0.67 0.19 46)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--accent</code><span class="ds-swval">oklch(0.72 0.175 50)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--accent-text</code><span class="ds-swval">oklch(0.80 0.15 62)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--ok</code><span class="ds-swval">oklch(0.76 0.15 152)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--warn</code><span class="ds-swval">oklch(0.82 0.14 88)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--err</code><span class="ds-swval">oklch(0.66 0.19 27)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--info</code><span class="ds-swval">oklch(0.72 0.12 240)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--role-mgmt</code><span class="ds-swval">oklch(0.74 0.13 236)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--role-data</code><span class="ds-swval">oklch(0.76 0.15 152)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--role-power</code><span class="ds-swval">oklch(0.77 0.15 68)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--role-poe</code><span class="ds-swval">oklch(0.82 0.15 102)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--focus</code><span class="ds-swval">var(--accent-text)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--grid-size</code><span class="ds-swval">24px</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--radius-pill</code><span class="ds-swval">5px</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--control-h</code><span class="ds-swval">36px</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--mono</code><span class="ds-swval">ui-monospace, &quot;SF Mono&quot;, &quot;Menlo&quot;, &quot;Consolas&quot;, &quot;Cascadia Mono&quot;, &quot;Roboto Mono&quot;, monospace</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--sans</code><span class="ds-swval">&quot;IBM Plex Sans&quot;, system-ui, -apple-system, &quot;Segoe UI&quot;, Roboto, &quot;Helvetica Neue&quot;, Arial, sans-serif</span></div>
+      </div><div class="ds-variant-title">Rayons &amp; divers (non-couleur)</div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--accent-fill</code><span class="ds-swval">oklch(0.66 0.19 46)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--accent</code><span class="ds-swval">oklch(0.71 0.175 50)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--accent-text</code><span class="ds-swval">oklch(0.79 0.15 62)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--ok</code><span class="ds-swval">oklch(0.74 0.15 152)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--warn</code><span class="ds-swval">oklch(0.80 0.14 88)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--err</code><span class="ds-swval">oklch(0.65 0.19 27)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--info</code><span class="ds-swval">oklch(0.70 0.12 240)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--role-mgmt</code><span class="ds-swval">oklch(0.72 0.13 236)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--role-data</code><span class="ds-swval">oklch(0.74 0.15 152)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--role-power</code><span class="ds-swval">oklch(0.75 0.15 68)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--role-poe</code><span class="ds-swval">oklch(0.80 0.15 102)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--focus</code><span class="ds-swval">var(--accent-text)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--grid-size</code><span class="ds-swval">24px</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--lift</code><span class="ds-swval">inset 0 1px 0 rgba(255,255,255,0.04)</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--scrim-ink</code><span class="ds-swval">8, 9, 10</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--radius-pill</code><span class="ds-swval">5px</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--control-h</code><span class="ds-swval">36px</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--mono</code><span class="ds-swval">ui-monospace, &quot;SF Mono&quot;, &quot;Menlo&quot;, &quot;Consolas&quot;, &quot;Cascadia Mono&quot;, &quot;Roboto Mono&quot;, monospace</span></div><div class="ds-swrow ds-swrow--misc"><code class="ds-swname">--sans</code><span class="ds-swval">&quot;IBM Plex Sans&quot;, system-ui, -apple-system, &quot;Segoe UI&quot;, Roboto, &quot;Helvetica Neue&quot;, Arial, sans-serif</span></div>
 </section>
 
 </div>
