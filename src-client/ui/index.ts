@@ -25,6 +25,8 @@ export { IconButton } from "./IconButton";
 export type { IconButtonOpts } from "./IconButton";
 export { ScanControl } from "./ScanControl";
 export type { ScanControlHost, ScanAttachSpec } from "./ScanControl";
+export { CartPanel } from "./CartPanel";
+export type { CartHost } from "./CartPanel";
 export { LabelPrintDialog } from "./LabelPrintDialog";
 export type { LabelPrintHost, LabelPrintContext, LabelPrintKind } from "./LabelPrintDialog";
 export { ScanViewfinder } from "./ScanViewfinder";

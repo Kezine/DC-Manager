@@ -369,6 +369,22 @@
   .icon-btn.topbar-settings { border-right: none; }
 
   .topbar-actions { display: flex; align-items: stretch; flex-shrink: 0; border-left: 1px solid var(--line); }
+  /* PANIER (cf. docs/panier.md) : pastille de comptage ancrée sur le bouton de topbar.
+     `position:relative` sur le bouton — sans lui la pastille se placerait par rapport à la topbar. */
+  .topbar-cart { position: relative; }
+  .cart-badge {
+    position: absolute; top: 3px; right: 3px; min-width: 16px; height: 16px; padding: 0 4px;
+    border-radius: 8px; background: var(--accent); color: var(--accent-fg, #fff);
+    font-size: 10px; line-height: 16px; font-weight: 700; text-align: center; pointer-events: none;
+  }
+  /* Colonne de cases à cocher des listings (greffon panier) : étroite, centrée, jamais tronquée. */
+  th.cell-select, td.cell-select { width: 34px; text-align: center; padding-left: 6px; padding-right: 6px; }
+  th.cell-select input, td.cell-select input { cursor: pointer; }
+  /* Modale du panier : une ligne = un libellé + le bouton de retrait. */
+  .cart-list { display: flex; flex-direction: column; gap: 2px; }
+  .cart-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  .cart-row:last-child { border-bottom: none; }
+  .cart-row-label { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* Pastille utilisateur = BOUTON (clic → modale d'infos) : réinitialise l'apparence bouton, ne garde
      que le liseré gauche de séparation. En responsive, `.user-chip-name` est masqué (cf. @media 760px) :
      reste l'icône seule, le nom passant en tooltip/aria-label. */
@@ -1895,7 +1911,7 @@
   /* Barre d'actions de la topbar : tout masqué SAUF le déclencheur des RÉGLAGES et le BURGER — le
      visualiseur reste NAVIGABLE, et sous 760 px le tiroir est le seul chemin de navigation (les deux
      barres d'onglets y cèdent). Masquer le burger y laisserait une application sans menu du tout. */
-  body.viewer-mode .topbar-actions > :not(.topbar-settings):not(.topbar-burger) { display: none !important; }
+  body.viewer-mode .topbar-actions > :not(.topbar-settings):not(.topbar-burger):not(.topbar-cart) { display: none !important; }
   /* Reglages : en viewer, on ne garde QUE les sections COSMETIQUES (theme, taille du texte) — on masque source de
      donnees, acces fichiers, auto-save, affichage 3D, EXPORT, debogage. */
   body.viewer-mode .settings-section:not(.settings-cosmetic) { display: none !important; }

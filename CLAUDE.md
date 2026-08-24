@@ -448,6 +448,17 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   faisceaux — TOUS sous le prédicat injecté `LabelPrintDialog.available()` ;
   section « Mode local » — scan OK dans les deux modes, génération/impression = mode API seulement
   (setup injecté par main.ts, patron injection nulle)).
+- [`panier.md`](docs/panier.md) — **PANIER d'actions groupées** (V1-Beta) : familles = classes
+  d'équivalence d'ANATOMIE d'action (`core/CartFamilies` — câble ≡ faisceau, cf. `isFlagKind`), état
+  PUR `core/CartModel` (🚨 `add` ne vide JAMAIS le panier de lui-même sur conflit de famille — le
+  remplacement est un geste séparé ; libellé = SECOURS d'affichage, la vérité est relue au Store à
+  l'action, disparus exclus et signalés ; plafond 50 tant que le bridage de concurrence des QR
+  n'existe pas), orchestration `ui/CartPanel` (injection nulle — pas d'action disponible ⇒ pas de
+  panier NI de cases ; cloisonnement par document relu à chaque accès ; `localStorage`, donc LOCAL à
+  l'appareil), greffon OPTIONNEL `ListSelection` de `ListView` (le listing ne porte AUCUN état :
+  cocher = être au panier ; un refus ramène la case ; la case d'en-tête coche la PAGE et n'a pas
+  d'état propre ; cocher ne repeint pas la liste) ; section « Mode local » — panier absent en mode
+  fichier car sa seule action est serveur, écart porté par les ACTIONS et non par un test de mode.
 - [`navigation.md`](docs/navigation.md) — **menu à DEUX NIVEAUX** (re-design 2026-08-20, maquette
   Claude Design) : modèle PUR `app/NavModel` (ni DOM ni Shell — le Shell ne fait que PEINDRE ce
   qu'il RÉSOUT), catalogue `NAV_DOMAINS` = source unique du rattachement vue → domaine avec VERROU

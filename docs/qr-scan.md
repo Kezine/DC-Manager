@@ -462,6 +462,7 @@ posent une. C'était la cause première du retour terrain.
 | Fiche faisceau | « Un drapeau » / « Imprimer les 2 extrémités » (les deux patchs terminaux) |
 | Listing faisceaux | Action de ligne : les **2 extrémités**, comme les câbles |
 | Fiche spare | « Imprimer l'étiquette » (gabarit S par défaut) |
+| **Panier** (topbar) | « Imprimer les étiquettes (N) » — planche d'un lot de câbles/faisceaux préparé par les cases des listings, DEUX drapeaux par lien. Cf. [`panier.md`](panier.md) |
 
 ### Rendu d'impression
 

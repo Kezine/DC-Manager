@@ -108,6 +108,8 @@ export class Icons {
   /** SCANNER un code (QR / code-barres) à la caméra : viseur à coins + ligne de visée. Sert au
       greffon de champ (`ui/ScanControl`), à l'entrée globale de la topbar et au viseur lui-même
       (chantier étiquettes QR — la maquette qr-saisie-camera fait foi pour le dessin). */
+  /** PANIER d'actions groupées (topbar, cf. docs/panier.md) — silhouette de panier à anse. */
+  static readonly CART = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h18l-1.8 11a2 2 0 0 1-2 1.7H6.8a2 2 0 0 1-2-1.7z"/><path d="M8.5 7V5.5a3.5 3.5 0 0 1 7 0V7"/></svg>';
   static readonly SCAN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8V5a2 2 0 0 1 2-2h3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M21 16v3a2 2 0 0 1-2 2h-3"/><line x1="7" y1="12" x2="17" y2="12"/></svg>';
 
   /** TORCHE de la caméra (fond de baie sombre) : lampe éclair. Intention DISTINCTE de POWER

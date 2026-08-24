@@ -75,6 +75,9 @@ export interface ShellHost extends SettingsPanelHost {
   /** SCANNER UNE ÉTIQUETTE (viseur caméra en mode libre — chantier QR, cf. docs/qr-scan.md § UI).
       Bouton révélé par `setScanAvailable` quand une caméra existe. */
   onScanGlobal?(): void;
+  /** PANIER d'actions groupées (cf. docs/panier.md). Bouton révélé par `setCartAvailable`
+      quand au moins une action groupée est disponible (V1-Beta : impression = mode API). */
+  onCart?(): void;
   /** BASCULE du thème — commande GLOBALE (action « Basculer le thème » de la palette Ctrl+K), et non
       un réglage : elle ne choisit pas une préférence, elle demande l'inverse de ce qui est affiché.
       Le toggle des réglages, lui, passe par `onThemePreference` (cf. `SettingsPanelHost`). */
@@ -146,6 +149,8 @@ export class Shell {
   private saveBtn!: HTMLButtonElement;
   private saveDot!: HTMLElement;
   private searchBtn!: HTMLButtonElement;          // loupe « Recherche globale » (Ctrl+F) — masquée sans aucune lecture documentaire
+  private cartBtn!: HTMLButtonElement;            // « Panier » (actions groupées) — masqué sans action disponible (cf. setCartAvailable)
+  private cartBadge!: HTMLElement;                // pastille de comptage du panier
   private scanBtn!: HTMLButtonElement;            // « Scanner une étiquette » (viseur caméra) — masqué sans caméra (cf. setScanAvailable)
   private newBtn!: HTMLButtonElement;             // « Nouveau » (fichier ou document serveur)
   private openBtn!: HTMLButtonElement;            // « Ouvrir » (fichier ou sélecteur de documents)
@@ -245,6 +250,18 @@ export class Shell {
     this.scanBtn.style.display = "none";
     this.scanBtn.onclick = () => this.host.onScanGlobal?.();
     actions.appendChild(this.scanBtn);
+    // PANIER (actions groupées) : à côté du scan — même famille de gestes « je prépare un lot,
+    // j'agis ensuite ». MASQUÉ par défaut, l'hôte le révèle si une action groupée existe
+    // (`setCartAvailable`, patron d'injection nulle — cf. docs/panier.md). La pastille porte le
+    // COMPTE, comme les onglets portent le leur : le panier est un état, il doit se voir sans clic.
+    this.cartBtn = document.createElement("button"); this.cartBtn.type = "button"; this.cartBtn.className = "icon-btn topbar-cart";
+    this.cartBtn.title = I18n.t("cart.topbar"); this.cartBtn.setAttribute("aria-label", I18n.t("cart.topbar"));
+    this.cartBtn.innerHTML = Icons.CART;
+    this.cartBadge = document.createElement("span"); this.cartBadge.className = "cart-badge"; this.cartBadge.hidden = true;
+    this.cartBtn.appendChild(this.cartBadge);
+    this.cartBtn.style.display = "none";
+    this.cartBtn.onclick = () => this.host.onCart?.();
+    actions.appendChild(this.cartBtn);
     // Nouveau / Ouvrir : utiles dans LES DEUX modes (fichier → fichier ; API → document serveur). Toujours visibles.
     this.newBtn = iconBtn(I18n.t("shell.topbar.new"), '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>', () => this.host.onNew?.());
     this.openBtn = iconBtn(I18n.t("shell.topbar.open"), '<path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', () => this.host.onOpen?.());
@@ -878,6 +895,14 @@ export class Shell {
       `getUserMedia` (sonde async `ScanControl.globalAvailable` du bootstrap) — un poste fixe sans
       webcam ne voit jamais le bouton (cf. core/ScanAffordance). */
   setScanAvailable(on: boolean): void { if (this.scanBtn) this.scanBtn.style.display = on ? "" : "none"; }
+  /** PANIER : révèle (ou masque) l'entrée de topbar — cf. `ShellHost.onCart` et docs/panier.md. */
+  setCartAvailable(on: boolean): void { if (this.cartBtn) this.cartBtn.style.display = on ? "" : "none"; }
+  /** PANIER : pastille de comptage. Zéro = pastille ABSENTE (un « 0 » permanent serait du bruit). */
+  setCartCount(count: number): void {
+    if (!this.cartBadge) return;
+    this.cartBadge.textContent = String(count);
+    this.cartBadge.hidden = count <= 0;
+  }
   /** Reflète les préférences de scan dans les bascules des réglages (sans déclencher les rappels). */
   setScanPrefs(allFields: boolean, force: boolean): void { this.settings.setScanPrefs(allFields, force); }
   /** Bouton « Nouveau » de la topbar : en mode API il CRÉE un document serveur (`documents:manage`) ; en mode

@@ -83,6 +83,22 @@ export interface ListActions {
   print?: boolean;
   canPrint?: (id: string) => boolean;
 }
+/** SÉLECTION MULTIPLE d'un listing — greffon OPTIONNEL du PANIER (cf. docs/panier.md).
+    Le listing ne PORTE aucun état de sélection : il pose des cases et RAPPORTE les gestes.
+    La vérité vit dans le panier, ce qui est tout l'intérêt — elle survit au changement de
+    page, de tri, de filtre et de vue (décision P5 : cocher une ligne SIGNIFIE « au panier »,
+    il n'y a pas deux concepts). */
+export interface ListSelection {
+  /** Ce listing propose-t-il des cases ? Réévalué À CHAQUE rendu — la disponibilité du panier
+      dépend de ses actions (impression = mode API seulement), donc elle peut changer à chaud. */
+  enabled(): boolean;
+  isSelected(id: string): boolean;
+  /** `record` = la LIGNE elle-même : l'hôte y prend son libellé de secours sans relire le
+      Store (une collection paginée peut n'avoir jamais été hydratée). Rend `false` si le
+      geste n'a PAS abouti (conflit de famille, plafond) — la case revient alors à son état. */
+  setSelected(id: string, on: boolean, record: any): boolean;
+}
+
 export interface ListOptions {
   collection: string;
   columns: ListColumn[];
@@ -102,6 +118,8 @@ export interface ListOptions {
       filtres serveur-mappables interrogent le serveur ; absent = mode FICHIER, jamais de réseau. */
   remoteList?: RemoteListReader | null;
   actions?: ListActions;
+  /** Cases à cocher du PANIER (absent = listing sans sélection, comportement historique). */
+  selection?: ListSelection;
   onAction?: (act: string, id: string) => void;
   /** Ouvre la fiche d'une AUTRE entité référencée DANS une cellule (élément `data-open-col`/`data-open-id`), ex.
       le nom d'équipement dans la liaison d'un câble. Indépendant des actions de ligne (`onAction`, liées à la ligne). */
@@ -196,6 +214,7 @@ export class ListView {
   private _resetHostEl!: HTMLElement;      // hôte du bouton « Réinitialiser » (cluster de droite)
   private _filterBar: FilterBar | null = null;
   private _bodyEl!: HTMLElement;
+  private selection: ListSelection | null = null;   // greffon PANIER (cf. ListSelection)
 
   constructor(store: Store, container: HTMLElement, opts: ListOptions) {
     this.container = container;
@@ -225,6 +244,7 @@ export class ListView {
     store.onChange(() => { this.searchIndex.invalidate(); this.rowEngine?.forgetRemote(); this.rowEngine?.forgetPage(); });
     this.emptyText = opts.emptyText || I18n.t("lists.chrome.empty");
     this.actions = opts.actions || { view: true, edit: true, clone: true, del: true };
+    this.selection = opts.selection || null;
     this.onAction = opts.onAction;
     this.onOpenEntity = opts.onOpenEntity;
     this.onCreate = opts.onCreate;
@@ -677,7 +697,13 @@ export class ListView {
   private _paintBody(rows: any[], total: number, pages: number, page: number, emptyText: string): void {
     this._bodyEl.classList.toggle("compact", this._compact);   // cellules plus denses en mode compact (CSS)
     const cols = this._visibleColumns();   // mode compact : sous-ensemble essentiel
-    const head = cols.map((c) => {
+    // PANIER : colonne de cases EN TÊTE de ligne, seulement si l'hôte la propose EN CE MOMENT
+    // (prédicat réévalué à chaque rendu — cf. ListSelection).
+    const selection = this.selection && this.selection.enabled() ? this.selection : null;
+    const selectHead = selection
+      ? `<th class="cell-select"><input type="checkbox" class="page-select" title="${Html.escape(I18n.t("cart.selectAll"))}" aria-label="${Html.escape(I18n.t("cart.selectAll"))}"></th>`
+      : "";
+    const head = selectHead + cols.map((c) => {
       // L'en-tête porte la classe d'alignement de SA colonne (`cls`) : une colonne numérique (`cell-num`)
       // ancre ainsi son libellé ET son indicateur de tri au bord DROIT, aligné avec les valeurs de la colonne.
       if (!c.sort) return `<th class="${c.cls || ""}">${Html.escape(c.head)}</th>`;
@@ -687,14 +713,19 @@ export class ListView {
     }).join("") + `<th class="cell-actions">${I18n.t("lists.chrome.actions")}</th>`;
     let bodyHtml: string;
     if (rows.length === 0) {
-      bodyHtml = `<tr class="empty-row"><td colspan="${cols.length + 1}">${Html.escape(emptyText)}</td></tr>`;
+      bodyHtml = `<tr class="empty-row"><td colspan="${cols.length + 1 + (selection ? 1 : 0)}">${Html.escape(emptyText)}</td></tr>`;
     } else {
       bodyHtml = rows.map((o) => {
         // `data-label` = en-tête de la colonne : sert au repli en CARTES sous 560px (revue design lot D2) — le
         // CSS l'affiche via `td::before { content: attr(data-label) }`, zéro duplication de markup. La cellule
         // d'ACTIONS n'en reçoit pas (rangée de boutons, jamais préfixée d'un libellé).
         const cells = cols.map((c) => `<td class="${c.cls || ""}" data-label="${Html.escape(c.head)}">${c.render(o)}</td>`).join("");
-        return `<tr>${cells}<td class="cell-actions">${this._rowActions(o.id)}</td></tr>`;
+        // Case du panier : pas de `data-label` (comme la cellule d'ACTIONS — un contrôle nu,
+        // jamais préfixé d'un libellé dans le repli en cartes).
+        const selectCell = selection
+          ? `<td class="cell-select"><input type="checkbox" class="row-select" data-sel-id="${Html.escape(o.id)}" ${selection.isSelected(o.id) ? "checked" : ""} title="${Html.escape(I18n.t("cart.select"))}" aria-label="${Html.escape(I18n.t("cart.select"))}"></td>`
+          : "";
+        return `<tr>${selectCell}${cells}<td class="cell-actions">${this._rowActions(o.id)}</td></tr>`;
       }).join("");
     }
     this._bodyEl.innerHTML = `
@@ -732,6 +763,45 @@ export class ListView {
     });
     const sel = this._bodyEl.querySelector(".page-size") as HTMLSelectElement;
     if (sel) sel.onchange = () => { this.pageSize = parseInt(sel.value, 10); this.page = 1; this.render(); };
+    // PANIER — cases de sélection. Un clic ne REPEINT PAS le listing (on perdrait le défilement et,
+    // en régime pagé, on relancerait une requête pour rien) : seules les cases concernées bougent.
+    if (selection) {
+      const rowsById = new Map<string, any>(rows.map((o) => [o.id as string, o]));
+      const rowBoxes = Array.from(this._bodyEl.querySelectorAll(".row-select")) as HTMLInputElement[];
+      const pageBox = this._bodyEl.querySelector(".page-select") as HTMLInputElement | null;
+      // La case d'en-tête REFLÈTE la page (cochée = toutes cochées, indéterminée = certaines) ;
+      // elle ne porte aucun état propre, sinon elle mentirait dès qu'une ligne change ailleurs.
+      const syncPageBox = () => {
+        if (!pageBox) return;
+        const checked = rowBoxes.filter((b) => b.checked).length;
+        pageBox.checked = rowBoxes.length > 0 && checked === rowBoxes.length;
+        pageBox.indeterminate = checked > 0 && checked < rowBoxes.length;
+      };
+      for (const box of rowBoxes) {
+        box.onchange = () => {
+          const id = box.dataset.selId || "";
+          // Un refus (autre famille, plafond) ramène la case où elle était : l'affichage ne
+          // prétend jamais un ajout que le panier n'a pas fait.
+          if (!selection.setSelected(id, box.checked, rowsById.get(id))) box.checked = !box.checked;
+          syncPageBox();
+        };
+      }
+      if (pageBox) {
+        pageBox.onchange = () => {
+          const on = pageBox.checked;
+          for (const box of rowBoxes) {
+            if (box.checked === on) continue;
+            const id = box.dataset.selId || "";
+            // Au PREMIER refus (plafond atteint, typiquement), on s'arrête : insister ferait
+            // pleuvoir un toast par ligne restante alors que la cause est déjà annoncée.
+            if (!selection.setSelected(id, on, rowsById.get(id))) break;
+            box.checked = on;
+          }
+          syncPageBox();
+        };
+      }
+      syncPageBox();
+    }
     // Délégation des actions de ligne → onAction(act, id). On cible `[data-act]`, PAS une classe de
     // style : l'attribut EST le contrat de la délégation (il porte l'action), la classe n'est qu'une
     // apparence. Cibler `.row-btn` couplait le câblage au style — le changer rendait les boutons inertes.

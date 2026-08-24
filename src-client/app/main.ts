@@ -18,8 +18,9 @@ import { UserInfoModal } from "../views/UserInfoModal";   // modale d'infos util
 import { GlobalSearchSources } from "../views/GlobalSearchSources";   // familles à fiche = périmètre envoyé à la recherche transverse serveur (mode API)
 import { ImageStore, IdbImageBackend, RestImageBackend, AttachmentStore, IdbAttachmentBackend, RestAttachmentBackend } from "../data";
 import type { ListOptions, FormHost } from "../views";
-import { Modal, Notify, FormControls, Dialog, Fullscreen, RichTooltip, Icons, ScanControl, LabelPrintDialog } from "../ui";
-import { LabelSubjects } from "../core/LabelSubjects";   // matière des étiquettes imprimables (lot E étiquettes QR) — constructeurs par famille
+import { Modal, Notify, FormControls, Dialog, Fullscreen, RichTooltip, Icons, ScanControl, LabelPrintDialog, CartPanel } from "../ui";
+import { LabelSubjects } from "../core/LabelSubjects";
+import type { LabelSubject } from "../core/LabelHtml";   // sujets de la PLANCHE du panier (cf. docs/panier.md)   // matière des étiquettes imprimables (lot E étiquettes QR) — constructeurs par famille
 import { Html } from "../core/Html";
 import type { RemoteListReader } from "../core/StoreListRowSource";   // lecteur SERVEUR des listings (mode API — lot 3)
 import { EntityCandidateSource, type EntitySearchReader, type EntityCandidateFamily } from "../core/EntityCandidates";   // candidats d'entités serveur-pilotés (mode API — lot 4)
@@ -694,6 +695,9 @@ async function boot(): Promise<void> {
     // hash du boot et le hashchange — jamais une résolution dupliquée) ; toute autre valeur
     // offre copier / insérer dans le dernier champ actif (cf. ScanControl.openGlobal).
     onScanGlobal: () => ScanControl.openGlobal({ openTarget: (target) => { void entityLinkOpener.open(target); } }),
+    // PANIER (actions groupées) : la modale liste le contenu et porte l'action. Le bouton n'existe
+    // que si `CartPanel.setup` a eu lieu (mode API en V1-Beta) — cf. docs/panier.md.
+    onCart: () => CartPanel.open(),
     // Préférences du scan (réglages → Scan) : persistées puis reflétées — l'effet est IMMÉDIAT
     // pour les prochains formulaires (le greffon relit les préférences à chaque attachement).
     onScanAllFields: (on) => { prefs.scanAllFields = on; shell.setScanPrefs(prefs.scanAllFields, prefs.scanForceButtons); },
@@ -766,6 +770,41 @@ async function boot(): Promise<void> {
   };
 
   const shell = new Shell(root, shellHost);
+  /* ---- PANIER D'ACTIONS GROUPÉES (docs/panier.md) — MODE API SEULEMENT en V1-Beta, pour la même
+     raison que l'impression d'étiquettes : c'est sa SEULE action, et elle est serveur. Patron
+     « injection nulle » comme `LabelPrintDialog.setup` — hors de ce bloc, `CartPanel.available()`
+     rend faux, l'entrée de topbar reste masquée et AUCUN listing ne pose de case (décision P11).
+     `families: ["links"]` = les familles portant une action ; les câbles et les faisceaux la
+     partagent (même anatomie d'étiquette, cf. core/CartFamilies). */
+  if (REST_MODE) {
+    CartPanel.setup({
+      openModal: (o) => formHost.openModal(o),
+      docKey: () => (adapter as RestAdapter).docId || "",   // cloisonnement : un panier par document
+      onCount: (count) => shell.setCartCount(count),
+      refreshView: () => shell.refreshActive(),   // retrait depuis la modale ⇒ les cases du listing dessous se remettent à jour
+      families: ["links"],
+      print: (items) => {
+        /* La VÉRITÉ est relue au Store au moment d'agir (décision P3) : un élément supprimé
+           entre-temps par un autre client est EXCLU et signalé, jamais cause d'un échec global. */
+        const subjects: LabelSubject[] = [];
+        let missing = 0;
+        for (const item of items) {
+          const record: any = store.get(item.collection, item.id);
+          if (!record) { missing++; continue; }
+          const subject = item.collection === "cableBundles" ? LabelSubjects.bundle(store, record) : LabelSubjects.cable(store, record);
+          // DEUX drapeaux par lien (décision P9) — un par extrémité, comme la fiche et l'action de
+          // ligne : un câble s'étiquette par paire. La modale dédoublonne les QR à récupérer.
+          subjects.push(subject, { ...subject });
+        }
+        if (missing) Notify.toast(I18n.t("cart.missing", { n: missing }), "warn");
+        if (!subjects.length) { Notify.toast(I18n.t("cart.nothing"), "err"); return; }
+        // `kind: "cable"` vaut pour TOUTE la famille `links` : `LabelPrintPolicy` traite câble et
+        // faisceau à l'identique (`isFlagKind`), un panier mixte n'a donc rien à arbitrer.
+        LabelPrintDialog.open({ kind: "cable", subjects, source: I18n.t("cart.printSource", { n: subjects.length / 2 }) });
+      },
+    });
+    shell.setCartAvailable(true);
+  }
   // SCAN : reflète les préférences dans les réglages, puis SONDE la caméra (async) — l'entrée
   // globale « scanner une étiquette » n'apparaît que si le poste peut scanner (caméra + contexte
   // sécurisé, cf. core/ScanAffordance) : jamais de bouton qui ne mène qu'à un échec.
@@ -945,6 +984,16 @@ async function boot(): Promise<void> {
           view = new ListView(store, container, {
             ...cfg,
             remoteList: listRemoteReader,   // mode API : recherche/filtres serveur-pilotés (null en mode fichier)
+            // PANIER (docs/panier.md) : colonne de cases sur les listings dont la collection entre au
+            // panier — donc, en V1-Beta, câbles et faisceaux SEULEMENT. Écrit ICI, une fois, pour TOUS
+            // les listings : le jour où une famille de plus porte une action, elle hérite des cases
+            // sans que personne y pense. Le prédicat est réévalué à CHAQUE rendu (mode fichier ⇒ jamais
+            // de case, changement de droits ⇒ suivi à chaud).
+            selection: {
+              enabled: () => CartPanel.accepts(cfg.collection),
+              isSelected: (id) => CartPanel.isSelected(cfg.collection, id),
+              setSelected: (id, on, record) => CartPanel.setSelected(cfg.collection, id, on, record),
+            },
             actions: VIEWER
               ? { view: true, locate: !!opts.locate, canLocate }   // viewer : consultation + localisation seulement (pas d'édition/clone/suppression)
               : {
@@ -1763,6 +1812,10 @@ async function boot(): Promise<void> {
   // ---- barre de statut / undo-redo (cohérence avec l'état du store) ----
   const refreshChrome = () => {
     session.setFile(files.hasLinkedFile); session.setAutosave(prefs.autosave);   // synchronise le contexte de save
+    // PANIER : relire le compte ICI suffit à tenir la pastille à jour — `CartPanel.count()` recharge
+    // le panier si le DOCUMENT a changé (cloisonnement) et renotifie l'hôte. Aucun événement dédié
+    // à brancher, donc aucun à oublier.
+    if (CartPanel.available()) shell.setCartCount(CartPanel.count());
     shell.setDocName(store.meta.docName || "");
     // Mode API : la barre de statut est masquée (cf. Shell.setRestMode) → inutile de la peupler. On saute donc
     // setStatus, qui n'aurait aucun effet visible (champs fichier/source/sauvegarde sans objet côté serveur).
