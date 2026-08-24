@@ -218,8 +218,12 @@ export const NAV_DOMAINS: readonly NavDomainDecl[] = [
   },
   {
     name: "implantation", label: "nav.domain.implantation", icon: "DATACENTER",
-    views: ["racks", "datacenter", "sites", "salles", "etages"],
-    separatorsBefore: ["datacenter"],
+    // La VUE Datacenter (2D/3D) ouvre le domaine — c'est la vue phare, et l'ordre de cette liste
+    // EST l'ordre de la barre de vues et du tiroir. Le séparateur suit donc : il détache la vue
+    // VISUELLE des listings de RÉFÉRENTIEL qui viennent après (demande utilisateur 2026-08-24 —
+    // auparavant `racks` ouvrait le domaine et le trait tombait avant `datacenter`).
+    views: ["datacenter", "racks", "sites", "salles", "etages"],
+    separatorsBefore: ["racks"],
   },
   {
     name: "reseau", label: "nav.domain.reseau", icon: "NETWORK",

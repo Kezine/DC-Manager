@@ -37,6 +37,9 @@ const PLANS: Readonly<Record<string, CartLabelPlan>> = {
   links: { kind: "cable", labelsPerItem: 2 },
   // `spare` vaut pour toute la famille : `isSpareLike` met spare et sous-équipement sur le même plan.
   components: { kind: "spare", labelsPerItem: 1 },
+  // Les équipements ont leur propre anatomie (baie · U, famille + marque/modèle, série, ET
+  // propriétaire — le seul sujet qui en porte un), donc leur propre famille et leur propre plan.
+  equipments: { kind: "equipment", labelsPerItem: 1 },
 };
 
 export class CartLabelPlans {

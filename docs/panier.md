@@ -23,7 +23,7 @@ d'étiquettes**. Cadrage complet et arbitrages : `.notes/toDos/panier-actions-bu
 | Famille | Collections | Pourquoi ensemble |
 |---|---|---|
 | `links` | `cables`, `cableBundles` | `LabelPrintPolicy.isFlagKind()` les déclare **strictement équivalents** (mêmes contenus, formats, champs et défauts d'étiquette). La famille ne fait que NOMMER cette équivalence. |
-| `equipments` | `equipments` | Formats, champs offerts et gabarit par défaut qui lui sont propres. |
+| `equipments` | `equipments` | Anatomie propre : « baie · U », famille + marque/modèle, série, **et propriétaire** — le seul sujet qui en porte un. |
 | `racks` | `racks` | Format « Baie » réservé, ni série ni propriétaire. |
 | `components` | `subEquipments`, `spares` | Même raison que `links`, un cran plus loin : `LabelPrintPolicy.isSpareLike()` les déclare équivalents (mêmes contenus, formats, champs, gabarit S par défaut). Stock ou installé ne change pas la FORME de l'étiquette — et étiqueter d'un coup un bac de disques dont certains sont montés est le geste naturel. |
 
@@ -95,6 +95,7 @@ Le **plan** d'une famille porte deux règles, écrites une fois et testées :
 |---|---|---|
 | `links` | `cable` | **2** — un drapeau par extrémité (décision P9), en parité avec la fiche et l'action de ligne |
 | `components` | `spare` | **1** |
+| `equipments` | `equipment` | **1** |
 
 Le `kind` unique ne pose aucun problème : une famille est **précisément** un ensemble de collections
 que `LabelPrintPolicy` traite à l'identique (`isFlagKind`, `isSpareLike`). Une famille **absente** de
@@ -131,7 +132,7 @@ Le panier **survit au mode lecture seule** (`viewer-mode`) : imprimer une étiqu
 | Pas de dialogue de **remplacement** au conflit de famille — simple refus expliqué | Impossible à déclencher aujourd'hui : les cases n'apparaissent que sur les listings d'une seule famille. À livrer avec la 2e famille porteuse d'une action. |
 | La case d'en-tête coche la **page**, pas « les N résultats du filtre » | Un second geste explicite, plafonné. |
 | **2 drapeaux par lien** imposés (pas de case pour n'en tirer qu'un) | Une case dans le panneau du panier. |
-| Seules `links` et `components` sont au panier — pas les équipements ni les baies | Une entrée de plus dans `CartLabelPlan` (leur anatomie d'étiquette existe déjà). |
+| Les **baies** ne sont pas au panier | Une entrée de plus dans `CartLabelPlan` — leur anatomie d'étiquette existe déjà, et la fiche baie offre déjà « Planche du contenu ». |
 | Remplissage par **listings** seulement (ni fiches, ni scan en rafale) | Boutons de fiche ; mode lot du viseur (déjà cadré, `qr-scan.md` § « Extension future »). |
 
 ## Tests

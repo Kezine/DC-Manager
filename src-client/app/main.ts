@@ -781,6 +781,7 @@ async function boot(): Promise<void> {
   /* Constructeur de sujet d'étiquette PAR COLLECTION — le seul endroit du panier qui touche au
      Store. La règle « qu'imprime-t-on pour un X ? » reste, elle, dans `core/LabelSubjects`. */
   const CART_LABEL_SUBJECTS: Record<string, (record: any) => LabelSubject> = {
+    equipments: (record) => LabelSubjects.equipment(store, record),
     cables: (record) => LabelSubjects.cable(store, record),
     cableBundles: (record) => LabelSubjects.bundle(store, record),
     subEquipments: (record) => LabelSubjects.subEquipment(store, record),

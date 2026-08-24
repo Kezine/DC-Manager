@@ -48,12 +48,14 @@ module.exports = async () => {
     ck.eq(CartLabelPlans.of("components").kind, "spare", "famille `components` → sujet `spare` (isSpareLike les égalise)");
     ck.eq(CartLabelPlans.of("components").labelsPerItem, 1, "du petit matériel = UNE étiquette");
     // Une famille sans action d'impression n'a pas de plan — et n'est donc pas offerte au panier.
-    ck.eq(CartLabelPlans.of("equipments"), null, "pas encore de plan pour les équipements");
-    ck.eq(CartLabelPlans.of("racks"), null, "ni pour les baies");
+    ck.eq(CartLabelPlans.of("equipments").kind, "equipment", "famille `equipments` → son propre sujet");
+    ck.eq(CartLabelPlans.of("equipments").labelsPerItem, 1, "un équipement = UNE étiquette");
+    // Une famille sans action d'impression n'a pas de plan — et n'est donc pas offerte au panier.
+    ck.eq(CartLabelPlans.of("racks"), null, "pas encore de plan pour les baies");
     // 🚨 L'argument `families` de CartPanel.setup est DÉRIVÉ de cette table : le verrou vérifie
     // qu'aucune famille annoncée imprimable n'est en réalité sans plan.
     const families = CartLabelPlans.families();
-    ck.eq(families.join(","), "links,components", "familles imprimables dérivées de la table");
+    ck.eq(families.join(","), "links,components,equipments", "familles imprimables dérivées de la table");
     ck(families.every((f) => !!CartLabelPlans.of(f)), "toute famille annoncée a bien un plan");
   });
 
