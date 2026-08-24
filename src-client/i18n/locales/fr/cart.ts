@@ -16,7 +16,7 @@ export const cart = {
     links: "Câbles et faisceaux",
     equipments: "Équipements",
     racks: "Baies",
-    spares: "Pièces détachées",
+    components: "Petit matériel",
   },
   empty: "Le panier est vide. Cochez des lignes dans un listing pour le remplir.",
   remove: "Retirer du panier",

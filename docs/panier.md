@@ -25,7 +25,7 @@ d'étiquettes**. Cadrage complet et arbitrages : `.notes/toDos/panier-actions-bu
 | `links` | `cables`, `cableBundles` | `LabelPrintPolicy.isFlagKind()` les déclare **strictement équivalents** (mêmes contenus, formats, champs et défauts d'étiquette). La famille ne fait que NOMMER cette équivalence. |
 | `equipments` | `equipments` | Formats, champs offerts et gabarit par défaut qui lui sont propres. |
 | `racks` | `racks` | Format « Baie » réservé, ni série ni propriétaire. |
-| `spares` | `spares` | Gabarit S par défaut, pas de propriétaire. |
+| `components` | `subEquipments`, `spares` | Même raison que `links`, un cran plus loin : `LabelPrintPolicy.isSpareLike()` les déclare équivalents (mêmes contenus, formats, champs, gabarit S par défaut). Stock ou installé ne change pas la FORME de l'étiquette — et étiqueter d'un coup un bac de disques dont certains sont montés est le geste naturel. |
 
 Une collection **absente de la carte n'entre pas au panier**, et c'est volontaire : elle y entrera le
 jour où au moins une action groupée l'accepte. Offrir le geste sans l'issue serait un mensonge
@@ -77,19 +77,36 @@ Persistance, pastille et modale. Trois points à connaître :
   d'état propre.
 - Cocher **ne repeint pas le listing** : on perdrait le défilement et, en régime pagé, on
   relancerait une requête pour rien.
+- Les cases portent la classe **`.app-check`** — la case à cocher thématisée de l'app, créée avec ce
+  chantier (il n'en existait aucune : les rares cases étaient nues, donc dépendantes de l'OS et mal
+  alignées sur la grille des traits). CSS pur sur un `<input type="checkbox">` natif : le rôle ARIA,
+  le focus clavier et l'état **indéterminé** restent ceux du navigateur, on ne repeint que le dessin.
+  Adoptable partout par le simple ajout de la classe — les cases de la page Certificats et de
+  `ui/MultiSelect` ne l'ont pas encore.
 
 Le câblage vit **une seule fois**, dans `addListTab` de `main.ts` : une famille de plus héritera des
 cases sans que personne y pense.
 
-## L'action « imprimer les étiquettes »
+## L'action « imprimer les étiquettes » — `core/CartLabelPlan` (PUR) + câblage
 
-Câblée dans `main.ts` (là où vivent déjà les autres points d'entrée d'impression) :
+Le **plan** d'une famille porte deux règles, écrites une fois et testées :
 
-- **deux drapeaux par lien** — un par extrémité, comme la fiche et l'action de ligne : un câble
-  s'étiquette par paire ;
-- **`kind: "cable"` vaut pour toute la famille `links`** — `LabelPrintPolicy` traite câble et
-  faisceau à l'identique, un panier mixte n'a donc rien à arbitrer ;
-- les éléments disparus sont comptés et signalés par un toast, les autres s'impriment.
+| Famille | `kind` | Étiquettes par élément |
+|---|---|---|
+| `links` | `cable` | **2** — un drapeau par extrémité (décision P9), en parité avec la fiche et l'action de ligne |
+| `components` | `spare` | **1** |
+
+Le `kind` unique ne pose aucun problème : une famille est **précisément** un ensemble de collections
+que `LabelPrintPolicy` traite à l'identique (`isFlagKind`, `isSpareLike`). Une famille **absente** de
+la table n'a pas d'action — `main.ts` ne la déclare donc pas, et ses listings ne posent aucune case.
+L'argument `families` de `CartPanel.setup` est **dérivé** de cette table, jamais recopié.
+
+Côté `main.ts` ne reste que ce qui touche au `Store` : la table `collection → constructeur de sujet`
+(`LabelSubjects.*`). Les éléments disparus sont comptés et signalés par un toast, les autres
+s'impriment.
+
+**Ajouter une famille au panier** = une entrée dans `CartFamilies`, une dans `CartLabelPlan`, un
+constructeur dans `LabelSubjects`. Rien d'autre — les cases, la pastille et la modale suivent.
 
 La suite (gabarits, planche, `@page`, manchons) est celle de
 [`qr-scan.md`](qr-scan.md) § « Étiquettes imprimables » — le panier n'ajoute **aucun** chemin de
@@ -114,6 +131,7 @@ Le panier **survit au mode lecture seule** (`viewer-mode`) : imprimer une étiqu
 | Pas de dialogue de **remplacement** au conflit de famille — simple refus expliqué | Impossible à déclencher aujourd'hui : les cases n'apparaissent que sur les listings d'une seule famille. À livrer avec la 2e famille porteuse d'une action. |
 | La case d'en-tête coche la **page**, pas « les N résultats du filtre » | Un second geste explicite, plafonné. |
 | **2 drapeaux par lien** imposés (pas de case pour n'en tirer qu'un) | Une case dans le panneau du panier. |
+| Seules `links` et `components` sont au panier — pas les équipements ni les baies | Une entrée de plus dans `CartLabelPlan` (leur anatomie d'étiquette existe déjà). |
 | Remplissage par **listings** seulement (ni fiches, ni scan en rafale) | Boutons de fiche ; mode lot du viseur (déjà cadré, `qr-scan.md` § « Extension future »). |
 
 ## Tests

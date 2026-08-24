@@ -701,7 +701,7 @@ export class ListView {
     // (prédicat réévalué à chaque rendu — cf. ListSelection).
     const selection = this.selection && this.selection.enabled() ? this.selection : null;
     const selectHead = selection
-      ? `<th class="cell-select"><input type="checkbox" class="page-select" title="${Html.escape(I18n.t("cart.selectAll"))}" aria-label="${Html.escape(I18n.t("cart.selectAll"))}"></th>`
+      ? `<th class="cell-select"><input type="checkbox" class="app-check page-select" title="${Html.escape(I18n.t("cart.selectAll"))}" aria-label="${Html.escape(I18n.t("cart.selectAll"))}"></th>`
       : "";
     const head = selectHead + cols.map((c) => {
       // L'en-tête porte la classe d'alignement de SA colonne (`cls`) : une colonne numérique (`cell-num`)
@@ -723,7 +723,7 @@ export class ListView {
         // Case du panier : pas de `data-label` (comme la cellule d'ACTIONS — un contrôle nu,
         // jamais préfixé d'un libellé dans le repli en cartes).
         const selectCell = selection
-          ? `<td class="cell-select"><input type="checkbox" class="row-select" data-sel-id="${Html.escape(o.id)}" ${selection.isSelected(o.id) ? "checked" : ""} title="${Html.escape(I18n.t("cart.select"))}" aria-label="${Html.escape(I18n.t("cart.select"))}"></td>`
+          ? `<td class="cell-select"><input type="checkbox" class="app-check row-select" data-sel-id="${Html.escape(o.id)}" ${selection.isSelected(o.id) ? "checked" : ""} title="${Html.escape(I18n.t("cart.select"))}" aria-label="${Html.escape(I18n.t("cart.select"))}"></td>`
           : "";
         return `<tr>${selectCell}${cells}<td class="cell-actions">${this._rowActions(o.id)}</td></tr>`;
       }).join("");

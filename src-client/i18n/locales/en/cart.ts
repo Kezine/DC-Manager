@@ -8,7 +8,7 @@ export const cart = {
     links: "Cables and trunks",
     equipments: "Equipment",
     racks: "Racks",
-    spares: "Spare parts",
+    components: "Components and spares",
   },
   empty: "The cart is empty. Tick rows in a listing to fill it.",
   remove: "Remove from cart",

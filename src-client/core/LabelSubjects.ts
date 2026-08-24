@@ -17,7 +17,10 @@
      · faisceau (trunk) : MÊME anatomie que le câble — extrémités A/B = les deux
        PATCHS terminaux (cf. docs/faisceaux.md, contrainte T11 : ce sont des
        équipements, pas des ports), type = fibre + capacité + longueur ;
-     · spare : désignation affichée, emplacement = lieu de stockage.
+     · spare : désignation affichée, emplacement = lieu de stockage ;
+     · sous-équipement : MÊME anatomie que le spare (cf. `isSpareLike`) —
+       l'emplacement est le MAÎTRE puis le repère `slot`, et le type se réduit à
+       marque + modèle (la collection n'a PAS de champ `type`).
    Un champ vide reste vide — la ligne correspondante est ABSENTE de l'étiquette
    (décision « owner vide → ligne absente », généralisée par LabelHtml).
    ============================================================================ */
@@ -112,6 +115,25 @@ export class LabelSubjects {
         bundle.fiber_count != null ? I18n.t("detail.bundle.strandCount", { count: bundle.fiber_count }) : "",
         bundle.length_m != null ? bundle.length_m + " m" : "",
       ].filter(Boolean).join(" · "),
+    };
+  }
+
+  /** Étiquette d'un SOUS-ÉQUIPEMENT (gabarit S par défaut, comme le spare — même anatomie,
+      cf. `LabelPrintPolicy.isSpareLike`) : désignation, emplacement = le MAÎTRE puis son repère
+      (`slot`, texte libre du modèle — « Étagère A / baie 3 »), type = marque + modèle, n° de série.
+
+      ⚠ Pas de `type` métier ici, contrairement au spare : la collection n'en a pas — sa spec dit
+      que « la SÉMANTIQUE est dans le nom ». On ne fabrique donc PAS un type de substitution ; le
+      libellé de type se réduit à l'identité matérielle, et reste vide si elle n'est pas saisie
+      (la ligne disparaît alors de l'étiquette, règle générale de LabelHtml). */
+  static subEquipment(reader: LabelSubjectReader, subEquipment: any): LabelSubject {
+    const master: any = subEquipment.equipment_id ? reader.get("equipments", subEquipment.equipment_id) : null;
+    return {
+      collection: "subEquipments", id: subEquipment.id,
+      name: subEquipment.name || "",
+      location: [master ? (master.name || "") : "", subEquipment.slot || ""].filter(Boolean).join(" · "),
+      typeLabel: [subEquipment.brand, subEquipment.model].filter(Boolean).join(" "),
+      serial: subEquipment.serial || "",
     };
   }
 

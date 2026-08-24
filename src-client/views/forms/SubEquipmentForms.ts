@@ -45,6 +45,8 @@ import { FormSave } from "./FormSave";   // écriture + garde-fou « ne jamais a
 import { FormBase } from "./FormBase";
 import { EquipmentForms } from "./EquipmentForms";   // rebond vers la fiche du MAÎTRE (usage différé, cf. en-tête)
 import { DetailForms } from "./DetailForms";   // ouverture de la fiche d'une PIÈCE JOINTE (usage DIFFÉRÉ — cycle toléré, cf. la note du cast d'EquipmentForms)
+import { LabelPrintDialog } from "../../ui/LabelPrintDialog";   // impression d'étiquettes QR — mode API seulement, prédicat `available`
+import { LabelSubjects } from "../../core/LabelSubjects";       // matière de l'étiquette d'un sous-équipement
 import { AttachmentUi } from "./AttachmentUi";   // section « Pièces jointes » de la fiche (factorisée avec la fiche équipement)
 import { FormUi } from "./shared";   // séparateur de section (bloc « Administratif », décalqué d'EquipmentForms)
 import type { FormHost } from "./shared";
@@ -144,6 +146,14 @@ export class SubEquipmentForms extends FormBase {
 
     AuditLine.attach(root, se, host.userDirectory);   // « Créé/Modifié par » (mode API)
     const footerActions = this.footer(() => this.form(store, host, se.equipment_id, se.id, onChanged), "subEquipments");
+    // « Imprimer l'étiquette » (mode API seulement, prédicat injecté — patron des autres fiches) :
+    // gabarit S par défaut, comme le spare (même anatomie, cf. LabelPrintPolicy.isSpareLike).
+    if (LabelPrintDialog.available()) {
+      const printBtn = document.createElement("button"); printBtn.type = "button"; printBtn.className = "btn btn-ghost";
+      printBtn.innerHTML = `<span class="gi">${Icons.PRINT}</span>${I18n.t("labels.entry.equipment")}`;
+      printBtn.onclick = () => LabelPrintDialog.open({ kind: "subEquipment", subjects: [LabelSubjects.subEquipment(store, se)], source: this.label(se) });
+      footerActions.unshift(printBtn);
+    }
     const tw = root;
     tw.querySelectorAll("[data-master-view]").forEach((el) => {
       (el as HTMLElement).onclick = () => EquipmentForms.equipmentDetail(store, host, (el as HTMLElement).dataset.masterView!, onChanged);

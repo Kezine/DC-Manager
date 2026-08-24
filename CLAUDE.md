@@ -117,6 +117,12 @@ francophone). Garder cette langue pour toute contribution — commentaires inclu
       + tooltip obligatoires, jamais d'emoji/glyphe en dur). **Pas de bouton texte** pour ces actions.
       Le texte reste réservé aux boutons PRIMAIRES explicites (création « + … » d'en-tête, Enregistrer/
       Annuler d'une modale).
+    - **Cases à COCHER** → la classe **`.app-check`** posée sur un `<input type="checkbox">` natif
+      (CSS pur, cf. `docs/panier.md`) : le rôle ARIA, le focus clavier et l'état INDÉTERMINÉ restent
+      ceux du navigateur, seul le dessin est thématisé. **Jamais une case NUE** — elle ignore les
+      tokens et change d'un OS à l'autre. (Dette connue : la page Certificats et `ui/MultiSelect` ne
+      l'ont pas encore.) Pour un RÉGLAGE binaire, c'est l'interrupteur `ui/ModeSwitch` qui s'applique,
+      pas une case.
     - **Champs de RECHERCHE** → le champ de recherche NORMALISÉ de l'app (même style/comportement que
       les recherches des listings), jamais un `<input>` ad hoc.
     - **SÉLECTION d'une entité** (lier un équipement / une VM / un spare / un objet du modèle) → le
@@ -433,7 +439,10 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   plancher QR 18 mm signalé, débordement en CODES ; DENSITÉS — compact = marges NULLES, la quiet zone du SVG suffit — et 🚨 le QR
   d'un préréglage NE DÉBORDE JAMAIS : `rectQrGeometry` clampe, la MARGE cède avant la scannabilité,
   `renderQrMm` est le point de passage UNIQUE vers le SVG), 🚨 MATRICE DE VISIBILITÉ CONTEXTUELLE PURE
-  `core/LabelPrintPolicy` (offres par sujet — kind `bundle` = faisceau, même anatomie que le câble —,
+  `core/LabelPrintPolicy` (offres par sujet — kind `bundle` = faisceau, même anatomie que le câble
+  (`isFlagKind`) ; kind `subEquipment` = sous-équipement, même anatomie que le spare (`isSpareLike`,
+  emplacement = maître + repère `slot`, type = marque + modèle car la collection n'a PAS de champ
+  `type`) —,
   verdict `visibility(sujet, contenu, format, nombre)` que la modale APPLIQUE sans jamais le calculer,
   `sanitize` qui fait retomber un réglage mémorisé invalide ; corollaire CSS indissociable
   `.label-print [hidden]{display:none!important}` — sans lui les `hidden` sont INERTES, une règle
@@ -449,7 +458,11 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   section « Mode local » — scan OK dans les deux modes, génération/impression = mode API seulement
   (setup injecté par main.ts, patron injection nulle)).
 - [`panier.md`](docs/panier.md) — **PANIER d'actions groupées** (V1-Beta) : familles = classes
-  d'équivalence d'ANATOMIE d'action (`core/CartFamilies` — câble ≡ faisceau, cf. `isFlagKind`), état
+  d'équivalence d'ANATOMIE d'action (`core/CartFamilies` — `links` = câble ≡ faisceau via `isFlagKind`,
+  `components` = spare ≡ sous-équipement via `isSpareLike` ; deux collections se retrouvent dans la même
+  famille quand la POLITIQUE d'impression ne sait pas les distinguer, jamais parce qu'elles se
+  ressemblent), plan d'action PUR `core/CartLabelPlan` (sujet de politique + étiquettes par élément —
+  2 pour un lien, 1 sinon ; l'argument `families` du setup en est DÉRIVÉ, jamais recopié), état
   PUR `core/CartModel` (🚨 `add` ne vide JAMAIS le panier de lui-même sur conflit de famille — le
   remplacement est un geste séparé ; libellé = SECOURS d'affichage, la vérité est relue au Store à
   l'action, disparus exclus et signalés ; plafond 50 tant que le bridage de concurrence des QR

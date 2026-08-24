@@ -13,6 +13,7 @@ const { ck, section, D } = require("./harness.js");
 module.exports = async () => {
   const { CartFamilies } = D("core/CartFamilies.js");
   const { CartModel } = D("core/CartModel.js");
+  const { CartLabelPlans } = D("core/CartLabelPlan.js");
 
   const item = (collection, id, label) => ({ collection, id, label: label || id });
 
@@ -26,10 +27,34 @@ module.exports = async () => {
     ck.eq(CartFamilies.of("equipments"), "equipments", "un équipement a sa propre famille");
     ck(!CartFamilies.compatible("cables", "equipments"), "câble et équipement ne cohabitent PAS");
     ck(!CartFamilies.compatible("racks", "spares"), "baie et spare non plus");
+    // MÊME raisonnement que links, appliqué à `isSpareLike` : spare et sous-équipement ont la
+    // même anatomie d'étiquette (emplacement/type/série, pas d'owner, gabarit S) — même famille.
+    ck.eq(CartFamilies.of("spares"), "components", "un spare est de la famille `components`");
+    ck.eq(CartFamilies.of("subEquipments"), "components", "un sous-équipement AUSSI");
+    ck(CartFamilies.compatible("spares", "subEquipments"), "spares et sous-équipements cohabitent");
+    ck(!CartFamilies.compatible("cables", "spares"), "…mais pas avec un lien");
+    ck.eq(CartFamilies.collectionsOf("components").join(","), "subEquipments,spares", "les collections de `components`");
     // Absente de la carte = n'entre pas au panier (décision P1 bis : pas d'action, pas de geste).
     ck.eq(CartFamilies.of("vms"), null, "une collection sans action n'a pas de famille");
     ck(!CartFamilies.compatible("vms", "vms"), "…et n'est donc compatible avec RIEN, pas même elle");
     ck.eq(CartFamilies.collectionsOf("links").join(","), "cables,cableBundles", "les collections de `links`");
+  });
+
+  await section("panier : CartLabelPlan — le plan d'impression par famille", async () => {
+    // Le plan porte DEUX règles : le sujet de politique de la planche, et le nombre d'étiquettes
+    // par élément. La seconde est la décision P9 (« un lien s'étiquette par paire »).
+    ck.eq(CartLabelPlans.of("links").kind, "cable", "famille `links` → sujet `cable` (isFlagKind les égalise)");
+    ck.eq(CartLabelPlans.of("links").labelsPerItem, 2, "un lien = DEUX drapeaux (un par extrémité)");
+    ck.eq(CartLabelPlans.of("components").kind, "spare", "famille `components` → sujet `spare` (isSpareLike les égalise)");
+    ck.eq(CartLabelPlans.of("components").labelsPerItem, 1, "du petit matériel = UNE étiquette");
+    // Une famille sans action d'impression n'a pas de plan — et n'est donc pas offerte au panier.
+    ck.eq(CartLabelPlans.of("equipments"), null, "pas encore de plan pour les équipements");
+    ck.eq(CartLabelPlans.of("racks"), null, "ni pour les baies");
+    // 🚨 L'argument `families` de CartPanel.setup est DÉRIVÉ de cette table : le verrou vérifie
+    // qu'aucune famille annoncée imprimable n'est en réalité sans plan.
+    const families = CartLabelPlans.families();
+    ck.eq(families.join(","), "links,components", "familles imprimables dérivées de la table");
+    ck(families.every((f) => !!CartLabelPlans.of(f)), "toute famille annoncée a bien un plan");
   });
 
   await section("panier : CartModel — ajout, ordre, idempotence", async () => {

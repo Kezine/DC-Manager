@@ -462,6 +462,9 @@ posent une. C'était la cause première du retour terrain.
 | Fiche faisceau | « Un drapeau » / « Imprimer les 2 extrémités » (les deux patchs terminaux) |
 | Listing faisceaux | Action de ligne : les **2 extrémités**, comme les câbles |
 | Fiche spare | « Imprimer l'étiquette » (gabarit S par défaut) |
+| Listing spares | Action de ligne « Imprimer l'étiquette » (parité avec la fiche) |
+| Fiche sous-équipement | « Imprimer l'étiquette » — sujet `subEquipment`, MÊME anatomie que le spare (`isSpareLike`) : emplacement = le maître puis le repère `slot`, type = marque + modèle (la collection n'a pas de champ `type`) |
+| Listing sous-équipements | Action de ligne « Imprimer l'étiquette » |
 | **Panier** (topbar) | « Imprimer les étiquettes (N) » — planche d'un lot de câbles/faisceaux préparé par les cases des listings, DEUX drapeaux par lien. Cf. [`panier.md`](panier.md) |
 
 ### Rendu d'impression

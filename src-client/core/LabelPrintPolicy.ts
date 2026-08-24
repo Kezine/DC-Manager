@@ -41,8 +41,14 @@ import type { LabelSizeId, LabelContentId } from "./LabelLayout";
 
 /** Familles de sujets d'étiquette — une entrée par point d'entrée de l'app.
     `bundle` (faisceau/trunk) partage l'anatomie du câble : id + extrémités
-    A/B (les deux patchs, cf. docs/faisceaux.md) = le même drapeau. */
-export type LabelPrintKind = "equipment" | "rack" | "cable" | "bundle" | "spare";
+    A/B (les deux patchs, cf. docs/faisceaux.md) = le même drapeau.
+    `subEquipment` partage, lui, l'anatomie du SPARE — désignation, emplacement,
+    type, n° de série, PAS de propriétaire : c'est du petit matériel qu'on
+    étiquette pour le retrouver (un disque, une carte). Ce qui change entre les
+    deux est le SENS de l'emplacement (le maître + son repère plutôt qu'un lieu
+    de stockage), pas la forme de l'étiquette — d'où `isSpareLike`, exact
+    pendant d'`isFlagKind`. */
+export type LabelPrintKind = "equipment" | "rack" | "cable" | "bundle" | "spare" | "subEquipment";
 
 /** Cases « Informations additionnelles » offertes/affichées (sous-ensemble de LabelFields). */
 export interface LabelFieldOffer {
@@ -82,6 +88,11 @@ export class LabelPrintPolicy {
   /** Un sujet « à drapeau » (câble/faisceau) — même anatomie, mêmes contenus. */
   static isFlagKind(kind: LabelPrintKind): boolean { return kind === "cable" || kind === "bundle"; }
 
+  /** Un sujet « petit matériel » (spare/sous-équipement) — même anatomie, mêmes offres, même
+      gabarit par défaut. Pendant exact d'`isFlagKind` : la POLITIQUE ne distingue pas les deux,
+      seul le constructeur de sujet le fait (cf. `LabelSubjects`). */
+  static isSpareLike(kind: LabelPrintKind): boolean { return kind === "spare" || kind === "subEquipment"; }
+
   /** Contenus offerts : les manchons sont réservés aux câbles/faisceaux. */
   static contentsFor(kind: LabelPrintKind): LabelContentId[] {
     return LabelPrintPolicy.isFlagKind(kind) ? ["full", "qr", "strip", "id"] : ["full", "qr"];
@@ -99,7 +110,7 @@ export class LabelPrintPolicy {
   static defaultSizeFor(kind: LabelPrintKind): LabelSizeId {
     if (LabelPrintPolicy.isFlagKind(kind)) return "cable";
     if (kind === "rack") return "rack";
-    if (kind === "spare") return "s";
+    if (LabelPrintPolicy.isSpareLike(kind)) return "s";
     return "m";
   }
 
@@ -112,13 +123,14 @@ export class LabelPrintPolicy {
   /** Cases OFFERTES par sujet — uniquement ce que l'enregistrement POSSÈDE
       (cf. LabelSubjects : une case sans donnée serait un mensonge d'interface) :
         · équipement : emplacement, type, n° de série, propriétaire (lot E1) ;
-        · spare      : emplacement (stockage), type, n° de série — owner n'existe pas ;
+        · spare / sous-équipement : emplacement (stockage, ou maître + repère), type,
+                       n° de série — owner n'existe pas ;
         · baie       : emplacement (salle), type (« Baie NU ») — ni série ni owner ;
         · câble/faisceau : extrémités A/B (= location), type — ni série ni owner. */
   static offeredFieldsFor(kind: LabelPrintKind): LabelFieldOffer {
     if (LabelPrintPolicy.isFlagKind(kind)) return { location: true, type: true, serial: false, owner: false };
     if (kind === "rack") return { location: true, type: true, serial: false, owner: false };
-    if (kind === "spare") return { location: true, type: true, serial: true, owner: false };
+    if (LabelPrintPolicy.isSpareLike(kind)) return { location: true, type: true, serial: true, owner: false };
     return { location: true, type: true, serial: true, owner: true };
   }
 

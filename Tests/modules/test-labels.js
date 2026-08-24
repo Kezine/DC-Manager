@@ -33,6 +33,39 @@ module.exports = async () => {
   }, over);
   const near = (a, b, eps = 0.01) => Math.abs(a - b) <= eps;
 
+  await section("labels : LabelPrintPolicy — le sujet SOUS-ÉQUIPEMENT (anatomie du spare)", async () => {
+    // Pendant exact d'isFlagKind : la POLITIQUE ne distingue pas spare et sous-équipement.
+    ck(LabelPrintPolicy.isSpareLike("spare"), "un spare est « petit matériel »");
+    ck(LabelPrintPolicy.isSpareLike("subEquipment"), "un sous-équipement aussi");
+    ck(!LabelPrintPolicy.isSpareLike("equipment"), "un équipement, non");
+    ck(!LabelPrintPolicy.isSpareLike("cable"), "un câble non plus");
+    ck.eq(LabelPrintPolicy.defaultSizeFor("subEquipment"), "s", "gabarit S par défaut, comme le spare");
+    ck.eq(LabelPrintPolicy.sizesFor("subEquipment").join(","), "s,m,l,custom", "formats rectangulaires (ni drapeau ni « Baie »)");
+    ck.eq(LabelPrintPolicy.contentsFor("subEquipment").join(","), "full,qr", "pas de manchon : ça ne s'enroule pas");
+    // Les offres doivent être RIGOUREUSEMENT celles du spare — sans quoi « même famille » serait faux.
+    ck.eq(JSON.stringify(LabelPrintPolicy.offeredFieldsFor("subEquipment")), JSON.stringify(LabelPrintPolicy.offeredFieldsFor("spare")), "mêmes champs offerts que le spare");
+    ck.eq(JSON.stringify(LabelPrintPolicy.defaultFieldsFor("subEquipment")), JSON.stringify(LabelPrintPolicy.defaultFieldsFor("spare")), "mêmes cases cochées par défaut");
+    ck(!LabelPrintPolicy.offeredFieldsFor("subEquipment").owner, "pas de propriétaire (le champ n'existe que sur les équipements)");
+  });
+
+  await section("labels : LabelSubjects — matière d'un SOUS-ÉQUIPEMENT", async () => {
+    const store = { get: (collection, id) => (collection === "equipments" && id === "eq1" ? { id: "eq1", name: "SRV-01" } : null) };
+    const full = LabelSubjects.subEquipment(store, { id: "se1", name: "Disque 3", equipment_id: "eq1", slot: "Baie 3", brand: "Seagate", model: "ST4000", serial: "ZC1ABC" });
+    ck.eq(full.collection, "subEquipments", "collection du sujet");
+    ck.eq(full.name, "Disque 3", "désignation");
+    ck.eq(full.location, "SRV-01 · Baie 3", "emplacement = le MAÎTRE puis le repère");
+    ck.eq(full.typeLabel, "Seagate ST4000", "type = marque + modèle (la collection n'a pas de champ `type`)");
+    ck.eq(full.serial, "ZC1ABC", "n° de série");
+    ck.eq(full.owner, undefined, "aucun propriétaire");
+    // Champs vides : la ligne correspondante DISPARAÎT de l'étiquette (règle générale LabelHtml) —
+    // on ne doit donc jamais fabriquer un « · » orphelin ni un libellé de substitution.
+    const bare = LabelSubjects.subEquipment(store, { id: "se2", name: "Carte", equipment_id: "eq1" });
+    ck.eq(bare.location, "SRV-01", "sans repère : le maître seul, sans séparateur pendant");
+    ck.eq(bare.typeLabel, "", "sans marque ni modèle : type VIDE (pas de type inventé)");
+    const orphan = LabelSubjects.subEquipment(store, { id: "se3", name: "Carte", equipment_id: "absent", slot: "S1" });
+    ck.eq(orphan.location, "S1", "maître introuvable : le repère seul, jamais « ? »");
+  });
+
   await section("labels : LabelLayout — table des gabarits (golden maquette)", async () => {
     // Les valeurs EXACTES du script SIZES de la maquette — tout écart est une régression de fidélité.
     ck.eq(JSON.stringify(LabelLayout.PRESETS.s), JSON.stringify({ qr: 18, w: 50, h: 20, cell: [50, 20] }), "S = 50×20, QR 18");

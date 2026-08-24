@@ -11,9 +11,12 @@
    d'équivalence, elle n'en invente aucune.
 
    Le découpage est celui de l'anatomie RÉELLE, pas d'un regroupement de confort
-   (décision P1, option A) : équipements, baies et spares diffèrent vraiment
-   (formats offerts, champs offerts, gabarit par défaut), donc chacun sa famille.
-   Les élargir demanderait d'INTERSECTER leurs offres — ce que rien ne réclame.
+   (décision P1, option A) : deux collections se retrouvent dans la même famille
+   quand la politique d'impression ne SAIT PAS les distinguer (`isFlagKind`,
+   `isSpareLike`), jamais parce qu'elles se ressemblent de loin. Équipements et
+   baies diffèrent vraiment (formats offerts, champs offerts, gabarit par
+   défaut) : chacun sa famille, et les élargir demanderait d'INTERSECTER leurs
+   offres — ce que rien ne réclame.
 
    Une collection ABSENTE de la carte n'a pas de famille : elle n'entre pas au
    panier. C'est volontaire (décision P1 bis) — une collection y entre le jour où
@@ -22,15 +25,23 @@
    ============================================================================ */
 
 /** Familles de panier — une par classe d'équivalence d'anatomie d'action. */
-export type CartFamily = "links" | "equipments" | "racks" | "spares";
+export type CartFamily = "links" | "equipments" | "racks" | "components";
 
-/** LA carte. Donnée pure (principe n°2 : les données restent de simples exports). */
+/** LA carte. Donnée pure (principe n°2 : les données restent de simples exports).
+
+    `components` réunit spares et sous-équipements pour la MÊME raison que `links` réunit
+    câbles et faisceaux : `LabelPrintPolicy.isSpareLike()` les déclare équivalents (mêmes
+    contenus, mêmes formats, mêmes champs offerts, même gabarit par défaut). Ce qui les
+    distingue — stock vs installé — ne change pas la FORME de l'étiquette, et c'est la forme
+    qui décide ici. Étiqueter d'un coup un bac de disques dont certains sont montés et
+    d'autres en réserve est d'ailleurs le geste naturel. */
 const COLLECTION_FAMILY: Readonly<Record<string, CartFamily>> = {
   cables: "links",
   cableBundles: "links",
   equipments: "equipments",
   racks: "racks",
-  spares: "spares",
+  subEquipments: "components",
+  spares: "components",
 };
 
 export class CartFamilies {

@@ -20,7 +20,9 @@ import { ImageStore, IdbImageBackend, RestImageBackend, AttachmentStore, IdbAtta
 import type { ListOptions, FormHost } from "../views";
 import { Modal, Notify, FormControls, Dialog, Fullscreen, RichTooltip, Icons, ScanControl, LabelPrintDialog, CartPanel } from "../ui";
 import { LabelSubjects } from "../core/LabelSubjects";
-import type { LabelSubject } from "../core/LabelHtml";   // sujets de la PLANCHE du panier (cf. docs/panier.md)   // matière des étiquettes imprimables (lot E étiquettes QR) — constructeurs par famille
+import type { LabelSubject } from "../core/LabelHtml";   // sujets de la PLANCHE du panier (cf. docs/panier.md)
+import { CartFamilies } from "../core/CartFamilies";            // famille d'une collection (invariant mono-famille du panier)
+import { CartLabelPlans } from "../core/CartLabelPlan";         // « imprimer un panier » : sujet de politique + étiquettes par élément   // matière des étiquettes imprimables (lot E étiquettes QR) — constructeurs par famille
 import { Html } from "../core/Html";
 import type { RemoteListReader } from "../core/StoreListRowSource";   // lecteur SERVEUR des listings (mode API — lot 3)
 import { EntityCandidateSource, type EntitySearchReader, type EntityCandidateFamily } from "../core/EntityCandidates";   // candidats d'entités serveur-pilotés (mode API — lot 4)
@@ -776,31 +778,45 @@ async function boot(): Promise<void> {
      rend faux, l'entrée de topbar reste masquée et AUCUN listing ne pose de case (décision P11).
      `families: ["links"]` = les familles portant une action ; les câbles et les faisceaux la
      partagent (même anatomie d'étiquette, cf. core/CartFamilies). */
+  /* Constructeur de sujet d'étiquette PAR COLLECTION — le seul endroit du panier qui touche au
+     Store. La règle « qu'imprime-t-on pour un X ? » reste, elle, dans `core/LabelSubjects`. */
+  const CART_LABEL_SUBJECTS: Record<string, (record: any) => LabelSubject> = {
+    cables: (record) => LabelSubjects.cable(store, record),
+    cableBundles: (record) => LabelSubjects.bundle(store, record),
+    subEquipments: (record) => LabelSubjects.subEquipment(store, record),
+    spares: (record) => LabelSubjects.spare(store, record),
+  };
   if (REST_MODE) {
     CartPanel.setup({
       openModal: (o) => formHost.openModal(o),
       docKey: () => (adapter as RestAdapter).docId || "",   // cloisonnement : un panier par document
       onCount: (count) => shell.setCartCount(count),
       refreshView: () => shell.refreshActive(),   // retrait depuis la modale ⇒ les cases du listing dessous se remettent à jour
-      families: ["links"],
+      // Familles imprimables DÉRIVÉES de la table des plans, jamais recopiées : une liste tenue à
+      // la main finirait par diverger de la règle qu'elle est censée refléter.
+      families: CartLabelPlans.families(),
       print: (items) => {
+        if (!items.length) return;
+        // Le panier est mono-famille par construction : la première ligne suffit à décider du plan.
+        const family = CartFamilies.of(items[0].collection);
+        const plan = family ? CartLabelPlans.of(family) : null;
+        if (!plan) { Notify.toast(I18n.t("cart.nothing"), "err"); return; }
         /* La VÉRITÉ est relue au Store au moment d'agir (décision P3) : un élément supprimé
            entre-temps par un autre client est EXCLU et signalé, jamais cause d'un échec global. */
         const subjects: LabelSubject[] = [];
         let missing = 0;
         for (const item of items) {
           const record: any = store.get(item.collection, item.id);
-          if (!record) { missing++; continue; }
-          const subject = item.collection === "cableBundles" ? LabelSubjects.bundle(store, record) : LabelSubjects.cable(store, record);
-          // DEUX drapeaux par lien (décision P9) — un par extrémité, comme la fiche et l'action de
-          // ligne : un câble s'étiquette par paire. La modale dédoublonne les QR à récupérer.
-          subjects.push(subject, { ...subject });
+          const build = record ? CART_LABEL_SUBJECTS[item.collection] : null;
+          if (!build) { missing++; continue; }
+          // `labelsPerItem` porte la règle « un lien s'étiquette par paire » (décision P9) — deux
+          // drapeaux pour un câble ou un faisceau, un seul pour du petit matériel. La modale
+          // dédoublonne les QR à récupérer, les répétitions ne coûtent donc aucun aller serveur.
+          for (let copy = 0; copy < plan.labelsPerItem; copy++) subjects.push({ ...build(record) });
         }
         if (missing) Notify.toast(I18n.t("cart.missing", { n: missing }), "warn");
         if (!subjects.length) { Notify.toast(I18n.t("cart.nothing"), "err"); return; }
-        // `kind: "cable"` vaut pour TOUTE la famille `links` : `LabelPrintPolicy` traite câble et
-        // faisceau à l'identique (`isFlagKind`), un panier mixte n'a donc rien à arbitrer.
-        LabelPrintDialog.open({ kind: "cable", subjects, source: I18n.t("cart.printSource", { n: subjects.length / 2 }) });
+        LabelPrintDialog.open({ kind: plan.kind, subjects, source: I18n.t("cart.printSource", { n: subjects.length / plan.labelsPerItem }) });
       },
     });
     shell.setCartAvailable(true);
@@ -1315,6 +1331,12 @@ async function boot(): Promise<void> {
     icon: Icons.SPARE,
     subtitle: I18n.t("tabs.spares.subtitle"),
     form: (id, done) => Forms.spare(store, formHost, id, done), addLabel: I18n.t("app.add.spare"), kind: "secondary", parent: "equipements",
+    // « Imprimer l'étiquette » de ligne — parité avec la fiche (le geste y existait déjà) et avec
+    // les autres listings étiquetables. UNE étiquette : un spare n'a pas deux extrémités.
+    onPrint: (id) => {
+      const spare: any = store.get("spares", id);
+      if (spare) LabelPrintDialog.open({ kind: "spare", subjects: [LabelSubjects.spare(store, spare)], source: (spare.displayName ? spare.displayName() : (spare.name || "")) });
+    },
   });
   // Sous-équipements : vue SECONDAIRE d'Équipements (D2 revue le 2026-08-03, lot C). PAS de bouton « + »
   // (`noAdd` — la création reste sur la fiche du maître, qui fournit `equipment_id`), mais l'ÉDITION en ligne
@@ -1329,6 +1351,11 @@ async function boot(): Promise<void> {
       if (!id) return;   // création absente de ce listing (le « + » est neutralisé par noAdd)
       const se: any = store.get("subEquipments", id);
       if (se) Forms.subEquipment(store, formHost, se.equipment_id, id, done);
+    },
+    // « Imprimer l'étiquette » de ligne — même geste que la fiche, gabarit S par défaut.
+    onPrint: (id) => {
+      const se: any = store.get("subEquipments", id);
+      if (se) LabelPrintDialog.open({ kind: "subEquipment", subjects: [LabelSubjects.subEquipment(store, se)], source: se.name || "" });
     },
   });
   // Applications : vue SECONDAIRE d'Équipements (cadrage applications 2026-08-10) — collection du DOCUMENT
