@@ -69,9 +69,17 @@ export class LabelHtml {
       zone hachurée `.ov` qui a perdu son `border-left` (plus de double trait au
       raccord), la dernière case portant `fold` pour marquer le pli d'un filet
       plus sombre — même géométrie, autre couleur.
-      La typographie COMPACTE se resserre en fin de feuille (`.lab.compact`). */
+      La typographie COMPACTE se resserre en fin de feuille (`.lab.compact`).
+      🚨 `print-color-adjust:exact` sur `.label-render` (retour terrain 2026-08-25) :
+      sans lui, le navigateur SUPPRIME à l'impression tout ce qui est une IMAGE DE
+      FOND — et les zones de recouvrement des manchons/drapeaux sont hachurées par
+      `repeating-linear-gradient`. Elles apparaissaient donc à l'aperçu et sortaient
+      BLANCHES sur le papier, ce qui fait perdre au poseur le repère du pli. La
+      propriété est héritée : la poser sur le conteneur couvre tout le rendu, et
+      garantit du même coup que les gris (#333/#444/#666/#999) ne soient pas
+      « optimisés » par le pilote. */
   static readonly CSS = `
-.label-render{--lp-mono:ui-monospace,"SF Mono","Menlo","Consolas","Cascadia Mono","Roboto Mono",monospace;--lp-sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;color:#000}
+.label-render{--lp-mono:ui-monospace,"SF Mono","Menlo","Consolas","Cascadia Mono","Roboto Mono",monospace;--lp-sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;color:#000;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .label-render *{box-sizing:border-box}
 .label-render .lab{background:#fff;color:#000;display:flex;align-items:center;overflow:hidden;font-family:var(--lp-sans)}
 .label-render .lab *{color:#000}
@@ -110,8 +118,10 @@ export class LabelHtml {
 .label-render .lab.compact .txt{gap:.2mm}
 .label-render .lab.compact .rule{margin:.4mm 0}
 .label-render .a4{width:210mm;height:297mm;background:#fff;padding:8mm;display:grid;gap:0;align-content:start}
-.label-render .a4 .cell{border:.2mm dashed #bbb;display:flex;align-items:center;justify-content:center;overflow:hidden}
-.label-render .a4 .cell.nocut{border:0}
+.label-render .a4 .cell{border:0 dashed #999;border-right-width:.2mm;border-bottom-width:.2mm;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.label-render .a4 .cell.cut-t{border-top-width:.2mm}
+.label-render .a4 .cell.cut-l{border-left-width:.2mm}
+.label-render .a4 .cell.nocut{border-width:0}
 .label-render .a4-head{display:flex;justify-content:space-between;font-family:var(--lp-mono);font-size:6pt;color:#666;grid-column:1/-1;padding-bottom:2mm}
 .label-render .a4-head span{color:#666}
 .label-render .unit{background:#fff;display:flex;align-items:flex-start;justify-content:flex-start}
@@ -208,7 +218,22 @@ export class LabelHtml {
       cotes de la cellule. `cuts` = traits de coupe pointillés (désactivables). */
   static sheetPage(cellsHtml: string[], layout: { cols: number; cellH: number }, opts: { source: string; headRight: string; cuts: boolean }): string {
     const esc = Html.escape;
-    const cells = cellsHtml.map((c) => `<div class="cell${opts.cuts ? "" : " nocut"}" style="height:${+layout.cellH.toFixed(2)}mm">${c}</div>`).join("");
+    /* 🚨 TRAITS DE COUPE — UN trait par ARÊTE, jamais deux (retour terrain 2026-08-25 :
+       « les lignes de découpe ne sont pas dessinées correctement »). Une bordure sur les
+       QUATRE côtés de chaque cellule faisait border-right de A et border-left de B se
+       toucher : le trait intérieur sortait deux fois plus épais que le trait de bord, et
+       les DEUX pointillés, calés chacun sur sa propre phase, se décalaient l'un de
+       l'autre — d'où l'aspect brouillon à l'impression. Chaque cellule ne peint donc plus
+       que son bord DROIT et son bord BAS ; la première rangée et la première colonne
+       ajoutent le bord manquant du pourtour. Le calcul se fait ICI, où l'on connaît le
+       nombre de colonnes ET l'index — le CSS seul ne saurait pas le dire, `cols` étant
+       dynamique. */
+    const cells = cellsHtml.map((c, index) => {
+      const edges = opts.cuts
+        ? " " + [index < layout.cols ? "cut-t" : "", index % layout.cols === 0 ? "cut-l" : ""].filter(Boolean).join(" ")
+        : " nocut";
+      return `<div class="cell${edges.trimEnd()}" style="height:${+layout.cellH.toFixed(2)}mm">${c}</div>`;
+    }).join("");
     return `<div class="a4" style="grid-template-columns:repeat(${layout.cols},1fr)">`
       + `<div class="a4-head"><span>${esc(opts.source)}</span><span>${esc(opts.headRight)}</span></div>${cells}</div>`;
   }

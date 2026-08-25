@@ -193,6 +193,16 @@ module.exports = async () => {
     // Défensif : un SVG inattendu est mis à l'échelle SANS compensation (jamais de crash).
     ck(LabelQrSvg.scaleToMm("<svg></svg>", 18).includes('width="18mm"'), "SVG inattendu : cote posée, pas de crash");
     ck.eq(LabelQrSvg.detectMarginModules("<svg></svg>"), null, "pas de chemin sombre → marge inconnue (null)");
+    /* 🚨 RENDU CRISP (retour terrain 2026-08-25) : la lib dessine les rangées de modules au
+       TRAIT (`M4 4.5h7`, d'où le demi-module). Anti-aliasées puis ramenées sur la grille de
+       sortie, ces rangées s'amincissent — au plus petit gabarit, le QR IMPRIMÉ paraissait
+       « rogné ». `crispEdges` colle les arêtes à la grille sans lisser. */
+    ck(scaled.includes('shape-rendering="crispEdges"'), "rendu CRISP imposé (rangées de modules jamais amincies)");
+    ck(LabelQrSvg.scaleToMm("<svg></svg>", 18).includes('shape-rendering="crispEdges"'), "…y compris sur un SVG inattendu");
+    // Un attribut déjà présent est ÉCRASÉ, jamais doublé (le SVG resterait invalide).
+    const reRendered = LabelQrSvg.scaleToMm('<svg shape-rendering="auto" viewBox="0 0 33 33"><path stroke="#000000" d="M4 4.5h7"/></svg>', 12);
+    ck.eq((reRendered.match(/shape-rendering=/g) || []).length, 1, "un shape-rendering existant est remplacé, pas dupliqué");
+    ck(!reRendered.includes('"auto"'), "…et c'est bien `crispEdges` qui gagne");
   });
 
   await section("labels : LabelHtml — rendu partagé aperçu ⇄ imprimé (structure, échappement)", async () => {
@@ -233,10 +243,25 @@ module.exports = async () => {
     ck(page.includes("grid-template-columns:repeat(4,1fr)") && page.includes("a4-head"), "planche : grille + en-tête hors zone");
     ck(!page.includes("nocut"), "traits de coupe actifs par défaut");
     ck(LabelHtml.sheetPage(["x"], { cols: 2, cellH: 20 }, { source: "s", headRight: "r", cuts: false }).includes("nocut"), "traits de coupe désactivables");
+    /* 🚨 TRAITS DE COUPE : UN trait par ARÊTE (retour terrain 2026-08-25). Une bordure sur
+       les 4 côtés faisait se toucher le bord droit d'une cellule et le bord gauche de la
+       suivante — trait intérieur deux fois plus épais que le pourtour, et pointillés
+       déphasés. Seules la 1re RANGÉE et la 1re COLONNE peignent le bord manquant. */
+    const grid = LabelHtml.sheetPage(["a", "b", "c", "d", "e"], { cols: 2, cellH: 20 }, { source: "s", headRight: "r", cuts: true });
+    const cellClasses = (grid.match(/class="cell[^"]*"/g) || []).map((c) => c.slice(7, -1).trim());
+    ck.eq(cellClasses.join(" | "), "cell cut-t cut-l | cell cut-t | cell cut-l | cell | cell cut-l", "coin, 1re rangée, 1re colonne — le reste nu");
+    ck.eq((grid.match(/cut-t/g) || []).length, 2, "le bord HAUT n'est peint que par la 1re rangée (2 colonnes)");
+    ck.eq((grid.match(/cut-l/g) || []).length, 3, "le bord GAUCHE n'est peint que par la 1re colonne (3 rangées)");
+    ck(!grid.includes("nocut"), "…et les classes d'arête ne réactivent pas `nocut`");
     const doc = LabelHtml.printDocument({ title: "T<est>", pageSize: "50mm 30mm", pagesHtml: "<div class=\"unit\">x</div>" });
     ck(doc.includes("@page{size:50mm 30mm;margin:0}"), "unitaire : @page à la taille EXACTE de l'étiquette");
     ck(doc.includes(".label-render .lab{background:#fff"), "print-CSS embarquée (noir sur blanc, aucune variable de thème)");
     ck(!doc.includes("var(--fg"), "aucun token de thème dans l'imprimé");
+    /* 🚨 Sans `print-color-adjust:exact`, le navigateur SUPPRIME les images de fond à
+       l'impression : les zones de recouvrement (hachures en repeating-linear-gradient)
+       sortaient BLANCHES alors qu'elles s'affichaient à l'aperçu. */
+    ck(doc.includes("print-color-adjust:exact"), "les fonds hachurés sont IMPRIMÉS (print-color-adjust)");
+    ck(doc.includes("-webkit-print-color-adjust:exact"), "…avec le préfixe -webkit- (Safari/Chrome anciens)");
     ck(doc.includes("T&lt;est&gt;"), "titre du document échappé");
   });
 

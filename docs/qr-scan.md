@@ -469,6 +469,29 @@ posent une. C'était la cause première du retour terrain.
 
 ### Rendu d'impression
 
+> 🚨 **Trois pièges d'impression mesurés le 2026-08-25** (l'aperçu était juste, le PAPIER ne l'était
+> pas). Ils ne venaient d'aucune « transformation » : l'aperçu et l'imprimé partagent déjà le même
+> HTML et le même CSS, et le seul `transform: scale()` est celui de l'aperçu de PLANCHE (un
+> `transform` ne recompose rien).
+>
+> 1. **QR « rogné » au plus petit gabarit.** La lib `qrcode` ne dessine pas des carrés mais des
+>    **traits** — une commande horizontale par rangée de modules (`M4 4.5h7…`, d'où les demi-modules),
+>    rendue au trait d'un module de large. Anti-aliasées par défaut puis ramenées sur la grille de
+>    sortie, ces rangées perdent du noir à chaque bord et la plus fine disparaît. Correctif :
+>    `shape-rendering="crispEdges"` posé par `LabelQrSvg.scaleToMm` — propriété de RENDU, aucune
+>    géométrie touchée.
+> 2. **Hachures absentes du papier.** Les zones de recouvrement des manchons/drapeaux sont peintes en
+>    `repeating-linear-gradient`, donc en **image de fond** — que le navigateur SUPPRIME à
+>    l'impression sauf « Graphiques d'arrière-plan ». Correctif : `print-color-adjust: exact` sur
+>    `.label-render` (propriété héritée, elle couvre tout le rendu et fige aussi les gris).
+> 3. **Traits de coupe brouillons.** Une bordure sur les quatre côtés de chaque cellule faisait se
+>    toucher le bord droit d'une cellule et le bord gauche de la suivante : trait intérieur deux fois
+>    plus épais que le pourtour, et deux pointillés calés chacun sur sa propre phase. Correctif :
+>    **un trait par arête** — chaque cellule ne peint que son bord droit et son bord bas, la première
+>    rangée et la première colonne ajoutant le pourtour manquant (`cut-t`/`cut-l`, posés par
+>    `LabelHtml.sheetPage` qui seul connaît `cols` et l'index).
+
+
 Les QR viennent de `GET <dataBase>/qr/:collection/:id?format=svg` (`RestAdapter.qrSvg` — fetch
 dédié : la réponse est du SVG brut, hors protocole JSON), mis à l'échelle en mm par `LabelQrSvg`
 puis **inlinés** dans un document print-CSS **isolé** (iframe cachée) : unitaire =

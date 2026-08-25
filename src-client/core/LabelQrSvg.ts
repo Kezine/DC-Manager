@@ -16,7 +16,10 @@
         le viewBox et en repeignant un fond blanc plein cadre — padding blanc
         CALCULÉ, jamais un rognage du QR.
      2. MET À L'ÉCHELLE en millimètres : width/height = la cote voulue de
-        l'étiquette (le mm du gabarit INCLUT la quiet zone, comme la maquette).
+        l'étiquette (le mm du gabarit INCLUT la quiet zone, comme la maquette),
+        et impose `shape-rendering="crispEdges"` — sans quoi les rangées de
+        modules (des TRAITS, pas des carrés) s'amincissent jusqu'à disparaître à
+        l'impression du plus petit gabarit (cf. `scaleToMm`).
 
    Manipulation de CHAÎNE pure (aucun DOM — testable sous Node, et le résultat
    s'inline tel quel dans le document d'impression). Défensif : un SVG qui ne
@@ -84,7 +87,17 @@ export class LabelQrSvg {
     const size = `${+mm.toFixed(2)}mm`;
     svg = svg.replace(/(<svg\b[^>]*?)\s+width="[^"]*"/, "$1");
     svg = svg.replace(/(<svg\b[^>]*?)\s+height="[^"]*"/, "$1");
-    svg = svg.replace(/<svg\b/, `<svg width="${size}" height="${size}"`);
+    /* 🚨 RENDU CRISP — retour terrain 2026-08-25 : au plus petit gabarit, le QR IMPRIMÉ
+       sortait « rogné », comme si des rangées de modules manquaient. Cause : la lib
+       `qrcode` ne dessine pas des carrés mais des TRAITS — une commande horizontale par
+       rangée (`M4 4.5h7…`), rendue au trait d'UN module de large, d'où les coordonnées en
+       demi-module. Anti-aliasées (`shape-rendering:auto`, le défaut) puis ramenées sur une
+       grille de sortie qui ne tombe pas juste, ces rangées perdent du noir à chaque bord —
+       et la plus fine finit par disparaître. `crispEdges` demande au moteur de coller les
+       arêtes à la grille SANS lisser : chaque rangée reste pleine. C'est une propriété de
+       RENDU (aucune géométrie touchée), et elle profite aussi à l'aperçu. */
+    svg = svg.replace(/(<svg\b[^>]*?)\s+shape-rendering="[^"]*"/, "$1");
+    svg = svg.replace(/<svg\b/, `<svg shape-rendering="crispEdges" width="${size}" height="${size}"`);
     return svg;
   }
 }

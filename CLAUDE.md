@@ -448,7 +448,12 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   `.label-print [hidden]{display:none!important}` — sans lui les `hidden` sont INERTES, une règle
   d'auteur battant toujours le `[hidden]` du navigateur), rendu HTML PARTAGÉ aperçu ⇄ imprimé
   `core/LabelHtml` (noir sur blanc, zéro token de thème, cotes posées INLINE depuis LabelLayout),
-  quiet zone du SVG servi vérifiée/compensée `core/LabelQrSvg`, matière par
+  quiet zone du SVG servi vérifiée/compensée `core/LabelQrSvg` (+ 🚨 `shape-rendering="crispEdges"` —
+  la lib dessine les rangées de modules au TRAIT, l'anti-aliasing les amincit jusqu'à les faire
+  disparaître au plus petit gabarit IMPRIMÉ), 🚨 `print-color-adjust:exact` (sans lui le navigateur
+  SUPPRIME les images de fond à l'impression : les hachures de recouvrement sortaient blanches),
+  🚨 traits de coupe à UN trait par ARÊTE (quatre bordures par cellule = trait intérieur doublé et
+  pointillés déphasés), matière par
   enregistrement `core/LabelSubjects` (owner = champ E1 derrière une case, vide → ligne absente) ;
   impression = iframe print-CSS isolée (unitaire `@page` taille EXACTE → Brother/Dymo, planche A4
   colonnes plafonnées + traits de coupe, `@page`/html/body à marge NULLE des deux côtés) ; points
