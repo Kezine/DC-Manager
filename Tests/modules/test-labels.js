@@ -144,8 +144,18 @@ module.exports = async () => {
     ck(LabelLayout.maxColumns(tiny) > LabelLayout.MAX_SHEET_COLUMNS, "le papier accepterait plus que le plafond d'affichage");
     ck.eq(LabelLayout.columnChoices(tiny).length, LabelLayout.MAX_SHEET_COLUMNS, "…mais la liste s'arrête au plafond d'affichage");
     // 🚨 Le TRAIT DE COUPE occupe de la place (cellule en content-box) : la capacité en tient compte.
-    ck.eq(LabelLayout.CUT_MM, 0.2, "épaisseur du trait de coupe");
-    ck(LabelLayout.maxColumns(spec()) * (LabelLayout.cellDims(spec())[0] + LabelLayout.CUT_MM) + LabelLayout.CUT_MM <= LabelLayout.A4_W - 2 * LabelLayout.A4_MARGIN, "une rangée pleine, traits compris, tient dans la largeur utile");
+    /* 🚨 0,5 mm et non 0,2 : l'utilisateur a trouvé LA reproduction — le défaut apparaît et
+       disparaît selon le ZOOM du navigateur, signature d'un filet SOUS-PIXEL (0,2 mm ≈ 0,76 px
+       CSS, donc 1 pixel… ou 0 selon l'arrondi). Les traits n'étaient pas recouverts : ils
+       n'étaient pas dessinés. 0,5 mm ≈ 1,9 px survit à l'arrondi même à 50 % d'échelle. */
+    ck.eq(LabelLayout.CUT_MM, 0.5, "épaisseur du trait de coupe : au-dessus du seuil sous-pixel");
+    // Le trait vit dans la GOUTTIÈRE : N cellules + (N − 1) gouttières ≤ largeur utile.
+    const rowWidth = (sp) => LabelLayout.maxColumns(sp) * LabelLayout.cellDims(sp)[0] + (LabelLayout.maxColumns(sp) - 1) * LabelLayout.CUT_MM;
+    for (const size of ["s", "m", "l", "rack"]) {
+      ck(rowWidth(spec({ size })) <= LabelLayout.A4_W - 2 * LabelLayout.A4_MARGIN, "gabarit " + size + " : une rangée pleine tient dans la largeur utile, gouttières comprises");
+    }
+    // …et une colonne de PLUS ne tiendrait pas (le plafond est bien le maximum, pas une marge de sûreté).
+    ck(rowWidth(spec()) + LabelLayout.cellDims(spec())[0] + LabelLayout.CUT_MM > LabelLayout.A4_W - 2 * LabelLayout.A4_MARGIN, "M : une 5e colonne ne tiendrait pas");
     // Capacité : M en 4 colonnes = 4 × 8 = 32 par feuille — 33 étiquettes → 2 feuilles.
     const m4 = LabelLayout.sheetLayout(spec(), 4, 33);
     ck.eq(JSON.stringify([m4.cols, m4.rows, m4.perPage, m4.pages, m4.capped]), JSON.stringify([4, 8, 32, 2, false]), "M ×4 col : 32/feuille, 33 → 2 feuilles");

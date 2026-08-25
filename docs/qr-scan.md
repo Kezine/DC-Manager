@@ -521,19 +521,21 @@ posent une. C'était la cause première du retour terrain.
 > **Suite — pourquoi « le même HTML » ne suffit pas.** Deux défauts restaient, tous deux nés du fait
 > que le navigateur **refait la mise en page contre les métriques de l'imprimante** : « HTML direct »
 > ne veut pas dire « mêmes pixels ».
-> · **Traits qui sautent.** Passés en **SOLIDE** d'abord (un pointillé de 0,2 mm fait ~50 tirets par
->   bord et se raccorde mal d'une cellule à l'autre) — ce qui n'a **pas suffi** : le terrain a
->   re-signalé des interruptions avec des traits pleins, tombant pile sur les zones hachurées.
->   🚨 **La vraie cause** : une **bordure** se peint dans la couche « fond/bordure du parent », donc
->   **sous** le contenu de ce parent. Tout fond opaque de l'étiquette — le blanc de `.lab`, les bandes
->   `#fff` du dégradé hachuré — passe par-dessus dès qu'un arrondi de rendu le fait déborder d'un
->   point ; d'où des trous **à l'impression seulement**. Passer la cellule en `content-box` avait
->   éloigné le trait de l'étiquette sans le mettre **hors de portée**. Le trait est donc désormais
->   porté par un **`::after` absolu** : un pseudo-élément positionné se peint **après** tout le
->   contenu en flux du parent, plus rien ne peut le recouvrir. Il chevauche le pourtour
->   (`right`/`bottom: -.2mm`, plus `top`/`left` sur la 1re rangée/colonne), donc la géométrie ne bouge
->   pas. Corollaire : `.cell` perd `overflow:hidden` (il rognerait ce débord) — sans risque, `.lab`
->   clippe déjà son propre contenu et sa cote est celle de la cellule.
+> · **Traits qui sautent.** 🚨 **L'épaisseur était la cause** — trouvée par la reproduction de
+>   l'utilisateur : *le défaut apparaît et disparaît selon le **zoom du navigateur***. Signature d'un
+>   filet **sous-pixel** : 0,2 mm ≈ 0,76 px CSS, donc selon l'endroit où chaque ligne tombe, le
+>   rasteur en met 1 pixel… ou 0. Les traits n'étaient pas recouverts : ils n'étaient pas dessinés.
+>   `LabelLayout.CUT_MM` passe à **0,5 mm** (≈ 1,9 px — survit à l'arrondi même à 50 % d'échelle,
+>   et c'est la cote des planches d'étiquettes du commerce), et devient une **source unique** :
+>   `LabelHtml.CSS` l'interpole, la capacité de la planche la compte. Le trait vit dans la
+>   **gouttière** de la grille (`gap`), il sépare donc réellement deux cellules au lieu de mordre sur
+>   l'étiquette voisine — une rangée occupe N cellules + (N − 1) gouttières, les traits du pourtour
+>   étant tirés dans la marge de 8 mm.
+>   *Trois correctifs antérieurs sont conservés, justes en eux-mêmes mais qui n'expliquaient pas le
+>   symptôme* : passage en **solide** (un pointillé de 0,2 mm fait ~50 tirets par bord), cellule en
+>   **`content-box`** (la cote posée est celle de l'étiquette), et trait porté par un **`::after`
+>   absolu** — un pseudo-élément positionné se peint après le contenu en flux, donc hors de portée
+>   de tout fond opaque ; corollaire, `.cell` n'a plus d'`overflow:hidden`.
 > · **Chiffres inégalement espacés.** Deux causes cumulées : `system-ui` et `ui-monospace` sont des
 >   familles **résolues par le système** — rien ne garantit que le chemin d'impression retienne la
 >   même police que l'écran, et une autre police a d'autres chasses ; et `letter-spacing:-.02em`,

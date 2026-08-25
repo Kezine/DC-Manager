@@ -314,17 +314,29 @@ export class LabelLayout {
     return LabelLayout.labelDims(spec);
   }
 
-  /** Épaisseur d'un TRAIT DE COUPE (mm). Depuis que la cellule est en `content-box`
-      (cf. `LabelHtml.sheetPage` — le trait ne mord plus sur l'étiquette), le trait
-      s'ajoute AUTOUR d'elle : une rangée de N cellules occupe N × (cote + trait) +
-      trait. Négligeable à 2 colonnes, plus du tout quand on en met 8. */
-  static readonly CUT_MM = 0.2;
+  /** Épaisseur d'un TRAIT DE COUPE (mm) — **source UNIQUE** : la géométrie de la planche
+      la lit ici, et `LabelHtml.CSS` la compose depuis cette constante (elle était écrite à
+      cinq endroits, donc condamnée à diverger).
+
+      🚨 0,5 et non 0,2 (retour terrain 2026-08-25, l'utilisateur ayant trouvé LA
+      reproduction : **le défaut apparaît et disparaît selon le zoom du navigateur**). C'est
+      la signature d'un filet SOUS-PIXEL — 0,2 mm ≈ 0,76 px CSS, donc selon l'endroit où
+      chaque ligne tombe, le rasteur en met 1 pixel… ou 0. D'où des traits qui « sautent »
+      par endroits, aussi bien à l'écran zoomé qu'à l'impression, sans qu'aucun élément ne
+      les recouvre. 0,5 mm ≈ 1,9 px : la ligne survit à l'arrondi même à 50 % d'échelle.
+      C'est aussi la cote des traits de coupe des planches d'étiquettes du commerce.
+
+      Le trait sépare RÉELLEMENT deux cellules (il vit dans la gouttière de la grille, cf.
+      `LabelHtml.CSS`) : une rangée de N cellules occupe donc N × cote + (N − 1) × trait. */
+  static readonly CUT_MM = 0.5;
 
   /** Plafond de COLONNES d'une planche A4 : combien de cellules tiennent dans la
       largeur utile (210 − 2 × 8 = 194 mm), traits de coupe compris. Jamais moins de 1. */
   static maxColumns(spec: LabelSpec): number {
-    const usable = LabelLayout.A4_W - 2 * LabelLayout.A4_MARGIN - LabelLayout.CUT_MM;
-    return Math.max(1, Math.floor(usable / (LabelLayout.cellDims(spec)[0] + LabelLayout.CUT_MM)));
+    // N cellules + (N − 1) gouttières ≤ largeur utile  ⇔  N ≤ (utile + trait) / (cote + trait).
+    // Les traits du POURTOUR, eux, sont dessinés dans la marge de 8 mm : ils ne comptent pas.
+    const usable = LabelLayout.A4_W - 2 * LabelLayout.A4_MARGIN;
+    return Math.max(1, Math.floor((usable + LabelLayout.CUT_MM) / (LabelLayout.cellDims(spec)[0] + LabelLayout.CUT_MM)));
   }
 
   /** Plafond d'AFFICHAGE du sélecteur de colonnes. Le papier en accepterait davantage
@@ -353,8 +365,10 @@ export class LabelLayout {
     const [cellW, cellH] = LabelLayout.cellDims(spec);
     const maxCols = LabelLayout.maxColumns(spec);
     const cols = Math.max(1, Math.min(requestedCols, maxCols));
-    const usableH = LabelLayout.A4_H - 2 * LabelLayout.A4_MARGIN - LabelLayout.SHEET_HEADER_MM - LabelLayout.CUT_MM;
-    const rows = Math.max(1, Math.floor(usableH / (cellH + LabelLayout.CUT_MM)));   // traits de coupe compris (cf. CUT_MM)
+    // Pas de bonus « + trait » ici, contrairement aux colonnes : l'en-tête de planche est lui
+    // aussi un élément de la grille, il consomme donc une gouttière de plus. Compter au plus juste.
+    const usableH = LabelLayout.A4_H - 2 * LabelLayout.A4_MARGIN - LabelLayout.SHEET_HEADER_MM;
+    const rows = Math.max(1, Math.floor(usableH / (cellH + LabelLayout.CUT_MM)));   // gouttières comprises (cf. CUT_MM)
     const perPage = cols * rows;
     return { cols, rows, perPage, pages: Math.max(1, Math.ceil(count / perPage)), capped: requestedCols > maxCols, cellW, cellH };
   }

@@ -24,6 +24,11 @@ import { Html } from "./Html";
 import { LabelLayout } from "./LabelLayout";
 import type { LabelSpec } from "./LabelLayout";
 
+/** Épaisseur du trait de coupe, en mm — LUE dans `LabelLayout` (source unique). Le CSS
+    ci-dessous l'interpole : la valeur était écrite à cinq endroits, donc condamnée à
+    diverger de la géométrie qui, elle, calcule la capacité de la planche avec. */
+const CUT = LabelLayout.CUT_MM;
+
 /** Matière d'UNE étiquette — préparée par `core/LabelSubjects` depuis le store.
     Champs absents/vides ⇒ la ligne correspondante n'est PAS rendue (décision
     « owner vide → ligne absente », généralisée à tout le lisible humain). */
@@ -101,22 +106,26 @@ export class LabelHtml {
           désormais nul, `text-rendering:geometricPrecision` demande des avances EXACTES
           plutôt qu'ajustées à la grille, et `font-variant-numeric:tabular-nums` impose des
           chiffres de largeur ÉGALE même si une police proportionnelle finit par gagner.
-      🚨 TRAITS DE COUPE — DESSINÉS PAR-DESSUS, et solides. Trois passes ont été
-      nécessaires, la bonne leçon est la dernière :
-        · pointillés → SOLIDES : un pointillé de 0,2 mm fait ~50 tirets par bord et se
-          raccorde mal d'une cellule à l'autre. Un trait plein ne peut pas sauter. Ça n'a
-          PAS suffi — le terrain a re-signalé des interruptions avec des traits pleins ;
-        · 🚨 la vraie cause : une BORDURE se peint dans la couche « fond/bordure du
-          parent », donc SOUS le contenu de ce parent. Tout fond opaque de l'étiquette (le
-          blanc de `.lab`, les bandes `#fff` du dégradé hachuré des zones de recouvrement)
-          passe par-dessus dès qu'un arrondi de rendu le fait déborder d'un point — d'où
-          des trous À L'IMPRESSION seulement, et tombant pile sur les hachures.
-          `content-box` avait éloigné le trait de l'étiquette sans le mettre HORS DE PORTÉE.
-        · d'où le trait porté par un `::after` ABSOLU : un pseudo-élément positionné se
-          peint APRÈS tout le contenu en flux du parent — plus rien ne peut le recouvrir,
-          quelle que soit la façon dont l'étiquette déborde. Il chevauche le pourtour
-          (`right/bottom:-.2mm`, plus `top`/`left` sur la 1re rangée/colonne) donc la
-          géométrie ne bouge pas d'un iota.
+      🚨 TRAITS DE COUPE — l'ÉPAISSEUR était la vraie cause. Quatre passes, et seule la
+      dernière touche juste ; les trois premières sont conservées ci-dessous parce qu'elles
+      décrivent des pièges réels, mais AUCUNE n'expliquait le symptôme :
+        · pointillés → SOLIDES (un pointillé de 0,2 mm fait ~50 tirets par bord) : n'a pas
+          suffi, le terrain a re-signalé des interruptions avec des traits pleins ;
+        · `content-box` puis `::after` ABSOLU, sur l'idée que le trait était RECOUVERT (une
+          bordure se peint sous le contenu du parent) : n'a pas suffi non plus. Les deux
+          restent justes en soi — le `::after` met le trait hors de portée de tout fond
+          opaque, et `content-box` fait que la cote posée est celle de l'étiquette ;
+        · 🚨 LA cause, trouvée par l'utilisateur qui a su la REPRODUIRE : **le défaut
+          apparaît et disparaît selon le ZOOM du navigateur.** C'est la signature d'un filet
+          SOUS-PIXEL — 0,2 mm ≈ 0,76 px CSS, donc selon l'endroit où chaque ligne tombe, le
+          rasteur en met 1 pixel… ou 0. Rien ne recouvrait quoi que ce soit : les lignes
+          n'étaient tout simplement pas dessinées. `CUT_MM` passe donc à **0,5 mm** (≈ 1,9 px,
+          survit à l'arrondi même à 50 % d'échelle) — et cette valeur est désormais une
+          SOURCE UNIQUE, lue depuis `LabelLayout` et interpolée ici.
+      Le trait vit dans la GOUTTIÈRE de la grille (`gap:${CUT}mm`) : il sépare réellement deux
+      cellules au lieu de mordre sur l'étiquette voisine, et la capacité de la planche le
+      compte (N cellules + N−1 gouttières). Les traits du POURTOUR, eux, sont tirés dans la
+      marge de 8 mm — ils ne coûtent rien.
       ⚠ Corollaire : `.cell` n'a PLUS `overflow:hidden` (il rognerait ce débord). C'est sans
       risque — `.lab` clippe déjà son propre contenu et sa cote est CELLE de la cellule.
       🚨 `print-color-adjust:exact` sur `.label-render` (retour terrain 2026-08-25) :
@@ -166,11 +175,11 @@ export class LabelHtml {
 .label-render .lab.cable.strip .ov{flex:none;background:repeating-linear-gradient(45deg,#fff 0 1mm,#e9e9e9 1mm 2mm)}
 .label-render .lab.compact .txt{gap:.2mm}
 .label-render .lab.compact .rule{margin:.4mm 0}
-.label-render .a4{width:210mm;height:297mm;background:#fff;padding:8mm;display:grid;gap:0;align-content:start;justify-content:start}
+.label-render .a4{width:210mm;height:297mm;background:#fff;padding:8mm;display:grid;gap:${CUT}mm;align-content:start;justify-content:start}
 .label-render .a4 .cell{position:relative;box-sizing:content-box;display:flex;align-items:center;justify-content:center}
-.label-render .a4 .cell::after{content:"";position:absolute;top:0;left:0;right:-.2mm;bottom:-.2mm;border:0 solid #999;border-right-width:.2mm;border-bottom-width:.2mm;pointer-events:none}
-.label-render .a4 .cell.cut-t::after{top:-.2mm;border-top-width:.2mm}
-.label-render .a4 .cell.cut-l::after{left:-.2mm;border-left-width:.2mm}
+.label-render .a4 .cell::after{content:"";position:absolute;top:0;left:0;right:-${CUT}mm;bottom:-${CUT}mm;border:0 solid #999;border-right-width:${CUT}mm;border-bottom-width:${CUT}mm;pointer-events:none}
+.label-render .a4 .cell.cut-t::after{top:-${CUT}mm;border-top-width:${CUT}mm}
+.label-render .a4 .cell.cut-l::after{left:-${CUT}mm;border-left-width:${CUT}mm}
 .label-render .a4 .cell.nocut::after{content:none}
 .label-render .a4-head{display:flex;justify-content:space-between;font-family:var(--lp-mono);font-size:6pt;color:#666;grid-column:1/-1;padding-bottom:2mm}
 .label-render .a4-head span{color:#666}
