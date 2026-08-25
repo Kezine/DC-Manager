@@ -19,6 +19,7 @@ import { GlobalSearchSources } from "../views/GlobalSearchSources";   // famille
 import { ImageStore, IdbImageBackend, RestImageBackend, AttachmentStore, IdbAttachmentBackend, RestAttachmentBackend } from "../data";
 import type { ListOptions, FormHost } from "../views";
 import { Modal, Notify, FormControls, Dialog, Fullscreen, RichTooltip, Icons, ScanControl, LabelPrintDialog, CartPanel } from "../ui";
+import { LABEL_FONT_CSS } from "../ui/LabelFontAssets";   // fonte embarquée du document d'impression (import DIRECT, hors barrel : il ne doit pas remonter dans les tests Node)
 import { LabelSubjects } from "../core/LabelSubjects";
 import type { LabelSubject } from "../core/LabelHtml";   // sujets de la PLANCHE du panier (cf. docs/panier.md)
 import { CartFamilies } from "../core/CartFamilies";            // famille d'une collection (invariant mono-famille du panier)
@@ -283,6 +284,10 @@ async function boot(): Promise<void> {
     LabelPrintDialog.setup({
       openModal: (o) => formHost.openModal(o),
       fetchQrSvg: (collection, id) => (adapter as RestAdapter).qrSvg(collection, id),
+      // FONTE EMBARQUÉE (data: URI) : le document d'impression est une iframe isolée, il ne voit
+      // pas la feuille de l'app. Injectée depuis ICI et non importée par la modale — les woff2 ne
+      // sont des chaînes que sous webpack, et la modale est chargée sous Node par les tests.
+      fontCss: LABEL_FONT_CSS,
     });
   }
   // RECHERCHE GLOBALE (modale dédiée) — UNE instance, UNE implémentation pour les DEUX chemins

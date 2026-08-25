@@ -67,6 +67,12 @@ export interface LabelPrintHost {
   /** SVG brut de la route `GET …/qr/:collection/:id?format=svg` (rejette si 4xx/5xx —
       le message serveur est actionnable : PUBLIC_BASE_URL absente → 503 explicite). */
   fetchQrSvg(collection: string, id: string): Promise<string>;
+  /** `@font-face` de la fonte EMBARQUÉE (data: URI), posés dans l'aperçu ET dans le document
+      d'impression — cf. `ui/LabelFontAssets`. INJECTÉ et non importé ici : les woff2 ne sont
+      des chaînes que sous webpack, et ce fichier est aussi chargé sous Node par les tests.
+      Absent → repli sur les familles concrètes de la pile (le rendu marche, mais rien ne
+      garantit plus que l'imprimé et l'aperçu dessinent avec la MÊME fonte). */
+  fontCss?: string;
 }
 
 /** Contexte d'ouverture — ce qui change entre les points d'entrée. Le TYPE de sujet
@@ -154,7 +160,7 @@ export class LabelPrintDialog {
     // CSS des étiquettes injectée UNE fois (scopée .label-render) : l'aperçu rend le
     // MÊME HTML que l'imprimé — fidélité par construction (cf. core/LabelHtml).
     const style = document.createElement("style");
-    style.textContent = LabelHtml.CSS;
+    style.textContent = (host.fontCss || "") + LabelHtml.CSS;   // aperçu ET imprimé déclarent la MÊME fonte embarquée
     root.appendChild(style);
 
     const side = document.createElement("div"); side.className = "label-print-side";
@@ -435,7 +441,7 @@ export class LabelPrintDialog {
           );
         }
       }
-      LabelPrintDialog.printHtml(LabelHtml.printDocument({ title: t("dialog.title") + " — " + ctx.source, pageSize, pagesHtml }));
+      LabelPrintDialog.printHtml(LabelHtml.printDocument({ title: t("dialog.title") + " — " + ctx.source, pageSize, pagesHtml, fontCss: host.fontCss }));
     };
 
     host.openModal({

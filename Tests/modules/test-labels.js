@@ -308,6 +308,26 @@ module.exports = async () => {
     ck(doc.includes("text-rendering:geometricPrecision"), "avances de glyphes EXACTES, non ajustées à la grille");
     ck(doc.includes("font-variant-numeric:tabular-nums"), "chiffres de largeur ÉGALE quelle que soit la police retenue");
     ck(doc.includes("font-kerning:none"), "crénage désactivé");
+    /* 🚨 FONTE EMBARQUÉE : le document d'impression est une iframe ISOLÉE — il ne voit ni la
+       feuille de l'app ni ses `url(../fonts/…)`. Sans @font-face en data: URI il retombe sur une
+       police du système, et une autre police = d'autres chasses = un imprimé qui ne ressemble
+       plus à l'aperçu. Les URI arrivent par INJECTION (ce module est pur, compilé sans webpack). */
+    const faces = LabelHtml.fontFaceCss([
+      { family: "IBM Plex Sans", weight: 400, src: "data:font/woff2;base64,AAA", unicodeRange: "U+0000-00FF" },
+      { family: "IBM Plex Sans", weight: 700, src: "data:font/woff2;base64,BBB" },
+    ]);
+    ck(faces.includes('@font-face{font-family:"IBM Plex Sans";font-style:normal;font-weight:400;'), "déclaration @font-face par graisse");
+    ck(faces.includes('src:url(data:font/woff2;base64,AAA) format("woff2");'), "la source est le data: URI injecté");
+    ck(faces.includes("unicode-range:U+0000-00FF;"), "plage Unicode du subset reprise");
+    ck.eq((faces.match(/@font-face/g) || []).length, 2, "une déclaration par fonte, pas une de plus");
+    ck(!faces.includes("unicode-range:undefined"), "une fonte SANS plage n'en déclare aucune");
+    ck(faces.includes("font-display:block"), "font-display:block — jamais un imprimé tiré avec la police de repli");
+    // Le bloc est posé AVANT le CSS des étiquettes : les @font-face doivent précéder leur usage.
+    const withFont = LabelHtml.printDocument({ title: "T", pageSize: "A4", pagesHtml: "", fontCss: faces });
+    ck(withFont.indexOf("@font-face") < withFont.indexOf(".label-render{"), "les @font-face précèdent le CSS qui les utilise");
+    ck(doc.includes('--lp-sans:"IBM Plex Sans"') && doc.includes('--lp-mono:"IBM Plex Sans"'), "les deux piles visent la fonte EMBARQUÉE en premier");
+    // Sans injection, le document reste valide (repli sur les familles concrètes de la pile).
+    ck(!doc.includes("@font-face"), "fontCss absent → aucun @font-face, et le document reste valide");
     ck(!/letter-spacing:-/.test(doc), "aucun crénage fractionnaire NÉGATIF (il s'arrondissait différemment par paire)");
     ck(doc.includes("T&lt;est&gt;"), "titre du document échappé");
   });

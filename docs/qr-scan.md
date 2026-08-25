@@ -538,10 +538,21 @@ posent une. C'était la cause première du retour terrain.
 >   familles **résolues par le système** — rien ne garantit que le chemin d'impression retienne la
 >   même police que l'écran, et une autre police a d'autres chasses ; et `letter-spacing:-.02em`,
 >   fractionnaire et négatif, s'arrondissait différemment d'une paire de glyphes à l'autre une fois
->   les avances ramenées aux points de l'imprimante. Les piles nomment maintenant des familles
->   **concrètes**, le crénage est nul, `text-rendering:geometricPrecision` demande des avances
->   **exactes** plutôt qu'ajustées à la grille, et `font-variant-numeric:tabular-nums` impose des
->   chiffres de **largeur égale** même si une police proportionnelle finit par gagner.
+>   les avances ramenées aux points de l'imprimante. Le crénage est nul,
+>   `text-rendering:geometricPrecision` demande des avances **exactes** plutôt qu'ajustées à la
+>   grille, et `font-variant-numeric:tabular-nums` impose des chiffres de **largeur égale**.
+>   🚨 Surtout, la fonte est désormais **EMBARQUÉE** dans le document d'impression
+>   (`ui/LabelFontAssets` → `LabelHtml.fontFaceCss`, data: URI) : c'est la seule façon d'ÊTRE SÛR
+>   que les deux surfaces dessinent avec la même fonte, plutôt que d'espérer que le système
+>   choisisse la même des deux côtés. Les woff2 sont ceux, déjà vendorés et OFL, de la feuille de
+>   l'app — aucun asset nouveau, aucune requête réseau.
+>   ⚠ **Découpe imposée par les tests** : un `import … from "*.woff2"` n'est une chaîne que sous
+>   webpack, or `ui/LabelPrintDialog` est chargé sous Node par la suite de tests (via la chaîne des
+>   fiches). Les assets vivent donc dans `ui/LabelFontAssets`, que seul `app/main.ts` importe — et
+>   la modale reçoit le bloc `@font-face` par **injection** (`LabelPrintHost.fontCss`).
+>   ⚠ **Aucune monospace n'est vendorée** : `--lp-mono` retombe sur Plex Sans, donc les identifiants
+>   perdent leur chasse fixe (les chiffres, eux, restent alignés par `tabular-nums`). Déposer
+>   `IBMPlexMono-latin-*.woff2` dans `src-client/fonts/` et l'ajouter à `LABEL_FONT_FACES` suffirait.
 
 
 Les QR viennent de `GET <dataBase>/qr/:collection/:id?format=svg` (`RestAdapter.qrSvg` — fetch

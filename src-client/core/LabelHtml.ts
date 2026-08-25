@@ -44,6 +44,16 @@ export interface LabelSubject {
   endB?: string;
 }
 
+/** Une déclaration de fonte EMBARQUÉE pour le document d'impression (cf. `fontFaceCss`).
+    `src` = un data: URI complet — l'iframe d'impression ne résout aucune URL relative. */
+export interface LabelFontFace {
+  family: string;
+  weight: number;
+  src: string;
+  /** Subset couvert (latin / latin-ext…). Absent = la fonte vaut pour tout le texte. */
+  unicodeRange?: string;
+}
+
 /** Cases « Lisible humain » de la modale (l'identifiant, lui, est toujours coché). */
 export interface LabelFields {
   location: boolean;
@@ -76,7 +86,15 @@ export class LabelHtml {
       contre les métriques de l'imprimante, et deux choses dérivaient alors :
         · `system-ui`/`ui-monospace` sont des familles RÉSOLUES PAR LE SYSTÈME : rien ne
           garantit que le chemin d'impression tombe sur la même police que l'écran, et une
-          autre police = d'autres chasses. Les piles nomment donc des familles CONCRÈTES ;
+          autre police = d'autres chasses. Les piles nomment donc des familles CONCRÈTES,
+          en tête desquelles **IBM Plex Sans, EMBARQUÉE** dans le document d'impression
+          (`fontFaceCss` — data: URI, cf. sa doc) : la seule façon d'ÊTRE SÛR que les deux
+          surfaces dessinent avec la même fonte, plutôt que d'espérer que le système
+          choisisse la même des deux côtés. ⚠ Il n'existe pas de MONOSPACE vendorée dans le
+          dépôt : `--lp-mono` retombe donc lui aussi sur Plex Sans, et c'est
+          `tabular-nums` (ci-dessous) qui garantit l'alignement des CHIFFRES — l'identité
+          visuelle « chasse fixe » des identifiants est, elle, perdue tant qu'une Plex Mono
+          n'est pas ajoutée à `src-client/fonts/` ;
         · les avances de glyphes sont ARRONDIES aux points de l'imprimante, et
           `letter-spacing:-.02em` (fractionnaire, négatif) s'arrondissait différemment
           d'une paire à l'autre — d'où des chiffres inégalement espacés. Le crénage est
@@ -110,7 +128,7 @@ export class LabelHtml {
       garantit du même coup que les gris (#333/#444/#666/#999) ne soient pas
       « optimisés » par le pilote. */
   static readonly CSS = `
-.label-render{--lp-mono:"Consolas","DejaVu Sans Mono","Liberation Mono","Menlo","Courier New",monospace;--lp-sans:"Segoe UI","Helvetica Neue","DejaVu Sans","Liberation Sans",Arial,sans-serif;color:#000;-webkit-print-color-adjust:exact;print-color-adjust:exact;text-rendering:geometricPrecision;font-variant-ligatures:none;font-kerning:none;font-variant-numeric:tabular-nums}
+.label-render{--lp-mono:"IBM Plex Sans","Consolas","DejaVu Sans Mono","Liberation Mono","Courier New",monospace;--lp-sans:"IBM Plex Sans","Segoe UI","DejaVu Sans","Liberation Sans",Arial,sans-serif;color:#000;-webkit-print-color-adjust:exact;print-color-adjust:exact;text-rendering:geometricPrecision;font-variant-ligatures:none;font-kerning:none;font-variant-numeric:tabular-nums}
 .label-render *{box-sizing:border-box}
 .label-render .lab{background:#fff;color:#000;display:flex;align-items:center;overflow:hidden;font-family:var(--lp-sans)}
 .label-render .lab *{color:#000}
@@ -289,14 +307,34 @@ export class LabelHtml {
 
   /* ----------------------------- document d'impression ----------------------------- */
 
+  /** Déclarations `@font-face` d'une fonte EMBARQUÉE (data: URI), à passer à
+      `printDocument`. Le document d'impression est une iframe ISOLÉE : il ne voit ni la
+      feuille de l'app ni ses `url(../fonts/…)`. Sans ces déclarations, il retombe sur une
+      police du système — et une autre police, ce sont d'autres chasses, donc un imprimé
+      qui ne ressemble plus à l'aperçu (retour terrain 2026-08-25).
+
+      🚨 Les URI arrivent par INJECTION, jamais par import : ce module est PUR et compilé
+      SANS webpack pour les tests Node (un `import … from "*.woff2"` y serait irrésolu).
+      C'est `ui/LabelPrintDialog` — qui vit, lui, dans le monde webpack — qui importe les
+      woff2 (inlinés en data: URI par `asset/inline`) et passe le résultat ici. */
+  static fontFaceCss(faces: readonly LabelFontFace[]): string {
+    return faces.map((face) =>
+      `@font-face{font-family:"${face.family}";font-style:normal;font-weight:${face.weight};font-display:block;`
+      + `src:url(${face.src}) format("woff2");`
+      + (face.unicodeRange ? `unicode-range:${face.unicodeRange};` : "")
+      + "}",
+    ).join("");
+  }
+
   /** Document d'IMPRESSION complet (iframe isolée) : print-CSS embarquée noir sur
       blanc, `@page` à la taille voulue — `pageSize` = `"A4"` (planche) ou
       `"<w>mm <h>mm"` (unitaire : page à la taille EXACTE de l'étiquette, ce qui
       passe tel quel sur une imprimante à rouleau Brother/Dymo). Les pages
       `.a4`/`.unit` se suivent avec saut de page. */
-  static printDocument(opts: { title: string; pageSize: string; pagesHtml: string }): string {
+  static printDocument(opts: { title: string; pageSize: string; pagesHtml: string; fontCss?: string }): string {
     return `<!doctype html><html><head><meta charset="utf-8"><title>${Html.escape(opts.title)}</title><style>`
       + `html,body{margin:0;padding:0;background:#fff}`
+      + (opts.fontCss || "")
       + LabelHtml.CSS
       + `@page{size:${opts.pageSize};margin:0}`
       + `.label-render .a4,.label-render .unit{page-break-after:always}`
