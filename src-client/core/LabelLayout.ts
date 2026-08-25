@@ -314,10 +314,33 @@ export class LabelLayout {
     return LabelLayout.labelDims(spec);
   }
 
+  /** Épaisseur d'un TRAIT DE COUPE (mm). Depuis que la cellule est en `content-box`
+      (cf. `LabelHtml.sheetPage` — le trait ne mord plus sur l'étiquette), le trait
+      s'ajoute AUTOUR d'elle : une rangée de N cellules occupe N × (cote + trait) +
+      trait. Négligeable à 2 colonnes, plus du tout quand on en met 8. */
+  static readonly CUT_MM = 0.2;
+
   /** Plafond de COLONNES d'une planche A4 : combien de cellules tiennent dans la
-      largeur utile (210 − 2 × 8 = 194 mm). Jamais moins de 1. */
+      largeur utile (210 − 2 × 8 = 194 mm), traits de coupe compris. Jamais moins de 1. */
   static maxColumns(spec: LabelSpec): number {
-    return Math.max(1, Math.floor((LabelLayout.A4_W - 2 * LabelLayout.A4_MARGIN) / LabelLayout.cellDims(spec)[0]));
+    const usable = LabelLayout.A4_W - 2 * LabelLayout.A4_MARGIN - LabelLayout.CUT_MM;
+    return Math.max(1, Math.floor(usable / (LabelLayout.cellDims(spec)[0] + LabelLayout.CUT_MM)));
+  }
+
+  /** Plafond d'AFFICHAGE du sélecteur de colonnes. Le papier en accepterait davantage
+      pour une très petite étiquette (un manchon de 12 mm en logerait 15), mais le
+      contrôle segmenté vit dans un panneau de 250 px : au-delà, les boutons ne sont
+      plus cliquables. C'est donc une borne d'INTERFACE, pas une borne physique — à
+      relever le jour où le contrôle change de forme. */
+  static readonly MAX_SHEET_COLUMNS = 8;
+
+  /** Colonnes PROPOSÉES pour un gabarit : 1 … min(capacité réelle, plafond d'affichage).
+      Rendre la liste plutôt qu'un maximum permet à l'UI de la peindre telle quelle, sans
+      réécrire la règle — et « 1 colonne » y figure, ce qu'un sélecteur figé à 2-3-4
+      interdisait alors que c'est le SEUL choix possible pour une étiquette de baie. */
+  static columnChoices(spec: LabelSpec): number[] {
+    const max = Math.min(LabelLayout.maxColumns(spec), LabelLayout.MAX_SHEET_COLUMNS);
+    return Array.from({ length: max }, (_, index) => index + 1);
   }
 
   /** Découpe d'une planche : colonnes demandées PLAFONNÉES par la largeur réelle,
@@ -330,7 +353,8 @@ export class LabelLayout {
     const [cellW, cellH] = LabelLayout.cellDims(spec);
     const maxCols = LabelLayout.maxColumns(spec);
     const cols = Math.max(1, Math.min(requestedCols, maxCols));
-    const rows = Math.max(1, Math.floor((LabelLayout.A4_H - 2 * LabelLayout.A4_MARGIN - LabelLayout.SHEET_HEADER_MM) / cellH));
+    const usableH = LabelLayout.A4_H - 2 * LabelLayout.A4_MARGIN - LabelLayout.SHEET_HEADER_MM - LabelLayout.CUT_MM;
+    const rows = Math.max(1, Math.floor(usableH / (cellH + LabelLayout.CUT_MM)));   // traits de coupe compris (cf. CUT_MM)
     const perPage = cols * rows;
     return { cols, rows, perPage, pages: Math.max(1, Math.ceil(count / perPage)), capped: requestedCols > maxCols, cellW, cellH };
   }

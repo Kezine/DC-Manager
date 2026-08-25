@@ -399,6 +399,14 @@ perdu son `border-left` (fin du **double trait** au raccord), la dernière case 
 pagination silencieuse au-delà d'une feuille (le compteur l'annonce). ⚠ Sur une planche, l'étiquette
 s'étire dans sa **cellule** de grille (colonne `cell` de la table — M : 48×33, d'où « 4 × 8 = 32 par
 feuille » alors que la cote nominale est 50 mm) ; le plafond de colonnes se calcule sur la CELLULE.
+
+**Colonnes** : la liste des choix est DÉDUITE de la capacité réelle (`LabelLayout.columnChoices`)
+— elle n'est plus figée à `[2, 3, 4]` dans l'UI. Depuis que la cellule épouse l'étiquette, une
+planche de manchons en loge 6 ; à l'inverse une étiquette de baie n'en accepte qu'**une**, choix
+que la liste figée ne savait pas exprimer. `MAX_SHEET_COLUMNS` (8) est une borne d'**interface**
+— le contrôle segmenté vit dans un panneau de 250 px —, pas une borne physique : une très petite
+étiquette en logerait davantage. La capacité (`maxColumns`, `rows`) compte les **traits de coupe**
+(`CUT_MM`), qui s'ajoutent autour de l'étiquette depuis le passage de la cellule en `content-box`.
 **Unitaire** : page à la taille EXACTE de l'étiquette (`@page size` → imprimantes à rouleau
 Brother/Dymo, sans découpe).
 

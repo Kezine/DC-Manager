@@ -129,6 +129,23 @@ module.exports = async () => {
     ck.eq(LabelLayout.maxColumns(spec({ size: "l" })), 2, "L (70) : 2 colonnes max");
     ck.eq(LabelLayout.maxColumns(spec({ size: "rack" })), 1, "Baie (100) : 1 colonne");
     ck.eq(LabelLayout.maxColumns(spec({ size: "cable", qr: 18 })), 3, "drapeau compact (54) : 3 colonnes");
+    /* Colonnes OFFERTES (retour terrain 2026-08-25 : « on gagne de la place, il faut plus de
+       4 colonnes »). La liste était figée à [2,3,4] dans l'UI ; elle se DÉDUIT désormais de la
+       capacité réelle — et « 1 colonne » y figure, seul choix possible pour une étiquette de baie.
+       Le plafond d'AFFICHAGE (MAX_SHEET_COLUMNS) est une borne d'interface, pas une borne physique. */
+    ck.eq(LabelLayout.columnChoices(spec()).join(","), "1,2,3,4", "M : 1 à 4 colonnes offertes");
+    ck.eq(LabelLayout.columnChoices(spec({ size: "rack" })).join(","), "1", "Baie : une seule colonne — la liste sait le dire");
+    // Manchon de 28,27 mm : 6 colonnes tiennent maintenant que la cellule épouse l'étiquette.
+    const sleeve = spec({ size: "cable", content: "strip", dia: 6, len: 25 });
+    ck.eq(LabelLayout.maxColumns(sleeve), 6, "manchon Ø6 (28,27) : 6 colonnes tiennent dans 194 mm");
+    ck.eq(LabelLayout.columnChoices(sleeve).join(","), "1,2,3,4,5,6", "…et les 6 sont proposées");
+    // Borne d'AFFICHAGE : une étiquette minuscule en logerait plus, le sélecteur s'arrête.
+    const tiny = spec({ size: "custom", custom: { w: 12, h: 10 } });
+    ck(LabelLayout.maxColumns(tiny) > LabelLayout.MAX_SHEET_COLUMNS, "le papier accepterait plus que le plafond d'affichage");
+    ck.eq(LabelLayout.columnChoices(tiny).length, LabelLayout.MAX_SHEET_COLUMNS, "…mais la liste s'arrête au plafond d'affichage");
+    // 🚨 Le TRAIT DE COUPE occupe de la place (cellule en content-box) : la capacité en tient compte.
+    ck.eq(LabelLayout.CUT_MM, 0.2, "épaisseur du trait de coupe");
+    ck(LabelLayout.maxColumns(spec()) * (LabelLayout.cellDims(spec())[0] + LabelLayout.CUT_MM) + LabelLayout.CUT_MM <= LabelLayout.A4_W - 2 * LabelLayout.A4_MARGIN, "une rangée pleine, traits compris, tient dans la largeur utile");
     // Capacité : M en 4 colonnes = 4 × 8 = 32 par feuille — 33 étiquettes → 2 feuilles.
     const m4 = LabelLayout.sheetLayout(spec(), 4, 33);
     ck.eq(JSON.stringify([m4.cols, m4.rows, m4.perPage, m4.pages, m4.capped]), JSON.stringify([4, 8, 32, 2, false]), "M ×4 col : 32/feuille, 33 → 2 feuilles");

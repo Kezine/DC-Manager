@@ -335,13 +335,18 @@ export class LabelPrintDialog {
 
       // Colonnes de planche : reconstruites à chaque rendu (le plafond dépend du gabarit).
       if (vis.showSheetSection) {
-        const maxCols = LabelLayout.maxColumns(sp);
+        // Choix OFFERTS = ceux que le papier accepte (`LabelLayout.columnChoices`), plus
+        // ceux qu'on fige ici. La liste était écrite en dur `[2, 3, 4]` : depuis que la
+        // cellule épouse l'étiquette, une planche de manchons en loge 6 — et une étiquette
+        // de baie n'en accepte qu'UNE, choix que la liste figée ne savait pas exprimer.
+        const choices = LabelLayout.columnChoices(sp);
+        const maxCols = choices[choices.length - 1] || 1;
         const effective = Math.min(st.cols, maxCols);
         colsHolder.innerHTML = "";
         colsHolder.appendChild(FormControls.segmented(
-          [2, 3, 4].map((n) => ({ value: String(n), label: t("dialog.cols", { n }), disabled: n > maxCols })),
+          choices.map((n) => ({ value: String(n), label: t("dialog.cols", { n }) })),
           String(effective),
-          (v) => { st.cols = parseInt(v, 10) || 4; render(); },
+          (v) => { st.cols = parseInt(v, 10) || maxCols; render(); },
           { ariaLabel: t("dialog.sheet") },
         ));
       }
