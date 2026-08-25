@@ -52,7 +52,9 @@ export const labels = {
     fieldSerial: "N° de série",
     fieldOwner: "Propriétaire",
     sheet: "Planche",
-    cols: "{{n}} col.",
+    /** Libellé du champ « Colonnes » de la planche (champ numérique borné). */
+    cols: "Colonnes",
+    colsMax: "max {{max}}",
     cuts: "Traits de coupe",
     preview: "Aperçu",
     previewUnit: "Aperçu — étiquette unitaire",

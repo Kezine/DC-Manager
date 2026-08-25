@@ -234,7 +234,15 @@ export class LabelPrintDialog {
     //    cas et masquée par le verdict (`showSheetSection` — ≥ 2 étiquettes) : une seule règle,
     //    écrite dans la politique, plutôt qu'un `if` de construction qui la dupliquerait. --
     const sheetBox = fset(t("dialog.sheet"));
-    const colsHolder = document.createElement("div");
+    /* Colonnes de planche : CHAMP NUMÉRIQUE BORNÉ, pas un contrôle segmenté — celui-ci est une
+       rangée de boutons, conçue pour 3 ou 4 choix (cf. `FormControls.segmented`), et depuis que la
+       cellule épouse l'étiquette une planche peut en accepter 6, 8 ou plus. Le champ est construit
+       UNE fois et seul son `max` bouge au rendu : le recréer à chaque rendu ferait perdre le focus
+       à chaque frappe (c'est la raison d'être des champs mm, construits ici aussi). */
+    const colsI = FormControls.number(st.cols, { min: 1, max: LabelLayout.MAX_SHEET_COLUMNS, step: 1 });
+    const colsHolder = mmField(t("dialog.cols"), colsI);
+    const colsMaxHint = document.createElement("span"); colsMaxHint.className = "label-print-max";
+    colsHolder.appendChild(colsMaxHint);
     sheetBox.appendChild(colsHolder);
     const cutsToggle = FormControls.toggle(t("dialog.cuts"), st.cuts, (v) => { st.cuts = v; render(); }, { block: true });
     cutsToggle.style.marginTop = "8px";
@@ -335,20 +343,14 @@ export class LabelPrintDialog {
 
       // Colonnes de planche : reconstruites à chaque rendu (le plafond dépend du gabarit).
       if (vis.showSheetSection) {
-        // Choix OFFERTS = ceux que le papier accepte (`LabelLayout.columnChoices`), plus
-        // ceux qu'on fige ici. La liste était écrite en dur `[2, 3, 4]` : depuis que la
-        // cellule épouse l'étiquette, une planche de manchons en loge 6 — et une étiquette
-        // de baie n'en accepte qu'UNE, choix que la liste figée ne savait pas exprimer.
-        const choices = LabelLayout.columnChoices(sp);
-        const maxCols = choices[choices.length - 1] || 1;
-        const effective = Math.min(st.cols, maxCols);
-        colsHolder.innerHTML = "";
-        colsHolder.appendChild(FormControls.segmented(
-          choices.map((n) => ({ value: String(n), label: t("dialog.cols", { n }) })),
-          String(effective),
-          (v) => { st.cols = parseInt(v, 10) || maxCols; render(); },
-          { ariaLabel: t("dialog.sheet") },
-        ));
+        // Le PLAFOND dépend du gabarit : seul `max` bouge, le champ lui-même est conservé
+        // (le recréer coûterait le focus à chaque frappe).
+        const maxCols = LabelLayout.maxColumns(sp);
+        const effective = Math.max(1, Math.min(st.cols, maxCols));
+        if (effective !== st.cols) st.cols = effective;
+        colsI.max = String(maxCols);
+        if (document.activeElement !== colsI) colsI.value = String(effective);
+        colsMaxHint.textContent = t("dialog.colsMax", { max: maxCols });
       }
 
       // Avertissements (codes purs → libellés).
@@ -395,6 +397,18 @@ export class LabelPrintDialog {
     sizeSel.onchange = () => { st.size = (sizeSel.value as LabelSizeId) || LabelPrintPolicy.defaultSizeFor(ctx.kind); render(); };
     const numInput = (input: HTMLInputElement, apply: (v: number) => void) => {
       input.oninput = () => { const v = parseFloat(input.value); if (Number.isFinite(v) && v > 0) { apply(v); render(); } };
+    };
+    /* Colonnes : borné À LA SAISIE. `numInput` ne convient pas — il accepte tout entier positif
+       et le plafond, lui, dépend du gabarit courant (il change quand on change de format). Un champ
+       VIDE (l'utilisateur efface avant de retaper) n'écrase rien : on attend un nombre. */
+    colsI.oninput = () => {
+      const typed = parseInt(colsI.value, 10);
+      if (!Number.isFinite(typed)) return;
+      const maxCols = LabelLayout.maxColumns(spec());
+      const clamped = Math.max(1, Math.min(typed, maxCols));
+      st.cols = clamped;
+      if (String(clamped) !== colsI.value) colsI.value = String(clamped);
+      render();
     };
     numInput(cwI, (v) => { st.customW = v; });
     numInput(chI, (v) => { st.customH = v; });

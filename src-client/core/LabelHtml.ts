@@ -70,6 +70,24 @@ export class LabelHtml {
       raccord), la dernière case portant `fold` pour marquer le pli d'un filet
       plus sombre — même géométrie, autre couleur.
       La typographie COMPACTE se resserre en fin de feuille (`.lab.compact`).
+      🚨 TYPOGRAPHIE STABLE À L'IMPRESSION (retour terrain 2026-08-25 : « l'espacement
+      entre les chiffres n'est pas constant, contrairement à l'aperçu »). C'est bien le
+      MÊME HTML et le MÊME CSS des deux côtés — mais le navigateur REFAIT la mise en page
+      contre les métriques de l'imprimante, et deux choses dérivaient alors :
+        · `system-ui`/`ui-monospace` sont des familles RÉSOLUES PAR LE SYSTÈME : rien ne
+          garantit que le chemin d'impression tombe sur la même police que l'écran, et une
+          autre police = d'autres chasses. Les piles nomment donc des familles CONCRÈTES ;
+        · les avances de glyphes sont ARRONDIES aux points de l'imprimante, et
+          `letter-spacing:-.02em` (fractionnaire, négatif) s'arrondissait différemment
+          d'une paire à l'autre — d'où des chiffres inégalement espacés. Le crénage est
+          désormais nul, `text-rendering:geometricPrecision` demande des avances EXACTES
+          plutôt qu'ajustées à la grille, et `font-variant-numeric:tabular-nums` impose des
+          chiffres de largeur ÉGALE même si une police proportionnelle finit par gagner.
+      🚨 TRAITS DE COUPE SOLIDES (et non pointillés) : un pointillé de 0,2 mm produit une
+      cinquantaine de tirets par bord, dont le rasteur d'impression en escamote — c'est le
+      « les traits sautent par endroits » du terrain, invisible à l'écran. Un trait plein ne
+      peut pas sauter, et ses segments se raccordent sans décalage de phase d'une cellule à
+      l'autre. On perd la convention « pointillé = à découper », on gagne un repère fiable.
       🚨 `print-color-adjust:exact` sur `.label-render` (retour terrain 2026-08-25) :
       sans lui, le navigateur SUPPRIME à l'impression tout ce qui est une IMAGE DE
       FOND — et les zones de recouvrement des manchons/drapeaux sont hachurées par
@@ -79,13 +97,13 @@ export class LabelHtml {
       garantit du même coup que les gris (#333/#444/#666/#999) ne soient pas
       « optimisés » par le pilote. */
   static readonly CSS = `
-.label-render{--lp-mono:ui-monospace,"SF Mono","Menlo","Consolas","Cascadia Mono","Roboto Mono",monospace;--lp-sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;color:#000;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.label-render{--lp-mono:"Consolas","DejaVu Sans Mono","Liberation Mono","Menlo","Courier New",monospace;--lp-sans:"Segoe UI","Helvetica Neue","DejaVu Sans","Liberation Sans",Arial,sans-serif;color:#000;-webkit-print-color-adjust:exact;print-color-adjust:exact;text-rendering:geometricPrecision;font-variant-ligatures:none;font-kerning:none;font-variant-numeric:tabular-nums}
 .label-render *{box-sizing:border-box}
 .label-render .lab{background:#fff;color:#000;display:flex;align-items:center;overflow:hidden;font-family:var(--lp-sans)}
 .label-render .lab *{color:#000}
 .label-render .lab svg{flex:none;display:block}
 .label-render .lab .txt{min-width:0;display:flex;flex-direction:column;gap:.6mm}
-.label-render .lab .l-id{font-family:var(--lp-mono);font-weight:700;line-height:1.08;letter-spacing:-.02em;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow-wrap:anywhere}
+.label-render .lab .l-id{font-family:var(--lp-mono);font-weight:700;line-height:1.08;letter-spacing:0;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow-wrap:anywhere}
 .label-render .lab .l-loc{font-family:var(--lp-mono);line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .label-render .lab .l-meta{line-height:1.15;color:#333;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .label-render .lab .l-sn{font-family:var(--lp-mono);color:#444;line-height:1.1}
@@ -95,7 +113,7 @@ export class LabelHtml {
 .label-render .lab.m .l-id{font-size:8.5pt}.label-render .lab.m .l-loc{font-size:7pt}.label-render .lab.m .l-meta{font-size:6pt}.label-render .lab.m .l-sn{font-size:5.5pt}.label-render .lab.m .l-own{font-size:5.5pt}
 .label-render .lab.l .l-id{font-size:12pt}.label-render .lab.l .l-loc{font-size:9pt}.label-render .lab.l .l-meta{font-size:7.5pt}.label-render .lab.l .l-sn{font-size:7pt}.label-render .lab.l .l-own{font-size:7pt}
 .label-render .lab.rack{align-items:center}
-.label-render .lab.rack .l-id{font-size:26pt;letter-spacing:-.03em}
+.label-render .lab.rack .l-id{font-size:26pt;letter-spacing:0}
 .label-render .lab.rack .l-loc{font-size:12pt;white-space:normal}
 .label-render .lab.rack .l-meta{font-size:9pt}.label-render .lab.rack .l-sn{font-size:8pt}.label-render .lab.rack .l-own{font-size:9pt}
 .label-render .lab.qronly{justify-content:center;flex-direction:column}
@@ -118,7 +136,7 @@ export class LabelHtml {
 .label-render .lab.compact .txt{gap:.2mm}
 .label-render .lab.compact .rule{margin:.4mm 0}
 .label-render .a4{width:210mm;height:297mm;background:#fff;padding:8mm;display:grid;gap:0;align-content:start;justify-content:start}
-.label-render .a4 .cell{box-sizing:content-box;border:0 dashed #999;border-right-width:.2mm;border-bottom-width:.2mm;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.label-render .a4 .cell{box-sizing:content-box;border:0 solid #999;border-right-width:.2mm;border-bottom-width:.2mm;display:flex;align-items:center;justify-content:center;overflow:hidden}
 .label-render .a4 .cell.cut-t{border-top-width:.2mm}
 .label-render .a4 .cell.cut-l{border-left-width:.2mm}
 .label-render .a4 .cell.nocut{border-width:0}

@@ -289,6 +289,19 @@ module.exports = async () => {
        arrivait au contact du trait (l'enfant est peint APRÈS la bordure de son parent). */
     ck(doc.includes(".label-render .a4 .cell{box-sizing:content-box"), "la cellule est en content-box : le trait ne mord pas sur l'étiquette");
     ck(doc.includes("justify-content:start"), "grille calée à GAUCHE (sinon les pistes `auto` s'étirent, et le 1fr revient)");
+    /* 🚨 Traits de coupe SOLIDES : un pointillé de 0,2 mm fait ~50 tirets par bord, dont le
+       rasteur d'impression escamote — « les traits sautent par endroits », invisible à l'écran. */
+    ck(doc.includes(".a4 .cell{box-sizing:content-box;border:0 solid"), "traits de coupe SOLIDES (un pointillé saute à l'impression)");
+    ck(!/\.a4 \.cell\{[^}]*dashed/.test(doc), "…plus aucun pointillé sur la cellule");
+    /* 🚨 Typographie STABLE à l'impression : le navigateur refait la mise en page contre les
+       métriques de l'imprimante. Familles CONCRÈTES (`system-ui`/`ui-monospace` sont résolues par
+       le système, donc pas forcément la même police des deux côtés), avances EXACTES, chiffres de
+       largeur ÉGALE, et plus aucun crénage fractionnaire négatif (il s'arrondissait par paire). */
+    ck(!doc.includes("system-ui") && !doc.includes("ui-monospace"), "aucune famille RÉSOLUE PAR LE SYSTÈME dans les piles");
+    ck(doc.includes("text-rendering:geometricPrecision"), "avances de glyphes EXACTES, non ajustées à la grille");
+    ck(doc.includes("font-variant-numeric:tabular-nums"), "chiffres de largeur ÉGALE quelle que soit la police retenue");
+    ck(doc.includes("font-kerning:none"), "crénage désactivé");
+    ck(!/letter-spacing:-/.test(doc), "aucun crénage fractionnaire NÉGATIF (il s'arrondissait différemment par paire)");
     ck(doc.includes("T&lt;est&gt;"), "titre du document échappé");
   });
 

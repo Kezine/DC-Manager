@@ -3296,6 +3296,9 @@
     color: var(--fg); font-family: var(--mono); font-size: 13px; padding: 8px 10px; outline: none;
   }
   .label-print-mm-field input:focus { border-color: var(--accent); }
+  /* Plafond rappelé sous le champ « Colonnes » de la planche (« max 6 ») : il dépend du gabarit,
+     donc l'afficher évite de faire deviner pourquoi la saisie se borne. */
+  .label-print-max { font-size: 9px; letter-spacing: 0; text-transform: none; color: var(--fg-dimmer); }
   .label-print-warn { font-family: var(--sans); font-size: 12px; color: var(--warn); border-left: 2px solid var(--warn); padding: 2px 0 2px 10px; }
   .label-print-preview { display: flex; flex-direction: column; gap: 10px; min-width: 0; background: var(--bg-3); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
   .label-print-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-dim); }

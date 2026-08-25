@@ -400,7 +400,11 @@ pagination silencieuse au-delà d'une feuille (le compteur l'annonce). ⚠ Sur u
 s'étire dans sa **cellule** de grille (colonne `cell` de la table — M : 48×33, d'où « 4 × 8 = 32 par
 feuille » alors que la cote nominale est 50 mm) ; le plafond de colonnes se calcule sur la CELLULE.
 
-**Colonnes** : la liste des choix est DÉDUITE de la capacité réelle (`LabelLayout.columnChoices`)
+**Colonnes** : un **champ numérique borné** (`min:1`, `max` = capacité réelle du gabarit), et non un
+contrôle segmenté — celui-ci est une rangée de boutons, faite pour 3 ou 4 choix, alors qu'une planche
+peut en accepter 8. Le champ est construit **une fois** et seul son `max` bouge au rendu : le recréer
+coûterait le focus à chaque frappe. La capacité vient de `LabelLayout.maxColumns` (`columnChoices`
+reste disponible pour un contrôle à choix discrets)
 — elle n'est plus figée à `[2, 3, 4]` dans l'UI. Depuis que la cellule épouse l'étiquette, une
 planche de manchons en loge 6 ; à l'inverse une étiquette de baie n'en accepte qu'**une**, choix
 que la liste figée ne savait pas exprimer. `MAX_SHEET_COLUMNS` (8) est une borne d'**interface**
@@ -513,6 +517,23 @@ posent une. C'était la cause première du retour terrain.
 >   les traits se dessinent en dehors d'elle.
 > Effet de bord assumé : les traits ajoutent ≤ 0,2 mm par cellule (~1 mm sur une rangée de 5), pris
 > sur la marge de 8 mm de la page, jamais sur l'étiquette.
+>
+> **Suite — pourquoi « le même HTML » ne suffit pas.** Deux défauts restaient, tous deux nés du fait
+> que le navigateur **refait la mise en page contre les métriques de l'imprimante** : « HTML direct »
+> ne veut pas dire « mêmes pixels ».
+> · **Traits qui sautent.** Un pointillé de 0,2 mm produit une cinquantaine de tirets par bord, et le
+>   rasteur d'impression en escamote — invisible à l'écran, criant sur le papier. Les traits sont
+>   désormais **SOLIDES** : un trait plein ne peut pas sauter, et ses segments se raccordent sans
+>   décalage de phase d'une cellule à l'autre. On perd la convention « pointillé = à découper », on
+>   gagne un repère fiable.
+> · **Chiffres inégalement espacés.** Deux causes cumulées : `system-ui` et `ui-monospace` sont des
+>   familles **résolues par le système** — rien ne garantit que le chemin d'impression retienne la
+>   même police que l'écran, et une autre police a d'autres chasses ; et `letter-spacing:-.02em`,
+>   fractionnaire et négatif, s'arrondissait différemment d'une paire de glyphes à l'autre une fois
+>   les avances ramenées aux points de l'imprimante. Les piles nomment maintenant des familles
+>   **concrètes**, le crénage est nul, `text-rendering:geometricPrecision` demande des avances
+>   **exactes** plutôt qu'ajustées à la grille, et `font-variant-numeric:tabular-nums` impose des
+>   chiffres de **largeur égale** même si une police proportionnelle finit par gagner.
 
 
 Les QR viennent de `GET <dataBase>/qr/:collection/:id?format=svg` (`RestAdapter.qrSvg` — fetch
