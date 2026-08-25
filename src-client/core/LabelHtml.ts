@@ -22,6 +22,7 @@
 
 import { Html } from "./Html";
 import { LabelLayout } from "./LabelLayout";
+import { LabelOrientation } from "./LabelOrientation";   // repère d'orientation des manchons « identifiant seul »
 import type { LabelSpec } from "./LabelLayout";
 
 /** Épaisseur du trait de coupe, en mm — LUE dans `LabelLayout` (source unique). Le CSS
@@ -171,6 +172,7 @@ export class LabelHtml {
 .label-render .lab.cable.strip .cell2{flex:none;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:1mm 0;overflow:hidden;border-right:.2mm dashed #ccc;writing-mode:vertical-rl}
 .label-render .lab.cable.strip .cell2.fold{border-right-color:#999}
 .label-render .lab.cable.strip .cell2 .l-id{font-size:8pt;letter-spacing:0;display:block;white-space:nowrap;text-overflow:ellipsis;max-width:100%}
+.label-render .lab.cable.strip .cell2 .l-id.flip{text-decoration:underline;text-decoration-thickness:.4mm;text-underline-offset:.35mm;text-decoration-skip-ink:none}
 .label-render .lab.cable.strip .cell2 .l-loc,.label-render .lab.cable.strip .cell2 .l-own{font-size:5pt;white-space:normal;overflow-wrap:anywhere;text-align:start;max-height:100%}
 .label-render .lab.cable.strip .ov{flex:none;background:repeating-linear-gradient(45deg,#fff 0 1mm,#e9e9e9 1mm 2mm)}
 .label-render .lab.compact .txt{gap:.2mm}
@@ -225,10 +227,18 @@ export class LabelHtml {
         // reste réparti. Seule la dernière ajoute `fold` : le filet qui la termine borne la
         // partie visible (là où le manchon commence à se recouvrir), d'où sa couleur plus
         // sombre ; c'est aussi pour ça que `.ov` n'a plus de bordure gauche (double trait).
+        /* REPÈRE D'ORIENTATION (retour terrain 2026-08-25) : ce format ne porte QUE le
+           numéro, répété autour du câble — rien n'indique le sens de lecture, et un manchon
+           posé à l'envers fait lire `168` comme `891`. On souligne alors l'identifiant.
+           Réservé à « identifiant seul » : le « repère complet » affiche A/B et le type,
+           dont le sens de lecture est évident (décision utilisateur). Et réservé aux
+           identifiants RÉELLEMENT ambigus — cf. `LabelOrientation`, qui écarte aussi bien
+           `1234` (illisible retourné) que `689` (qui se relit à l'identique). */
+        const flipRisk = idOnly && LabelOrientation.isAmbiguous(subject.name);
         let cells = "";
         for (let i = 0; i < count; i++) {
           cells += `<div class="cell2${i === count - 1 ? " fold" : ""}" style="width:${cellW}mm">`
-            + `<div class="l-id">${esc(subject.name)}</div>${extra}</div>`;
+            + `<div class="l-id${flipRisk ? " flip" : ""}">${esc(subject.name)}</div>${extra}</div>`;
         }
         return `<div class="lab cable strip${cp ? " compact" : ""}" style="width:${mm(g.w)}mm;height:${mm(g.h)}mm">${cells}<div class="ov" style="width:${mm(g.overlap)}mm"></div></div>`;
       }

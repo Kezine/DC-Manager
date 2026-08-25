@@ -414,6 +414,38 @@ que la liste figée ne savait pas exprimer. `MAX_SHEET_COLUMNS` (8) est une born
 **Unitaire** : page à la taille EXACTE de l'étiquette (`@page size` → imprimantes à rouleau
 Brother/Dymo, sans découpe).
 
+### Repère d'orientation des manchons « identifiant seul » (`core/LabelOrientation`)
+
+Ce format ne porte **que** le numéro, répété autour du câble : aucun mot n'y donne le sens de
+lecture. Un manchon posé à l'envers fait donc lire `168` comme `891` — un identifiant parfaitement
+plausible, et le seul cas où l'on peut débrancher le mauvais câble **en ayant lu correctement**.
+L'identifiant est alors **souligné**.
+
+**Le déclencheur n'est pas « que des chiffres »**, qui attrape trop et trop peu :
+
+| Identifiant | Retourné | Souligné ? | Pourquoi |
+|---|---|---|---|
+| `168` | `891` | **oui** | deux lectures plausibles — le vrai piège |
+| `1234` | *(illisible)* | non | `2/3/4` n'ont pas d'image : on voit que c'est à l'envers |
+| `689` | `689` | non | **strobogrammatique** — se relit à l'identique, aucune erreur possible |
+| `SW-01` | *(illisible)* | non | un mot latin retourné se reconnaît instantanément |
+
+Le critère est donc « **tous** les caractères ont une image par rotation (`0 1 6 8 9`, plus le tiret)
+**et** la lecture retournée **diffère** de l'originale ». Le souligné porte alors une information —
+« celui-ci est retournable » — au lieu d'être un ornement posé partout.
+
+Choix de conception :
+
+- **Souligné** plutôt qu'un point final ou un préfixe : sur un manchon, la ressource rare est la
+  longueur le long du câble (cf. l'avertissement `sleeve-tight`) — un souligné ne coûte **aucune**
+  largeur. C'est aussi la convention établie pour les chiffres ambigus.
+- **Épaisseur posée en mm** (`0,4`), jamais l'automatique : à 8 pt un souligné auto ferait ~0,5 px et
+  disparaîtrait selon l'arrondi — exactement le piège sous-pixel des traits de coupe.
+- `text-decoration` plutôt qu'une bordure physique : le texte est en `writing-mode: vertical-rl`, le
+  soulignement doit suivre le mode d'écriture et non un côté physique deviné.
+- **« Identifiant seul » uniquement** (décision utilisateur) : le « repère complet » affiche déjà les
+  extrémités A/B et le type, dont le sens de lecture est évident.
+
 ### Décisions du cadrage E (amendent la maquette)
 
 - **« Société propriétaire » = le champ `equipments.owner`** (lot E1), PAS une saisie d'impression

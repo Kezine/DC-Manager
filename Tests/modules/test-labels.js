@@ -25,6 +25,7 @@ module.exports = async () => {
   const { LabelHtml } = D("core/LabelHtml.js");
   const { LabelPrintPolicy } = D("core/LabelPrintPolicy.js");
   const { LabelSubjects } = D("core/LabelSubjects.js");
+  const { LabelOrientation } = D("core/LabelOrientation.js");
 
   /* Réglage de base : gabarit M, QR + texte, compact — les défauts de la modale. */
   const spec = (over = {}) => Object.assign({
@@ -32,6 +33,48 @@ module.exports = async () => {
     qr: 20, custom: { w: 50, h: 25 }, dia: 6, len: 25, hasOwner: false,
   }, over);
   const near = (a, b, eps = 0.01) => Math.abs(a - b) <= eps;
+
+  await section("labels : LabelOrientation — l'identifiant se lit-il autrement à 180° ?", async () => {
+    /* Le manchon « identifiant seul » ne porte QUE le numéro : posé à l'envers, `168` se lit
+       `891`. Mais « que des chiffres » attrape trop et trop peu — cf. l'en-tête du module. */
+    ck(LabelOrientation.isAmbiguous("168"), "168 → 891 : DEUX lectures plausibles, c'est le piège");
+    ck(LabelOrientation.isAmbiguous("106"), "106 → 901");
+    ck(LabelOrientation.isAmbiguous("16-89"), "le tiret est invariant : 16-89 → 68-91");
+    // Illisible une fois retourné ⇒ aucune ambiguïté : le technicien VOIT que c'est à l'envers.
+    ck(!LabelOrientation.isAmbiguous("1234"), "1234 : 2/3/4 n'ont pas d'image → aucun risque");
+    ck(!LabelOrientation.isAmbiguous("SW-01"), "identifiant à lettres → aucun risque");
+    ck(!LabelOrientation.isAmbiguous("25"), "2 et 5 ne se répondent qu'en afficheur à segments");
+    // STROBOGRAMMATIQUES : se relisent à l'IDENTIQUE, donc aucune erreur possible non plus.
+    ck(!LabelOrientation.isAmbiguous("689"), "689 se relit 689 (strobogrammatique)");
+    ck(!LabelOrientation.isAmbiguous("88"), "88 se relit 88");
+    ck(!LabelOrientation.isAmbiguous("0"), "0 seul");
+    ck(!LabelOrientation.isAmbiguous("69"), "69 se relit 69");
+    ck(!LabelOrientation.isAmbiguous(""), "vide : rien à retourner");
+    // La rotation inverse l'ORDRE autant qu'elle transforme les glyphes.
+    ck.eq(LabelOrientation.rotated("168"), "891", "la rotation inverse aussi l'ordre de lecture");
+    ck.eq(LabelOrientation.rotated("1234"), null, "un caractère sans image → pas de lecture retournée");
+    // 🚨 `1` est INCLUS à dessein : l'inclure ÉLARGIT l'ensemble jugé ambigu, donc protège plus.
+    ck.eq(LabelOrientation.rotated("1"), "1", "1 a une image (choix conservateur, cf. en-tête)");
+  });
+
+  await section("labels : repère d'orientation du manchon « identifiant seul »", async () => {
+    const allFields = { location: true, type: true, serial: true, owner: true };
+    const cable = { collection: "cables", id: "c1", name: "168", endA: "A", endB: "B", typeLabel: "Cat6a" };
+    const sleeveId = spec({ size: "cable", content: "id", dia: 6, len: 25 });
+    const risky = LabelHtml.label(cable, sleeveId, allFields, "");
+    ck(risky.includes('class="l-id flip"'), "identifiant ambigu → souligné sur TOUTES les cases du tour");
+    ck.eq((risky.match(/l-id flip/g) || []).length, (risky.match(/cell2/g) || []).length, "…une case soulignée par répétition, sans exception");
+    // Un identifiant sans risque ne porte AUCUNE marque : le souligné doit rester porteur de sens.
+    ck(!LabelHtml.label({ ...cable, name: "689" }, sleeveId, allFields, "").includes("flip"), "689 (se relit pareil) : pas de marque");
+    ck(!LabelHtml.label({ ...cable, name: "SW-01" }, sleeveId, allFields, "").includes("flip"), "identifiant à lettres : pas de marque");
+    // 🚨 Décision utilisateur : le « repère complet » porte déjà A/B et le type — le sens de
+    // lecture y est donné par les mots, la marque n'a pas lieu d'être.
+    ck(!LabelHtml.label(cable, spec({ size: "cable", content: "strip", dia: 6, len: 25 }), allFields, "").includes("flip"), "manchon « repère complet » : jamais de marque");
+    ck(!LabelHtml.label(cable, spec({ size: "cable", content: "full" }), allFields, "").includes("flip"), "drapeau : jamais de marque");
+    // Épaisseur EXPLICITE : un souligné automatique à 8 pt ferait ~0,5 px et disparaîtrait
+    // selon l'arrondi — exactement le piège sous-pixel des traits de coupe.
+    ck(LabelHtml.CSS.includes("text-decoration-thickness:.4mm"), "épaisseur du souligné posée en mm, jamais laissée à l'automatique");
+  });
 
   await section("labels : LabelPrintPolicy — le sujet SOUS-ÉQUIPEMENT (anatomie du spare)", async () => {
     // Pendant exact d'isFlagKind : la POLITIQUE ne distingue pas spare et sous-équipement.
