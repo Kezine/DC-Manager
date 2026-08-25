@@ -117,8 +117,8 @@ export class LabelHtml {
 .label-render .lab.cable.strip .ov{flex:none;background:repeating-linear-gradient(45deg,#fff 0 1mm,#e9e9e9 1mm 2mm)}
 .label-render .lab.compact .txt{gap:.2mm}
 .label-render .lab.compact .rule{margin:.4mm 0}
-.label-render .a4{width:210mm;height:297mm;background:#fff;padding:8mm;display:grid;gap:0;align-content:start}
-.label-render .a4 .cell{border:0 dashed #999;border-right-width:.2mm;border-bottom-width:.2mm;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.label-render .a4{width:210mm;height:297mm;background:#fff;padding:8mm;display:grid;gap:0;align-content:start;justify-content:start}
+.label-render .a4 .cell{box-sizing:content-box;border:0 dashed #999;border-right-width:.2mm;border-bottom-width:.2mm;display:flex;align-items:center;justify-content:center;overflow:hidden}
 .label-render .a4 .cell.cut-t{border-top-width:.2mm}
 .label-render .a4 .cell.cut-l{border-left-width:.2mm}
 .label-render .a4 .cell.nocut{border-width:0}
@@ -215,8 +215,25 @@ export class LabelHtml {
 
   /** UNE page de planche A4 : en-tête hors zone (source · compte/date) + grille de
       cellules. `cellsHtml` = étiquettes de CETTE page (≤ perPage), déjà rendues aux
-      cotes de la cellule. `cuts` = traits de coupe pointillés (désactivables). */
-  static sheetPage(cellsHtml: string[], layout: { cols: number; cellH: number }, opts: { source: string; headRight: string; cuts: boolean }): string {
+      cotes de la cellule. `cuts` = traits de coupe pointillés (désactivables).
+
+      🚨 LE RECTANGLE DE COUPE ÉPOUSE L'ÉTIQUETTE (retour terrain 2026-08-25). Deux
+      défauts tenaient à la même cause — la cellule n'avait pas la taille de ce qu'elle
+      contient :
+        · les colonnes étaient en `1fr`, donc larges de 194/cols mm quelle que soit
+          l'étiquette. Un manchon de 28 mm se retrouvait CENTRÉ dans une colonne de
+          65 mm : couper sur les traits laissait deux bandes de papier mort. On pose
+          donc la LARGEUR RÉELLE de la cellule et des colonnes `auto`, la grille étant
+          calée à gauche (`justify-content:start` — sans quoi des pistes `auto`
+          s'étirent pour remplir la page, et le `1fr` reviendrait par la bande) ;
+        · en `border-box`, le trait de 0,2 mm était PRIS SUR la cellule : le contenu ne
+          faisait plus que 24,8 mm pour une étiquette de 25, qui débordait donc et
+          arrivait au contact du trait (l'étiquette est peinte APRÈS la bordure de son
+          parent). D'où `content-box` : la cote posée est celle de l'étiquette, et les
+          traits se dessinent EN DEHORS d'elle.
+      Effet de bord assumé : les traits ajoutent ≤ 0,2 mm par cellule, soit ~1 mm sur
+      une rangée de 5 — pris sur la marge de 8 mm de la page, jamais sur l'étiquette. */
+  static sheetPage(cellsHtml: string[], layout: { cols: number; cellW: number; cellH: number }, opts: { source: string; headRight: string; cuts: boolean }): string {
     const esc = Html.escape;
     /* 🚨 TRAITS DE COUPE — UN trait par ARÊTE, jamais deux (retour terrain 2026-08-25 :
        « les lignes de découpe ne sont pas dessinées correctement »). Une bordure sur les
@@ -232,9 +249,9 @@ export class LabelHtml {
       const edges = opts.cuts
         ? " " + [index < layout.cols ? "cut-t" : "", index % layout.cols === 0 ? "cut-l" : ""].filter(Boolean).join(" ")
         : " nocut";
-      return `<div class="cell${edges.trimEnd()}" style="height:${+layout.cellH.toFixed(2)}mm">${c}</div>`;
+      return `<div class="cell${edges.trimEnd()}" style="width:${+layout.cellW.toFixed(2)}mm;height:${+layout.cellH.toFixed(2)}mm">${c}</div>`;
     }).join("");
-    return `<div class="a4" style="grid-template-columns:repeat(${layout.cols},1fr)">`
+    return `<div class="a4" style="grid-template-columns:repeat(${layout.cols},auto)">`
       + `<div class="a4-head"><span>${esc(opts.source)}</span><span>${esc(opts.headRight)}</span></div>${cells}</div>`;
   }
 

@@ -490,6 +490,21 @@ posent une. C'était la cause première du retour terrain.
 >    **un trait par arête** — chaque cellule ne peint que son bord droit et son bord bas, la première
 >    rangée et la première colonne ajoutant le pourtour manquant (`cut-t`/`cut-l`, posés par
 >    `LabelHtml.sheetPage` qui seul connaît `cols` et l'index).
+>
+> **Suite (même journée) — le rectangle de coupe ÉPOUSE l'étiquette.** Deux défauts restants tenaient
+> à la même cause : la cellule n'avait pas la taille de ce qu'elle contient.
+> · Les colonnes étaient en **`1fr`**, donc larges de 194/cols mm quelle que soit l'étiquette — un
+>   manchon de 28 mm se retrouvait centré dans une colonne de 65 mm, et couper sur les traits laissait
+>   deux bandes de papier mort. La cellule porte désormais sa **largeur réelle**, les pistes sont en
+>   `auto` et la grille est calée à gauche (`justify-content:start` — sans quoi des pistes `auto`
+>   s'étirent pour remplir la page et le `1fr` revient par la bande).
+> · En **`border-box`**, le trait de 0,2 mm était **pris sur la cellule** : son contenu tombait à
+>   24,8 mm pour une étiquette de 25, qui débordait donc et arrivait au contact du trait — or un
+>   enfant est peint APRÈS la bordure de son parent, d'où un trait masqué sur la largeur de
+>   l'étiquette. La cellule est passée en **`content-box`** : la cote posée est celle de l'étiquette,
+>   les traits se dessinent en dehors d'elle.
+> Effet de bord assumé : les traits ajoutent ≤ 0,2 mm par cellule (~1 mm sur une rangée de 5), pris
+> sur la marge de 8 mm de la page, jamais sur l'étiquette.
 
 
 Les QR viennent de `GET <dataBase>/qr/:collection/:id?format=svg` (`RestAdapter.qrSvg` — fetch

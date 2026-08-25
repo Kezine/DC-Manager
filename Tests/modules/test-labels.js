@@ -239,15 +239,20 @@ module.exports = async () => {
     // ×6 figé AVANT le retour terrain ; le compte est désormais DÉDUIT du Ø (4 cases à Ø 6).
     ck.eq((LabelHtml.label(cable, spec({ size: "cable", content: "id" }), allFields, "").match(/cell2/g) || []).length, 4, "manchon identifiant seul à Ø 6 : 4 cases sur le tour");
     // Planche + document d'impression.
-    const page = LabelHtml.sheetPage(["<i>a</i>", "<i>b</i>"], { cols: 4, cellH: 33 }, { source: "Baie B12 · contenu", headRight: "2 étiquettes", cuts: true });
-    ck(page.includes("grid-template-columns:repeat(4,1fr)") && page.includes("a4-head"), "planche : grille + en-tête hors zone");
+    const page = LabelHtml.sheetPage(["<i>a</i>", "<i>b</i>"], { cols: 4, cellW: 48, cellH: 33 }, { source: "Baie B12 · contenu", headRight: "2 étiquettes", cuts: true });
+    ck(page.includes("grid-template-columns:repeat(4,auto)") && page.includes("a4-head"), "planche : grille + en-tête hors zone");
+    /* 🚨 Le rectangle de coupe ÉPOUSE l'étiquette (retour terrain 2026-08-25) : des colonnes
+       `1fr` faisaient 194/cols mm quelle que soit l'étiquette, un manchon de 28 mm s'y
+       retrouvait centré dans 65 mm — couper sur les traits laissait du papier mort. */
+    ck(page.includes("width:48mm;height:33mm"), "la cellule porte la LARGEUR réelle, pas seulement la hauteur");
+    ck(!page.includes("1fr"), "…et plus aucune piste `1fr` qui étirerait la cellule");
     ck(!page.includes("nocut"), "traits de coupe actifs par défaut");
-    ck(LabelHtml.sheetPage(["x"], { cols: 2, cellH: 20 }, { source: "s", headRight: "r", cuts: false }).includes("nocut"), "traits de coupe désactivables");
+    ck(LabelHtml.sheetPage(["x"], { cols: 2, cellW: 30, cellH: 20 }, { source: "s", headRight: "r", cuts: false }).includes("nocut"), "traits de coupe désactivables");
     /* 🚨 TRAITS DE COUPE : UN trait par ARÊTE (retour terrain 2026-08-25). Une bordure sur
        les 4 côtés faisait se toucher le bord droit d'une cellule et le bord gauche de la
        suivante — trait intérieur deux fois plus épais que le pourtour, et pointillés
        déphasés. Seules la 1re RANGÉE et la 1re COLONNE peignent le bord manquant. */
-    const grid = LabelHtml.sheetPage(["a", "b", "c", "d", "e"], { cols: 2, cellH: 20 }, { source: "s", headRight: "r", cuts: true });
+    const grid = LabelHtml.sheetPage(["a", "b", "c", "d", "e"], { cols: 2, cellW: 30, cellH: 20 }, { source: "s", headRight: "r", cuts: true });
     const cellClasses = (grid.match(/class="cell[^"]*"/g) || []).map((c) => c.slice(7, -1).trim());
     ck.eq(cellClasses.join(" | "), "cell cut-t cut-l | cell cut-t | cell cut-l | cell | cell cut-l", "coin, 1re rangée, 1re colonne — le reste nu");
     ck.eq((grid.match(/cut-t/g) || []).length, 2, "le bord HAUT n'est peint que par la 1re rangée (2 colonnes)");
@@ -262,6 +267,11 @@ module.exports = async () => {
        sortaient BLANCHES alors qu'elles s'affichaient à l'aperçu. */
     ck(doc.includes("print-color-adjust:exact"), "les fonds hachurés sont IMPRIMÉS (print-color-adjust)");
     ck(doc.includes("-webkit-print-color-adjust:exact"), "…avec le préfixe -webkit- (Safari/Chrome anciens)");
+    /* 🚨 `content-box` sur la cellule : en `border-box`, le trait de coupe de 0,2 mm était PRIS
+       SUR elle — le contenu tombait à 24,8 mm pour une étiquette de 25, qui débordait et
+       arrivait au contact du trait (l'enfant est peint APRÈS la bordure de son parent). */
+    ck(doc.includes(".label-render .a4 .cell{box-sizing:content-box"), "la cellule est en content-box : le trait ne mord pas sur l'étiquette");
+    ck(doc.includes("justify-content:start"), "grille calée à GAUCHE (sinon les pistes `auto` s'étirent, et le 1fr revient)");
     ck(doc.includes("T&lt;est&gt;"), "titre du document échappé");
   });
 
