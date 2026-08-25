@@ -287,12 +287,19 @@ module.exports = async () => {
     /* 🚨 `content-box` sur la cellule : en `border-box`, le trait de coupe de 0,2 mm était PRIS
        SUR elle — le contenu tombait à 24,8 mm pour une étiquette de 25, qui débordait et
        arrivait au contact du trait (l'enfant est peint APRÈS la bordure de son parent). */
-    ck(doc.includes(".label-render .a4 .cell{box-sizing:content-box"), "la cellule est en content-box : le trait ne mord pas sur l'étiquette");
+    ck(doc.includes(".label-render .a4 .cell{position:relative;box-sizing:content-box"), "la cellule est en content-box (cote = celle de l'étiquette) et sert d'ancre au trait");
     ck(doc.includes("justify-content:start"), "grille calée à GAUCHE (sinon les pistes `auto` s'étirent, et le 1fr revient)");
     /* 🚨 Traits de coupe SOLIDES : un pointillé de 0,2 mm fait ~50 tirets par bord, dont le
        rasteur d'impression escamote — « les traits sautent par endroits », invisible à l'écran. */
-    ck(doc.includes(".a4 .cell{box-sizing:content-box;border:0 solid"), "traits de coupe SOLIDES (un pointillé saute à l'impression)");
-    ck(!/\.a4 \.cell\{[^}]*dashed/.test(doc), "…plus aucun pointillé sur la cellule");
+    /* 🚨 Le trait est porté par un ::after ABSOLU, pas par la bordure de la cellule : une BORDURE se
+       peint dans la couche « fond/bordure du parent », donc SOUS son contenu — le blanc de l'étiquette
+       (ou les bandes #fff du dégradé hachuré) la recouvrait à l'impression. Un pseudo-élément positionné
+       se peint APRÈS le contenu en flux : plus rien ne peut le masquer. */
+    ck(doc.includes(".a4 .cell::after{content:\"\";position:absolute"), "le trait de coupe est une couche POSÉE PAR-DESSUS l'étiquette");
+    ck(doc.includes("border:0 solid #999"), "traits SOLIDES (un pointillé se raccorde mal d'une cellule à l'autre)");
+    ck(!/\.a4 \.cell\{[^}]*border/.test(doc), "…et la cellule elle-même ne porte PLUS de bordure (elle passerait sous le contenu)");
+    ck(!/\.a4 \.cell\{[^}]*overflow:hidden/.test(doc), "…ni overflow:hidden, qui rognerait le débord du trait");
+    ck(doc.includes(".a4 .cell.nocut::after{content:none}"), "traits désactivables : la couche entière disparaît");
     /* 🚨 Typographie STABLE à l'impression : le navigateur refait la mise en page contre les
        métriques de l'imprimante. Familles CONCRÈTES (`system-ui`/`ui-monospace` sont résolues par
        le système, donc pas forcément la même police des deux côtés), avances EXACTES, chiffres de

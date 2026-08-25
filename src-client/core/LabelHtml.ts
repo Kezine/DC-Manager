@@ -83,11 +83,24 @@ export class LabelHtml {
           désormais nul, `text-rendering:geometricPrecision` demande des avances EXACTES
           plutôt qu'ajustées à la grille, et `font-variant-numeric:tabular-nums` impose des
           chiffres de largeur ÉGALE même si une police proportionnelle finit par gagner.
-      🚨 TRAITS DE COUPE SOLIDES (et non pointillés) : un pointillé de 0,2 mm produit une
-      cinquantaine de tirets par bord, dont le rasteur d'impression en escamote — c'est le
-      « les traits sautent par endroits » du terrain, invisible à l'écran. Un trait plein ne
-      peut pas sauter, et ses segments se raccordent sans décalage de phase d'une cellule à
-      l'autre. On perd la convention « pointillé = à découper », on gagne un repère fiable.
+      🚨 TRAITS DE COUPE — DESSINÉS PAR-DESSUS, et solides. Trois passes ont été
+      nécessaires, la bonne leçon est la dernière :
+        · pointillés → SOLIDES : un pointillé de 0,2 mm fait ~50 tirets par bord et se
+          raccorde mal d'une cellule à l'autre. Un trait plein ne peut pas sauter. Ça n'a
+          PAS suffi — le terrain a re-signalé des interruptions avec des traits pleins ;
+        · 🚨 la vraie cause : une BORDURE se peint dans la couche « fond/bordure du
+          parent », donc SOUS le contenu de ce parent. Tout fond opaque de l'étiquette (le
+          blanc de `.lab`, les bandes `#fff` du dégradé hachuré des zones de recouvrement)
+          passe par-dessus dès qu'un arrondi de rendu le fait déborder d'un point — d'où
+          des trous À L'IMPRESSION seulement, et tombant pile sur les hachures.
+          `content-box` avait éloigné le trait de l'étiquette sans le mettre HORS DE PORTÉE.
+        · d'où le trait porté par un `::after` ABSOLU : un pseudo-élément positionné se
+          peint APRÈS tout le contenu en flux du parent — plus rien ne peut le recouvrir,
+          quelle que soit la façon dont l'étiquette déborde. Il chevauche le pourtour
+          (`right/bottom:-.2mm`, plus `top`/`left` sur la 1re rangée/colonne) donc la
+          géométrie ne bouge pas d'un iota.
+      ⚠ Corollaire : `.cell` n'a PLUS `overflow:hidden` (il rognerait ce débord). C'est sans
+      risque — `.lab` clippe déjà son propre contenu et sa cote est CELLE de la cellule.
       🚨 `print-color-adjust:exact` sur `.label-render` (retour terrain 2026-08-25) :
       sans lui, le navigateur SUPPRIME à l'impression tout ce qui est une IMAGE DE
       FOND — et les zones de recouvrement des manchons/drapeaux sont hachurées par
@@ -136,10 +149,11 @@ export class LabelHtml {
 .label-render .lab.compact .txt{gap:.2mm}
 .label-render .lab.compact .rule{margin:.4mm 0}
 .label-render .a4{width:210mm;height:297mm;background:#fff;padding:8mm;display:grid;gap:0;align-content:start;justify-content:start}
-.label-render .a4 .cell{box-sizing:content-box;border:0 solid #999;border-right-width:.2mm;border-bottom-width:.2mm;display:flex;align-items:center;justify-content:center;overflow:hidden}
-.label-render .a4 .cell.cut-t{border-top-width:.2mm}
-.label-render .a4 .cell.cut-l{border-left-width:.2mm}
-.label-render .a4 .cell.nocut{border-width:0}
+.label-render .a4 .cell{position:relative;box-sizing:content-box;display:flex;align-items:center;justify-content:center}
+.label-render .a4 .cell::after{content:"";position:absolute;top:0;left:0;right:-.2mm;bottom:-.2mm;border:0 solid #999;border-right-width:.2mm;border-bottom-width:.2mm;pointer-events:none}
+.label-render .a4 .cell.cut-t::after{top:-.2mm;border-top-width:.2mm}
+.label-render .a4 .cell.cut-l::after{left:-.2mm;border-left-width:.2mm}
+.label-render .a4 .cell.nocut::after{content:none}
 .label-render .a4-head{display:flex;justify-content:space-between;font-family:var(--lp-mono);font-size:6pt;color:#666;grid-column:1/-1;padding-bottom:2mm}
 .label-render .a4-head span{color:#666}
 .label-render .unit{background:#fff;display:flex;align-items:flex-start;justify-content:flex-start}

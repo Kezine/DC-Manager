@@ -521,11 +521,19 @@ posent une. C'était la cause première du retour terrain.
 > **Suite — pourquoi « le même HTML » ne suffit pas.** Deux défauts restaient, tous deux nés du fait
 > que le navigateur **refait la mise en page contre les métriques de l'imprimante** : « HTML direct »
 > ne veut pas dire « mêmes pixels ».
-> · **Traits qui sautent.** Un pointillé de 0,2 mm produit une cinquantaine de tirets par bord, et le
->   rasteur d'impression en escamote — invisible à l'écran, criant sur le papier. Les traits sont
->   désormais **SOLIDES** : un trait plein ne peut pas sauter, et ses segments se raccordent sans
->   décalage de phase d'une cellule à l'autre. On perd la convention « pointillé = à découper », on
->   gagne un repère fiable.
+> · **Traits qui sautent.** Passés en **SOLIDE** d'abord (un pointillé de 0,2 mm fait ~50 tirets par
+>   bord et se raccorde mal d'une cellule à l'autre) — ce qui n'a **pas suffi** : le terrain a
+>   re-signalé des interruptions avec des traits pleins, tombant pile sur les zones hachurées.
+>   🚨 **La vraie cause** : une **bordure** se peint dans la couche « fond/bordure du parent », donc
+>   **sous** le contenu de ce parent. Tout fond opaque de l'étiquette — le blanc de `.lab`, les bandes
+>   `#fff` du dégradé hachuré — passe par-dessus dès qu'un arrondi de rendu le fait déborder d'un
+>   point ; d'où des trous **à l'impression seulement**. Passer la cellule en `content-box` avait
+>   éloigné le trait de l'étiquette sans le mettre **hors de portée**. Le trait est donc désormais
+>   porté par un **`::after` absolu** : un pseudo-élément positionné se peint **après** tout le
+>   contenu en flux du parent, plus rien ne peut le recouvrir. Il chevauche le pourtour
+>   (`right`/`bottom: -.2mm`, plus `top`/`left` sur la 1re rangée/colonne), donc la géométrie ne bouge
+>   pas. Corollaire : `.cell` perd `overflow:hidden` (il rognerait ce débord) — sans risque, `.lab`
+>   clippe déjà son propre contenu et sa cote est celle de la cellule.
 > · **Chiffres inégalement espacés.** Deux causes cumulées : `system-ui` et `ui-monospace` sont des
 >   familles **résolues par le système** — rien ne garantit que le chemin d'impression retienne la
 >   même police que l'écran, et une autre police a d'autres chasses ; et `letter-spacing:-.02em`,
