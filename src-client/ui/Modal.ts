@@ -1,5 +1,7 @@
 import { Notify } from "./Notify";
 import { Icons } from "./Icons";
+import { Clipboard } from "./Clipboard";
+import { AppLink } from "../../src-shared/AppLink";
 import { Dialog } from "./Dialog";
 import { Fullscreen } from "./Fullscreen";
 import { OverlayA11y } from "./OverlayA11y";
@@ -33,6 +35,13 @@ export interface ModalOptions {
       LES FORMULAIRES N'EN FOURNISSENT PAS : leur DOM est conservé tel quel, donc la SAISIE en
       cours survit — c'est le défaut sain, on ne perd jamais de frappe par omission. */
   onResume?: () => void;
+  /** Clé d'ADRESSE de l'objet affiché, pour le bouton « copier le lien » de l'en-tête — À NE
+      FOURNIR QUE pour surcharger la dérivation. Par défaut le lien est DÉRIVÉ de `stackKey`
+      (`src-shared/AppLink.fromStackKey`), qui EST déjà l'adresse des fiches : aucune des 21 fiches du
+      document n'a une ligne à écrire, et le bouton ne peut pas être oublié quelque part.
+      Fournir cette clé sert au cas — pas encore rencontré — où l'identité de PILE et l'adresse
+      PUBLIQUE d'une modale devraient diverger. Une chaîne vide FORCE l'absence de bouton. */
+  shareKey?: string;
   /** Clé d'IDENTITÉ du niveau, pour la dédup des BOUCLES de navigation (décision D5). Rouvrir une
       fiche déjà présente dans la pile (fiche A → fiche liée B → A) REDESCEND jusqu'à elle au lieu
       d'empiler un doublon — la profondeur revient à celle de la première visite, avec un contenu
@@ -68,6 +77,9 @@ interface ModalLevel extends ModalStackEntry {
   title: string;
   /** Clé d'identité (fiches seulement) — dédup des boucles, cf. `ModalStack.indexOfKey` (D5). */
   stackKey?: string;
+  /** Clé d'ADRESSE retenue pour ce niveau (explicite si fournie, sinon `stackKey`) — CONSERVÉE au
+      push/pop comme le corps : le bouton de l'en-tête reflète toujours le niveau AU PREMIER PLAN. */
+  shareKey: string;
   titleText: string;
   subtitleHtml: string;
   bodyEl: HTMLElement;
@@ -165,6 +177,13 @@ export class Modal {
       pas un raccourci temporaire. */
   fullscreenShortcut: { active: () => boolean; toggle: () => void } | null = null;
 
+  /** CONTEXTE des liens directs, posé par `main.ts` (même patron d'accroche que `editLocked` et
+      `fullscreenShortcut`, et pour la même raison : `Modal` n'a pas à connaître le mode de données ni
+      le document courant). `docId()` est RELU à chaque ouverture — une bascule de document change
+      l'adresse des objets affichés. Tant qu'aucune accroche n'est posée, le bouton NE SE REND PAS
+      (robustesse + tests headless), exactement comme le raccourci plein écran. */
+  linkContext: { docId: () => string | null; baseUrl: () => string } | null = null;
+
   private overlay!: HTMLElement;
   private elTitle!: HTMLElement;
   private elSubtitle!: HTMLElement;
@@ -179,6 +198,9 @@ export class Modal {
   private btnBack!: HTMLButtonElement;
   /** Bouton du RACCOURCI plein écran (cf. `fullscreenShortcut`) — masqué tant qu'aucune accroche n'est posée. */
   private btnFs!: HTMLButtonElement;
+  /** Bouton « copier le lien » — masqué sur toute modale qui ne désigne pas un OBJET (réglages,
+      panier, viseur de scan, infos utilisateur, et TOUS les formulaires d'édition). */
+  private btnLink!: HTMLButtonElement;
   /** LA pile : politique dans `core/ModalStack` (pure, testée), état DOM ici. */
   private readonly stack = new ModalStack<ModalLevel>();
   /** Verrou de défilement pris + déclencheur mémorisé ? (armé à la 1re ouverture, rendu à la dernière.) */
@@ -200,6 +222,7 @@ export class Modal {
             <div class="modal-title"></div><div class="modal-subtitle"></div>
           </div></div>
           <div class="modal-header-actions">
+            <button type="button" class="modal-link" aria-label="${I18n.t("ui.modal.copyLink")}" title="${I18n.t("ui.modal.copyLink")}">${Icons.LINK}</button>
             <button type="button" class="modal-fs" aria-label="${I18n.t("shell.settings.modalFs")}" title="${I18n.t("shell.settings.modalFs")}" aria-pressed="false">${Icons.FULLSCREEN}</button>
             <button type="button" class="modal-back" aria-label="${I18n.t("ui.action.back")}">${Icons.BACK}</button>
             <button type="button" class="modal-close" aria-label="${I18n.t("ui.action.close")}">${Icons.CLOSE}</button>
@@ -224,6 +247,11 @@ export class Modal {
     this.btnCancel = overlay.querySelector(".modal-cancel") as HTMLButtonElement;
     this.btnBack = overlay.querySelector(".modal-back") as HTMLButtonElement;
     this.btnFs = overlay.querySelector(".modal-fs") as HTMLButtonElement;
+    this.btnLink = overlay.querySelector(".modal-link") as HTMLButtonElement;
+    // Le lien est recalculé au CLIC, pas à la peinture : entre l'ouverture et le geste, le document
+    // courant a pu changer (bascule de document par un autre lien), et c'est l'adresse de MAINTENANT
+    // qu'on veut dans le presse-papiers.
+    this.btnLink.onclick = () => { void this._copyLink(); };
     // Rôles ARIA : boîte = dialogue modal, nommée par son titre (ID stable généré une fois).
     const titleId = OverlayA11y.nextId("dcm-modal-title");
     this.elTitle.id = titleId;
@@ -340,6 +368,7 @@ export class Modal {
     const previous = this.stack.at(this.stack.depth() - 2);
     this.btnBack.title = previous ? previous.title : I18n.t("ui.action.cancel");
     this._syncFullscreenButton();
+    this._syncLinkButton(level);
   }
 
   /** Reflète le RACCOURCI plein écran à chaque peinture d'un niveau : bouton MASQUÉ tant qu'aucune accroche
@@ -353,8 +382,35 @@ export class Modal {
     if (sc) this.btnFs.setAttribute("aria-pressed", sc.active() ? "true" : "false");
   }
 
+  /** Cible du lien direct de ce niveau, ou `null` s'il n'en a pas. Tout est RELU ici : l'accroche,
+      le document courant, et la traduction de la clé — rien n'est mémorisé sur le niveau, qui peut
+      être resté ouvert pendant une bascule de document. */
+  private _linkTargetOf(level: ModalLevel) {
+    const ctx = this.linkContext;
+    if (!ctx || !level.shareKey) return null;
+    return AppLink.fromStackKey(level.shareKey, ctx.docId() || "");
+  }
+
+  /** Reflète le bouton « copier le lien » à chaque peinture : présent SI ET SEULEMENT SI le niveau
+      affiché désigne un objet adressable. C'est ce qui fait qu'il n'apparaît jamais là où il n'y
+      aurait rien à partager — donc aucune promesse non tenue (cf. `AppLink.STACK_KEY_FORMS`). */
+  private _syncLinkButton(level: ModalLevel): void {
+    this.btnLink.style.display = this._linkTargetOf(level) ? "" : "none";
+  }
+
+  /** Copie l'URL d'accès du niveau AU PREMIER PLAN. La synchronisation d'onglet (`?vue=1`) est posée
+      PAR DÉFAUT — décision A1 : celui qui partage un objet veut que le destinataire arrive dessus,
+      dans son contexte, pas au-dessus de l'onglet où il se trouvait. Les étiquettes QR, elles, ne
+      portent pas le paramètre et gardent donc leur comportement d'avant le chantier. */
+  private async _copyLink(): Promise<void> {
+    const level = this.stack.top();
+    const target = level ? this._linkTargetOf(level) : null;
+    if (!target) return;   // bouton masqué : ce chemin ne se produit pas, mais on ne copie pas du vide
+    await Clipboard.copy(AppLink.build(this.linkContext!.baseUrl(), AppLink.withViewSync(target)), I18n.t("app.deepLink.copied"));
+  }
+
   open(opts: ModalOptions): void {
-    const { title, subtitle, body, onSave, onCancel, onClose, onResume, stackKey, hideFooter, footerActions, saveLabel, confirmClose, wide, onReady } = opts;
+    const { title, subtitle, body, onSave, onCancel, onClose, onResume, stackKey, shareKey, hideFooter, footerActions, saveLabel, confirmClose, wide, onReady } = opts;
     if (this.editLocked && !hideFooter) return;   // viewer : bloque l'édition
     // Un `open` déclenché PENDANT le `onResume` d'un niveau le REMPLACE (il se reconstruit sur
     // place) au lieu d'en empiler un de plus. Le drapeau est CONSOMMÉ ici : un second `open` dans le
@@ -397,7 +453,12 @@ export class Modal {
     else { const covered = this.stack.top(); if (covered) covered.focusAtPush = (document.activeElement as HTMLElement) || null; }
 
     const level: ModalLevel = {
-      kind, title: "", stackKey, titleText: title || "—", subtitleHtml: subtitle || "",
+      kind, title: "", stackKey,
+      // ADRESSE du niveau : l'explicite PRIME, sinon on dérive de la clé de pile. `?? ""` et non
+      // `|| ""` : une chaîne vide fournie EXPRÈS doit rester un refus de bouton, pas retomber sur
+      // la dérivation.
+      shareKey: shareKey ?? stackKey ?? "",
+      titleText: title || "—", subtitleHtml: subtitle || "",
       bodyEl: body,
       footerActions: Array.isArray(footerActions) ? footerActions : [],
       hideFooter: !!hideFooter, wide: !!wide, saveLabel: saveLabel || I18n.t("ui.action.save"),

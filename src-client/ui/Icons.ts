@@ -98,6 +98,12 @@ export class Icons {
   /** Démarrer / lancer (mise en cours d'une intervention…) : triangle « play ». */
   static readonly PLAY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4.5l12 7.5-12 7.5z"/></svg>';
 
+  /** COPIER LE LIEN d'accès direct à l'objet affiché (en-tête des modales d'info, chantier « liens
+      directs ») : maillon de chaîne. Intention DISTINCTE d'EXPORT (télécharger un fichier) et de CLONE
+      (dupliquer un objet) : ici on met une ADRESSE dans le presse-papiers, rien ne sort ni ne se crée.
+      Le libellé de l'action reste dans son `aria-label`/tooltip — le dessin ne dit pas « copier ». */
+  static readonly LINK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13.5a4 4 0 0 0 5.7.4l3-3a4 4 0 0 0-5.7-5.7l-1.7 1.7"/><path d="M14 10.5a4 4 0 0 0-5.7-.4l-3 3a4 4 0 0 0 5.7 5.7l1.7-1.7"/></svg>';
+
   /** Rechercher : loupe. Icône INTÉGRÉE au champ de recherche des barres de listing (revue design lot C). */
   static readonly SEARCH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>';
 

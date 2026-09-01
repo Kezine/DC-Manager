@@ -93,6 +93,18 @@ export class AppLink {
       (un lien tronqué ou bricolé ne doit pas activer une navigation par accident). */
   static readonly PARAM_VIEW = "vue";
 
+  /** Document du MODE FICHIER, qui n'a pas d'identifiant : « le document EST le fichier ».
+      La grammaire, elle, exige un segment `doc/<docId>/` non vide — d'où cette sentinelle, plutôt
+      qu'une forme d'URL de plus à parser et à tester.
+
+      Elle est SANS RISQUE de collision : un document serveur est toujours `doc-<uuid>`
+      (`src-server/src/documents.ts`). Et elle est SANS CONSÉQUENCE à la relecture en mode fichier,
+      où le `docId` est de toute façon IGNORÉ (arbitrage n°1 du chantier QR).
+      ⚠ Un lien produit en mode fichier puis collé dans une instance SERVEUR échouera donc — sur un
+      message honnête (« document visé inaccessible »), pas en silence. C'est l'écart assumé de la
+      décision A7 : le bouton reste offert partout, et un lien local vaut pour le poste local. */
+  static readonly LOCAL_DOC = "local";
+
   /* ==========================================================================
      LECTURE
      ========================================================================== */

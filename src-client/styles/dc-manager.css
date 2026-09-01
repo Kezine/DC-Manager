@@ -1566,8 +1566,11 @@
   .modal-header-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
   /* `.modal-fs` = RACCOURCI d'ergonomie (2026-07-31), PROBABLEMENT TEMPORAIRE : bascule « Modales en plein
      écran » dans l'en-tête, MÊME facture que ← / ✕. Le RETIRER = supprimer `.modal-fs` de ces trois blocs
-     (base, hover, masquage responsive) et le bouton côté Modal.ts — rien d'autre. */
-  .modal-close, .modal-back, .modal-fs {
+     (base, hover, masquage responsive) et le bouton côté Modal.ts — rien d'autre.
+     `.modal-link` = « copier le lien vers cet élément » (chantier « liens directs », 2026-09-01), MÊME
+     facture lui aussi. Il n'est PAS masqué en responsive, à dessein : partager l'objet qu'on a sous les
+     yeux est justement un geste de TERRAIN, fait depuis un téléphone en salle. */
+  .modal-close, .modal-back, .modal-fs, .modal-link {
     background: transparent;
     border: 1px solid var(--line-2);
     color: var(--fg-dim);
@@ -1579,7 +1582,7 @@
     padding: 0;
     flex: 0 0 auto;
   }
-  .modal-close:hover, .modal-back:hover, .modal-fs:hover { color: var(--fg); border-color: var(--fg); }
+  .modal-close:hover, .modal-back:hover, .modal-fs:hover, .modal-link:hover { color: var(--fg); border-color: var(--fg); }
   /* État ACTIF du raccourci (plein écran en cours) : cadre plein pour le distinguer d'un coup d'œil. */
   .modal-fs[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
   .modal-body { padding: 20px; flex: 1 1 auto; min-height: 0; overflow-y: auto; }

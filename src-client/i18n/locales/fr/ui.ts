@@ -36,6 +36,7 @@ export const ui = {
     confirmCloseConfirm: "Fermer",
     confirmCloseCancel: "Continuer l'édition",
     editingToast: "Vous éditez « {{title}} »…",
+    copyLink: "Copier le lien vers cet élément",
   },
   dialog: {
     confirmTitle: "Confirmation",

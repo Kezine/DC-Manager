@@ -253,6 +253,21 @@ async function boot(): Promise<void> {
   const handleStore = new HandleStore();
 
   const modal = new Modal();
+  // LIENS DIRECTS — contexte du bouton « copier le lien » de l'en-tête des modales (cf. `ui/Modal`,
+  // docs/liens-directs.md). Accroche posée ici, comme `editLocked` : `Modal` n'a ainsi à connaître ni
+  // le mode de données ni le document courant. Les deux fermetures sont RELUES à chaque copie.
+  //   · `docId` — en mode fichier, le document n'a PAS d'identifiant (« le document EST le fichier ») :
+  //     on pose la sentinelle partagée `AppLink.LOCAL_DOC`, que la relecture ignore de toute façon dans
+  //     ce mode (arbitrage n°1 du chantier QR). ⚠ Fermeture sur `rest`, déclaré plus bas : légale, ces
+  //     rappels ne s'exécutent qu'au clic.
+  //   · `baseUrl` — l'URL COURANTE, débarrassée de son hash ET de sa query par `AppLink.baseOf`
+  //     (décision A3). C'est l'adresse par laquelle l'utilisateur accède RÉELLEMENT, donc celle qui
+  //     marchera pour son collègue ; `PUBLIC_BASE_URL` reste réservée au QR imprimé, qui doit, lui,
+  //     survivre hors de l'application.
+  modal.linkContext = {
+    docId: () => (REST_MODE ? (rest ? rest.docId : null) : AppLink.LOCAL_DOC),
+    baseUrl: () => (typeof location !== "undefined" ? AppLink.baseOf(location.href) : ""),
+  };
   // `markDirty` : garde « modifications non enregistrées » du NIVEAU de modale, pour les éditeurs SANS
   // champ de saisie (la chaîne de route) que l'instantané de `Modal` ne peut pas voir bouger.
   const formHost: FormHost = { openModal: (o) => modal.open(o), closeModal: () => modal.close(), refreshModal: () => modal.refresh(), markDirty: () => modal.markDirty(), setDirty: () => { refreshChrome(); }, autocompleteLimit: () => prefs.autocompleteMaxResults, userDirectory };   // mutation modèle déjà suivie par la révision (store.onChange) ; userDirectory : résout les auteurs d'audit (mode API)

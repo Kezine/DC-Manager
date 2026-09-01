@@ -29,6 +29,7 @@ export const ui = {
     confirmCloseMessage: "The unsaved changes in this form will be lost.",
     confirmCloseConfirm: "Close",
     confirmCloseCancel: "Keep editing",
+    copyLink: "Copy the link to this item",
     editingToast: "You are editing « {{title}} »…",
   },
   dialog: {
