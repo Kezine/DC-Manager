@@ -18,4 +18,14 @@ export class EquipFaces {
 
   /** Une face est-elle annexe (dessus/dessous/gauche/droite) ? */
   static isAnnex(f: string): boolean { return EQUIP_ANNEX_FACE_IDS.includes(f); }
+
+  /** Face DIAMÉTRALEMENT opposée (front⇄rear, top⇄bottom, left⇄right).
+      Sert quand un demi-tour s'applique à l'objet porteur et non à la face : un équipement monté à
+      l'ARRIÈRE d'une baie a sa façade tournée vers l'arrière, donc sa face « avant » se regarde
+      depuis l'arrière de la baie (cf. `DcInteract.aimAtPort`). Une face inconnue est normalisée
+      d'abord — l'opposé d'un défaut « front » reste donc « rear », jamais `undefined`. */
+  static opposite(f: string): string {
+    const paires: Record<string, string> = { front: "rear", rear: "front", top: "bottom", bottom: "top", left: "right", right: "left" };
+    return paires[EquipFaces.norm(f)];
+  }
 }

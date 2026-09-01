@@ -441,7 +441,18 @@ export class CableForms extends EquipmentForms {
         host.setDirty?.(true); Notify.toast(cable ? I18n.t("cable.cable.updated") : (max !== CABLE_STATUS_DRAFT ? I18n.t("cable.cable.created") : I18n.t("cable.cable.draftCreated"))); onSaved?.(); return true;
       },
     });
-    setTimeout(() => (cable ? nameI : selEqA).focus(), 30);
+    // FOCUS D'OUVERTURE : le premier champ NON RENSEIGNÉ, jamais un champ qu'on vient de remplir pour
+    // l'utilisateur (retour terrain T7, 2026-09-01). La règle historique était « édition → le nom ;
+    // création → l'équipement A » : juste pour une création à froid, FAUSSE dès que le formulaire arrive
+    // PRÉ-REMPLI — ce que fait exactement le traçage de route, qui pose les DEUX bouts (`RouteTool.finish`
+    // → `fromPortId`/`toPortId`). L'utilisateur atterrissait alors sur un champ déjà rempli pendant que le
+    // seul champ vide — le nom — n'avait pas le focus. Formulée ainsi, la règle reste juste pour les
+    // ouvertures pré-remplies qu'on n'a pas encore inventées (clic de port, affectation d'un brouillon).
+    // ⚠ CONSÉQUENCE ASSUMÉE : une création À FROID (tout est vide) focalise désormais le NOM et non plus
+    // l'équipement A — c'est le premier champ vide du formulaire, et c'est déjà ce que fait l'édition.
+    const champsDansLOrdre: Array<{ value: string; focus: () => void }> = [nameI, selEqA, selPortA, selEqB, selPortB];
+    const premierVide = champsDansLOrdre.find((c) => !String(c.value || "").trim());
+    setTimeout(() => (premierVide || nameI).focus(), 30);
   }
 
   /** Faisceau / trunk : créé À L'AVANCE (nom + type + nb de brins) entre 2 PATCHS. Ses fibres sont piochées

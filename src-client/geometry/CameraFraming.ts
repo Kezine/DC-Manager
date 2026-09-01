@@ -77,4 +77,63 @@ export class CameraFraming {
     const narrowing = (viewAspect > 0 && viewAspect < 1) ? viewAspect : 1;
     return framed / 2 / narrowing;
   }
+
+  /* ---------------------------------------------------------------------------
+     VISÉE PAR FACE — « de quel côté la caméra doit-elle se placer pour VOIR
+     cette face-là ? » (correctif T1, 2026-09-01)
+
+     POURQUOI CETTE RÈGLE EXISTE. « Localiser » un port cadrait le bon POINT mais
+     sous le mauvais ANGLE : l'azimut se déduisait du CÔTÉ DE MONTAGE de
+     l'équipement (`rack_side === "rear"`), jamais de la FACE que porte le port.
+     Localiser un port de face ARRIÈRE sur un équipement monté à l'AVANT plaçait
+     donc la caméra devant — le port visé étant, littéralement, derrière elle.
+
+     La règle est PURE et vit ici pour la même raison que le reste du module
+     (`docs/placement.md` §3 règle 4) : elle ne prend que des nombres et un nom
+     de face, elle n'en rend que deux. La vue ne fait qu'appliquer.
+
+     CONVENTION D'AZIMUT — reprise À L'IDENTIQUE de `DcInteract.frontAzimuth`,
+     qui reste l'origine de la formule : `atan2(-s·cos o, s·sin o)`, où `s = +1`
+     regarde la face AVANT et `s = -1` la face ARRIÈRE. On ne la redémontre pas,
+     on la NOMME — et les faces latérales s'en déduisent par un quart de tour.
+     --------------------------------------------------------------------------- */
+
+  /** Élévation (rad) d'une visée VERTICALE — face `top` (on regarde vers le bas) ou
+      `bottom` (vers le haut). Pas tout à fait ±90° : une verticale parfaite supprime
+      tout repère de profondeur et rend la vue illisible (on ne sait plus où est
+      l'avant). 70° laissent la face pleinement visible en gardant ce repère. */
+  static readonly FACE_ELEVATION_RAD = (70 * Math.PI) / 180;
+
+  /** Visée `{az, el}` pour VOIR la face `faceSide` d'un objet orienté à `orientationDeg`.
+      `faceSide` suit `EQUIP_FACE_IDS` (front/rear + top/bottom/left/right pour un libre) ;
+      toute valeur inconnue retombe sur `front` — un cadrage approximatif vaut mieux qu'un
+      refus, et c'est le comportement d'avant ce correctif.
+
+      ⚠ `orientationDeg` est l'orientation de l'OBJET QUI PORTE LA GÉOMÉTRIE (la baie pour un
+      équipement monté, l'équipement lui-même pour un libre) : composer les deux est l'affaire
+      de l'appelant, pas la nôtre.
+
+      ⚠ Une LANE de breakout n'a pas de face propre — elle émerge du connecteur de son TRUNK
+      (cf. `Resolver3D`) : c'est donc la face du TRUNK qu'on passe ici. Même règle qu'au dessin,
+      au même endroit, pour que les deux ne puissent pas diverger. */
+  static faceAim(orientationDeg: number, faceSide: string): { az: number; el: number } {
+    const o = (((orientationDeg | 0) % 360) + 360) % 360;
+    const rad = (o * Math.PI) / 180;
+    // Verticales : l'azimut garde celui de la façade (le repère avant/arrière reste lisible),
+    // seule l'élévation bascule — positive pour plonger sur le dessus, négative pour lever
+    // les yeux vers le dessous.
+    if (faceSide === "top" || faceSide === "bottom") {
+      const front = CameraFraming.horizontalAim(rad, 1);
+      return { az: front.az, el: faceSide === "top" ? CameraFraming.FACE_ELEVATION_RAD : -CameraFraming.FACE_ELEVATION_RAD };
+    }
+    // Latérales : un quart de tour depuis la façade, dans un sens puis l'autre.
+    if (faceSide === "left") return CameraFraming.horizontalAim(rad + Math.PI / 2, 1);
+    if (faceSide === "right") return CameraFraming.horizontalAim(rad - Math.PI / 2, 1);
+    return CameraFraming.horizontalAim(rad, faceSide === "rear" ? -1 : 1);
+  }
+
+  /** Cœur trigonométrique commun (cf. la convention ci-dessus). `sens` : +1 avant, −1 arrière. */
+  private static horizontalAim(rad: number, sens: number): { az: number; el: number } {
+    return { az: Math.atan2(-sens * Math.cos(rad), sens * Math.sin(rad)), el: CameraFraming.FOCUS_ELEVATION_RAD };
+  }
 }

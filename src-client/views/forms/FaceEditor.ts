@@ -29,6 +29,9 @@ import { EquipmentForms } from "./EquipmentForms";   // modale complète de cré
 import { I18n } from "../../i18n/I18n";
 
 export class FaceEditor extends FormBase {
+  /** Mode de pose retenu pour la SESSION (cf. `placeMode` dans `open`) — « 2 clics » au départ. */
+  private static sessionPlaceMode: "auto" | "click" = "click";
+
   /** Éditeur de FAÇADE (sous-éditeur empilé) : pose les ports sur les faces de l'équipement
       (face_x/face_y/face_side) — onglets de face, glisser avec GUIDES d'alignement dynamiques,
       « Tout poser / enlever », palette des ports non posés. `opts.onApply({fids,place})` reporte sur le brouillon du formulaire
@@ -71,7 +74,14 @@ export class FaceEditor extends FormBase {
     // Affichage des ports : "chip" (label SUR le port, défaut) | "leader" (pastille + label déporté relié).
     let portDisplay: "chip" | "leader" = "chip";
     // Pose des ports : "auto" (clic port = pose au centre) | "click" (clic port = active, clic sur la face = pose).
-    let placeMode: "auto" | "click" = "auto";
+    // MODE DE POSE — « 2 clics » PAR DÉFAUT (retour terrain T4, 2026-09-01). Le mode `click` (activer une
+    // pastille de la palette, puis cliquer la face) pose AU POINT VISÉ, avec aimantation `FaceAlign`, aperçu
+    // fantôme et guides ; `auto` pose au centre de la face, sans aimantation. Le second n'était le défaut que
+    // parce qu'il est arrivé le premier — il oblige à re-glisser chaque port après l'avoir posé.
+    // MÉMORISÉ EN SESSION, pas en Prefs (patron `LabelPrintDialog`) : le défaut est une opinion, le choix de
+    // l'utilisateur reste le sien tant que l'onglet vit. Une Prefs persistée reste ouverte si le besoin vient
+    // — elle demanderait de faire descendre les prefs jusqu'ici, ce que rien d'autre ne réclame aujourd'hui.
+    let placeMode: "auto" | "click" = FaceEditor.sessionPlaceMode;
     let activePortId: string | null = null;   // port ACTIVÉ (mode 2 clics) : les autres ports posés deviennent des pastilles de référence.
     const tools = document.createElement("div"); tools.className = "face-toolbar";
     const attachBtn = document.createElement("button"); attachBtn.type = "button"; attachBtn.className = "btn btn-ghost btn-sm"; attachBtn.textContent = I18n.t("face.attachImage");
@@ -398,7 +408,7 @@ export class FaceEditor extends FormBase {
       placeBtn.className = "btn btn-sm " + (placeMode === "click" ? "btn-primary" : "btn-ghost");
       leaderBtn.className = "btn btn-sm " + (portDisplay === "leader" ? "btn-primary" : "btn-ghost");
     };
-    placeBtn.onclick = () => { placeMode = placeMode === "click" ? "auto" : "click"; activePortId = null; syncModes(); render(); };
+    placeBtn.onclick = () => { placeMode = placeMode === "click" ? "auto" : "click"; FaceEditor.sessionPlaceMode = placeMode; activePortId = null; syncModes(); render(); };
     leaderBtn.onclick = () => { portDisplay = portDisplay === "leader" ? "chip" : "leader"; syncModes(); render(); };   // change aussi la marge verticale (bande)
     addAllBtn.onclick = () => { markDirty(); layoutUniform(ports.filter((p) => !place[p.id] || place[p.id].side === side)); render(); };
     removeAllBtn.onclick = () => { markDirty(); ports.forEach((p) => { if (place[p.id] && place[p.id].side === side) delete place[p.id]; }); render(); };

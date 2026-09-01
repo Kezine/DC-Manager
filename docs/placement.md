@@ -869,6 +869,22 @@ nombres et rend un nombre, ce qui la rend testable en Node — le moteur 3D, lui
   constantes sont donc RECALIBRÉES (700 → 1 250, 2 500 → 3 500, 1 200 → 1 900) pour que le monde cadré reste celui
   d'avant à 1,5 % près. Écarté : les reprendre telles quelles — la nouvelle règle aurait resserré ces trois vues
   de 30 à 45 %, alors que le lot ne doit changer que ce qui est signalé.
+- 🐛 **LA FACE VISÉE EST CELLE DU PORT, pas le côté de MONTAGE de son équipement** (correctif T1,
+  2026-09-01). « Localiser » un port déduisait son azimut d'`aimAtEquip`, qui ne connaît que
+  `rack_side` : un port de face **arrière** porté par un équipement monté à l'**avant** était donc
+  cadré depuis l'avant — caméra dos au port. Le POINT visé, lui, a toujours été juste, d'où un
+  symptôme déroutant (« la vue arrive au bon endroit et ne montre rien »). La règle est désormais
+  PURE et nommée — `CameraFraming.faceAim(orientation, face_side)` — et `DcInteract.aimAtPort` la
+  compose avec l'orientation du porteur (la BAIE si l'équipement y est monté, l'équipement sinon),
+  en retournant la face quand l'équipement est monté à l'arrière (sa façade regarde alors l'arrière
+  de la baie : les deux demi-tours se composent, l'ancien code n'en appliquait qu'un).
+  `aimAtEquip` reste l'autorité pour la surbrillance et l'isolement de baie — `aimAtPort` ne lui
+  reprend QUE l'angle. Les faces **latérales** se déduisent par un quart de tour ; les faces
+  **verticales** (équipements libres) basculent l'**élévation** (`FACE_ELEVATION_RAD`, 70°) et non
+  l'azimut — jamais une verticale parfaite, qui supprimerait tout repère de profondeur. Une **lane**
+  de breakout n'ayant pas de face propre, c'est celle de son **trunk** qui commande, comme au dessin.
+  Écarté : viser la normale exacte du connecteur — elle ne dit rien de plus que la face, et ferait
+  dépendre l'angle d'une donnée de rendu.
 - **PLONGÉE par défaut** (`FOCUS_ELEVATION_RAD = π/9`, 20°), extraite de `frontAzimuth` où elle était un littéral.
   Arbitrage : **une face visée GAGNE toujours** (« se positionner en face » est une intention exprimée sur CET objet) ;
   sans face — câble, waypoint, des POINTS sans façade — on **conserve l'azimut** (« de quel côté je regarde » reste un

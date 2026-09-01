@@ -2797,6 +2797,73 @@ module.exports = async () => {
   }
   });
 
+  /* ============================================================================================
+     CameraFraming.faceAim — « de quel côté se placer pour VOIR cette face ? » (correctif T1).
+
+     Le défaut refermé : « Localiser » un port déduisait l'azimut du CÔTÉ DE MONTAGE de son
+     équipement, jamais de la FACE du port — un port de face ARRIÈRE sur un équipement monté à
+     l'AVANT était donc cadré depuis l'avant, caméra dos au port.
+
+     Les attentes sont dérivées À LA MAIN de la convention (face avant = normale (sin o, −cos o),
+     caméra du côté de la normale), jamais de la sortie de l'implémentation. On vérifie surtout
+     l'INVARIANT qui porte le correctif : avant et arrière sont à 180° l'un de l'autre, TOUJOURS.
+     ============================================================================================ */
+  await section("CameraFraming.faceAim : la visée suit la FACE, pas le côté de montage (T1)", async () => {
+  {
+    const TAU = 2 * Math.PI;
+    const ecart = (a, b) => { const d = Math.abs(((a - b) % TAU + TAU + Math.PI) % TAU - Math.PI); return d; };   // écart angulaire signé→absolu
+
+    // ---- l'invariant du correctif : avant ⇄ arrière = demi-tour, à toute orientation ----
+    for (const o of [0, 90, 180, 270]) {
+      const av = CameraFraming.faceAim(o, "front"), ar = CameraFraming.faceAim(o, "rear");
+      ck(Math.abs(ecart(av.az, ar.az) - Math.PI) < 1e-12,
+        "🚨 orientation " + o + "° : « arrière » vise à 180° de « avant » — c'est TOUT le correctif T1");
+      ck.eq(av.el, CameraFraming.FOCUS_ELEVATION_RAD, "orientation " + o + "° : élévation de façade inchangée (avant)");
+      ck.eq(ar.el, CameraFraming.FOCUS_ELEVATION_RAD, "orientation " + o + "° : idem à l'arrière");
+    }
+
+    // ---- PARITÉ avec la formule historique `frontAzimuth` (elle reste l'origine de la convention) ----
+    const historique = (deg, rear) => { const o = deg * Math.PI / 180, s = rear ? -1 : 1; return Math.atan2(-s * Math.cos(o), s * Math.sin(o)); };
+    for (const o of [0, 90, 180, 270]) {
+      ck(Math.abs(ecart(CameraFraming.faceAim(o, "front").az, historique(o, false))) < 1e-12,
+        "orientation " + o + "° : « avant » IDENTIQUE à l'ancienne formule (aucune régression sur le cas courant)");
+      ck(Math.abs(ecart(CameraFraming.faceAim(o, "rear").az, historique(o, true))) < 1e-12,
+        "orientation " + o + "° : « arrière » identique à l'ancien `rear = true`");
+    }
+
+    // ---- faces LATÉRALES : un quart de tour de part et d'autre de la façade ----
+    for (const o of [0, 45, 90, 210]) {
+      const av = CameraFraming.faceAim(o, "front");
+      const g = CameraFraming.faceAim(o, "left"), d = CameraFraming.faceAim(o, "right");
+      ck(Math.abs(ecart(g.az, av.az) - Math.PI / 2) < 1e-12, "orientation " + o + "° : « gauche » à 90° de la façade");
+      ck(Math.abs(ecart(d.az, av.az) - Math.PI / 2) < 1e-12, "orientation " + o + "° : « droite » à 90° de la façade");
+      ck(Math.abs(ecart(g.az, d.az) - Math.PI) < 1e-12, "orientation " + o + "° : gauche et droite sont opposées");
+    }
+
+    // ---- faces VERTICALES : c'est l'ÉLÉVATION qui bascule, pas l'azimut ----
+    const dessus = CameraFraming.faceAim(0, "top"), dessous = CameraFraming.faceAim(0, "bottom");
+    ck.eq(dessus.az, CameraFraming.faceAim(0, "front").az, "« dessus » garde l'azimut de la façade (le repère avant/arrière reste lisible)");
+    ck.eq(dessus.el, CameraFraming.FACE_ELEVATION_RAD, "« dessus » : caméra haute (70°), on plonge sur la face");
+    ck.eq(dessous.el, -CameraFraming.FACE_ELEVATION_RAD, "« dessous » : élévation NÉGATIVE, on regarde vers le haut");
+    ck(CameraFraming.FACE_ELEVATION_RAD < Math.PI / 2,
+      "🚨 jamais une verticale PARFAITE : elle supprimerait tout repère de profondeur (on ne saurait plus où est l'avant)");
+
+    // ---- entrées douteuses : on cadre approximativement plutôt que de refuser ----
+    ck.eq(CameraFraming.faceAim(0, "inconnue").az, CameraFraming.faceAim(0, "front").az, "face inconnue → repli « avant » (comportement d'avant le correctif)");
+    ck.eq(CameraFraming.faceAim(0, "").az, CameraFraming.faceAim(0, "front").az, "face vide → même repli");
+    ck.eq(CameraFraming.faceAim(360, "front").az, CameraFraming.faceAim(0, "front").az, "orientation 360° ≡ 0° (normalisée)");
+    ck.eq(CameraFraming.faceAim(-90, "front").az, CameraFraming.faceAim(270, "front").az, "orientation négative normalisée dans [0,360[");
+
+    // ---- EquipFaces.opposite : la brique du demi-tour « monté à l'arrière » ----
+    ck.eq(EquipFaces.opposite("front"), "rear", "opposite : avant → arrière");
+    ck.eq(EquipFaces.opposite("rear"), "front", "opposite : arrière → avant");
+    ck.eq(EquipFaces.opposite("top"), "bottom", "opposite : dessus → dessous");
+    ck.eq(EquipFaces.opposite("left"), "right", "opposite : gauche → droite");
+    ck.eq(EquipFaces.opposite("nawak"), "rear", "opposite : face inconnue normalisée en « avant » d'abord → « arrière » (jamais undefined)");
+    for (const f of EQUIP_FACE_IDS) ck.eq(EquipFaces.opposite(EquipFaces.opposite(f)), f, "opposite est une INVOLUTION sur « " + f + " »");
+  }
+  });
+
   await section("RackDoorGeometry : débattement des portes de baie (partagé 2D/3D)", async () => {
   {
     const { RackDoorGeometry } = D("geometry/RackDoorGeometry.js");

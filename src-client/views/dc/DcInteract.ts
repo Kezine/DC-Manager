@@ -13,8 +13,10 @@ import { FreeEquipGeometry } from "../../geometry/FreeEquipGeometry";
 // CONTENEUR SALLE : `origin()` donne le centre d'un contenu en local salle — source UNIQUE du repli
 // « position absente ⇒ demi-empreinte » que le cadrage caméra et l'outil de positionnement recopiaient.
 import { PlacementFrame } from "../../geometry/PlacementFrame";
-// Règle de CADRAGE : quelle étendue monde embrasser pour qu'une cible occupe la fraction voulue de la vue.
+// Règle de CADRAGE : quelle étendue monde embrasser pour qu'une cible occupe la fraction voulue de la vue,
+// et sous quel ANGLE se placer pour voir une face donnée (`faceAim` — visée d'un port, cf. `aimAtPort`).
 import { CameraFraming } from "../../geometry/CameraFraming";
+import { EquipFaces } from "../../registries/EquipFaces";   // normalisation + face opposée (visée d'un port)
 import { FloorLayout } from "../../geometry/FloorLayout";
 import { GridGeometry } from "../../geometry/GridGeometry";
 import type { Frame } from "../../geometry/Positioning";
@@ -930,8 +932,35 @@ export abstract class DcInteract extends DcPanels {
       l'élévation vient de `CameraFraming`, source unique de cet angle (le moteur l'applique aussi par défaut
       quand aucune face n'est visée). */
   protected frontAzimuth(orientationDeg: number, rear = false): { az: number; el: number } {
-    const o = Normalize.rackOrientation(orientationDeg) * Math.PI / 180, s = rear ? -1 : 1;
-    return { az: Math.atan2(-s * Math.cos(o), s * Math.sin(o)), el: CameraFraming.FOCUS_ELEVATION_RAD };
+    return CameraFraming.faceAim(Normalize.rackOrientation(orientationDeg), rear ? "rear" : "front");
+  }
+
+  /** Visée d'un PORT : c'est SA FACE qui commande l'angle, pas le côté de MONTAGE de son équipement
+      (correctif T1, 2026-09-01). `aimAtEquip` reste l'autorité pour tout le reste — surbrillance,
+      isolement de la baie, et l'orientation à composer : on ne lui reprend QUE l'azimut/élévation.
+
+      🐛 CE QUI N'ALLAIT PAS. `aimAtEquip` ne connaît que `rack_side` : un port de face ARRIÈRE porté par
+      un équipement monté à l'AVANT était cadré depuis l'avant, caméra dos au port. Le POINT visé, lui,
+      a toujours été juste — d'où un symptôme déroutant : la vue arrive au bon endroit et ne montre rien.
+
+      ⚠ Une LANE de breakout émerge du connecteur de son TRUNK (`Resolver3D`) : c'est donc la face du
+      TRUNK qui commande, comme pour le dessin. Sans ça, une lane sans `face_side` propre retomberait
+      sur « avant » et rouvrirait le défaut pour la moitié des breakouts. */
+  protected aimAtPort(e: any, port: any, dcId: string | null): { az: number; el: number } {
+    const base = this.aimAtEquip(e, dcId);   // surbrillance + isolement de baie : effets de bord CONSERVÉS
+    if (!port) return base;
+    const geo: any = port.parent_port_id ? (this.store.get("ports", port.parent_port_id) || port) : port;
+    const face = EquipFaces.norm(geo.face_side);
+    // ORIENTATION à composer : celle de la BAIE hôte si l'équipement y est monté (sa façade suit la
+    // baie), sinon la sienne — exactement la distinction que fait déjà `aimAtEquip`.
+    const rk: any = this.selRackId ? this.store.get("racks", this.selRackId) : null;
+    const orientation = rk ? rk.orientation : e?.dc_orientation;
+    // Un équipement monté à l'ARRIÈRE d'une baie a sa façade tournée vers l'arrière : sa face « front »
+    // se regarde donc depuis l'arrière de la baie. On compose les deux retournements plutôt que d'en
+    // choisir un — c'est ce que l'ancien code faisait pour l'équipement, il manquait la moitié « port ».
+    const monteArriere = !!rk && e && e.placement_mode === "rack" && e.rack_side === "rear";
+    const faceVisee = monteArriere ? EquipFaces.opposite(face) : face;
+    return CameraFraming.faceAim(Normalize.rackOrientation(orientation), faceVisee);
   }
 
   /** Cible « Localiser » d'une BAIE : son centre en local salle + l'étendue à cadrer. Partagé par
@@ -1081,7 +1110,7 @@ export abstract class DcInteract extends DcPanels {
     // construction, le connecteur affiché et non un point recalculé à côté.
     const pt = this.resolver.resolvePortWorld3D(portId, o.x, o.y, o.baseZ);
     if (!pt) { Notify.toast(I18n.t("dc.interact.portNotFound3d"), "err"); return true; }
-    const face = this.aimAtEquip(e, null);
+    const face = this.aimAtPort(e, this.store.get("ports", portId), null);   // la face DU PORT commande l'angle (T1)
     this.focusPortId = portId;   // le port lui-même est mis en évidence (même ambre que l'équipement)
     this.focusWorld3DAt({ x: pt.x, y: pt.y, z: pt.z }, FOCUS_CONTEXT_PORT_MM, face);
     return true;
@@ -1219,8 +1248,9 @@ export abstract class DcInteract extends DcPanels {
     const dcId = k.id;
     const pt = this.resolver.resolvePort3D(portId, dcId);
     if (!pt) { Notify.toast(I18n.t("dc.interact.portNotFound3d"), "err"); return; }
-    // surbrillance de l'équipement ET du PORT + isolement de sa baie + orientation « en face » ; cadrage serré.
-    const face = e ? this.aimAtEquip(e, dcId) : null;
+    // surbrillance de l'équipement ET du PORT + isolement de sa baie + orientation « en face DU PORT » (T1) ;
+    // cadrage serré.
+    const face = e ? this.aimAtPort(e, p, dcId) : null;
     this.focusPortId = portId;   // le port lui-même est mis en évidence (même ambre que l'équipement)
     this.focus3DAt(dcId, { x: pt.x, y: pt.y, z: pt.z }, FOCUS_CONTEXT_PORT_MM, face);
   }
