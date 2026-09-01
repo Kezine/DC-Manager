@@ -346,20 +346,33 @@ export class ListView {
     this._filterBar?.syncChips();   // la chip retirable : la barre ne voit pas une mutation externe
   }
 
-  /** Oublie la PAGE serveur en main (régime pagé, G4) : le prochain rendu la redemandera. Point d'entrée
-      de l'HÔTE pour le cas que le listing ne peut pas voir tout seul — un événement SSE portant sur une
-      collection chargée PARESSEUSEMENT (G3 saute son rechargement, donc `store.onChange` ne part PAS et
-      le filet de l'abonnement ci-dessus ne joue pas), alors que la page reçue est bel et bien périmée.
-      Ce n'est PAS un contournement de G3 : on ne re-tire pas la collection, on redemande UNE page — ce
-      que le pager fait de toute façon à chaque navigation. No-op hors régime pagé.
+  /** Oublie TOUT ce que ce listing tient du SERVEUR — la PAGE en main (régime pagé, G4) **et** le JEU
+      mémoïsé par signature de requête (régime `rows()` sous recherche/filtre actif). Le prochain rendu
+      redemandera les deux. Point d'entrée de l'HÔTE pour le cas que le listing ne peut pas voir tout
+      seul — un événement SSE portant sur une collection chargée PARESSEUSEMENT (G3 saute son
+      rechargement, donc `store.onChange` ne part PAS et le filet de l'abonnement ci-dessus ne joue pas),
+      alors que ce qu'on affiche est bel et bien périmé.
+
+      🐛 POURQUOI LES DEUX, ET PAS SEULEMENT LA PAGE (correctif T8/Q8.5, 2026-09-01). Cette méthode
+      n'oubliait QUE la page. Or le jeu serveur est mémoïsé PAR SIGNATURE (collection + saisie + cible,
+      cf. `ListRowEngine.forgetRemote`) et une écriture d'un AUTRE client ne change pas cette
+      signature : sous une recherche ou un filtre actif, le listing d'une collection lazy restait donc
+      périmé même après avoir quitté puis rouvert l'onglet — il fallait vider et re-saisir le filtre.
+      C'est le MÊME défaut que le lot R2 a refermé pour les collections hydratées ; le filet
+      d'abonnement (`store.onChange`, plus haut) appelle bien les DEUX depuis R2, celui-ci était resté
+      à mi-chemin. **Les deux chemins font désormais la même chose** — principe n°3.
+
+      Ce n'est TOUJOURS PAS un contournement de G3 : on ne re-tire aucune collection, on redemande une
+      page / une réponse de recherche — ce que le pager fait de toute façon à chaque navigation.
+      No-op en mode fichier (aucun jeu serveur, aucune page en main).
       Cf. docs/hydratation.md § « Vague 2 ». */
-  forgetServerPage(): void { this.rowEngine?.forgetPage(); }
+  forgetServerData(): void { this.rowEngine?.forgetRemote(); this.rowEngine?.forgetPage(); }
 
   /** Repeint après l'ARRIVÉE de valeurs de facette serveur (G8) : la barre de filtres se reconstruit
       d'elle-même, sa signature d'options ayant changé (`_ensureToolbar`). `typing: true` — rien n'a
       muté dans le document, l'index de recherche mémoïsé survit (même sémantique qu'une réponse de
       recherche serveur). Point d'entrée de l'HÔTE, câblé sur `Store.onFacetResolved` (main.ts), comme
-      `forgetServerPage` l'est sur `onLazyReloadDeferred`. */
+      `forgetServerData` l'est sur `onLazyReloadDeferred`. */
   refreshFacetOptions(): void { this.render({ typing: true }); }
 
   /** Options d'un filtre de COLONNE pour l'état courant — LE point où G8 bascule.

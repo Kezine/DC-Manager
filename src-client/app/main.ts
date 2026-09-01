@@ -635,14 +635,21 @@ async function boot(): Promise<void> {
   // passe par sa route multipart). On ne les recharge PAS — ce serait annuler le lazy. Deux dérivés
   // sont rafraîchis, tous deux à coût BORNÉ :
   //   - les COMPTEURS (déjà invalidés par le Store) → on redemande leur rendu ;
-  //   - la PAGE en main du listing de cette collection (régime pagé G4) : on l'OUBLIE, le prochain
-  //     rendu la redemandera. Ce n'est pas un contournement de G3 (on ne re-tire pas la collection,
-  //     on redemande UNE page — ce que fait tout clic sur « ‹ › ») ; sans ça, une pièce jointe qu'on
-  //     vient d'envoyer n'apparaîtrait dans SON listing qu'au prochain changement d'onglet, alors que
-  //     la pastille, elle, se serait mise à jour. Le re-rendu suit : le contrôleur REST appelle
+  //   - tout ce que le listing de cette collection tient du SERVEUR : la PAGE en main (régime pagé G4)
+  //     ET le JEU mémoïsé par signature de requête (régime `rows()` sous recherche/filtre actif). On les
+  //     OUBLIE, le prochain rendu les redemandera. Ce n'est pas un contournement de G3 (on ne re-tire pas
+  //     la collection, on redemande UNE page — ce que fait tout clic sur « ‹ › ») ; sans ça, une pièce
+  //     jointe qu'on vient d'envoyer n'apparaîtrait dans SON listing qu'au prochain changement d'onglet,
+  //     alors que la pastille, elle, se serait mise à jour. Le re-rendu suit : le contrôleur REST appelle
   //     `refreshActive()` juste après le rechargement (cf. RestDocuments). Voir docs/hydratation.md.
+  //     🐛 T8/Q8.5 (2026-09-01) : on n'oubliait ici que la PAGE. Le JEU serveur, lui, est mémoïsé par
+  //     SIGNATURE (collection + saisie + cible) qu'une écriture d'un autre client ne change pas — donc
+  //     sous une recherche ou un filtre ACTIF, le listing d'une collection lazy restait périmé même en
+  //     quittant puis rouvrant l'onglet. C'est le défaut que le lot R2 avait refermé pour les collections
+  //     HYDRATÉES (`store.onChange` appelle bien les deux, cf. ListView) ; la branche lazy était restée à
+  //     mi-chemin. Les deux branches font désormais la même chose (principe n°3).
   store.onLazyReloadDeferred = (collections) => {
-    for (const collection of collections) listViewsByCollection.get(collection)?.()?.forgetServerPage();
+    for (const collection of collections) listViewsByCollection.get(collection)?.()?.forgetServerData();
     shell.refreshCounts();
   };
 

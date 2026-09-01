@@ -257,4 +257,54 @@ module.exports = async () => {
       "🎯 G8 SANS OBJET : les filtres Type/Statut proposent des ÉNUMÉRATIONS FERMÉES — exactes quel que soit le cache, aucun DISTINCT à payer");
   });
 
+  /* ------------------------------------------------------------------------------------------------
+     🚨 T8/Q8.5 — LE RATTRAPAGE DE LA BRANCHE LAZY OUBLIE **TOUT** LE SERVEUR, PAS SEULEMENT LA PAGE.
+
+     Le défaut refermé ici : `ListView.forgetServerPage()` n'oubliait que la PAGE (régime pagé G4).
+     Or le JEU serveur est mémoïsé PAR SIGNATURE de requête (collection + saisie + cible) et l'écriture
+     d'un AUTRE client ne change pas cette signature — donc, sous une recherche ou un filtre ACTIF, le
+     listing d'une collection lazy restait périmé MÊME en quittant puis rouvrant l'onglet (le rendu
+     ressortait le jeu mémoïsé). C'est exactement le bug que le lot R2 avait refermé pour les
+     collections HYDRATÉES : `store.onChange` y appelle `forgetRemote()` ET `forgetPage()`. La branche
+     lazy, elle, était restée à mi-chemin — deux chemins pour une même question, et l'écart est le bug.
+
+     POURQUOI UN VERROU SUR LES SOURCES plutôt qu'un test de comportement : le défaut ne vit ni dans un
+     module pur ni dans une classe instanciable sans DOM — il vit dans le CÂBLAGE (`main.ts` → `ListView`
+     → `ListRowEngine`). Le patron est celui du verrou d'exhaustivité de `test-nav-model.js` : on relit
+     la SOURCE et on nomme ce qui manque. Un test qui bouchonnerait `ListView` ne prouverait rien du
+     câblage réel, qui est précisément l'endroit où le défaut s'était logé.
+     ------------------------------------------------------------------------------------------------ */
+  await section("🚨 T8/Q8.5 : la branche LAZY oublie la PAGE **et** le JEU serveur (analyse des SOURCES)", async () => {
+    const fs = require("fs");
+    const path = require("path");
+    const src = (...p) => fs.readFileSync(path.join(__dirname, "..", "..", "src-client", ...p), "utf8");
+
+    // -- 1. Le point d'entrée de l'HÔTE oublie bien les DEUX --
+    const listView = src("views", "ListView.ts");
+    const methode = /forgetServerData\(\)\s*:\s*void\s*\{([^}]*)\}/.exec(listView);
+    ck(!!methode, "ListView.forgetServerData() existe (le nom ne ment plus : ce n'est plus « Page »)");
+    ck(/forgetRemote\(\)/.test(methode[1]), "🚨 forgetServerData oublie le JEU serveur mémoïsé (forgetRemote) — LE correctif Q8.5");
+    ck(/forgetPage\(\)/.test(methode[1]), "forgetServerData oublie AUSSI la page en main (forgetPage) — comportement historique préservé");
+    ck.eq(/forgetServerPage/.test(listView), false, "aucun reste de l'ancien nom dans ListView");
+
+    // -- 2. PARITÉ avec la branche HYDRATÉE (lot R2) : les deux filets font la même chose --
+    const abonnement = /store\.onChange\(\(\)\s*=>\s*\{([^}]*)\}\);/.exec(listView);
+    ck(!!abonnement, "le filet d'abonnement `store.onChange` du listing est bien lu");
+    for (const appel of ["forgetRemote()", "forgetPage()"]) {
+      ck(abonnement[1].includes(appel),
+        "parité branche HYDRATÉE : l'abonnement appelle " + appel + " (c'est le modèle que la branche lazy rejoint)");
+    }
+
+    // -- 3. Le câblage de l'hôte appelle le bon point d'entrée --
+    const mainTs = src("app", "main.ts");
+    const accroche = /store\.onLazyReloadDeferred\s*=\s*\(collections\)\s*=>\s*\{([\s\S]*?)\n  \};/.exec(mainTs);
+    ck(!!accroche, "le point d'accroche G3 `onLazyReloadDeferred` est bien lu dans main.ts");
+    ck(/forgetServerData\(\)/.test(accroche[1]), "🚨 main.ts appelle forgetServerData() sur le listing de la collection différée");
+    ck.eq(/forgetServerPage/.test(mainTs), false, "aucun reste de l'ancien nom dans main.ts");
+
+    // -- 4. G3 n'est PAS contournée : on n'a re-tiré AUCUNE collection --
+    ck.eq(/reloadCollections|hydrate\(/.test(accroche[1]), false,
+      "🚨 G3 INTACTE : le rattrapage ne re-tire aucune collection — il périme ce que le listing tient, rien de plus");
+  });
+
 };

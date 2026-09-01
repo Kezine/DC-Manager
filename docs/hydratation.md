@@ -142,10 +142,11 @@ consommateur de `Store.toJSON()` à visée d'export (`_persistAll` est couvert p
 **Point d'accroche** : `Store.onLazyReloadDeferred: ((collections: string[]) => void) | null` —
 appelé avec les collections sautées. Le Store y invalide d'abord SES dérivés (les compteurs G6, seul
 dérivé recalculable à bas coût), puis appelle l'accroche pour ceux de l'hôte : `main.ts` y redemande
-un rendu des pastilles (`shell.refreshCounts()`) et **oublie la page en main** du listing de cette
-collection (`ListView.forgetServerPage()`, vague 2 — cf. § « Vague 2 »). Oublier une PAGE n'est pas
-re-tirer la COLLECTION : c'est ce que G3 refuse, et la distinction est nette — le prochain rendu
-redemande une page, exactement comme un clic sur « ‹ › ».
+un rendu des pastilles (`shell.refreshCounts()`) et **oublie ce que le listing de cette collection
+tient du serveur** — la page en main ET le jeu mémoïsé par signature de requête
+(`ListView.forgetServerData()`, vague 2 — cf. § « Vague 2 »). Oublier une PAGE n'est pas re-tirer la
+COLLECTION : c'est ce que G3 refuse, et la distinction est nette — le prochain rendu redemande une
+page, exactement comme un clic sur « ‹ › ».
 
 ### Fraîcheur — SSE MANQUÉS (vérification de révision + rattrapage, lot R3)
 
@@ -472,10 +473,23 @@ jointe passe par sa route multipart dédiée, donc **hors du Store** ; le client
 de sa propre écriture (cette route n'envoie pas `X-Client-Id`, l'événement n'est donc pas filtré). En
 régime hydraté, la collection était re-tirée et la nouvelle pièce apparaissait ; en régime lazy, G3
 saute le rechargement — la pastille se mettait à jour, mais la page du listing restait telle quelle. Le
-point d'accroche G3 **oublie donc désormais la page en main** du listing concerné
-(`ListView.forgetServerPage`, registre `collection → listing` tenu par `main.ts`) : le rendu qui suit
-immédiatement (`RestDocuments` appelle `refreshActive()` après tout rechargement) en redemande une
-fraîche. Coût BORNÉ — une page, jamais la collection — et le bénéfice vaut aussi pour la vague 1.
+point d'accroche G3 **oublie donc désormais ce que le listing concerné tient du serveur**
+(`ListView.forgetServerData`, registre `collection → listing` tenu par `main.ts`) : le rendu qui suit
+immédiatement (`RestDocuments` appelle `refreshActive()` après tout rechargement) en redemande du
+frais. Coût BORNÉ — une page, jamais la collection — et le bénéfice vaut aussi pour la vague 1.
+
+> 🐛 **Correctif T8/Q8.5 (2026-09-01) — la moitié qui manquait.** Ce point d'accroche n'oubliait que
+> la **page** (régime pagé G4). Or un listing en **recherche ou filtre actif** ne sert pas une page :
+> il sert le **jeu serveur mémoïsé par SIGNATURE de requête** (collection + saisie + cible), et
+> l'écriture d'un AUTRE client ne change pas cette signature. Résultat : dans ce régime, le listing
+> d'une collection lazy restait périmé **même en quittant puis rouvrant l'onglet** — il fallait vider
+> et re-saisir le filtre pour changer la signature. C'est mot pour mot le défaut que le **lot R2**
+> avait refermé pour les collections HYDRATÉES (leur filet `store.onChange` appelle `forgetRemote()`
+> **et** `forgetPage()`) ; la branche lazy était restée à mi-chemin, et l'écart entre deux chemins qui
+> répondent à la même question EST le bug (principe n°3). Les deux branches font désormais la même
+> chose. G3 reste INTACTE : on ne re-tire toujours aucune collection.
+> Verrou : section « T8/Q8.5 » de `Tests/modules/test-lazy-vague4.js`, qui relit les SOURCES
+> (`ListView.ts`, `main.ts`) — le défaut vivait dans le CÂBLAGE, pas dans un module pur.
 
 ### 🚨 G7 — les sections de fiches deviennent ASYNCHRONES
 
@@ -804,8 +818,8 @@ chantier. Ce qui se passe alors, dans l'ordre :
 
 1. `Store.reloadCollections` invalide le **compteur** (G6) **et les valeurs de facette** (G8 — une
    passe peut apporter un SSID ou un type de raccordement inédit), puis appelle `onLazyReloadDeferred` ;
-2. `main.ts` **oublie la page en main** du listing wifi (`ListView.forgetServerPage`, mécanique de la
-   vague 2) et redemande le rendu des pastilles ;
+2. `main.ts` **oublie ce que le listing wifi tient du serveur** — page en main et jeu mémoïsé
+   (`ListView.forgetServerData`, mécanique de la vague 2) — et redemande le rendu des pastilles ;
 3. `RestDocuments.reload` appelle `refreshActive()` juste après → le listing se repeint, **redemande
    sa page** et ses facettes.
 
