@@ -1909,6 +1909,32 @@ module.exports = async () => {
     ck.eq(JSON.stringify(GlobalSearch.parsePrefix("sw-01", PREFIXES)), JSON.stringify({ scope: null, query: "sw-01" }), "parsePrefix : sans préfixe → portée null, requête intacte");
     ck.eq(JSON.stringify(GlobalSearch.parsePrefix("cb:", PREFIXES)), JSON.stringify({ scope: "cables", query: "" }), "parsePrefix : préfixe seul → portée active, requête vide (état « parcourir la portée »)");
 
+    // --- 4 bis. TEXTE CANONIQUE (chantier « liens directs », décision A6) : ce qu'un lien de
+    //     recherche doit porter. La portée vient de DEUX gestes — tapée en préfixe (elle est dans le
+    //     texte) ou cliquée sur une pastille (elle est hors du texte). `canonicalQuery` remet le
+    //     préfixe devant dans le second cas, pour que le lien reste UNE seule donnée. ---
+    ck.eq(GlobalSearch.canonicalQuery("sw-01", "equip", PREFIXES), "eq: sw-01",
+      "canonicalQuery : portée choisie à la PASTILLE → le préfixe est remis devant (sinon le lien la perdrait)");
+    ck.eq(GlobalSearch.canonicalQuery("eq:sw-01", "equip", PREFIXES), "eq:sw-01",
+      "canonicalQuery : portée déjà TAPÉE → texte inchangé (jamais de double préfixe)");
+    ck.eq(GlobalSearch.canonicalQuery("sw-01", "all", PREFIXES), "sw-01",
+      "canonicalQuery : portée « tout » → rien à préfixer");
+    ck.eq(GlobalSearch.canonicalQuery("  sw  ", "all", PREFIXES), "sw", "canonicalQuery : saisie trimée");
+    ck.eq(GlobalSearch.canonicalQuery("", "equip", PREFIXES), "",
+      "canonicalQuery : saisie vide → vide (un lien de recherche vide n'a pas d'objet, cf. AppLink.parse)");
+    ck.eq(GlobalSearch.canonicalQuery("sw", "portee-sans-prefixe", PREFIXES), "sw",
+      "canonicalQuery : portée sans préfixe déclaré → saisie nue plutôt qu'un lien qui MENT sur sa portée");
+
+    // 🚨 RÉCIPROCITÉ — c'est la vérité qui rend le lien fidèle : ce que la copie écrit, la relecture
+    //    le rend à l'identique. Sans elle, un lien copié rouvrirait une AUTRE recherche que celle
+    //    affichée, et rien ne le signalerait.
+    for (const [raw, scope] of [["sw-01", "equip"], ["eq:sw-01", "equip"], ["xx", "cables"], ["yy", "all"]]) {
+      const canonical = GlobalSearch.canonicalQuery(raw, scope, PREFIXES);
+      const back = GlobalSearch.parsePrefix(canonical, PREFIXES);
+      ck.eq((back.scope || "all") + "/" + back.query, scope + "/" + raw.replace(/^eq:/, ""),
+        "réciprocité : parsePrefix(canonicalQuery(« " + raw + " », " + scope + ")) rend la MÊME portée et la MÊME requête");
+    }
+
     // --- 5. SURLIGNAGE : position du fragment dans le texte ORIGINAL (pour le <mark> du rendu). ---
     ck.eq(JSON.stringify(GlobalSearch.matchRange("Core-SW-01", "sw", norm)), JSON.stringify({ start: 5, end: 7 }), "matchRange : indices sur l'original (casse ignorée)");
     ck.eq(GlobalSearch.matchRange("Onduleur", "sw", norm), null, "matchRange : absent → null (pas de <mark>)");

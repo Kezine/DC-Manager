@@ -143,6 +143,28 @@ export class GlobalSearch {
     return { scope: null, query: raw };
   }
 
+  /** Texte CANONIQUE d'une recherche : la saisie, PRÉFIXÉE de la portée active si celle-ci n'y est
+      pas déjà. Réciproque exacte de `parsePrefix` — `parsePrefix(canonicalQuery(raw, scope, p), p)`
+      rend la portée `scope` et la requête nue.
+
+      POURQUOI CETTE RÈGLE EXISTE (chantier « liens directs », décision A6). Une portée peut venir de
+      DEUX gestes : tapée en préfixe (« eq: switch »), elle vit DANS le texte et se relit toute seule ;
+      choisie d'un clic sur une pastille, elle vit HORS du texte. Un lien qui ne porterait que la
+      saisie perdrait donc la moitié des recherches. Plutôt que d'ajouter un second paramètre à l'URL
+      — à encoder, parser et tester —, on remet le préfixe devant : le lien reste UNE donnée, lisible
+      et tapable à la main.
+
+      `allScope` est l'id de la portée « tout » (rien à préfixer). Une portée SANS préfixe déclaré
+      (cas qui ne se produit pas aujourd'hui) rend la saisie nue : mieux vaut un lien moins précis
+      qu'un lien qui MENT sur sa portée. */
+  static canonicalQuery(raw: string, scope: string, prefixes: Readonly<Record<string, string>>, allScope = "all"): string {
+    const text = String(raw ?? "").trim();
+    if (!text || scope === allScope) return text;
+    if (GlobalSearch.parsePrefix(text, prefixes).scope) return text;   // déjà porté par le texte
+    const prefix = Object.keys(prefixes).find((p) => prefixes[p] === scope);
+    return prefix ? prefix + " " + text : text;
+  }
+
   /** Position du fragment CORRESPONDANT dans le texte ORIGINAL — pour le <mark> du rendu ; null si
       le texte ne contient pas la requête. ⚠ APPROXIMATION documentée (celle de la maquette) : l'index
       est calculé sur le texte NORMALISÉ puis appliqué à l'original — exact tant qu'un caractère

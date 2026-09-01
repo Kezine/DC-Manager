@@ -12,6 +12,8 @@
    catalogues ; c'est le test du corpus qui couvre l'oubli SIMULTANÉ. */
 export const search = {
   title: "Recherche globale",
+  /** Bouton « copier le lien » de la palette — SAUVE la recherche courante sous forme d'URL. */
+  copyLink: "Copier le lien de cette recherche",
   placeholder: "Équipement, baie, câble, adresse IP, n° de série…",
 
   scope: {

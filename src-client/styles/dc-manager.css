@@ -2934,6 +2934,13 @@
   .gs-clear.show { display: flex; }
   .gs-clear:hover { color: var(--fg); border-color: var(--fg); }
   .gs-clear svg { width: 13px; height: 13px; }
+  /* « Copier le lien de cette recherche » (chantier « liens directs », 2026-09-01) : MÊME facture que
+     le ✕ d'effacement, et même règle d'apparition (`.show` posé au rendu) — les deux agissent sur ce
+     qui est saisi, pas sur la palette. */
+  .gs-link { display: none; background: transparent; border: 1px solid var(--line-2); border-radius: 4px; color: var(--fg-dim); width: 26px; height: 26px; align-items: center; justify-content: center; cursor: pointer; flex: none; padding: 0; }
+  .gs-link.show { display: flex; }
+  .gs-link:hover { color: var(--fg); border-color: var(--fg); }
+  .gs-link svg { width: 14px; height: 14px; }
   /* FERMER la palette (✕ explicite) : toujours visible, à l'extrême droite de la rangée de saisie. Sert
      surtout au TACTILE (pas de clavier pour Échap, et sous 640px la palette est plein écran → aucun fond
      à taper). Distinct du ✕ d'effacement (`.gs-clear`). */

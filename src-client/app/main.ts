@@ -264,10 +264,11 @@ async function boot(): Promise<void> {
   //     (décision A3). C'est l'adresse par laquelle l'utilisateur accède RÉELLEMENT, donc celle qui
   //     marchera pour son collègue ; `PUBLIC_BASE_URL` reste réservée au QR imprimé, qui doit, lui,
   //     survivre hors de l'application.
-  modal.linkContext = {
+  const linkContext = {
     docId: () => (REST_MODE ? (rest ? rest.docId : null) : AppLink.LOCAL_DOC),
     baseUrl: () => (typeof location !== "undefined" ? AppLink.baseOf(location.href) : ""),
   };
+  modal.linkContext = linkContext;
   // `markDirty` : garde « modifications non enregistrées » du NIVEAU de modale, pour les éditeurs SANS
   // champ de saisie (la chaîne de route) que l'instantané de `Modal` ne peut pas voir bouger.
   const formHost: FormHost = { openModal: (o) => modal.open(o), closeModal: () => modal.close(), refreshModal: () => modal.refresh(), markDirty: () => modal.markDirty(), setDirty: () => { refreshChrome(); }, autocompleteLimit: () => prefs.autocompleteMaxResults, userDirectory };   // mutation modèle déjà suivie par la révision (store.onChange) ; userDirectory : résout les auteurs d'audit (mode API)
@@ -422,6 +423,9 @@ async function boot(): Promise<void> {
   // construit après `formHost` (au voisinage d'imageStore) ; rien ne le consomme avant le boot des vues.
   formHost.attachmentStore = attachmentStore;
   formHost.restMode = REST_MODE;
+  // Même contexte de lien que la modale : la palette porte, elle aussi, un bouton « copier » — il SAUVE
+  // la recherche courante sous forme d'URL (point 4 du cadrage).
+  globalSearch.linkContext = linkContext;
   Fullscreen.install();   // re-parente les overlays (modale/dialogues/toasts/menus) dans l'élément plein écran
   RichTooltip.install();  // délégation UNIQUE des tooltips enrichis (data-rich-tooltip) — idempotent
 

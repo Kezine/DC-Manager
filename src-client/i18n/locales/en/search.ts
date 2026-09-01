@@ -7,6 +7,7 @@
    `fr/search.ts`. */
 export const search = {
   title: "Global search",
+  copyLink: "Copy the link to this search",
   placeholder: "Equipment, rack, cable, IP address, serial number…",
 
   scope: {

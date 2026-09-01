@@ -67,6 +67,8 @@ import { Html } from "../core/Html";
 import { Icons } from "../ui/Icons";
 import { OverlayA11y } from "../ui/OverlayA11y";
 import { I18n } from "../i18n/I18n";
+import { Clipboard } from "../ui/Clipboard";
+import { AppLink } from "../../src-shared/AppLink";
 
 /** Entrée de l'historique « consultés récemment » (localStorage). */
 interface RecentEntry { kind: string; id: string; }
@@ -133,6 +135,12 @@ export class GlobalSearchPalette {
   private input!: HTMLInputElement;
   private clearBtn!: HTMLButtonElement;
   private scopesEl!: HTMLElement;
+  /** Bouton « copier le lien de cette recherche » — masqué tant qu'aucun contexte n'est posé
+      (robustesse + tests headless) ou tant que le champ est vide (il n'y a rien à sauver). */
+  private linkBtn!: HTMLButtonElement;
+  /** CONTEXTE des liens directs, posé par `main.ts` — même accroche, même raison que `Modal.linkContext` :
+      la palette n'a à connaître ni le mode de données ni le document courant. Relu à chaque copie. */
+  linkContext: { docId: () => string | null; baseUrl: () => string } | null = null;
   private resultsEl!: HTMLElement;
   private countEl!: HTMLElement;
 
@@ -318,6 +326,12 @@ export class GlobalSearchPalette {
     this.clearBtn.type = "button"; this.clearBtn.className = "gs-clear"; this.clearBtn.innerHTML = Icons.CLOSE;
     this.clearBtn.title = I18n.t("ui.search.clear"); this.clearBtn.setAttribute("aria-label", I18n.t("ui.search.clear"));
     this.clearBtn.onclick = () => { this.input.value = ""; this.scope = "all"; this.sel = 0; this.render(); this.input.focus(); };
+    // COPIER LE LIEN de la recherche courante (chantier « liens directs ») : à droite du champ, au
+    // même endroit que le ✕ d'effacement — les deux agissent sur ce qui est SAISI, pas sur la palette.
+    this.linkBtn = document.createElement("button");
+    this.linkBtn.type = "button"; this.linkBtn.className = "gs-link"; this.linkBtn.innerHTML = Icons.LINK;
+    this.linkBtn.title = I18n.t("search.copyLink"); this.linkBtn.setAttribute("aria-label", I18n.t("search.copyLink"));
+    this.linkBtn.onclick = () => { void this.copyLink(); };
     const esc = document.createElement("span"); esc.className = "gs-kbd"; esc.textContent = I18n.t("search.kbd.esc");
     // FERMETURE EXPLICITE (✕) : Échap ne suffit pas en TACTILE (pas de clavier), et sous 640px la palette
     // occupe TOUT l'écran — il n'y a plus de fond à taper. Ce bouton ferme la palette dans tous les cas.
@@ -327,7 +341,7 @@ export class GlobalSearchPalette {
     closeBtn.type = "button"; closeBtn.className = "gs-close"; closeBtn.innerHTML = Icons.CLOSE;
     closeBtn.title = I18n.t("ui.action.close"); closeBtn.setAttribute("aria-label", I18n.t("ui.action.close"));
     closeBtn.onclick = () => this.close();
-    inputRow.append(lens, this.input, this.clearBtn, esc, closeBtn);
+    inputRow.append(lens, this.input, this.clearBtn, this.linkBtn, esc, closeBtn);
 
     // -- portées + résultats + pied --
     this.scopesEl = document.createElement("div"); this.scopesEl.className = "gs-scopes"; this.scopesEl.setAttribute("role", "tablist");
@@ -399,19 +413,41 @@ export class GlobalSearchPalette {
     this.paintSelection();
   }
 
+  /** Table préfixe → portée de l'INSTANT : portées d'entités + familles externes + `>` pour les
+      actions (seulement s'il y en a de visibles). Extraite du rendu depuis que la COPIE en a besoin
+      elle aussi — les deux doivent lire exactement les mêmes préfixes, sinon un lien copié ne
+      rouvrirait pas la portée qu'il affiche. */
+  private prefixMap(): Record<string, string> {
+    const prefixes: Record<string, string> = GlobalSearchSources.prefixes();
+    for (const external of this.externals) prefixes[external.prefix] = external.scopeId;
+    if (this.activeActions.length) prefixes[">"] = "actions";
+    return prefixes;
+  }
+
+  /** Copie l'URL qui rouvrira CETTE recherche. Le lien ne porte JAMAIS `?vue=1` : la palette est une
+      surcouche, elle n'appartient à aucun onglet (corollaire retenu de la décision A6). */
+  private async copyLink(): Promise<void> {
+    const ctx = this.linkContext;
+    const query = GlobalSearch.canonicalQuery(this.input.value, this.scope, this.prefixMap());
+    const docId = ctx ? (ctx.docId() || "") : "";
+    if (!ctx || !docId || !query) return;   // bouton masqué dans ces cas : on ne copie pas du vide
+    await Clipboard.copy(AppLink.build(ctx.baseUrl(), { kind: "recherche", docId, query }), I18n.t("app.deepLink.copied"));
+  }
+
   /* ---- rendu ---- */
 
   private render(): void {
     const raw = this.input.value.trim();
     // Préfixe de portée saisi (« eq:sw-01 ») : il ACTIVE la portée et disparaît de la requête.
     // « > » (maquette) s'ajoute aux préfixes des portées d'entités — seulement si des actions existent.
-    const prefixes: Record<string, string> = GlobalSearchSources.prefixes();
-    for (const external of this.externals) prefixes[external.prefix] = external.scopeId;
-    if (this.activeActions.length) prefixes[">"] = "actions";
+    const prefixes = this.prefixMap();
     const parsed = GlobalSearch.parsePrefix(raw, prefixes);
     if (parsed.scope) this.scope = parsed.scope;
     const query = parsed.query;
     this.clearBtn.classList.toggle("show", raw.length > 0);
+    // Le bouton de copie suit la même règle que l'effacement — rien de saisi, rien à sauver — plus la
+    // présence du contexte (aucune accroche posée ⇒ pas de bouton, comme dans `ui/Modal`).
+    this.linkBtn.classList.toggle("show", raw.length > 0 && !!this.linkContext && !!this.linkContext.docId());
 
     // MODE API (provider injecté) : toute saisie NON VIDE programme l'aller-retour serveur (debounce +
     // abort) — même seuil que le rendu local, qui cherche dès le premier caractère. Tant que la réponse
