@@ -185,9 +185,12 @@ export const app = {
   },
   // ENTITY DEEP-LINK (QR labels) — cf. ../fr/app.ts for the rationale.
   deepLink: {
-    notFound: "Label link: the target object cannot be found (deleted, or absent from this document).",
-    noDetail: "Label link: this kind of object has no detail sheet to open.",
+    notFound: "Link: the target object cannot be found (deleted, or absent from this document).",
+    noDetail: "Link: this kind of object has no detail sheet to open.",
     docError: "Document targeted by the link is unreachable: {{error}}",
+    serverOnly: "This link points to an intervention or a certificate: those objects only exist in server mode.",
+    viewDenied: "This link leads to a page you do not have access to.",
+    copied: "Link copied",
   },
   main: {
     tabConflict: "This file is also open in another tab.",

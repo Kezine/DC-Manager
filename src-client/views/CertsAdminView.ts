@@ -223,18 +223,21 @@ export class CertsAdminView {
 
   /** FOCALISE un certificat par son id : ouvre l'onglet (déjà basculé par l'appelant) sur l'arbre, DÉPLIE tous les
       ancêtres du nœud et surligne sa ligne. Point d'entrée du rapprochement DEPUIS une fiche
-      (`CertFicheHooks.openCert`). L'arbre complet étant chargé côté client, on cherche le nœud EN MÉMOIRE (aucune
-      requête ciblée). Introuvable → no-op silencieux (la vue reste où elle est). */
-  async focusCert(certId: string): Promise<void> {
-    if (!this.client || !this.client.docId) return;
+      (`CertFicheHooks.openCert`) ET d'un LIEN DIRECT (`app/AppLinkOpener`, chantier 2026-09-01). L'arbre complet
+      étant chargé côté client, on cherche le nœud EN MÉMOIRE (aucune requête ciblée).
+      Rend `false` quand rien n'a été focalisé (coffre absent, réseau KO, certificat absent du document) : le geste
+      DEPUIS une fiche s'en désintéresse — un no-op silencieux y est le bon comportement — mais un LIEN, lui, doit
+      pouvoir dire « introuvable ». Un appelant qui ignore le retour retrouve exactement l'ancien comportement. */
+  async focusCert(certId: string): Promise<boolean> {
+    if (!this.client || !this.client.docId) return false;
     this.session.touch();
     await this.lastLoad.catch(() => { /* un échec du chargement d'activation ne bloque pas la focalisation */ });
     // S'assurer que l'arbre est chargé (l'activation a pu ne pas avoir eu lieu / avoir échoué).
     if (!this.allItems.length) {
-      try { await this.loadAll(); } catch (_) { return; }   // réseau KO → on abandonne
+      try { await this.loadAll(); } catch (_) { return false; }   // réseau KO → on abandonne
     }
     const node = this.findNode(certId);
-    if (!node) return;   // certificat absent du document → aucune navigation
+    if (!node) return false;   // certificat absent du document → aucune navigation
     // GARANTIR la visibilité de la cible : on lève les filtres/recherche courants (un filtre résiduel pourrait
     // exclure la ligne de l'arbre affiché) — même intention que l'ancienne navigation par la recherche.
     this.filter = { family: "", state: "", query: "" };
@@ -242,6 +245,7 @@ export class CertsAdminView {
     for (let ancestor = node.parent; ancestor; ancestor = ancestor.parent) this.open.add(ancestor.item.id);
     this.focusId = certId;
     this.render();
+    return true;
   }
 
   /** Retrouve un nœud de la forêt par id (parcours en profondeur borné par la structure acyclique de CertTree.build).

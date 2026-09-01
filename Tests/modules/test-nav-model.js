@@ -15,7 +15,7 @@
 
    Harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path } = require("./harness.js");
+const { ck, section, path, TsViews } = require("./harness.js");
 const { D } = require("./harness.js");
 const { NavModel, NAV_DOMAINS } = D("app/NavModel.js");
 
@@ -140,34 +140,10 @@ module.exports = async () => {
                                                naturellement exclu — même distinction structurelle
                                                que le verrou de gating de test-client-access.js). */
     const fs = require("fs");
-    const ts = require("typescript");
-
-    const declaredViews = (text, fileName) => {
-      const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.ES2020, true, ts.ScriptKind.TS);
-      const found = [];
-      const visit = (node) => {
-        if (ts.isCallExpression(node)) {
-          const arg0 = node.arguments[0];
-          // a) addListTab("nom", …)
-          if (ts.isIdentifier(node.expression) && node.expression.text === "addListTab"
-              && arg0 && ts.isStringLiteralLike(arg0)) {
-            found.push({ name: arg0.text, line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1 });
-          }
-          // b) shell.addView({ name: "nom", … })
-          if (ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "addView"
-              && arg0 && ts.isObjectLiteralExpression(arg0)) {
-            for (const p of arg0.properties) {
-              if (ts.isPropertyAssignment(p) && p.name && p.name.getText(sf) === "name" && ts.isStringLiteralLike(p.initializer)) {
-                found.push({ name: p.initializer.text, line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1 });
-              }
-            }
-          }
-        }
-        ts.forEachChild(node, visit);
-      };
-      visit(sf);
-      return found;
-    };
+    // Le détecteur vit dans le HARNAIS (`TsViews`) depuis qu'un SECOND verrou pose la même question à
+    // main.ts — la carte collection → onglet des liens directs (test-app-link-routing.js). Le contrôle
+    // de discrimination ci-dessous le couvre donc pour les deux.
+    const declaredViews = (text, fileName) => TsViews.declaredIn(text, fileName);
 
     // -- CONTRÔLE DE DISCRIMINATION : sans lui, un détecteur aveugle rendrait le verrou vert à tort --
     {

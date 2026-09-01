@@ -74,6 +74,50 @@ class TsImports {
   }
 }
 
+/* -------- lecture des VUES DÉCLARÉES d'une source TypeScript (verrous d'architecture) --------
+   DEUX verrous posent la même question à `app/main.ts` — « quelles vues cette application
+   enregistre-t-elle ? » — et doivent donc partager le même détecteur (principe n°3) :
+     · test-nav-model.js       : toute vue enregistrée est-elle rattachée à un domaine du menu ?
+     · test-app-link-routing.js : tout onglet nommé par la carte collection → vue existe-t-il ?
+   Comme `TsImports`, ce détecteur relit les SOURCES `.ts` et jamais le compilé : c'est ce que le
+   contributeur a ÉCRIT qu'on contrôle. Le CONTRÔLE DE DISCRIMINATION qui prouve qu'il voit les
+   bonnes formes (et seulement elles) vit dans test-nav-model.js, et couvre les deux usages. */
+class TsViews {
+  /** Vues enregistrées par une source → [{ name, line }]. DEUX formes d'enregistrement :
+        · `addListTab("nom", …)`           — onglets de LISTE (1er argument littéral) ;
+        · `shell.addView({ name: "nom" })` — vues CUSTOM (littéral ; l'appel interne d'addListTab
+                                             passe `name` en propriété RACCOURCIE, il est donc
+                                             naturellement exclu — même distinction structurelle
+                                             que le verrou de gating de test-client-access.js). */
+  static declaredIn(text, fileName) {
+    const ts = require("typescript");
+    const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.ES2020, true, ts.ScriptKind.TS);
+    const found = [];
+    const visit = (node) => {
+      if (ts.isCallExpression(node)) {
+        const arg0 = node.arguments[0];
+        // a) addListTab("nom", …)
+        if (ts.isIdentifier(node.expression) && node.expression.text === "addListTab"
+            && arg0 && ts.isStringLiteralLike(arg0)) {
+          found.push({ name: arg0.text, line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1 });
+        }
+        // b) shell.addView({ name: "nom", … })
+        if (ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "addView"
+            && arg0 && ts.isObjectLiteralExpression(arg0)) {
+          for (const p of arg0.properties) {
+            if (ts.isPropertyAssignment(p) && p.name && p.name.getText(sf) === "name" && ts.isStringLiteralLike(p.initializer)) {
+              found.push({ name: p.initializer.text, line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1 });
+            }
+          }
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+    return found;
+  }
+}
+
 /* -------- localisation : init AVANT tout (lot B2a) --------
    Les registres de libellés (EquipmentTypes/SpareStatuses/Depths…) résolvent désormais leur libellé
    via `I18n.t(labelKey)` au POINT DE RENDU. Comme certaines sections testent `.label()` directement,
@@ -227,4 +271,4 @@ function summary() {
   process.exit(0);
 }
 
-module.exports = { ck, section, summary, path, D, SHARED, SERVER, TsImports, mkStorage, Store, BrowserStorageAdapter, PlacementContainers, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, PlacementFrame, TrayFrame, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, RouteMiniGraph, LeaderLayout, FaceAlign, FacePanelBands, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, TrunkRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FilterChips, FieldFacet, Ip, Markdown, RichTooltip, VmNetMapping, VmIpMatch, VmClusterFormat, FormSave, VmStatus, VmHostTip, VmLocate, Locatable, ContainerLabel, WebglHostVisibility, OptionSearch, RouteEligibility, ModalStack, GlobalSearch, GlobalSearchSources, DetailForms, NotifyFormat, DEFAULT_REMIND_HOURS, Prefs, DatacenterView, FloorLayout, SiteLayout, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, Positioning, PivotBounds, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, FILLET_RADIUS_PER_K_MM, MeasureTool, RouteTool, SceneLayoutSignature, FaceImagePolicy, PivotMarker, ImageStore, FaceImage, SaveState, ShellNav, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, TrayGeom, TrayGeometry, RackDepthPol, RackDepthPolicy, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, TRAY_TYPES, makeStore };
+module.exports = { ck, section, summary, path, D, SHARED, SERVER, TsImports, TsViews, mkStorage, Store, BrowserStorageAdapter, PlacementContainers, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, PlacementFrame, TrayFrame, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, RouteMiniGraph, LeaderLayout, FaceAlign, FacePanelBands, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, TrunkRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FilterChips, FieldFacet, Ip, Markdown, RichTooltip, VmNetMapping, VmIpMatch, VmClusterFormat, FormSave, VmStatus, VmHostTip, VmLocate, Locatable, ContainerLabel, WebglHostVisibility, OptionSearch, RouteEligibility, ModalStack, GlobalSearch, GlobalSearchSources, DetailForms, NotifyFormat, DEFAULT_REMIND_HOURS, Prefs, DatacenterView, FloorLayout, SiteLayout, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, Positioning, PivotBounds, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, FILLET_RADIUS_PER_K_MM, MeasureTool, RouteTool, SceneLayoutSignature, FaceImagePolicy, PivotMarker, ImageStore, FaceImage, SaveState, ShellNav, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, PowerAnalysis, TrayGeom, TrayGeometry, RackDepthPol, RackDepthPolicy, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, TRAY_TYPES, makeStore };

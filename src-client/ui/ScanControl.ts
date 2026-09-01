@@ -42,7 +42,7 @@ import { BarcodeDetection } from "../core/BarcodeDetection";
 import { ScanAffordance } from "../core/ScanAffordance";
 import type { ScanParserId } from "../core/ScanParsing";
 import type { ScanEngineMode } from "../core/Prefs";
-import type { EntityLinkTarget } from "../../src-shared/EntityLink";
+import type { AppLinkTarget } from "../../src-shared/AppLink";
 import { I18n } from "../i18n/I18n";
 
 /** Ce que le greffon attend de l'application (câblé UNE fois par main.ts). */
@@ -176,11 +176,11 @@ export class ScanControl {
     });
   }
 
-  /** Entrée GLOBALE « scanner une étiquette » (topbar) : viseur en mode LIBRE — un deep-link
-      OUVRE la fiche (`openTarget` = l'instance `EntityLinkOpener` de main.ts, jamais dupliquée),
+  /** Entrée GLOBALE « scanner une étiquette » (topbar) : viseur en mode LIBRE — un lien direct
+      OUVRE sa cible (`openTarget` = l'instance `AppLinkOpener` de main.ts, jamais dupliquée),
       sinon panneau d'actions (copier / injecter dans le DERNIER champ actif / lien si URL).
       La cible d'injection est CAPTURÉE à l'ouverture : le focus bouge pendant le scan. */
-  static openGlobal(opts: { openTarget(target: EntityLinkTarget): void }): void {
+  static openGlobal(opts: { openTarget(target: AppLinkTarget): void }): void {
     const host = ScanControl.host;
     if (!host) return;
     const captured = ScanControl.lastField;

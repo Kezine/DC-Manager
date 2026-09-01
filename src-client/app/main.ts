@@ -65,9 +65,9 @@ import { UndoTimeline } from "./UndoTimeline";
 import { AutoSave } from "./AutoSave";
 import { FileDocumentController } from "./FileDocuments";
 import { RestDocumentController } from "./RestDocuments";
-import { EntityLink } from "../../src-shared/EntityLink";   // format PARTAGÉ du deep-link d'entité (étiquettes QR) — lecture AGNOSTIQUE de l'hôte imprimé
-import { EntityLinkOpener } from "./EntityLinkOpener";      // exécution d'un deep-link : (docId, collection, id) → fiche ouverte (hash + futur greffon de scan)
-import type { EntityLinkTarget } from "../../src-shared/EntityLink";
+import { AppLink } from "../../src-shared/AppLink";         // grammaire PARTAGÉE des liens directs (fiche · intervention · cert · recherche) — lecture AGNOSTIQUE de l'hôte imprimé
+import { AppLinkOpener } from "./AppLinkOpener";            // exécution d'un lien direct : cible → onglet activé + modale ouverte (hash + greffon de scan)
+import type { AppLinkTarget } from "../../src-shared/AppLink";
 
 // Timeline d'undo UNIFIÉE (modèle + images) : UN SEUL geste défait dans l'ordre chronologique, quelle que soit
 // la pile d'origine. Logique EXTRAITE dans `UndoTimeline` (pure, testée) ; les piles sont enregistrées au boot.
@@ -507,30 +507,52 @@ async function boot(): Promise<void> {
   // la construction (référence `rest`), mode REST uniquement (le mode fichier n'a pas de session).
   if (rest) SessionExpiry.install(() => rest.sessionExpired());
 
-  /* ---- DEEP-LINK D'ENTITÉ (étiquettes QR — cf. `src-shared/EntityLink`, `core/EntityLinkRouting`) ----
-     Une étiquette imprimée encode l'URL ABSOLUE d'une fiche :
-     `<URL publique>#doc/<docId>/fiche/<collection>/<id>`. Scannée hors app, elle arrive donc ici comme
-     un simple fragment d'URL. Trois coutures, et l'ORDRE fait tout :
+  /* ---- LIENS DIRECTS (cf. `src-shared/AppLink`, `core/AppLinkRouting`, docs/liens-directs.md) ----
+     Quatre formes, une seule grammaire, toutes sous `doc/<docId>/` : fiche d'un objet (ce qu'encode
+     une étiquette QR), intervention, certificat, recherche. Scanné ou collé hors app, un lien arrive
+     ici comme un simple fragment d'URL. Trois coutures, et l'ORDRE fait tout :
 
      1. CAPTURER la cible MAINTENANT, avant que quoi que ce soit ne réécrive le hash. `Shell.switchView`
         reflète l'onglet actif dans l'URL (`location.hash = "#equipements"`) et la fin du boot le fait
         SYSTÉMATIQUEMENT : relire `location.hash` plus tard ne rendrait plus qu'un nom d'onglet.
-     2. N'OUVRIR la fiche qu'une fois un document PRÊT — sinon `Forms.detail` lirait un cache vide et
-        dirait « introuvable » d'un objet qui existe. Au boot, aucun document n'est encore là (mode
-        fichier : l'utilisateur n'a pas choisi son fichier ; mode API : `rest.bootstrap()` va le
-        charger). On s'accroche donc au MÊME instant que la restauration de vue — la fermeture
-        `documentOpened` des deux contrôleurs — et APRÈS elle : la fiche est une MODALE, elle se pose
-        PAR-DESSUS la vue que `core/ViewRestoration` vient d'activer, sans la perturber.
-     3. NE RIEN CASSER en cas d'échec : `EntityLinkOpener.open` ne lève jamais et notifie lui-même
+     2. N'AGIR qu'une fois un document PRÊT — sinon `Forms.detail` lirait un cache vide et dirait
+        « introuvable » d'un objet qui existe. Au boot, aucun document n'est encore là (mode fichier :
+        l'utilisateur n'a pas choisi son fichier ; mode API : `rest.bootstrap()` va le charger). On
+        s'accroche donc au MÊME instant que la restauration de vue — la fermeture `documentOpened` des
+        deux contrôleurs — et APRÈS elle : la fiche est une MODALE, elle se pose PAR-DESSUS la vue
+        active. ⚠ Un lien porteur de `?vue=1` ACTIVE d'abord la vue de son objet : il passe donc après
+        `core/ViewRestoration` et la remplace, ce qui est exactement ce qu'il demande.
+     3. NE RIEN CASSER en cas d'échec : `AppLinkOpener.open` ne lève jamais et notifie lui-même
         (et se tait quand un autre mécanisme a déjà parlé : 403 → `core/AccessDenial`, 401 →
         `SessionExpiry`). Un boot sous droits partiels reste donc exactement ce qu'il était.
 
      CONSOMMATION UNIQUE (`pendingDeepLink` remis à null AVANT l'exécution) : une bascule de document
      rappelle `documentOpened`, qui rappellerait ce consommateur — la remise à zéro préalable est ce
      qui empêche la boucle. */
-  let pendingDeepLink: EntityLinkTarget | null = EntityLink.parse(typeof location !== "undefined" ? location.hash : "");
-  const entityLinkOpener = new EntityLinkOpener({
+  let pendingDeepLink: AppLinkTarget | null = AppLink.parse(typeof location !== "undefined" ? location.hash : "");
+  const appLinkOpener = new AppLinkOpener({
     store, formHost,
+    // ACTIVATION D'ONGLET — interface étroite sur le Shell (déclaré plus bas : fermeture légale, ces
+    // rappels ne s'exécutent qu'à l'arrivée d'un lien). Le test de visibilité est FAIT PAR L'OPENER
+    // avant d'activer : `switchView` se replierait sinon sur la première vue accessible et
+    // déménagerait l'utilisateur alors qu'il ne demandait qu'une fiche.
+    views: { isVisible: (view) => shell.isViewVisible(view), activate: (view) => shell.switchView(view) },
+    // FAMILLES HORS DOCUMENT — injection NULLE en mode fichier : leurs bases vivent côté serveur.
+    // L'opener le DIT alors (« mode serveur requis ») au lieu de rester muet, et aucun test de mode
+    // n'est écrit ici ni là-bas. Mêmes chemins d'ouverture que les familles externes de la palette.
+    externals: REST_MODE ? {
+      openIntervention: async (id) => {
+        // La modale de détail prend l'ENREGISTREMENT, pas un id — d'où la lecture unitaire préalable.
+        // Un échec (404, ou droit retiré depuis l'activation de l'onglet) devient « introuvable » :
+        // le cas « page interdite » a déjà été écarté par la garde de vue de l'opener.
+        let record; try { record = await interventionsClient!.getOne(id); } catch (_) { return false; }
+        interventionsView.openDetail(record);
+        return true;
+      },
+      openCert: (id) => certsView.focusCert(id),
+    } : null,
+    // RECHERCHE — disponible dans les DEUX modes : la palette est locale en mode fichier (principe n°15).
+    openSearch: (query) => globalSearch.open(query),
     // Injection NULLE en mode fichier/visualiseur : sans accès aux documents serveur, la décision pure
     // ignore le `docId` de la cible (mono-document par nature) — aucun test de mode ailleurs.
     documents: rest ? {
@@ -555,16 +577,18 @@ async function boot(): Promise<void> {
   const consumePendingDeepLink = (): void => {
     const target = pendingDeepLink;
     pendingDeepLink = null;
-    if (target) void entityLinkOpener.open(target);
+    if (target) void appLinkOpener.open(target);
   };
   // HASH CHANGÉ pendant que l'app tourne (lien collé, retour arrière, URL d'étiquette ouverte dans
-  // l'onglet courant) : le deep-link est tenté EN PREMIER. Les deux routages ne peuvent PAS se disputer
-  // un même hash — un fragment d'entité contient des `/`, aucun nom de vue n'en contient — donc quand
-  // `parse` rend null on ne fait RIEN, et la navigation par onglet reste EXACTEMENT ce qu'elle était
-  // (`ShellNav.resolveHash`, écouteur propre au Shell, intouché).
+  // l'onglet courant) : le lien direct est tenté EN PREMIER. Les deux routages ne peuvent PAS se
+  // disputer un même hash — toute forme de la grammaire contient des `/`, aucun nom de vue n'en
+  // contient — donc quand `parse` rend null on ne fait RIEN, et la navigation par onglet reste
+  // EXACTEMENT ce qu'elle était (`ShellNav.resolveHash`, écouteur propre au Shell, intouché).
+  // ⚠ Aucune boucle possible quand le lien active une vue : `switchView` réécrit le hash en `#nom`,
+  // qui n'est justement PAS un lien direct — le tour suivant rend null et s'arrête.
   window.addEventListener("hashchange", () => {
-    const target = EntityLink.parse(location.hash);
-    if (target) void entityLinkOpener.open(target);
+    const target = AppLink.parse(location.hash);
+    if (target) void appLinkOpener.open(target);
   });
 
   // Validation PARTAGÉE côté client (Store) : SEUL garde-fou en mode fichier, retour immédiat en mode API.
@@ -698,10 +722,10 @@ async function boot(): Promise<void> {
     // (`currentAuthUser`) et l'état d'autorisation COURANT (`access`, relu à chaud) — aucun réseau.
     onUserInfo: () => UserInfoModal.open(formHost, currentAuthUser, access),
     // SCANNER UNE ÉTIQUETTE (bouton topbar, à côté de la loupe) : viseur en mode LIBRE. Un
-    // deep-link décodé passe par l'instance UNIQUE `entityLinkOpener` (le même service que le
+    // lien direct décodé passe par l'instance UNIQUE `appLinkOpener` (le même service que le
     // hash du boot et le hashchange — jamais une résolution dupliquée) ; toute autre valeur
     // offre copier / insérer dans le dernier champ actif (cf. ScanControl.openGlobal).
-    onScanGlobal: () => ScanControl.openGlobal({ openTarget: (target) => { void entityLinkOpener.open(target); } }),
+    onScanGlobal: () => ScanControl.openGlobal({ openTarget: (target) => { void appLinkOpener.open(target); } }),
     // PANIER (actions groupées) : la modale liste le contenu et porte l'action. Le bouton n'existe
     // que si `CartPanel.setup` a eu lieu (mode API en V1-Beta) — cf. docs/panier.md.
     onCart: () => CartPanel.open(),

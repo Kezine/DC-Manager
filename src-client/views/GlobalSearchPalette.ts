@@ -232,7 +232,17 @@ export class GlobalSearchPalette {
   isOpen(): boolean { return !!this.overlay && this.overlay.classList.contains("open"); }
   toggle(): void { this.isOpen() ? this.close() : this.open(); }
 
-  open(): void {
+  /** Ouvre la palette, éventuellement PRÉ-REMPLIE — c'est la forme `doc/<docId>/recherche/<texte>` des
+      liens directs (chantier 2026-09-01) qui a besoin du paramètre.
+
+      Le texte suffit à tout restaurer, PORTÉE COMPRISE : `parsePrefix` relit un préfixe tapé (« eq: »,
+      « cert: », « > »…) et positionne le scope au rendu. C'est la raison pour laquelle le lien ne porte
+      qu'UNE donnée (décision A6) — et pourquoi le bouton « copier » COMPOSE le texte canonique
+      (préfixe de la portée active + saisie) plutôt que d'ajouter un second paramètre d'URL.
+
+      Rouvrir une palette DÉJÀ ouverte avec un nouveau texte est licite (deux liens de recherche
+      enchaînés) : l'état est réinitialisé de toute façon. */
+  open(query = ""): void {
     if (!this.overlay) this.buildDom();
     // Actions DISPONIBLES à cet instant : le prédicat `visible` est relu ici, jamais mémorisé — un
     // droit retiré à chaud (relecture de `/me`) retire l'action à la prochaine ouverture.
@@ -246,7 +256,9 @@ export class GlobalSearchPalette {
       ...GlobalSearchSources.build(this.store),
       ...this.activeActions.map((a) => ({ kind: ACTIONS_KIND, id: a.id, label: a.label, sub: a.sub, terms: a.terms || [] })),
     ];
-    this.scope = "all"; this.sel = 0; this.input.value = "";
+    // Remise à zéro, puis pose du texte du lien s'il y en a un. L'ordre compte : `render()` (plus bas)
+    // relira ce champ et en tirera la portée, exactement comme si l'utilisateur venait de le taper.
+    this.scope = "all"; this.sel = 0; this.input.value = query;
     this.resetRemote();   // état serveur NEUF à chaque ouverture (aucune réponse d'une session passée)
     this.restoreFocus = (document.activeElement as HTMLElement) || null;
     this.overlay!.classList.add("open");

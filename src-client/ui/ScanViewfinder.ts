@@ -17,8 +17,8 @@
      - `field` : le viseur remplit UN champ — la valeur passe par le PARSEUR
        NOMMÉ du champ (`core/ScanParsing`, doctrine « jamais d'injection
        silencieuse » : non conforme = affichée + avertie + Valider désactivé) ;
-     - `free`  : l'entrée GLOBALE « scanner une étiquette » — un deep-link
-       d'entité (`EntityLink.parse` non-null) OUVRE la fiche et ferme ; sinon
+     - `free`  : l'entrée GLOBALE « scanner une étiquette » — un lien direct
+       (`AppLink.parse` non-null) OUVRE sa cible et ferme ; sinon
        panneau d'actions (copier, injecter dans le dernier champ actif, lien
        cliquable si URL http(s) — JAMAIS de navigation automatique).
 
@@ -50,8 +50,8 @@ import type { ScanRoiRect, ScanRoiCorner } from "../core/ScanRoiMemory";
 import { Haptics } from "../core/Haptics";
 import { Html } from "../core/Html";
 import type { ScanEngineMode } from "../core/Prefs";
-import { EntityLink } from "../../src-shared/EntityLink";
-import type { EntityLinkTarget } from "../../src-shared/EntityLink";
+import { AppLink } from "../../src-shared/AppLink";
+import type { AppLinkTarget } from "../../src-shared/AppLink";
 import { I18n } from "../i18n/I18n";
 
 /** Ce que le viseur attend de son hôte (main.ts via `ScanControl.setup`) : la pile de modales
@@ -78,7 +78,7 @@ export interface ScanFieldTarget {
 /** Cible « libre » : l'entrée globale — deep-link → fiche, sinon panneau d'actions. */
 export interface ScanFreeTarget {
   kind: "free";
-  onDeepLink(target: EntityLinkTarget): void;
+  onDeepLink(target: AppLinkTarget): void;
   /** L'injection « dernier champ actif » est-elle possible ? (champ encore vivant et éditable) */
   canInject(): boolean;
   onInject(value: string): void;
@@ -433,8 +433,8 @@ export class ScanViewfinder {
     this.liveEl.textContent = I18n.t("scan.result.announce", { value: hit.rawValue });
 
     if (this.target.kind === "free") {
-      /* Deep-link d'étiquette : ouvrir la fiche EST le geste — fermeture immédiate, pas de panneau. */
-      const link = EntityLink.parse(hit.rawValue);
+      /* Lien direct : ouvrir sa cible EST le geste — fermeture immédiate, pas de panneau. */
+      const link = AppLink.parse(hit.rawValue);
       if (link) { this.host.closeModal(); this.target.onDeepLink(link); return; }
       this.showFreeResult(hit);
     } else {

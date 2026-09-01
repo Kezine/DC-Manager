@@ -193,9 +193,12 @@ export const app = {
   // ÉCHOUE en le disant — les refus d'AUTORISATION (403) et l'expiration de session, eux, sont déjà
   // signalés par leurs propres mécanismes et ne sont PAS redits ici. Cf. app/EntityLinkOpener.
   deepLink: {
-    notFound: "Lien d'étiquette : l'objet visé est introuvable (supprimé, ou absent de ce document).",
-    noDetail: "Lien d'étiquette : ce type d'objet n'a pas de fiche à ouvrir.",
+    notFound: "Lien : l'objet visé est introuvable (supprimé, ou absent de ce document).",
+    noDetail: "Lien : ce type d'objet n'a pas de fiche à ouvrir.",
     docError: "Document visé par le lien inaccessible : {{error}}",
+    serverOnly: "Ce lien désigne une intervention ou un certificat : ces objets n'existent qu'en mode serveur.",
+    viewDenied: "Ce lien mène à une page à laquelle vous n'avez pas accès.",
+    copied: "Lien copié",
   },
   main: {
     tabConflict: "Ce fichier est aussi ouvert dans un autre onglet.",

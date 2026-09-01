@@ -25,7 +25,7 @@
                   probablement le MAUVAIS code qui a été lu.
    ============================================================================= */
 
-import { EntityLink } from "../../src-shared/EntityLink";
+import { AppLink } from "../../src-shared/AppLink";
 
 /** Identifiants des parseurs déclarables sur un champ (cf. `ui/ScanControl`). */
 export type ScanParserId = "raw" | "serial";
@@ -73,11 +73,11 @@ export class ScanParsing {
     return { ok: true, value };
   }
 
-  /** « Ressemble à un lien » : URL http(s), ou deep-link d'étiquette DCM — la
-      SOURCE UNIQUE du format (`src-shared/EntityLink.parse`) décide, jamais une
-      regex maison qui divergerait du vrai format. */
+  /** « Ressemble à un lien » : URL http(s), ou lien direct DCM (fiche d'étiquette, mais aussi
+      intervention, certificat, recherche) — la SOURCE UNIQUE de la grammaire
+      (`src-shared/AppLink.parse`) décide, jamais une regex maison qui divergerait du vrai format. */
   private static looksLikeLink(value: string): boolean {
     if (/^https?:\/\//i.test(value)) return true;
-    return EntityLink.parse(value) !== null;
+    return AppLink.parse(value) !== null;
   }
 }
