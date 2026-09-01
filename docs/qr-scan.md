@@ -12,6 +12,15 @@ de saisie de l'app (n° de série, référence, recherche…) — pas une vue mo
   l'étiquette pour sauter à la fiche, ou pour remplir un champ de saisie (service tags
   constructeur en Code 128 / DataMatrix dès la v1). Le décodage est **100 % local** au poste.
 
+> ⚠ **Depuis le chantier « liens directs » (2026-09-01), ce format est ENVELOPPÉ, pas remplacé.**
+> `src-shared/AppLink` est désormais la **grammaire** de tous les liens de l'application (fiche,
+> intervention, certificat, recherche) et **délègue** la forme « fiche » à `EntityLink`, qui reste sa
+> source de vérité — le format est gravé sur des étiquettes physiques, il est **intangible**.
+> Deux conséquences pour ce document : le routage client s'appelle maintenant `core/AppLinkRouting` +
+> `app/AppLinkOpener`, et une étiquette imprimée **ne porte pas** le paramètre `?vue=1` — elle ouvre
+> donc la fiche **par-dessus l'onglet courant**, exactement comme décrit ci-dessous. Voir
+> [`liens-directs.md`](liens-directs.md).
+
 Le **format du deep-link** encodé/décodé a une **source unique** : `src-shared/EntityLink.ts`
 (forme canonique de l'URL, liste blanche des collections, lecture **agnostique de l'hôte** — dans
 l'app, le greffon extrait le deep-link sans tenir compte de l'hôte imprimé, l'étiquette survit

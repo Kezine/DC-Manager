@@ -254,7 +254,10 @@ document est toujours ouvert.
 
 ## 6 · Ce qui n'a PAS bougé (contraintes dures)
 
-- **Les deep-links `#nom`** de toutes les vues. Seule leur **place dans le menu** change. Un
+- **Les deep-links `#nom`** de toutes les vues. Seule leur **place dans le menu** change. (Depuis le
+  chantier « liens directs », un lien d'OBJET peut à son tour **activer** une vue — la carte
+  collection → onglet et son verrou vivent dans `core/CollectionViews`, cf.
+  [`liens-directs.md`](liens-directs.md).) Un
   bookmark, un lien partagé ou une navigation programmatique existants continuent de fonctionner.
   Un **nom de domaine n'est pas un hash valide** : `ShellNav.resolveHash` le refuse, au même titre
   qu'il refusait un nom de groupe.

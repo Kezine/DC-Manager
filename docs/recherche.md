@@ -29,6 +29,11 @@ construction**, pas par discipline. La **recherche des LISTINGS** boit à la mê
 (cf. « Listings serveur-pilotés » plus bas) : une seule définition de « quel texte trouve cet
 enregistrement » pour toute l'application.
 
+La palette s'ouvre aussi **pré-remplie par une URL** (`doc/<docId>/recherche/<texte>`) et sait
+**copier le lien** de la recherche courante. Le texte porte alors la **portée** sous forme de préfixe
+— `GlobalSearch.canonicalQuery`, réciproque exacte de `parsePrefix` — pour que le lien reste une
+seule donnée : cf. [`liens-directs.md`](liens-directs.md) § 5.
+
 ## Les composants
 
 | Composant | Rôle |

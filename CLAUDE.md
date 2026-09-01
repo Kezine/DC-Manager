@@ -162,6 +162,18 @@ francophone). Garder cette langue pour toute contribution — commentaires inclu
     elle, entièrement lisible/cherchable/enrichissable en mode fichier, cf. `docs/wifi-unifi.md`
     § « Mode local »). ⚠ Écart CONNU à résorber : les **interventions** n'existent qu'en mode API alors
     que rien ne l'impose — chantier à venir (cf. `.notes/toDos/`).
+16. **Toute modale d'INFO est ADRESSABLE — une URL directe, et le bouton pour la copier.**
+    Tout objet que l'utilisateur peut CONSULTER doit pouvoir être **partagé par un lien** qui l'ouvre,
+    onglet compris (cf. [`docs/liens-directs.md`](docs/liens-directs.md)). Le mécanisme est **déjà en
+    place et générique** : le bouton de l'en-tête est **dérivé** de la `stackKey` que la modale passe
+    de toute façon à `Modal.open`, par le registre `AppLink.STACK_KEY_FORMS`.
+    ⇒ **Brancher un nouvel élément = UNE LIGNE de ce registre**, plus une `stackKey` de la forme
+    `<type>:<id>` (ou `<type>:<collection>/<id>`). **Rien** à écrire dans la modale, et surtout **pas**
+    un bouton réimplémenté sur place — ce serait la dette du principe n°14, appliquée aux liens.
+    ⚠ **Un oubli est SILENCIEUX** (pas de bouton, personne ne le voit) : c'est pourquoi l'exhaustivité
+    est tenue par un **test** et non par la vigilance. Une modale qui n'est PAS un objet (réglages,
+    panier, viseur, formulaire d'édition) ne déclare rien — l'absence de bouton y est le comportement
+    JUSTE, pas un trou.
 
 ## Structure du projet
 
@@ -412,7 +424,9 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   `AuthCacheUserResolver` = cache d'auth capturé par puits injecté `ProfileSink` + snapshot SQLite
   `users.db` réhydraté au boot ; `RequestAuthor.identity` ; endpoint batch `GET /users/resolve`,
   email/téléphone caviardés sauf pour l'appelant ; impl SSO future, procédure d'ajout).
-- [`qr-scan.md`](docs/qr-scan.md) — **étiquettes QR & scan caméra** (deep-link d'entité à SOURCE
+- [`qr-scan.md`](docs/qr-scan.md) — **étiquettes QR & scan caméra** (⚠ le ROUTAGE des liens a été
+  généralisé depuis, cf. [`liens-directs.md`](docs/liens-directs.md) : `EntityLink` reste le FORMAT de
+  la fiche, `AppLink` est la grammaire qui l'enveloppe ; deep-link d'entité à SOURCE
   UNIQUE `src-shared/EntityLink` — `<PUBLIC_BASE_URL>#doc/<docId>/fiche/<collection>/<id>`, lecture
   AGNOSTIQUE de l'hôte imprimé : l'étiquette survit à un déménagement d'URL pour l'usage in-app ;
   **côté client** : routage `core/EntityLinkRouting` (pur — mode fichier IGNORE le docId) +
@@ -462,6 +476,24 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   faisceaux — TOUS sous le prédicat injecté `LabelPrintDialog.available()` ;
   section « Mode local » — scan OK dans les deux modes, génération/impression = mode API seulement
   (setup injecté par main.ts, patron injection nulle)).
+- [`liens-directs.md`](docs/liens-directs.md) — **LIENS DIRECTS** (chantier 2026-09-01) : une URL par
+  élément consultable + bouton « copier le lien » dans l'en-tête des modales d'info + URL qui ouvre la
+  recherche pré-remplie. Grammaire UNIQUE dans `src-shared/AppLink`
+  (`doc/<docId>/fiche|intervention|cert|recherche/…`, toutes sous `doc/<docId>/` — les familles « hors
+  document » sont indexées par `doc_id` côté serveur, donc la bascule de document leur vaut aussi ;
+  toutes contiennent des `/`, donc aucune collision avec les deep-links de VUE) ; 🚨 `EntityLink` reste
+  la SOURCE DE VÉRITÉ de la forme « fiche » — format GRAVÉ sur des étiquettes imprimées, donc INTANGIBLE,
+  `AppLink` lui DÉLÈGUE ; 🚨 **la synchronisation d'onglet est portée par `?vue=1` DANS LE FRAGMENT** —
+  absent des QR déjà imprimés, qui gardent donc leur comportement (aucune régression), présent par défaut
+  dans ce que produit le bouton ; ⚠ piège mesuré — `EntityLink.parse` exige EXACTEMENT 5 segments et prend
+  l'id au 5ᵉ, donc le suffixe `?…` doit être SÉPARÉ AVANT toute délégation (sinon l'id l'avale) ; carte
+  `core/CollectionViews` collection → onglet **explicite** (`datacenters`→« salles », `ipAddresses`→« ipam » :
+  une convention aurait marché 19 fois sur 21) à DEUX verrous ; activation qui teste `isVisible` AVANT
+  d'agir (sinon `switchView` se replie et DÉMÉNAGE l'utilisateur) ; bouton DÉRIVÉ de la `stackKey` via le
+  registre `AppLink.fromStackKey` — zéro ligne dans les 21 fiches, exhaustivité prouvée par test, et rien
+  là où il n'y a rien à partager ; lien de recherche = texte CANONIQUE `GlobalSearch.canonicalQuery`
+  (réciproque exacte de `parsePrefix`, verrouillée comme telle) ; section « Mode local » — bouton présent
+  partout, sentinelle `AppLink.LOCAL_DOC` et double écart assumé.
 - [`panier.md`](docs/panier.md) — **PANIER d'actions groupées** (V1-Beta) : familles = classes
   d'équivalence d'ANATOMIE d'action (`core/CartFamilies` — `links` = câble ≡ faisceau via `isFlagKind`,
   `components` = spare ≡ sous-équipement via `isSpareLike` ; deux collections se retrouvent dans la même
