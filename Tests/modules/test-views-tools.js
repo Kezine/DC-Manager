@@ -2318,4 +2318,52 @@ module.exports = async () => {
     ck(/trunkSuffix/.test(cableForms), "…et il est NOMMÉ comme trunk, sinon rien n'expliquerait sa présence");
   }
   });
+
+  /* ============================================================================================
+     🚨 « LOCALISER » AU PREMIER PASSAGE EN 3D — le montage DIFFÉRÉ ne doit pas écraser le focus.
+
+     Retour terrain (2026-09-01) : depuis un onglet Datacenter JAMAIS ouvert, « Localiser » cadrait
+     bien l'objet **puis la caméra repartait aussitôt** sur un cadrage par défaut (milieu de la
+     salle, ou milieu du bâtiment en cadrage MULTI sans qu'aucune vue multi ait été demandée).
+     Une seule fois — la 2ᵉ localisation était correcte.
+
+     MÉCANIQUE : le 1er passage en 3D enchaîne DEUX montages. `show()` en demande un DIFFÉRÉ
+     (branche lourde : overlay + double rAF) qui CAPTURE options/salle ; puis `locate()` en demande
+     un second, IMMÉDIAT cette fois (`Notify.isBusy()` est déjà vrai), qui construit et pose la
+     caméra. Le différé se réveille ENSUITE avec ses options périmées et re-cadre.
+
+     La garde d'hôte préexistante ne pouvait pas l'attraper : l'hôte WebGL est PERSISTANT, donc
+     c'est le MÊME objet dans les deux montages. Il fallait comparer la FRAÎCHEUR de la demande.
+
+     Ce qui est vérifiable sans DOM (`render`/`renderWebGL` sortent sur `typeof document`) : la
+     forme du garde-fou, par lecture des SOURCES — patron du verrou de `test-nav-model`.
+     ============================================================================================ */
+  await section("🚨 « Localiser » : un montage 3D DIFFÉRÉ périmé abandonne au lieu d'écraser le focus", async () => {
+  {
+    const fs = require("fs");
+    const dcBase = fs.readFileSync(path.join(__dirname, "..", "..", "src-client", "views", "dc", "DcBase.ts"), "utf8");
+
+    ck(/protected _webglMountSeq = 0;/.test(dcBase), "DcBase porte un compteur de montage 3D (`_webglMountSeq`)");
+
+    const corps = /protected renderWebGL\(dc: any\): void \{([\s\S]*?)\n  \}\n/.exec(dcBase);
+    ck(!!corps, "renderWebGL est bien lu");
+
+    const iSeq = corps[1].indexOf("const seq = ++this._webglMountSeq;");
+    const iMount = corps[1].indexOf("const doMount");
+    const iBail = corps[1].indexOf("if (seq !== this._webglMountSeq) return;");
+    ck(iSeq >= 0, "chaque demande de montage prend un NUMÉRO");
+    ck(iBail >= 0, "🚨 le montage ABANDONNE s'il n'est plus le plus récent — c'est tout le correctif");
+    ck(iSeq < iMount, "🚨 le numéro est pris À LA DEMANDE (hors du callback) : capturé dedans, il vaudrait toujours le dernier et ne garderait RIEN");
+    ck(iBail > iMount, "…et il est comparé À L'EXÉCUTION, dans le callback du montage");
+
+    // La garde de SÉQUENCE passe AVANT celle de l'hôte : c'est la plus discriminante des deux
+    // (l'hôte étant persistant, la sienne ne voit rien dans ce scénario).
+    const iHost = corps[1].indexOf("if (this._webglHost !== hostDiv) return;");
+    ck(iHost > iBail, "la garde d'hôte (préexistante, insuffisante ici) est CONSERVÉE, après celle de séquence");
+
+    // L'overlay doit être levé MÊME quand le montage différé abandonne, sinon « Rendu 3D… » resterait à l'écran.
+    ck(/doMount\(\)\.finally\(\(\) => Notify\.idle\(\)\)/.test(corps[1]),
+      "🚨 l'overlay est levé dans un `finally` : un montage qui ABANDONNE ne doit pas laisser « Rendu 3D… » collé à l'écran");
+  }
+  });
 };

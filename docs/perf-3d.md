@@ -71,6 +71,18 @@
   si le canvas est attaché ET `histIndex()` inchangé → chemin diff (`renderThreeD`/`applyOptionsDiff`, souvent
   no-op) au lieu de `renderWebGL → mount → build()`. Sinon (1er rendu, canvas détaché par sous-vue, données
   modifiées) → (re)build.
+- 🐛 **Un montage DIFFÉRÉ qui n'est plus le plus récent ABANDONNE** (`_webglMountSeq`, correctif du
+  2026-09-01). L'overlay « Rendu 3D… » diffère le build derrière un double `requestAnimationFrame` — et ce
+  build **capture** options, contexte et salle au moment où il est DEMANDÉ. Or le premier passage en 3D peut
+  en enchaîner deux : `show()` en demande un (différé), puis un « Localiser » en demande un second qui, lui,
+  part **immédiatement** (`Notify.isBusy()` est déjà vrai), construit et pose la caméra sur l'objet. Le
+  différé se réveillait ensuite avec ses options périmées et **re-cadrait la salle par-dessus le focus** —
+  d'où le symptôme « ça localise correctement, très brièvement », une seule fois, uniquement quand l'onglet
+  Datacenter n'avait jamais été ouvert (seul cas où la branche lourde est prise). Chaque demande prend
+  désormais un numéro et le montage abandonne s'il n'est plus le dernier : **le dernier demandeur gagne**.
+  La garde d'hôte préexistante ne pouvait pas l'attraper — l'hôte étant PERSISTANT, c'est le même objet dans
+  les deux montages ; c'est la fraîcheur de la DEMANDE qu'il faut comparer, pas l'identité du conteneur.
+  L'overlay est levé dans un `finally`, donc un montage qui abandonne ne laisse jamais « Rendu 3D… » collé.
 - **Moteur préservé entre vues** : `render()` ne `dispose()` le moteur Three QUE si on bascule sur la 3D LEGACY
   (SVG). L'hôte WebGL est **persistant et conservé ATTACHÉ** (exclu de `clearStage`) : en 2D (Dessus/Étage) il est
   juste **masqué** (`display:none`), pas détaché. Au retour en 3D, comme il est toujours attaché, la garde de

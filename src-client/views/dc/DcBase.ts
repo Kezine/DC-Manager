@@ -128,6 +128,10 @@ export abstract class DcBase {
   protected _returnAction: (() => void) | null = null;   // action du bouton « Retour » (rouvrir la modale / revenir à l'onglet d'origine)
   protected _webglHost: HTMLElement | null = null;
   protected _webglRev: number | null = null;     // révision du store au dernier (re)build WebGL → éviter un build complet au simple retour de vue
+  /** N° du dernier montage 3D DEMANDÉ. Un montage DIFFÉRÉ (double rAF, cf. `renderWebGL`) capture ce
+      numéro et ABANDONNE si un montage plus récent est passé entre-temps — sinon il rejouerait un build
+      avec des options PÉRIMÉES et écraserait ce que le montage récent a fait (cf. le 🐛 de `renderWebGL`). */
+  protected _webglMountSeq = 0;
 
   protected scene: RackScene;
   protected resolver: Resolver3D;
@@ -731,8 +735,30 @@ export abstract class DcBase {
       this._webglHost = hostDiv;
     }
     // import DYNAMIQUE eager (cf. en-tête) : inliné dans le bundle, mais non chargé par la chaîne require() CJS des tests.
+    // ⚠ `opts`/`ctx`/`dcId` sont CAPTURÉS ICI, pas relus dans `doMount` : un montage différé travaille donc
+    // sur l'état du moment où il a été DEMANDÉ. D'où la garde de séquence ci-dessous.
     const opts = this.webglOptions(), ctx = this.webglCtx(), persp = this.webglPerspective, dcId = dc.id;
+    /* 🐛 GARDE DE SÉQUENCE — « Localiser » depuis un onglet Datacenter JAMAIS OUVERT cadrait bien l'objet,
+       puis la caméra repartait aussitôt sur un cadrage par défaut (milieu de la salle, ou milieu du bâtiment
+       en cadrage MULTI alors qu'aucune vue multi n'était demandée). Une seule fois, et seulement la première.
+
+       POURQUOI. Le premier passage en 3D enchaîne DEUX montages :
+         1. `switchView` → `show()` → `render()` → `renderWebGL` : `_three` est null, donc branche
+            « lourde » → `Notify.busy()` + double rAF → montage n°1 DIFFÉRÉ, qui a capturé les options et
+            la salle d'AVANT la localisation ;
+         2. puis `dcView.locate(...)` → `focus3DAt` → `render()` → `renderWebGL` de nouveau : cette fois
+            `Notify.isBusy()` est VRAI, donc montage n°2 IMMÉDIAT — il construit, puis `applyFocus3D()`
+            pose la caméra sur l'objet. C'est le « ça localise correctement très brièvement ».
+       Le double rAF du n°1 se déclenche ENSUITE et re-monte avec ses options périmées : `frameOnce` cadre
+       la salle (ou la clé MULTI) et écrase le focus. À la 2ᵉ localisation `_three` existe déjà, la branche
+       lourde n'est plus prise, il n'y a plus qu'un montage — d'où « d'office correcte ».
+
+       La garde d'hôte juste dessous ne pouvait pas l'attraper : l'hôte est PERSISTANT et RÉUTILISÉ, donc
+       `hostDiv` est le même objet dans les deux montages. C'est la FRAÎCHEUR de la demande qu'il faut
+       comparer, pas l'identité du conteneur — le dernier demandeur gagne. */
+    const seq = ++this._webglMountSeq;
     const doMount = (): Promise<void> => import(/* webpackMode: "eager" */ "./three/DcThreeScene").then(({ DcThreeScene }) => {
+      if (seq !== this._webglMountSeq) return;   // un montage PLUS RÉCENT est passé → celui-ci est périmé, il n'a plus rien à dire
       if (this._webglHost !== hostDiv) return;   // un re-rendu a remplacé l'hôte entre-temps → abandon
       if (!this._three) {
         this._three = new DcThreeScene(this.store, this.host);
