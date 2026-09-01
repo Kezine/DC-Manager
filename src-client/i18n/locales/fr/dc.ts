@@ -381,6 +381,16 @@ export const dc = {
     cableField: "Câble",
     cableFieldHint: "Le formulaire s'ouvre ensuite, port prérempli — vérifiez puis enregistrez.",
     connectPortTitle: "Brancher le port",
+    // BREAKOUT (T2-B1) : le trunk est le seul port DESSINÉ de son groupe (ses lanes émergent de son
+    // connecteur, donc la 3D ne les dessine pas) alors qu'il est justement le seul INCÂBLABLE. Le clic
+    // demande donc la lane — on ne rend pas le trunk câblable, on rend ses lanes ATTEIGNABLES.
+    laneChooseTitle: "Choisir la lane à câbler",
+    laneChooseHint: "« {{trunk}} » est un trunk éclaté en {{n}} lanes. Un trunk ne porte pas de câble lui-même : ce sont ses lanes qui se câblent.",
+    laneField: "Lane",
+    lanePlaceholder: "Lane {{n}}",
+    laneTaken: " · déjà câblée ({{cable}})",
+    laneAllTaken: "Toutes les lanes de ce trunk sont déjà câblées.",
+    trunkWord: "ce trunk",
     continue: "Continuer",
     show: "Afficher {{noun}}{{suf}}",
     isolate: "Isoler {{noun}}{{suf}}",

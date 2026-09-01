@@ -2255,4 +2255,67 @@ module.exports = async () => {
     ck(cNu, "fixture câble non plaçable créée");
   }
   });
+
+  /* ============================================================================================
+     🚨 BREAKOUT — UNE LANE DOIT ÊTRE ATTEIGNABLE AU GESTE (correctif T2-B1, 2026-09-01)
+
+     Le retour terrain : « je sais créer un breakout, aucun moyen de l'associer à quoi que ce soit
+     via l'UI ». Quatre verrous en série l'expliquaient, dont trois sont DÉLIBÉRÉS et le restent :
+       ① une lane n'a pas de position de façade propre (elle émerge du connecteur de son trunk) ;
+       ② donc la 3D ne la dessine pas — rien à cliquer ;
+       ③ le trunk, lui, EST dessiné… mais il est le seul port INCÂBLABLE (doctrine : les lanes
+          portent les câbles) ;
+       ④ et il était exclu de `portOpts` SANS échappatoire, si bien qu'un formulaire ouvert sur un
+          trunk n'avait même pas son bout A dans sa propre liste d'options.
+
+     Le correctif ne touche NI ① NI ② NI la doctrine ③ : il rend les lanes ATTEIGNABLES (le clic sur
+     un trunk demande laquelle câbler) et referme ④ (une valeur RETENUE n'est jamais perdue).
+
+     Ce qui est vérifiable sans DOM : les briques de STORE que le geste consomme, et — par lecture
+     des SOURCES, patron du verrou de `test-nav-model` — le fait que le câblage les emprunte bien.
+     ============================================================================================ */
+  await section("🚨 Breakout : les LANES sont atteignables au geste, le trunk reste incâblable (T2-B1)", async () => {
+  {
+    const s = await makeStore();
+    const eq = await s.create("equipments", { name: "SW-CORE" });
+    const trunk = await s.create("ports", { equipment_id: eq.id, name: "QSFP1", role: "data" });
+    const lanes = [];
+    for (let i = 1; i <= 4; i++) lanes.push(await s.create("ports", { equipment_id: eq.id, name: "QSFP1/" + i, role: "data", parent_port_id: trunk.id, lane: i }));
+    const normal = await s.create("ports", { equipment_id: eq.id, name: "Gi1/0/1", role: "data" });
+
+    // ---- les briques que le geste consomme ----
+    ck(s.isBreakoutParent(trunk), "le trunk est bien reconnu comme parent de breakout");
+    ck.eq(s.isBreakoutParent(normal), false, "un port ordinaire ne l'est pas");
+    ck.eq(s.breakoutLanes(trunk.id).length, 4, "les 4 lanes sont retrouvées depuis le trunk");
+    ck.eq(s.breakoutLanes(trunk.id).map((l) => l.lane).join(","), "1,2,3,4", "…et ORDONNÉES par n° de lane (l'ordre du choix proposé)");
+    ck.eq(s.breakoutLanes(normal.id).length, 0, "un port ordinaire n'a pas de lane");
+    ck.eq(s.breakoutLanes(lanes[0].id).length, 0, "une lane n'est pas elle-même un trunk (pas de breakout de breakout ici)");
+
+    // ---- une lane est un port comme un autre pour le câblage : c'est ELLE qui porte le câble ----
+    ck.eq(s.portsOf(eq.id).filter((p) => !s.isBreakoutParent(p)).length, 5,
+      "ports CÂBLABLES de l'équipement : les 4 lanes + le port ordinaire — le trunk est écarté, doctrine INCHANGÉE");
+
+    // -- Le VERROU, sur les SOURCES : le câblage emprunte bien ces briques --
+    const fs = require("fs");
+    const src = (...p) => fs.readFileSync(path.join(__dirname, "..", "..", "src-client", ...p), "utf8");
+
+    const dcInteract = src("views", "dc", "DcInteract.ts");
+    const resolveur = /resolveLaneToCable\(port: any\): Promise<any> \{([\s\S]*?)\n  \}/.exec(dcInteract);
+    ck(!!resolveur, "DcInteract.resolveLaneToCable existe (le geste qui rend les lanes atteignables)");
+    ck(/isBreakoutParent\(port\)/.test(resolveur[1]), "…il ne s'active QUE sur un trunk (un port ordinaire passe tout droit)");
+    ck(/breakoutLanes\(port\.id\)/.test(resolveur[1]), "…et propose les lanes DU trunk cliqué");
+    ck(/cableOnPort/.test(resolveur[1]), "…en signalant celles qui sont déjà câblées (jamais un choix qui échouera)");
+
+    const connect = /protected async connectPort\(portClique: any\): Promise<void> \{([\s\S]*?)\n    const cands/.exec(dcInteract);
+    ck(!!connect, "connectPort est bien lu");
+    ck(/await this\.resolveLaneToCable\(portClique\)/.test(connect[1]),
+      "🚨 le clic de port PASSE par la résolution de lane — c'est le chemin que le clic 3D ET le menu contextuel empruntent tous deux");
+
+    // ④ l'échappatoire : une valeur RETENUE n'est jamais perdue, même devenue trunk
+    const cableForms = src("views", "forms", "CableForms.ts");
+    ck(/!store\.isBreakoutParent\(p\) \|\| p\.id === selectedPortId/.test(cableForms),
+      "🚨 portOpts : un trunk DÉJÀ retenu reste dans sa propre liste (un port peut être devenu trunk APRÈS avoir reçu un câble)");
+    ck(/trunkSuffix/.test(cableForms), "…et il est NOMMÉ comme trunk, sinon rien n'expliquerait sa présence");
+  }
+  });
 };

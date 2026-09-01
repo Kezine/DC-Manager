@@ -438,8 +438,53 @@ export abstract class DcInteract extends DcPanels {
     node.addEventListener("contextmenu", (e: any) => { this.hideTip(); this.ctxMenu(e, this.portCtx(port, cab)); });
   }
 
-  /** Clic d'un port LIBRE : propose les brouillons-candidats (un bout manquant, compatibles) ou un nouveau câble. */
-  protected async connectPort(port: any): Promise<void> {
+  /** TRUNK ÉCLATÉ → la LANE à câbler (correctif T2-B1, 2026-09-01).
+
+      🐛 CE QUI N'ALLAIT PAS. Un trunk de breakout est le SEUL port dessiné de son groupe : ses lanes
+      n'ont pas de position de façade propre (elles émergent de SON connecteur), donc la 3D ne les
+      dessine pas et rien ne permet de les cliquer. Or c'est le trunk qui est INCÂBLABLE — la doctrine
+      veut que les câbles portent sur les lanes. Cliquer le seul objet visible ouvrait donc un
+      formulaire dont le bout A n'existait même pas dans sa propre liste d'options : un cul-de-sac,
+      et l'unique chemin restant (retrouver la lane par son nom dans un formulaire ouvert à froid)
+      était indécouvrable. D'où le retour terrain : « je sais créer un breakout, aucun moyen de
+      l'associer à quoi que ce soit via l'UI ».
+
+      CE QU'ON FAIT ICI : le clic sur un trunk DEMANDE la lane, puis poursuit avec elle. On ne rend
+      pas le trunk câblable (la doctrine ne bouge pas) — on rend ses lanes ATTEIGNABLES.
+      Rend `null` si l'utilisateur renonce ; le port lui-même s'il n'est pas un trunk. */
+  protected async resolveLaneToCable(port: any): Promise<any> {
+    if (!this.store.isBreakoutParent(port)) return port;
+    const lanes = this.store.breakoutLanes(port.id);
+    if (!lanes.length) return port;   // défensif : `isBreakoutParent` vient de dire l'inverse
+    const libre = (p: any) => !this.store.cableOnPort(p.id);
+    const options = lanes.map((l: any) => {
+      const pt: any = this.store.get("portTypes", l.port_type_id);
+      const occ = this.store.cableOnPort(l.id);
+      let label = (l.name || I18n.t("dc.interact.lanePlaceholder", { n: l.lane || "?" })) + (pt ? " · " + pt.family : "");
+      if (occ) label += I18n.t("dc.interact.laneTaken", { cable: occ.name || I18n.t("dc.interact.draftPh") });
+      return { value: l.id, label, disabled: !!occ };
+    });
+    const premiereLibre = lanes.find(libre);
+    if (!premiereLibre) { Notify.toast(I18n.t("dc.interact.laneAllTaken"), "err"); return null; }
+    const sel = FormControls.select(options, premiereLibre.id);
+    const res = await Dialog.custom({
+      title: I18n.t("dc.interact.laneChooseTitle"), confirmLabel: I18n.t("dc.interact.continue"),
+      build: (r: HTMLElement) => {
+        const hint = document.createElement("div"); hint.className = "form-hint";
+        hint.textContent = I18n.t("dc.interact.laneChooseHint", { trunk: port.name || I18n.t("dc.interact.trunkWord"), n: lanes.length });
+        r.append(hint, FormControls.fieldRow(I18n.t("dc.interact.laneField"), sel));
+        return { validate: () => true as const, collect: () => ({ laneId: sel.value }) };
+      },
+    });
+    if (!res || !res.laneId) return null;
+    return this.store.get("ports", res.laneId) || null;
+  }
+
+  /** Clic d'un port LIBRE : propose les brouillons-candidats (un bout manquant, compatibles) ou un nouveau câble.
+      Un TRUNK de breakout demande d'abord LAQUELLE de ses lanes câbler (cf. `resolveLaneToCable`). */
+  protected async connectPort(portClique: any): Promise<void> {
+    const port = await this.resolveLaneToCable(portClique);
+    if (!port) return;   // trunk sans lane libre, ou choix annulé
     const cands = this.store.cableDraftCandidatesForPort(port.id);
     if (!cands.length) { this.host.openCableForm?.(null, { fromPortId: port.id }); return; }
     const sel = FormControls.select([{ value: "", label: I18n.t("dc.interact.newCable") }].concat(cands.map((c: any) => {

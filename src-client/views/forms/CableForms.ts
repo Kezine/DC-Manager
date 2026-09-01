@@ -172,7 +172,13 @@ export class CableForms extends EquipmentForms {
     };
     const portOpts = (eqId: string, selectedPortId: string | null, fam: string | null) => {
       if (!eqId) return [{ value: "", label: I18n.t("cable.cable.pickEquipFirst") }];
-      let ports = store.portsOf(eqId).filter((p: any) => !store.isBreakoutParent(p));
+      // Un TRUNK de breakout ne se câble pas (ses LANES portent les câbles) — sauf s'il est DÉJÀ la
+      // valeur retenue : un port peut être devenu trunk APRÈS avoir reçu un câble (on lui a ajouté des
+      // lanes), et l'exclure sans échappatoire faisait disparaître le bout A de sa propre liste — le
+      // formulaire s'ouvrait alors sur une valeur invisible, impossible à relire comme à corriger.
+      // Même échappatoire `p.id === selectedPortId` que le filtre de FAMILLE juste dessous, et pour la
+      // même raison : on n'ajoute jamais un choix, on ne PERD jamais celui qui existe (T2-B1).
+      let ports = store.portsOf(eqId).filter((p: any) => !store.isBreakoutParent(p) || p.id === selectedPortId);
       if (fam) ports = ports.filter((p: any) => store.portFamily(p) === fam || p.id === selectedPortId);
       if (!ports.length) return [{ value: "", label: fam ? I18n.t("cable.cable.noCompatPort") : I18n.t("cable.cable.noPortOnEquip") }];
       ports = ports.slice().sort((a: any, b: any) => ((store.cableOnPort(a.id, cable ? cable.id : null) ? 1 : 0) - (store.cableOnPort(b.id, cable ? cable.id : null) ? 1 : 0)) || (a.name || "").localeCompare(b.name || ""));
@@ -180,6 +186,9 @@ export class CableForms extends EquipmentForms {
         const pt: any = store.get("portTypes", p.port_type_id);
         let label = (p.name || I18n.t("cable.cable.port")) + " · " + (pt ? pt.family : I18n.t("cable.cable.unknownType")) + " · " + PortRoles.label(p.role);
         if (p.parent_port_id) { const par: any = store.get("ports", p.parent_port_id); label += I18n.t("cable.cable.laneOf") + (par ? (par.name || I18n.t("cable.cable.trunk")) : I18n.t("cable.cable.trunk")); }
+        // Trunk RETENU par l'échappatoire ci-dessus : on le NOMME pour tel, sinon la ligne serait un
+        // port ordinaire d'apparence, dans une liste où plus rien n'expliquerait sa présence.
+        else if (store.isBreakoutParent(p)) label += I18n.t("cable.cable.trunkSuffix", { n: store.breakoutLanes(p.id).length });
         const occ = store.cableOnPort(p.id, cable ? cable.id : null);
         if (occ) { const otherId = occ.from_port_id === p.id ? occ.to_port_id : occ.from_port_id; const other: any = store.get("ports", otherId); const otherEq: any = other ? store.get("equipments", other.equipment_id) : null; label += I18n.t("cable.cable.occupied") + (other ? ((otherEq ? otherEq.name : "?") + " : " + (other.name || I18n.t("cable.cable.port"))) : "?"); return { value: p.id, label, disabled: true }; }
         return { value: p.id, label };

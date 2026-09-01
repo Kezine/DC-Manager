@@ -56,6 +56,9 @@ export const cable = {
     unknownType: "type ?",
     laneOf: " · lane de ",
     trunk: "trunk",
+    // Trunk RETENU dans la liste des ports parce qu'il EST la valeur courante (un port devenu trunk
+    // après avoir reçu un câble) — on le nomme, sinon rien n'expliquerait sa présence. Cf. T2-B1.
+    trunkSuffix: " · TRUNK éclaté en {{n}} lanes",
     occupied: "  — occupé ↔ ",
     equipA: "Équipement A",
     portA: "Port A",

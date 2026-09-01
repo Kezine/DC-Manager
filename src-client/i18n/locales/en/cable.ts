@@ -48,6 +48,7 @@ export const cable = {
     unknownType: "type ?",
     laneOf: " · lane of ",
     trunk: "trunk",
+    trunkSuffix: " · TRUNK broken out into {{n}} lanes",
     occupied: "  — used ↔ ",
     equipA: "Equipment A",
     portA: "Port A",
