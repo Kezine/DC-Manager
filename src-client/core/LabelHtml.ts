@@ -18,11 +18,22 @@
 
    Les QR arrivent DÉJÀ retravaillés (`core/LabelQrSvg.scaleToMm` — quiet zone
    garantie, cote en mm) : ce module les INLINE tels quels, il ne les touche pas.
+
+   🚨 CHAMPS DÉCLARÉS PAR SUJET (retour terrain T10, 2026-09-02) : le sujet ne
+   porte plus quatre champs FIGÉS (location/type/serial/owner) mais une LISTE de
+   déclarations `LabelFieldDecl` — les spares/sous-équipements ne « reprenaient
+   pas les bonnes infos » précisément parce que leurs caractéristiques (capacité,
+   interface, achat…) n'avaient aucun nom dans le modèle figé. Ce module rend la
+   liste GÉNÉRIQUEMENT (une ligne par déclaration cochée, registre typographique
+   déclaré — les classes `.l-loc`/`.l-meta`/`.l-sn`/`.l-own` EXISTANTES, jamais
+   de nouvelle typographie) ; seule l'anatomie STRUCTURELLE des câbles/faisceaux
+   (extrémités A/B des drapeaux et manchons) reste hors liste.
    ============================================================================ */
 
 import { Html } from "./Html";
 import { LabelLayout } from "./LabelLayout";
 import { LabelOrientation } from "./LabelOrientation";   // repère d'orientation des manchons « identifiant seul »
+import { LabelPrintPolicy } from "./LabelPrintPolicy";   // règle contenu × champ (la MÊME que les cases du dialogue)
 import type { LabelSpec } from "./LabelLayout";
 
 /** Épaisseur du trait de coupe, en mm — LUE dans `LabelLayout` (source unique). Le CSS
@@ -30,22 +41,50 @@ import type { LabelSpec } from "./LabelLayout";
     diverger de la géométrie qui, elle, calcule la capacité de la planche avec. */
 const CUT = LabelLayout.CUT_MM;
 
-/** Matière d'UNE étiquette — préparée par `core/LabelSubjects` depuis le store.
-    Champs absents/vides ⇒ la ligne correspondante n'est PAS rendue (décision
-    « owner vide → ligne absente », généralisée à tout le lisible humain). */
+/** Registres typographiques d'une ligne d'étiquette — les classes `.l-*` du CSS ci-dessous,
+    HÉRITÉES du modèle figé (l'imprimé équipement/baie/câble d'avant T10 doit rester identique) :
+      · `loc`  = mono, une ligne (emplacement, caractéristiques techniques) ;
+      · `meta` = sans-serif grise (type/famille, marque/modèle, achat) ;
+      · `sn`   = mono grise (n° de série) ;
+      · `own`  = capitales espacées (propriétaire — aussi la bande sous le carré en « QR seul »). */
+export type LabelFieldStyle = "loc" | "meta" | "sn" | "own";
+
+/** UN champ imprimable DÉCLARÉ par un sujet (décision Q10.B du retour terrain T10) :
+    l'UI du dialogue se PEINT depuis ces déclarations, le rendu les consomme telles
+    quelles. Un sujet ne déclare JAMAIS un champ à valeur vide — le « pas de case
+    sans donnée » est STRUCTUREL (décision Q10.C), plus une règle d'interface. */
+export interface LabelFieldDecl {
+  /** Identité STABLE de la case — clé de la mémoire de session et de l'union de planche
+      (deux sujets qui déclarent le même id partagent la même case du dialogue). */
+  id: string;
+  /** Libellé de la case (déjà localisé par `LabelSubjects`). */
+  label: string;
+  /** Valeur composée à imprimer — non vide par construction. */
+  value: string;
+  /** Cochée par défaut au premier tirage du contexte. */
+  checked: boolean;
+  /** Registre typographique de la ligne imprimée. */
+  style: LabelFieldStyle;
+  /** Ligne SUPPRIMÉE au registre S (héritage du modèle figé : type/série d'un équipement
+      n'ont jamais tenu sur 50 × 20 — les déclarations du petit matériel ne le posent PAS,
+      leur gabarit par défaut EST le S et leur contenu est la raison d'être de T10). */
+  hideOnSmall?: boolean;
+  /** Survit au contenu « QR seul » — rendue en bande sous le carré (historiquement le
+      propriétaire, seul champ que ce contenu conservait). */
+  qrOnly?: boolean;
+}
+
+/** Matière d'UNE étiquette — préparée par `core/LabelSubjects` depuis le store. */
 export interface LabelSubject {
   collection: string;
   id: string;
   /** Identifiant imprimé (nom / désignation) — seul champ TOUJOURS rendu. */
   name: string;
-  /** Emplacement (« B12 · U18-U19 », « Salle 2 »…). */
-  location?: string;
-  /** Type / famille lisible (« Serveur · Dell R650 », « Cat 6a · 3 m »…). */
-  typeLabel?: string;
-  serial?: string;
-  /** Société propriétaire — champ `owner` de l'ENREGISTREMENT (lot E1), jamais une saisie d'impression. */
-  owner?: string;
-  /** Câble : extrémités A / B (drapeau, manchon « repère complet »). */
+  /** Champs imprimables DÉCLARÉS (T10) — jamais de valeur vide (cf. `LabelFieldDecl`). */
+  fields: LabelFieldDecl[];
+  /** Câble/faisceau SEULEMENT : extrémités A / B — STRUCTURELLES (drapeau, manchon
+      « repère complet »), elles ne rejoignent pas la liste déclarée : leur rendu est
+      une ANATOMIE (panneaux, `<b>A</b>`/`<b>B</b>`), pas une ligne générique. */
   endA?: string;
   endB?: string;
 }
@@ -60,12 +99,13 @@ export interface LabelFontFace {
   unicodeRange?: string;
 }
 
-/** Cases « Lisible humain » de la modale (l'identifiant, lui, est toujours coché). */
-export interface LabelFields {
-  location: boolean;
-  type: boolean;
-  serial: boolean;
-  owner: boolean;
+/** Choix de rendu d'un tirage — l'état des cases du dialogue, appliqué à CHAQUE sujet :
+    `checked[id]` vaut pour la déclaration portant cet id (un sujet qui ne le déclare pas
+    saute simplement la ligne — c'est ce qui rend la planche MULTI-SUJETS hétérogène sûre),
+    `ends` est la bascule STRUCTURELLE « Extrémités A / B » des sujets à drapeau. */
+export interface LabelFieldChoice {
+  ends: boolean;
+  checked: Readonly<Record<string, boolean>>;
 }
 
 export class LabelHtml {
@@ -150,7 +190,7 @@ export class LabelHtml {
 .label-render .lab .l-sn{font-family:var(--lp-mono);color:#444;line-height:1.1}
 .label-render .lab .l-own{font-family:var(--lp-sans);text-transform:uppercase;letter-spacing:.07em;color:#222;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
 .label-render .lab .rule{height:.35mm;background:#000;width:100%;margin:.8mm 0}
-.label-render .lab.s .l-id{font-size:8pt}.label-render .lab.s .l-loc{font-size:6.5pt}.label-render .lab.s .l-own{font-size:5pt}
+.label-render .lab.s .l-id{font-size:8pt}.label-render .lab.s .l-loc{font-size:6.5pt}.label-render .lab.s .l-meta{font-size:5.5pt}.label-render .lab.s .l-sn{font-size:5pt}.label-render .lab.s .l-own{font-size:5pt}
 .label-render .lab.m .l-id{font-size:8.5pt}.label-render .lab.m .l-loc{font-size:7pt}.label-render .lab.m .l-meta{font-size:6pt}.label-render .lab.m .l-sn{font-size:5.5pt}.label-render .lab.m .l-own{font-size:5.5pt}
 .label-render .lab.l .l-id{font-size:12pt}.label-render .lab.l .l-loc{font-size:9pt}.label-render .lab.l .l-meta{font-size:7.5pt}.label-render .lab.l .l-sn{font-size:7pt}.label-render .lab.l .l-own{font-size:7pt}
 .label-render .lab.rack{align-items:center}
@@ -194,11 +234,21 @@ export class LabelHtml {
       typographie). `qrSvg` = SVG déjà mis à l'échelle (`LabelQrSvg.scaleToMm`,
       cote = `LabelLayout.qrSizeOf(spec)` mm) — vide pour les manchons.
       `dims` (optionnel) force les cotes : sur une PLANCHE, l'étiquette prend la
-      taille de sa CELLULE (cf. LabelLayout, « cellule ≠ étiquette »). */
-  static label(subject: LabelSubject, spec: LabelSpec, fields: LabelFields, qrSvg: string, dims?: [number, number]): string {
+      taille de sa CELLULE (cf. LabelLayout, « cellule ≠ étiquette »).
+
+      T10 : les lignes viennent des DÉCLARATIONS du sujet — cochées via `choice.checked`
+      et filtrées par la MÊME règle contenu × champ que les cases du dialogue
+      (`LabelPrintPolicy.fieldVisible` : une case masquée ne s'imprime jamais). Un sujet
+      d'une planche hétérogène qui ne déclare pas un id coché saute la ligne. */
+  static label(subject: LabelSubject, spec: LabelSpec, choice: LabelFieldChoice, qrSvg: string, dims?: [number, number]): string {
     const esc = Html.escape;
     const cp = spec.compact;
-    const own = fields.owner ? String(subject.owner || "").trim() : "";
+    const lineOf = (f: LabelFieldDecl): string => `<div class="l-${f.style}">${esc(f.value)}</div>`;
+    const checked = (subject.fields || []).filter((f) => choice.checked[f.id] && LabelPrintPolicy.fieldVisible(f, spec.content));
+    // Extrémités A / B — anatomie STRUCTURELLE des sujets à drapeau (hors liste déclarée, T10).
+    const endLines = choice.ends && (subject.endA || subject.endB)
+      ? `<div class="l-loc"><b>A</b> ${esc(subject.endA || "")}</div><div class="l-loc"><b>B</b> ${esc(subject.endB || "")}</div>`
+      : "";
     const mm = (v: number) => +v.toFixed(2);
     // Les CASES de manchon se posent au MILLIÈME de mm, pas au centième comme les autres
     // cotes : elles sont répétées jusqu'à 20 fois, et un arrondi au centième laisserait un
@@ -219,10 +269,11 @@ export class LabelHtml {
         const idOnly = spec.content === "id";
         const count = idOnly ? LabelLayout.sleeveRepeats(g.visible) : LabelLayout.SLEEVE_STRIP_PANELS;
         const cellW = mm3(LabelLayout.sleeveCellWidth(g.visible, count));
+        // Sur un manchon le texte est VERTICAL et étroit : toute déclaration se rend dans le
+        // registre mono `l-loc` (comme le type du modèle figé), sauf `own` qui garde ses
+        // capitales — même typographie qu'avant T10, appliquée à la liste déclarée.
         const extra = idOnly ? "" :
-          (fields.location && (subject.endA || subject.endB) ? `<div class="l-loc"><b>A</b> ${esc(subject.endA || "")}</div><div class="l-loc"><b>B</b> ${esc(subject.endB || "")}</div>` : "")
-          + (fields.type && subject.typeLabel ? `<div class="l-loc">${esc(subject.typeLabel)}</div>` : "")
-          + (own ? `<div class="l-own">${esc(own)}</div>` : "");
+          endLines + checked.map((f) => f.style === "own" ? lineOf(f) : `<div class="l-loc">${esc(f.value)}</div>`).join("");
         // TOUTES les cases portent la MÊME largeur posée — l'égalité est une cote, pas un
         // reste réparti. Seule la dernière ajoute `fold` : le filet qui la termine borne la
         // partie visible (là où le manchon commence à se recouvrir), d'où sa couleur plus
@@ -245,10 +296,7 @@ export class LabelHtml {
       // DRAPEAU : QR à gauche, texte (ou second QR — « scannable des deux faces ») à
       // droite, zone d'enroulement hachurée entre les deux. Géométrie dérivée du QR.
       const g = LabelLayout.flagGeometry(LabelLayout.qrSizeOf(spec), cp);
-      let t = `<div class="l-id">${esc(subject.name)}</div>`;
-      if (fields.location && (subject.endA || subject.endB)) t += `<div class="l-loc"><b>A</b> ${esc(subject.endA || "")}</div><div class="l-loc"><b>B</b> ${esc(subject.endB || "")}</div>`;
-      if (fields.type && subject.typeLabel) t += `<div class="l-meta">${esc(subject.typeLabel)}</div>`;
-      if (own) t += `<div class="l-own">${esc(own)}</div>`;
+      const t = `<div class="l-id">${esc(subject.name)}</div>` + endLines + checked.map(lineOf).join("");
       const panB = spec.content === "qr" ? qrSvg : `<div class="txt">${t}</div>`;
       return `<div class="lab cable${cp ? " compact" : ""}" style="width:${mm(g.w)}mm;height:${mm(g.h)}mm">`
         + `<div class="pan" style="width:${g.pan}mm;padding:${g.pad}mm">${qrSvg}</div>`
@@ -260,9 +308,11 @@ export class LabelHtml {
     const cls = spec.size === "custom" ? LabelLayout.fontClassForHeight(h) : spec.size;
 
     if (spec.content === "qr") {
-      // QR SEUL : carré (QR + marges), éventuelle bande propriétaire sous le carré.
-      const g = LabelLayout.qrOnlyGeometry(spec.qr, cp, !!own);
-      return `<div class="lab ${cls} qronly${cp ? " compact" : ""}" style="width:${mm(g.side)}mm;height:${mm(g.side)}mm;padding:${g.pad}mm;gap:${g.gap}mm">${qrSvg}${own ? `<div class="txt"><div class="l-own">${esc(own)}</div></div>` : ""}</div>`;
+      // QR SEUL : carré (QR + marges), éventuelle bande sous le carré — `checked` ne
+      // contient déjà PLUS que les déclarations `qrOnly` (fieldVisible), historiquement
+      // le propriétaire ; la géométrie du carré suit la présence de la bande.
+      const g = LabelLayout.qrOnlyGeometry(spec.qr, cp, checked.length > 0);
+      return `<div class="lab ${cls} qronly${cp ? " compact" : ""}" style="width:${mm(g.side)}mm;height:${mm(g.side)}mm;padding:${g.pad}mm;gap:${g.gap}mm">${qrSvg}${checked.length ? `<div class="txt">${checked.map(lineOf).join("")}</div>` : ""}</div>`;
     }
 
     // QR + TEXTE (gabarits S/M/L/Baie/personnalisé) : QR TOUJOURS à gauche (la main
@@ -271,12 +321,19 @@ export class LabelHtml {
     // des préréglages — bug S : en confort la marge cède, jamais la scannabilité).
     const rg = LabelLayout.rectQrGeometry(spec, h);
     const big = cls === "l" || cls === "rack";
+    // Registre S : seules les déclarations marquées `hideOnSmall` sautent (héritage du
+    // modèle figé — type/série d'un équipement) ; celles du petit matériel (T10) restent,
+    // le S est leur gabarit PAR DÉFAUT (d'où les tailles `.lab.s .l-meta/.l-sn` du CSS).
+    const lines = checked.filter((f) => !(f.hideOnSmall && cls === "s"));
     let t = `<div class="l-id">${esc(subject.name)}</div>`;
-    if (fields.location && subject.location) t += `<div class="l-loc">${esc(subject.location)}</div>`;
-    if (big && ((fields.type && subject.typeLabel) || (fields.serial && subject.serial) || own)) t += `<div class="rule"></div>`;
-    if (fields.type && subject.typeLabel && cls !== "s") t += `<div class="l-meta">${esc(subject.typeLabel)}</div>`;
-    if (fields.serial && subject.serial && cls !== "s") t += `<div class="l-sn">SN ${esc(subject.serial)}</div>`;
-    if (own) t += `<div class="l-own">${esc(own)}</div>`;
+    // Filet séparateur des grands gabarits : AVANT la première ligne d'un registre autre
+    // que `loc` — la position qu'il occupait dans le modèle figé (après l'emplacement,
+    // avant type/série/propriétaire), exprimée sur la liste déclarée.
+    const firstSecondary = lines.findIndex((f) => f.style !== "loc");
+    lines.forEach((f, index) => {
+      if (big && index === firstSecondary) t += `<div class="rule"></div>`;
+      t += lineOf(f);
+    });
     return `<div class="lab ${cls}${cp ? " compact" : ""}" style="width:${mm(w)}mm;height:${mm(h)}mm;padding:${mm(rg.padV)}mm ${mm(rg.padH)}mm;gap:${mm(rg.gap)}mm">${qrSvg}<div class="txt">${t}</div></div>`;
   }
 

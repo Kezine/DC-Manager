@@ -44,13 +44,11 @@ export const labels = {
     densityComfort: "Confort",
     // Titre de la section des cases par champ. « Lisible humain » (maquette) disait le REGISTRE
     // typographique, pas le contenu — renommé sur retour terrain 2026-08-20.
+    // T10 : les libellés des CASES vivent désormais dans `field.*` (déclarés par les sujets,
+    // cf. core/LabelSubjects) — ne restent ici que les deux rangées STRUCTURELLES.
     fields: "Informations additionnelles",
     fieldId: "Identifiant (toujours)",
-    fieldLocation: "Emplacement",
     fieldEnds: "Extrémités A / B",
-    fieldType: "Type / famille",
-    fieldSerial: "N° de série",
-    fieldOwner: "Propriétaire",
     sheet: "Planche",
     /** Libellé du champ « Colonnes » de la planche (champ numérique borné). */
     cols: "Colonnes",
@@ -80,7 +78,26 @@ export const labels = {
   sheetHead: {
     count: "{{count}} étiquette{{s}}",
   },
+  /* Libellés des CASES déclarées par les sujets (T10, cf. core/LabelSubjects) — ce que
+     le dialogue affiche à côté de chaque case « Informations additionnelles ». */
+  field: {
+    location: "Emplacement",
+    type: "Type / famille",
+    serial: "N° de série",
+    owner: "Propriétaire",
+    // Spare : « Type » nu (la marque/le modèle ont désormais LEUR case, décision Q10.A).
+    spareType: "Type",
+    characteristics: "Caractéristiques",
+    brandModel: "Marque / modèle",
+    purchase: "Achat",
+    storage: "Stockage",
+    // Sous-équipement : l'« emplacement » est le maître puis son repère (`slot`).
+    master: "Maître · repère",
+  },
   subject: {
     rackType: "Baie {{u}}U",
+    // Valeur imprimée de la case « Achat » — préfixée pour rester lisible seule sur
+    // l'étiquette (« Achat 2026-01-15 · BC 4471 », le BC venant de detail.common.poRef).
+    purchase: "Achat {{info}}",
   },
 } as const;

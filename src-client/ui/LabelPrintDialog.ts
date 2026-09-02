@@ -21,9 +21,16 @@
 
    🚨 AUCUNE RÈGLE DE VISIBILITÉ ÉCRITE ICI (retours terrain 2026-08-20 : « tous
    les contrôles dans tous les contextes »). `render()` demande UN verdict à
-   `LabelPrintPolicy.visibility(kind, contenu, format, nombre)` et se contente de
-   POSER `hidden` — et `sanitize` ramène, à l'ouverture, des réglages mémorisés
-   devenus invalides sur les défauts du contexte. Corollaire CSS indissociable :
+   `LabelPrintPolicy.visibility(kind, contenu, format, nombre, offre)` et se
+   contente de POSER `hidden` — et `sanitize` ramène, à l'ouverture, des réglages
+   mémorisés devenus invalides sur les défauts du contexte.
+
+   🚨 CASES PEINTES DEPUIS LES DÉCLARATIONS (retour terrain T10, 2026-09-02) :
+   les cases « Informations additionnelles » ne sont PLUS quatre contrôles figés —
+   elles se construisent depuis l'OFFRE du tirage (`LabelPrintPolicy.fieldOffer` =
+   l'union des déclarations des sujets, planche hétérogène comprise). Seules
+   restent structurelles la rangée « Identifiant (toujours) » et la bascule
+   « Extrémités A / B » des sujets à drapeau. Corollaire CSS indissociable :
    la feuille de l'app porte `.label-print [hidden]{display:none!important}` —
    sans elle, `.btn`/`.label-print-mm-field` (règles d'AUTEUR, qui battent
    toujours le `[hidden]` de la feuille du navigateur) rendaient ces `hidden`
@@ -56,7 +63,7 @@ import { I18n } from "../i18n/I18n";
 import { LabelLayout } from "../core/LabelLayout";
 import type { LabelSpec, LabelSizeId, LabelContentId, LabelWarning } from "../core/LabelLayout";
 import { LabelHtml } from "../core/LabelHtml";
-import type { LabelSubject, LabelFields } from "../core/LabelHtml";
+import type { LabelSubject } from "../core/LabelHtml";
 import { LabelQrSvg } from "../core/LabelQrSvg";
 import { LabelPrintPolicy } from "../core/LabelPrintPolicy";
 import type { LabelPrintKind } from "../core/LabelPrintPolicy";
@@ -88,7 +95,11 @@ export interface LabelPrintContext {
   source: string;
 }
 
-/** Réglages d'un tirage — mémorisés EN SESSION par contexte (cf. en-tête). */
+/** Réglages d'un tirage — mémorisés EN SESSION par contexte (cf. en-tête).
+    T10 : `fields` = les IDS de cases cochés (clés des déclarations des sujets), plus
+    la bascule structurelle `ends`. La forme historique à quatre booléens ne peut PAS
+    survivre ici : la Map de session vit dans ce module, dans cet onglet, dans ce
+    bundle — un rechargement repart de `defaultsFor` (vérifié : aucune persistance). */
 interface LabelPrintSettings {
   size: LabelSizeId;
   content: LabelContentId;
@@ -98,7 +109,10 @@ interface LabelPrintSettings {
   customH: number;
   dia: number;
   len: number;
-  fields: LabelFields;
+  /** Ids de déclarations cochés — réconciliés avec l'offre par `sanitize` à l'ouverture. */
+  fields: Record<string, boolean>;
+  /** « Extrémités A / B » (sujets à drapeau) — structurelle, hors liste déclarée. */
+  ends: boolean;
   cols: number;
   cuts: boolean;
 }
@@ -117,7 +131,9 @@ export class LabelPrintDialog {
 
   /** Défauts d'un contexte — DÉCIDÉS par la politique pure (`core/LabelPrintPolicy`,
       valeurs de la maquette `openPrint`) : le premier tirage d'un contexte part de
-      là, les suivants reprennent le dernier tirage de la session. */
+      là, les suivants reprennent le dernier tirage de la session. T10 : les cases
+      par défaut ne sont plus une table par sujet — `fields` part VIDE et `sanitize`
+      le peuple depuis l'état coché DÉCLARÉ de l'offre du tirage. */
   private static defaultsFor(kind: LabelPrintKind): LabelPrintSettings {
     return {
       size: LabelPrintPolicy.defaultSizeFor(kind),
@@ -125,7 +141,8 @@ export class LabelPrintDialog {
       compact: true,
       qr: LabelPrintPolicy.defaultQrFor(kind),
       customW: 50, customH: 25, dia: 6, len: 25,
-      fields: LabelPrintPolicy.defaultFieldsFor(kind),
+      fields: {},
+      ends: true,   // défaut historique des sujets à drapeau (« Emplacement » coché)
       cols: LabelPrintPolicy.defaultColsFor(kind),
       cuts: true,
     };
@@ -143,14 +160,14 @@ export class LabelPrintDialog {
     const host = LabelPrintDialog.host;
     const subjects = (ctx.subjects || []).filter(Boolean);
     if (!host || !subjects.length) return;
+    // L'OFFRE de cases du tirage = l'union des déclarations des sujets (T10 — une planche
+    // hétérogène offre la réunion : un id déclaré par AU MOINS un sujet a sa case).
+    const offer = LabelPrintPolicy.fieldOffer(subjects);
     // Réglages mémorisés RAMENÉS dans ce que le contexte offre (retombée sur défaut —
-    // un format drapeau hérité n'a aucun sens sur un équipement, cf. LabelPrintPolicy).
-    const st = LabelPrintPolicy.sanitize(ctx.kind, LabelPrintDialog.settingsFor(ctx.kind));
+    // un format drapeau hérité n'a aucun sens sur un équipement) et cases RÉCONCILIÉES
+    // avec l'offre courante (ids disparus retirés, nouveaux au défaut déclaré).
+    const st = LabelPrintPolicy.sanitize(ctx.kind, offer, LabelPrintDialog.settingsFor(ctx.kind));
     const count = subjects.length;
-    // Verdict d'OUVERTURE : sert aux traits qui ne dépendent QUE du sujet et ne bougeront donc
-    // plus (libellé « Emplacement » ⇄ « Extrémités A / B »). Tout le reste est réévalué à chaque
-    // rendu — c'est le même appel, avec l'état courant.
-    const openVis = LabelPrintPolicy.visibility(ctx.kind, st.content, st.size, count);
     const longestId = subjects.reduce((max, s) => Math.max(max, (s.name || "").length), 0);
     const t = (key: string, vars?: Record<string, unknown>) => I18n.t("labels." + key, vars);
 
@@ -222,19 +239,19 @@ export class LabelPrintDialog {
     );
     fset(t("dialog.density")).appendChild(densSeg);
 
-    // -- Informations additionnelles : identifiant verrouillé + cases par champ (owner incluse —
-    //    décision E). Les cases PRÉSENTES sont celles que le SUJET possède ; celles que le CONTENU
-    //    courant annule sont masquées au rendu (verdict `fields`), jamais décidées ici. --
+    // -- Informations additionnelles (T10) : identifiant verrouillé + bascule structurelle
+    //    « Extrémités A / B » (sujets à drapeau) + UNE case PAR déclaration de l'OFFRE —
+    //    l'UI se PEINT depuis les déclarations, elle ne connaît aucun champ par son nom.
+    //    Celles que le CONTENU courant annule sont masquées au rendu (verdict), jamais ici. --
     const fieldsBox = fset(t("dialog.fields"));
     const fieldsCol = document.createElement("div"); fieldsCol.className = "label-print-checks"; fieldsBox.appendChild(fieldsCol);
     const idToggle = FormControls.toggle(t("dialog.fieldId"), true, () => { /* toujours coché */ }, { disabled: true, block: true });
-    // « Emplacement » devient « Extrémités A / B » pour les sujets à DRAPEAU (câble, faisceau) :
-    // le verdict le dit, le dialogue n'a pas à savoir quelles familles sont concernées.
-    const locToggle = FormControls.toggle(openVis.locationAsEnds ? t("dialog.fieldEnds") : t("dialog.fieldLocation"), st.fields.location, (v) => { st.fields.location = v; render(); }, { block: true });
-    const typeToggle = FormControls.toggle(t("dialog.fieldType"), st.fields.type, (v) => { st.fields.type = v; render(); }, { block: true });
-    const snToggle = FormControls.toggle(t("dialog.fieldSerial"), st.fields.serial, (v) => { st.fields.serial = v; render(); }, { block: true });
-    const ownerToggle = FormControls.toggle(t("dialog.fieldOwner"), st.fields.owner, (v) => { st.fields.owner = v; render(); }, { block: true });
-    fieldsCol.append(idToggle, locToggle, typeToggle, snToggle, ownerToggle);
+    const endsToggle = FormControls.toggle(t("dialog.fieldEnds"), st.ends, (v) => { st.ends = v; render(); }, { block: true });
+    const fieldToggles = offer.map((o) => ({
+      id: o.id,
+      el: FormControls.toggle(o.label, !!st.fields[o.id], (v) => { st.fields[o.id] = v; render(); }, { block: true }),
+    }));
+    fieldsCol.append(idToggle, endsToggle, ...fieldToggles.map((f) => f.el));
 
     // -- Planche : colonnes plafonnées + traits de coupe. La section est CONSTRUITE dans tous les
     //    cas et masquée par le verdict (`showSheetSection` — ≥ 2 étiquettes) : une seule règle,
@@ -289,7 +306,10 @@ export class LabelPrintDialog {
       custom: { w: LabelLayout.clampCustom("w", st.customW), h: LabelLayout.clampCustom("h", st.customH) },
       dia: LabelLayout.clampCustom("dia", st.dia),
       len: LabelLayout.clampCustom("len", st.len),
-      hasOwner: st.fields.owner && subjects.some((s) => !!String(s.owner || "").trim()),
+      // Nom historique (« owner ») : y a-t-il une BANDE sous le carré en « QR seul » ?
+      // T10 : c'est toute déclaration `qrOnly` cochée — le propriétaire en est la seule
+      // aujourd'hui, la géométrie (LabelLayout.qrOnlyGeometry) n'a pas bougé.
+      hasOwner: subjects.some((s) => (s.fields || []).some((f) => f.qrOnly && st.fields[f.id])),
     });
     const labelOf = (s: LabelSubject, sp: LabelSpec, dims?: [number, number]): string => {
       let svg = "";
@@ -300,7 +320,7 @@ export class LabelPrintDialog {
         // l'aperçu et l'imprimé, l'unitaire et la planche (la CELLULE donne alors la hauteur).
         if (raw) svg = LabelQrSvg.scaleToMm(raw, LabelLayout.renderQrMm(sp, dims ? dims[1] : undefined));
       }
-      return LabelHtml.label(s, sp, st.fields, svg, dims);
+      return LabelHtml.label(s, sp, { ends: st.ends, checked: st.fields }, svg, dims);
     };
     const plural = (n: number) => (n > 1 ? "s" : "");
     const headRight = (): string => t("sheetHead.count", { count, s: plural(count) }) + " · " + new Date().toLocaleDateString();
@@ -324,7 +344,7 @@ export class LabelPrintDialog {
       const sp = spec();
       const sleeve = sp.content === "strip" || sp.content === "id";
       // LE VERDICT — un seul appel, appliqué tel quel (aucune règle de visibilité ici, cf. en-tête).
-      const vis = LabelPrintPolicy.visibility(ctx.kind, sp.content, sp.size, count);
+      const vis = LabelPrintPolicy.visibility(ctx.kind, sp.content, sp.size, count, offer);
       sizeHead.textContent = vis.header === "sleeve" ? t("dialog.formatSleeve")
         : vis.header === "qrSize" ? t("dialog.formatQrSize") : t("dialog.format");
       sizeSel.hidden = !vis.showSizeSelect;
@@ -335,10 +355,9 @@ export class LabelPrintDialog {
       cdF.hidden = !vis.showDiaLen;
       clF.hidden = !vis.showDiaLen;
       idToggle.hidden = !vis.showIdRow;
-      locToggle.hidden = !vis.fields.location;
-      typeToggle.hidden = !vis.fields.type;
-      snToggle.hidden = !vis.fields.serial;
-      ownerToggle.hidden = !vis.fields.owner;
+      endsToggle.hidden = !vis.showEndsToggle;
+      const visibleIds = new Set(vis.visibleFieldIds);
+      for (const f of fieldToggles) f.el.hidden = !visibleIds.has(f.id);
       fieldsBox.hidden = !vis.showFieldsSection;
       sheetBox.hidden = !vis.showSheetSection;
       sizeHint.textContent = sleeve

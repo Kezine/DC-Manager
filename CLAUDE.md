@@ -453,10 +453,11 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   plancher QR 18 mm signalé, débordement en CODES ; DENSITÉS — compact = marges NULLES, la quiet zone du SVG suffit — et 🚨 le QR
   d'un préréglage NE DÉBORDE JAMAIS : `rectQrGeometry` clampe, la MARGE cède avant la scannabilité,
   `renderQrMm` est le point de passage UNIQUE vers le SVG), 🚨 MATRICE DE VISIBILITÉ CONTEXTUELLE PURE
-  `core/LabelPrintPolicy` (offres par sujet — kind `bundle` = faisceau, même anatomie que le câble
-  (`isFlagKind`) ; kind `subEquipment` = sous-équipement, même anatomie que le spare (`isSpareLike`,
-  emplacement = maître + repère `slot`, type = marque + modèle car la collection n'a PAS de champ
-  `type`) —,
+  `core/LabelPrintPolicy` (contenus/formats/QR/colonnes par sujet — kind `bundle` = faisceau, même
+  anatomie que le câble (`isFlagKind`) ; kind `subEquipment` = sous-équipement, même anatomie que le
+  spare (`isSpareLike`) ; ⚠ les CASES de champs ne viennent PLUS d'une matrice : depuis T10 chaque
+  sujet DÉCLARE ses champs (`LabelFieldDecl`), l'offre d'un tirage = l'UNION des déclarations,
+  `fieldOffer(subjects)`) —,
   verdict `visibility(sujet, contenu, format, nombre)` que la modale APPLIQUE sans jamais le calculer,
   `sanitize` qui fait retomber un réglage mémorisé invalide ; corollaire CSS indissociable
   `.label-print [hidden]{display:none!important}` — sans lui les `hidden` sont INERTES, une règle
@@ -468,7 +469,10 @@ Tests/modules/  # tests unitaires (Node, sans navigateur) sur les modules compil
   SUPPRIME les images de fond à l'impression : les hachures de recouvrement sortaient blanches),
   🚨 traits de coupe à UN trait par ARÊTE (quatre bordures par cellule = trait intérieur doublé et
   pointillés déphasés), matière par
-  enregistrement `core/LabelSubjects` (owner = champ E1 derrière une case, vide → ligne absente) ;
+  enregistrement `core/LabelSubjects` (champs DÉCLARÉS par sujet depuis T10 — `{id, label, value,
+  checked, style}`, jamais de déclaration à valeur vide : « pas de case sans donnée » est STRUCTUREL ;
+  spare = type + caractéristiques PAR TYPE + marque/modèle + série + achat, stockage offert décoché ;
+  sous-équipement SANS garantie, décision explicite) ;
   impression = iframe print-CSS isolée (unitaire `@page` taille EXACTE → Brother/Dymo, planche A4
   colonnes plafonnées + traits de coupe, `@page`/html/body à marge NULLE des deux côtés) ; points
   d'entrée fiches équipement/baie (étiquette DE la baie ≠ planche DU contenu, U décroissants)/câble

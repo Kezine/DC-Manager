@@ -39,7 +39,10 @@ colonnes plafonnées + traits de coupe) · 4 cases de champ (Emplacement — qui
 `LabelControlsVisibility` (le verdict que la modale APPLIQUE sans jamais le calculer) compte
 **onze** champs : `header` à trois valeurs (Format / Taille du QR / Manchon), `showSizeSelect`,
 `showWidthHeight`, `showQrMm`, `showDiaLen`, `showMmRow`, `showIdRow`, `showFieldsSection`,
-`fields` (∩ de l'offre du sujet et des règles du contenu), `locationAsEnds`, `showSheetSection`.
+`fieldVisible` (règle contenu × champ, appliquée aux cases ET au rendu), `ends` (bascule
+structurelle « Extrémités A/B » des drapeaux), `showSheetSection` — ⚠ depuis le chantier T10 les
+CASES de champs ne sont plus un drapeau de la matrice : elles se PEIGNENT depuis les déclarations
+des sujets (`LabelFieldDecl`, union de planche), la dérive décrite ici porte sur le RESTE.
 
 **Une seule modale se replie donc en un grand nombre de visages** (4 anatomies × 4 contenus ×
 formats × 1-ou-N). Chacun a été ajouté isolément et est individuellement défendable ; c'est leur

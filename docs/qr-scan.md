@@ -309,10 +309,10 @@ objet, les deux extrémités d'un câble, le contenu d'une baie).
 | Module | Rôle |
 |---|---|
 | `core/LabelLayout` | **Géométrie PURE** (mm) : table des gabarits (cotes EXACTES de la maquette), **densités** (padding/gouttière), drapeau **dérivé du QR**, manchon (**1,5 tour, le demi-tour EST le recouvrement** + nombre de cases DÉDUIT), QR seul, **cellule de planche ≠ étiquette**, plafond de colonnes, capacité A4, bornes du personnalisé, **débordement en CODES** (`LabelWarning` — l'UI traduit) |
-| `core/LabelPrintPolicy` | **LA matrice de visibilité contextuelle** (pure) : contenus/formats/défauts/cases OFFERTS par sujet, **verdict** `visibility(sujet, contenu, format, nombre)` consommé tel quel par la modale, et `sanitize` qui fait RETOMBER un réglage mémorisé devenu invalide |
+| `core/LabelPrintPolicy` | Les **règles TRANSVERSES** (pures) : contenus/formats/défauts par sujet, **union d'offre de planche** `fieldOffer(sujets)`, règle contenu × champ `fieldVisible`, **verdict** `visibility(sujet, contenu, format, nombre, offre)` consommé tel quel par la modale, et `sanitize` qui fait RETOMBER un réglage mémorisé devenu invalide. 🚨 Depuis T10, **plus aucune table de cases par sujet** — l'offre descend des déclarations (cf. « Champs déclarés par sujet ») |
 | `core/LabelQrSvg` | Retravail PUR du SVG servi par `/qr` : **quiet zone vérifiée** (marge en modules lue dans le tracé) et **compensée par un padding blanc calculé** si < 4 modules (un `?size=` plus grand n'y changerait rien — propriété en modules, pas en pixels), mise à l'échelle en mm |
-| `core/LabelHtml` | Rendu HTML PUR **partagé aperçu ⇄ imprimé** (une seule source, fidélité par construction) : étiquette, page de planche, document d'impression. **Noir sur blanc, aucun token de thème** ; les COTES (padding/gouttière) sont posées INLINE depuis `LabelLayout` |
-| `core/LabelSubjects` | La matière d'une étiquette depuis un enregistrement (lecteur injecté) : équipement (« baie · U »), baie, câble (A/B = **ordre de la fiche**), **faisceau** (A/B = les deux patchs terminaux), spare — la règle écrite UNE fois pour tous les points d'entrée |
+| `core/LabelHtml` | Rendu HTML PUR **partagé aperçu ⇄ imprimé** (une seule source, fidélité par construction) : étiquette, page de planche, document d'impression. **Noir sur blanc, aucun token de thème** ; les COTES (padding/gouttière) sont posées INLINE depuis `LabelLayout`. Porte aussi le **modèle** `LabelFieldDecl`/`LabelSubject` et rend la liste déclarée **génériquement** (une ligne par déclaration cochée, registre typographique déclaré) |
+| `core/LabelSubjects` | La matière d'une étiquette depuis un enregistrement (lecteur injecté) : équipement (« baie · U »), baie, câble (A/B = **ordre de la fiche**), **faisceau** (A/B = les deux patchs terminaux), spare, sous-équipement — la règle écrite UNE fois pour tous les points d'entrée. Depuis T10, chaque constructeur **DÉCLARE les champs imprimables** du sujet |
 | `ui/LabelPrintDialog` | La modale : panneau de réglages + aperçu fidèle réduit + avertissements + iframe d'impression. **N'écrit AUCUNE règle de visibilité** — elle applique le verdict de `LabelPrintPolicy` (pose `hidden`). Réglages **mémorisés en session** par contexte (jamais de Prefs persistées — dernier tirage repris) |
 
 ### Gabarits et planche
@@ -476,8 +476,14 @@ largeur/hauteur personnalisées sous un préréglage… La règle « quels contr
 format, nombre) ? » était éparpillée dans le rendu DOM, donc invérifiable — elle vit désormais dans
 UN module pur, et la modale ne fait plus qu'**appliquer le verdict** (poser `hidden`).
 
+⚠ « Matrice » ne parle ici que de la **visibilité des contrôles**. La matrice des **cases par sujet**,
+elle, a disparu au profit des déclarations (section suivante) : `LabelPrintPolicy` ne garde de l'offre
+que ses règles TRANSVERSES — l'union de planche, la règle contenu × champ, la retombée `sanitize`.
+
 - **Sujets** (`LabelPrintKind`) : `equipment`, `rack`, `cable`, **`bundle`** (faisceau/trunk — même
-  anatomie que le câble : un identifiant, deux extrémités, donc le même drapeau), `spare`.
+  anatomie que le câble : un identifiant, deux extrémités, donc le même drapeau), `spare`,
+  **`subEquipment`** (même famille que le spare — `isSpareLike` : mêmes contenus, mêmes formats,
+  même gabarit S par défaut ; ce qui les sépare est ce qu'ils DÉCLARENT, pas la politique).
 - **Contenus** : les manchons (repère complet / identifiant seul) n'existent que pour ce qui
   s'ENROULE — câble et faisceau ; un équipement ne s'enroule pas.
 - **Formats** : « Câble — drapeau » = câble/faisceau seulement (et réciproquement : un rectangle
@@ -486,16 +492,98 @@ UN module pur, et la modale ne fait plus qu'**appliquer le verdict** (poser `hid
 - **Cotes mm** : Larg./Haut. **uniquement** sous « Personnalisé » ; la cote de QR quand elle est
   LIBRE (QR seul, drapeau, personnalisé — sinon le préréglage l'impose) ; Ø et longueur
   **uniquement** pour les manchons. La rangée entière disparaît quand aucune ne s'applique.
-- **Informations additionnelles** (ex-« Lisible humain », renommé sur retour terrain) : les cases
-  offertes sont **ce que le sujet POSSÈDE** (pas de n° de série sur une baie ni sur un faisceau, pas
-  de propriétaire hors équipement — une case sans donnée est un mensonge d'interface), intersectées
-  avec les règles du contenu (« QR seul » ne garde que le propriétaire ; « identifiant seul » ne
-  garde rien, section comprise). Le libellé « Emplacement » devient « **Extrémités A / B** » pour
-  les sujets à drapeau.
+- **Informations additionnelles** (ex-« Lisible humain », renommé sur retour terrain) : les cases ne
+  sont plus des contrôles figés — elles se peignent depuis les **déclarations des sujets** (section
+  suivante). Ne restent STRUCTURELLES que la rangée « Identifiant (toujours) » et la bascule
+  « **Extrémités A / B** », offerte aux seuls sujets à drapeau (leur rendu est une *anatomie* —
+  panneaux `A`/`B` — pas une ligne générique). La règle **contenu × champ** (`fieldVisible`) reste
+  ici : « QR seul » ne garde que les déclarations marquées `qrOnly` (la bande sous le carré,
+  historiquement le propriétaire) ; « identifiant seul » ne garde rien, section comprise ; un
+  manchon « repère complet » écarte le registre `sn`.
 - **Planche** : à partir de 2 étiquettes.
-- **Mémoire de session** : `sanitize(kind, settings)` tourne à CHAQUE ouverture — un réglage hérité
-  devenu invalide (format drapeau sur un équipement, case d'un champ inexistant) **retombe** sur le
-  défaut du contexte, plutôt que de laisser un état que l'UI ne sait plus représenter.
+- **Mémoire de session** : `sanitize(kind, offre, settings)` tourne à CHAQUE ouverture — un réglage
+  hérité devenu invalide (format drapeau sur un équipement) **retombe** sur le défaut du contexte,
+  et les cases mémorisées sont **réconciliées** avec l'offre du tirage courant (ids disparus retirés
+  — la mémoire d'une case morte ne doit pas resurgir sur un id un jour recyclé —, ids nouveaux semés
+  à leur état coché DÉCLARÉ), plutôt que de laisser un état que l'UI ne sait plus représenter.
+
+### Champs déclarés par SUJET (retour terrain T10, 2026-09-02)
+
+Le retour était : « *les QR des sous-équipements et des spares ne reprennent pas les bonnes infos ;
+il faut rendre dynamiques les éléments récupérables et imprimables, **ils diffèrent d'un élément à
+l'autre*** ». La cause n'était pas un mauvais câblage mais le **modèle** : le sujet portait quatre
+champs FIGÉS (`location`, `typeLabel`, `serial`, `owner`) distribués par une matrice par `kind`
+(`offeredFieldsFor`/`defaultFieldsFor`). Toute donnée hors de ces quatre noms était **inimprimable**
+— la capacité d'un disque, la portée d'un transceiver, une date d'achat n'avaient simplement aucun
+nom où se poser.
+
+**Le modèle (décision Q10.B).** Chaque `LabelSubject` **déclare** ses champs imprimables :
+
+```ts
+interface LabelFieldDecl {
+  id: string;        // identité STABLE — clé de la mémoire de session ET de l'union de planche
+  label: string;     // libellé de la case, déjà localisé (catalogue labels.field.*)
+  value: string;     // valeur composée à imprimer — non vide PAR CONSTRUCTION
+  checked: boolean;  // cochée au premier tirage du contexte
+  style: "loc" | "meta" | "sn" | "own";   // registre typographique de la ligne (classes .l-* héritées)
+  hideOnSmall?: boolean;   // ligne supprimée au gabarit S
+  qrOnly?: boolean;        // survit au contenu « QR seul » (bande sous le carré)
+}
+```
+
+La modale **se peint** depuis ces déclarations : elle ne connaît plus aucun champ par son nom, et la
+**matrice de cases a disparu** de `LabelPrintPolicy` (une résurrection d'`offeredFieldsFor` serait
+une régression du modèle — c'est verrouillé par un test). Le rendu (`LabelHtml`) consomme la même
+liste : une ligne par déclaration cochée, dans le registre déclaré. Les registres typographiques,
+eux, n'ont PAS bougé — les nouveaux venus du petit matériel se posent dans les classes `.l-loc` /
+`.l-meta` / `.l-sn` / `.l-own` existantes (le CSS du gabarit S a seulement reçu les tailles `meta`
+et `sn`, qu'il n'avait jamais eu à donner).
+
+🚨 **« Pas de case sans donnée » devient STRUCTUREL (décision Q10.C).** Ce n'était qu'un garde-fou
+d'interface, tenu à la main dans la matrice ; c'est désormais une règle de **construction** : un
+sujet **ne déclare pas** un champ à valeur vide, donc la case n'existe pas, donc la ligne non plus.
+Les deux chemins d'avant (case décochée / valeur vide) convergent vers le même imprimé. Corollaire
+assumé : un câble sans type ni longueur n'offre plus **aucune** case là où l'ancienne UI en
+proposait une qui n'imprimait rien. **Pas de plafond dur** de champs : les garde-fous existants
+suffisent (lignes vides absentes, avertissements de gabarit `multi-page`/`qr-exceeds-label`), et les
+DÉFAUTS restent sobres.
+
+**Union d'une planche HÉTÉROGÈNE** (`LabelPrintPolicy.fieldOffer`). Une planche peut mélanger des
+sujets qui ne déclarent pas la même chose — c'est le cas nominal du **panier** (famille
+`components` = spares *et* sous-équipements ; et deux spares de TYPES différents ne déclarent déjà
+pas les mêmes caractéristiques). L'offre du tirage est donc l'**UNION** des déclarations, dans
+l'ordre de première apparition : un id déclaré par **au moins un** sujet a sa case ; libellé et état
+coché viennent du **PREMIER déclarant** (règle assumée : déterministe — l'ordre d'une planche est
+celui du panier ou du contenu de baie —, et sur une planche homogène, le cas courant, tous les
+déclarants disent la même chose). Au rendu, **un sujet qui ne déclare pas un id coché saute la
+ligne** : c'est ce qui rend la planche mixte sûre sans le moindre cas particulier.
+
+**Les contenus décidés (Q10.A).**
+
+| Sujet | Cases déclarées (ordre) | Cochées par défaut |
+|---|---|---|
+| **spare** | `type` (SpareTypes) · **`characteristics`** · `brandModel` (`brand`+`model_pn`) · `serial` · `purchase` (`purchase_date` · BC `po_ref`) · `storage` (`storage_location`) | toutes **sauf `storage`** |
+| **sous-équipement** | `master` (le maître · le repère `slot`) · `brandModel` · `serial` · `purchase` | toutes |
+| **équipement** | `location` · `type` · `serial` · `owner` | `location` seule — **inchangé** |
+| **baie** | `location` (la salle) · `type` (« Baie *N*U ») | les deux — **inchangé** |
+| **câble / faisceau** | `type` (+ extrémités A/B **structurelles**, hors liste) | `type` — **inchangé** |
+
+- 🚨 **`characteristics` est UNE seule case, à valeur composée SELON LE TYPE** — c'est le cœur du
+  « ils diffèrent d'un élément à l'autre » : disque = capacité · interface · format · rpm ;
+  transceiver = forme · débit · média · portée ; autre = `specs` libres. La composition n'est PAS
+  réécrite ici : c'est `Spare.techSummary()` du modèle, déjà source unique du listing et de la
+  désignation automatique (principe n°3).
+- **`storage` est OFFERT mais DÉCOCHÉ** : la liste de l'utilisateur énumérait les champs *cochés*,
+  et retirer le stockage de l'**offre** aurait été une régression silencieuse vs l'étiquette
+  d'avant. **Statut et attribution ne sont PAS déclarés** (non cités — une étiquette de terrain
+  n'est pas une fiche de suivi).
+- **Le sous-équipement n'imprime PAS `warranty_end`** (décision explicite) ni de `type` de
+  substitution : la collection n'a pas de champ `type`, sa spec dit que « la sémantique est dans le
+  nom » — on n'en fabrique pas un.
+- **Équipement, baie, câble et faisceau : offres, défauts et imprimé STRICTEMENT inchangés** — c'est
+  une décision, et elle est verrouillée par une section de non-régression écrivant EN DUR les
+  valeurs d'avant T10 (dont `hideOnSmall` sur type/série d'un équipement et `qrOnly` sur le
+  propriétaire).
 
 ⚠ **Corollaire CSS indissociable** : `.label-print [hidden] { display: none !important }`
 (`dc-manager.css`). Sans cette ligne les `hidden` de la modale sont **inertes** — `[hidden]` vient
@@ -516,9 +604,9 @@ posent une. C'était la cause première du retour terrain.
 | Listing faisceaux | Action de ligne : les **2 extrémités**, comme les câbles |
 | Fiche spare | « Imprimer l'étiquette » (gabarit S par défaut) |
 | Listing spares | Action de ligne « Imprimer l'étiquette » (parité avec la fiche) |
-| Fiche sous-équipement | « Imprimer l'étiquette » — sujet `subEquipment`, MÊME anatomie que le spare (`isSpareLike`) : emplacement = le maître puis le repère `slot`, type = marque + modèle (la collection n'a pas de champ `type`) |
+| Fiche sous-équipement | « Imprimer l'étiquette » — sujet `subEquipment`, MÊME famille que le spare (`isSpareLike`, gabarit S par défaut) ; ses cases sont celles qu'il DÉCLARE (maître · repère, marque/modèle, série, achat — cf. « Champs déclarés par sujet ») |
 | Listing sous-équipements | Action de ligne « Imprimer l'étiquette » |
-| **Panier** (topbar) | « Imprimer les étiquettes (N) » — planche d'un lot de câbles/faisceaux préparé par les cases des listings, DEUX drapeaux par lien. Cf. [`panier.md`](panier.md) |
+| **Panier** (topbar) | « Imprimer les étiquettes (N) » — planche d'un lot préparé par les cases des listings (familles `links`, `components`, `equipments` — cf. `core/CartLabelPlan`), DEUX drapeaux par lien. 🚨 **Seul point d'entrée à planche HÉTÉROGÈNE** : l'offre de cases y est l'UNION des déclarations. Cf. [`panier.md`](panier.md) |
 
 ### Rendu d'impression
 

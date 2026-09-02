@@ -37,11 +37,7 @@ export const labels = {
     densityComfort: "Comfort",
     fields: "Additional information",
     fieldId: "Identifier (always)",
-    fieldLocation: "Location",
     fieldEnds: "Ends A / B",
-    fieldType: "Type / family",
-    fieldSerial: "Serial number",
-    fieldOwner: "Owner",
     sheet: "Sheet",
     cols: "Columns",
     colsMax: "max {{max}}",
@@ -70,7 +66,21 @@ export const labels = {
   sheetHead: {
     count: "{{count}} label{{s}}",
   },
+  /* Labels of the subject-declared checkboxes (T10, cf. core/LabelSubjects). */
+  field: {
+    location: "Location",
+    type: "Type / family",
+    serial: "Serial number",
+    owner: "Owner",
+    spareType: "Type",
+    characteristics: "Characteristics",
+    brandModel: "Brand / model",
+    purchase: "Purchase",
+    storage: "Storage",
+    master: "Parent · landmark",
+  },
   subject: {
     rackType: "Rack {{u}}U",
+    purchase: "Purchase {{info}}",
   },
 } as const;

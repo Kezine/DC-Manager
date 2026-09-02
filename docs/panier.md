@@ -22,10 +22,10 @@ d'étiquettes**. Cadrage complet et arbitrages : `.notes/toDos/panier-actions-bu
 
 | Famille | Collections | Pourquoi ensemble |
 |---|---|---|
-| `links` | `cables`, `cableBundles` | `LabelPrintPolicy.isFlagKind()` les déclare **strictement équivalents** (mêmes contenus, formats, champs et défauts d'étiquette). La famille ne fait que NOMMER cette équivalence. |
+| `links` | `cables`, `cableBundles` | `LabelPrintPolicy.isFlagKind()` les déclare **strictement équivalents** (mêmes contenus, mêmes formats, même anatomie de drapeau et d'extrémités A/B). La famille ne fait que NOMMER cette équivalence. |
 | `equipments` | `equipments` | Anatomie propre : « baie · U », famille + marque/modèle, série, **et propriétaire** — le seul sujet qui en porte un. |
 | `racks` | `racks` | Format « Baie » réservé, ni série ni propriétaire. |
-| `components` | `subEquipments`, `spares` | Même raison que `links`, un cran plus loin : `LabelPrintPolicy.isSpareLike()` les déclare équivalents (mêmes contenus, formats, champs, gabarit S par défaut). Stock ou installé ne change pas la FORME de l'étiquette — et étiqueter d'un coup un bac de disques dont certains sont montés est le geste naturel. |
+| `components` | `subEquipments`, `spares` | Même raison que `links`, un cran plus loin : `LabelPrintPolicy.isSpareLike()` les déclare équivalents (mêmes contenus, mêmes formats, même gabarit S par défaut). Stock ou installé ne change pas la FORME de l'étiquette — et étiqueter d'un coup un bac de disques dont certains sont montés est le geste naturel. ⚠ Depuis **T10** leurs CASES diffèrent (chaque sujet déclare les siennes) : la planche mixte est portée par l'**union d'offre**, pas par une identité de champs — cf. [`qr-scan.md`](qr-scan.md) § « Champs déclarés par sujet ». |
 
 Une collection **absente de la carte n'entre pas au panier**, et c'est volontaire : elle y entrera le
 jour où au moins une action groupée l'accepte. Offrir le geste sans l'issue serait un mensonge
@@ -98,7 +98,11 @@ Le **plan** d'une famille porte deux règles, écrites une fois et testées :
 | `equipments` | `equipment` | **1** |
 
 Le `kind` unique ne pose aucun problème : une famille est **précisément** un ensemble de collections
-que `LabelPrintPolicy` traite à l'identique (`isFlagKind`, `isSpareLike`). Une famille **absente** de
+que `LabelPrintPolicy` traite à l'identique (`isFlagKind`, `isSpareLike`) — et depuis **T10** ce que
+la politique traite est bien la seule chose qu'un `kind` décide (contenus, formats, défauts) : les
+CASES, elles, ne dépendent plus du `kind` mais des **sujets du tirage**, dont la modale prend
+l'union. Une planche de spares hétérogènes, ou de spares *et* de sous-équipements, est donc le cas
+NOMINAL et non un cas limite. Une famille **absente** de
 la table n'a pas d'action — `main.ts` ne la déclare donc pas, et ses listings ne posent aucune case.
 L'argument `families` de `CartPanel.setup` est **dérivé** de cette table, jamais recopié.
 
