@@ -100,14 +100,26 @@ la section Planche, aujourd'hui reléguée en bas, devient l'essentiel. Le panie
 6. Les **avertissements** cohabitent avec les réglages sans hiérarchie claire entre « ton QR sera
    peu lisible » et « ta planche fera 3 feuilles ».
 
-## 7 · Entrée attendue du chantier T10 (champs dynamiques)
+## 7 · Entrée attendue du chantier T10 (champs dynamiques) — ✅ ARBITRÉ le 2026-09-02
 
-En parallèle de ce carton, le point T10 doit faire **descendre l'offre de champs du SUJET** :
-chaque sujet déclarerait les champs qu'il POSSÈDE (libellé + valeur) au lieu de la matrice figée
-à quatre noms. Conséquence pour la maquette : **la section « Informations additionnelles » doit
-être dessinée pour une liste de longueur VARIABLE selon l'objet** (un spare voudra sa quantité et
-son emplacement de stock, un sous-équipement son maître et son repère), bornée par ce que le
-gabarit peut physiquement porter. Ne pas la dessiner comme quatre cases en dur.
+T10 est arbitré et en chantier : l'offre de champs **descend du SUJET** — chaque sujet déclare
+les champs qu'il POSSÈDE (`{ id, libellé, valeur, coché par défaut }`), l'UI se peint depuis la
+déclaration, la politique ne garde que les règles transverses (gabarits, contenus, colonnes).
+La matrice figée à quatre noms disparaît. Contenus DÉCIDÉS par l'utilisateur :
+
+- **spare** : type · **caractéristiques du type** (disque : capacité·interface·form factor·rpm ;
+  transceiver : forme·débit·média·portée ; autre : specs libres) · marque · modèle · n° de série ·
+  **infos d'achat** (date + réf. commande). Stockage offert mais décoché par défaut.
+- **sous-équipement** : maître·repère · marque modèle · n° de série · **infos d'achat** —
+  PAS la garantie (décision explicite).
+- équipement / baie / câble / faisceau : offres actuelles inchangées (déclarées dans le même
+  modèle, zéro régression).
+
+Conséquence pour la maquette, INCHANGÉE mais désormais ferme : **la section « Informations
+additionnelles » se dessine pour une liste de longueur VARIABLE selon l'objet** (jusqu'à ~7-8
+cases pour un spare disque), jamais quatre cases en dur ; les défauts cochés restent sobres
+(3-4), le reste est offert décoché. Le principe « pas de case sans donnée » demeure — il devient
+structurel (un sujet ne déclare pas un champ vide).
 
 ## 8 · Contraintes — dont cinq pièges d'impression DÉJÀ payés cher
 
