@@ -594,7 +594,10 @@ export class DcThreeScene extends DcThreeCamera {
       const geo = new THREE.BoxGeometry(bw, bd, bh);
       const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.15 });
       const mesh = new THREE.Mesh(geo, mat); mesh.position.set(xc, yc, zc);
-      mesh.userData = { pick: { type: "occ", kind: u.kind, id: u.id }, eqSide };
+      // `faceDir` = signe de l'axe Y LOCAL (repère baie) portant la FAÇADE du device : un monté-AVANT
+      // regarde le −Y de la baie, un monté-ARRIÈRE le +Y (là où ses images/ports « front » sont dessinés,
+      // cf. drawFace plus bas). Consommé par l'ancre de la flèche « Localiser » (computeFocusAnchor).
+      mesh.userData = { pick: { type: "occ", kind: u.kind, id: u.id }, eqSide, faceDir: front ? -1 : 1 };
       group.add(mesh);
       const occEdges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25 }));
       occEdges.position.set(xc, yc, zc); occEdges.userData = { eqSide }; group.add(occEdges);
@@ -1275,7 +1278,11 @@ export class DcThreeScene extends DcThreeCamera {
     // mais un mesh ne doit jamais naître faux, cf. CLAUDE.md « Rendu 3D »).
     const mesh = new THREE.Mesh(geo, swap ? FaceImagePolicy.materials(swap, !!this.opts.showFaceImages) : matsSans);
     mesh.position.set(0, 0, elevation + b.h / 2);
-    mesh.userData = Object.assign({ pick: { type: "occ", kind: "eq", id: e.id } }, extra, swap ? { faceImageSwap: swap } : null);   // même traitement que les occupants (détail + survol)
+    // `faceDir` = signe de l'axe Y LOCAL portant la FAÇADE (pour l'ancre de la flèche « Localiser ») :
+    // ici TOUJOURS −Y par construction (FACE_BY_MAT — le lacet vit dans la rotation du groupe). ⚠ Ne pas
+    // relire `extra.eqSide` : c'est un côté de MASQUAGE (hideAv/Ar, celui de la baie/étagère hôte), jamais
+    // l'orientation du boîtier — cf. la note « le côté de MASQUAGE reste celui de l'ÉTAGÈRE » plus bas.
+    mesh.userData = Object.assign({ pick: { type: "occ", kind: "eq", id: e.id }, faceDir: -1 }, extra, swap ? { faceImageSwap: swap } : null);   // même traitement que les occupants (détail + survol)
     grp.add(mesh);
     const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25 }));
     edges.position.copy(mesh.position); if (extra) edges.userData = Object.assign({}, extra); grp.add(edges);

@@ -154,7 +154,7 @@ export abstract class DcThreeCamera extends DcThreeBase {
       }));
       this._focusObjs.forEach((o) => this.setFocusHi(o, true));
     }
-    this.computeFocusAnchor();   // point que la FLÈCHE désigne (null si plus rien n'est localisé)
+    this.computeFocusAnchor(portId);   // point que la FLÈCHE désigne (null si plus rien n'est localisé)
     this.updateFocusArrow();
     if (had || this._focusObjs.length) this.request();
     // PULSE CONTINU tant que la localisation est active — exception ASSUMÉE au rendu à la demande
@@ -164,8 +164,8 @@ export abstract class DcThreeCamera extends DcThreeBase {
     if (this._focusObjs.length) this.startFocusPulse(); else this.stopFocusPulse();
   }
 
-  /** Calcule le point que la FLÈCHE désigne : le centre MONDE de l'objet localisé, et sa demi-diagonale
-      (de combien remonter vers la caméra pour se poser sur la face regardée plutôt qu'au cœur de l'objet).
+  /** Calcule le point MONDE que la FLÈCHE désigne (`_focusAnchor`) et l'éventuelle remontée caméra
+      (`_focusRadius` — 0 = pointe posée telle quelle, sinon demi-diagonale à remonter vers la caméra).
 
       POURQUOI DEPUIS LES MESHES, et pas depuis le modèle. Les objets sous focus viennent d'être collectés
       par `setFocusEquip` — ils portent donc DÉJÀ la vérité de ce que la scène DESSINE, à travers les cinq
@@ -174,37 +174,63 @@ export abstract class DcThreeCamera extends DcThreeBase {
       endroit, avec la divergence que ça finit toujours par produire — c'est exactement le défaut que
       `core/Locatable` a refermé pour les boutons « Localiser ».
 
-      Un PORT localisé donne une boîte quasi plate : sa demi-diagonale est minuscule, donc la flèche se
-      pose pratiquement sur le connecteur — ce qui est le comportement voulu (c'est là qu'elle sert le
-      plus, un port faisant quelques pixels à l'écran). */
-  protected computeFocusAnchor(): void {
-    if (!this._focusObjs.length) { this._focusAnchor = null; this._focusRadius = 0; return; }
+      OÙ SE POSE LA POINTE (demande utilisateur 2026-09-02) :
+      - un PORT localisé → sur le CONNECTEUR (la boîte du port seul, quasi plate : sa demi-diagonale est
+        minuscule) et non plus sur le corps de l'équipement hôte — c'est là que la flèche sert le plus,
+        un port faisant quelques pixels à l'écran ;
+      - un ÉQUIPEMENT localisé → au CENTRE DE SA FAÇADE (la face que « Localiser » cadre), FIXE dans le
+        monde : la pointe reste sur la façade même si on orbite (sprite en depthTest:false → toujours
+        visible). Le côté façade vient du BUILDER via `userData.faceDir` (signe de l'axe Y local) — c'est
+        lui qui a dessiné la boîte, on ne re-déduit rien du modèle ;
+      - repli (aucun mesh marqué) → centre de la boîte englobante + remontée caméra (comportement
+        historique, cf. `updateFocusArrow`). */
+  protected computeFocusAnchor(portId: string | null = null): void {
+    this._focusAnchor = null; this._focusRadius = 0;
+    if (!this._focusObjs.length) return;
+    /* Meshes MESURABLES : les LIGNES (arêtes) et les sprites fausseraient le centre ; et une salle
+       MASQUÉE (cache chaud hors portée d'affichage) garde ses meshes — les mesurer pointerait la flèche
+       dans le vide, là où la salle n'est plus dessinée. On écarte donc tout mesh invisible, chaîne de
+       parents comprise (la visibilité de salle vit sur le groupe `outer`, pas sur le mesh). Tout masqué
+       → ancre null → flèche cachée, et elle revient au prochain refit qui ré-affiche. */
+    const measurable = this._focusObjs.filter((o) => {
+      if (!(o as any).isMesh) return false;
+      for (let a: THREE.Object3D | null = o; a; a = a.parent) if (!a.visible) return false;
+      return true;
+    });
+    if (!measurable.length) return;
+    /* 🐛 matrixWorld À JOUR AVANT toute mesure — c'était la cause du « coin de salle ». Cette méthode
+       court SYNCHRONEMENT juste après un (re)build / roomDelta, AVANT la frame RAF qui recalcule les
+       matrices : les groupes de salle fraîchement créés ou repositionnés (pavage Vue étage) ont encore
+       une matrixWorld d'IDENTITÉ, et ni `Box3.setFromObject` ni `applyMatrix4` ne remontent la chaîne
+       des parents. L'ancre perdait l'offset de salle ET la position de la baie : flèche posée au coin de
+       la salle, à la bonne hauteur (le z vit dans le mesh). Sur une scène déjà RENDUE le bug était
+       invisible (matrices à jour) — d'où le symptôme « ça ne marche que si la salle était déjà
+       affichée ». On force donc la chaîne des ancêtres, comme `getWorldPosition` pour les marqueurs. */
+    measurable.forEach((o) => o.updateWorldMatrix(true, false));
+    // PORT localisé : l'ancre est la boîte du (des) mesh(es) du PORT seul — l'union avec le corps de
+    // l'équipement (aussi surligné, donc aussi dans `_focusObjs`) renverrait le centre de l'équipement.
+    const portMeshes = portId ? measurable.filter((o) => { const p = (o as any).userData?.pick; return p && p.type === "port" && p.id === portId; }) : [];
+    // ÉQUIPEMENT : le mesh de CORPS marqué `faceDir` par le builder (jamais les oreilles/arêtes/plans).
+    const body: any = portMeshes.length ? null : measurable.find((o) => { const ud = (o as any).userData; return ud && ud.faceDir && ud.pick && ud.pick.type === "occ"; });
+    if (body) {
+      const g = body.geometry; if (g && !g.boundingBox) g.computeBoundingBox();
+      const bb = g && g.boundingBox;
+      if (bb && !bb.isEmpty()) {
+        // centre de la FAÇADE en coords GÉOMÉTRIE (face ±Y selon faceDir) → monde via matrixWorld.
+        this._focusAnchor = new THREE.Vector3((bb.min.x + bb.max.x) / 2, body.userData.faceDir < 0 ? bb.min.y : bb.max.y, (bb.min.z + bb.max.z) / 2).applyMatrix4(body.matrixWorld);
+        this._focusRadius = 0;   // la pointe se pose SUR la façade — aucune remontée caméra
+        return;
+      }
+    }
+    // PORT (boîte du connecteur) ou REPLI (union de tout ce qui est mesurable) : centre + demi-diagonale.
     const box = new THREE.Box3();
     let empty = true;
-    this._focusObjs.forEach((o) => {
-      // Les LIGNES (arêtes de boîte) et les sprites n'ajoutent rien d'utile à l'étendue et peuvent
-      // fausser le centre ; on ne retient que les meshes, qui sont le corps de l'objet.
-      if (!(o as any).isMesh) return;
-      // Une salle MASQUÉE (cache chaud hors portée d'affichage) garde ses meshes : les mesurer pointerait
-      // la flèche dans le vide, là où la salle n'est plus dessinée. On écarte donc tout mesh invisible —
-      // chaîne de parents comprise (la visibilité de salle vit sur le groupe `outer`, pas sur le mesh).
-      // Tout masqué → ancre null → flèche cachée, et elle revient au prochain refit qui ré-affiche.
-      for (let a: THREE.Object3D | null = o; a; a = a.parent) if (!a.visible) return;
-      // 🐛 matrixWorld À JOUR AVANT la mesure — c'était la cause du « coin de salle ». Cette méthode court
-      // SYNCHRONEMENT juste après un (re)build / roomDelta, AVANT la frame RAF qui recalcule les matrices :
-      // les groupes de salle fraîchement créés ou repositionnés (pavage Vue étage) ont encore une
-      // matrixWorld d'IDENTITÉ, et `Box3.setFromObject` ne remonte JAMAIS la chaîne des parents
-      // (`updateWorldMatrix(false, false)` dans three). L'ancre perdait l'offset de salle ET la position
-      // de la baie : flèche posée au coin de la salle, à la bonne hauteur (le z vit dans le mesh). Sur une
-      // scène déjà RENDUE le bug était invisible (matrices à jour) — d'où le symptôme « ça ne marche que
-      // si la salle était déjà affichée ». On force donc la chaîne des ancêtres ici, comme `getWorldPosition`
-      // le fait pour les marqueurs à taille écran.
-      o.updateWorldMatrix(true, false);
+    (portMeshes.length ? portMeshes : measurable).forEach((o) => {
       const b = new THREE.Box3().setFromObject(o);
       if (b.isEmpty()) return;
       if (empty) { box.copy(b); empty = false; } else box.union(b);
     });
-    if (empty) { this._focusAnchor = null; this._focusRadius = 0; return; }
+    if (empty) return;
     this._focusAnchor = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
     this._focusRadius = 0.5 * Math.sqrt(size.x * size.x + size.y * size.y + size.z * size.z);

@@ -567,10 +567,11 @@ export abstract class DcThreeBase {
 
       POSITION. La flèche est ancrée par son BORD INFÉRIEUR (`center = (0.5, 0)`, cf. l'en-tête du module) :
       sa pointe tombe donc EXACTEMENT sur le point rendu ici, et son corps monte au-dessus sans jamais
-      recouvrir la cible. Ce point est le centre de l'objet REMONTÉ vers la caméra de sa demi-diagonale :
-      sans ce décalage la pointe viserait le CŒUR de l'objet, donc l'intérieur d'une boîte — visible
-      seulement grâce au `depthTest: false`, mais visuellement « enfoncée » dedans. Le décalage suit la
-      caméra, donc la flèche reste sur la face qu'on regarde, quel que soit l'angle. */
+      recouvrir la cible. Ce point est l'ancre calculée par `computeFocusAnchor` — le CENTRE DE LA FAÇADE
+      pour un équipement (`_focusRadius` = 0 : la pointe se pose dessus, fixe dans le monde), le connecteur
+      pour un port, ou, en repli, le centre de la boîte englobante REMONTÉ vers la caméra de sa
+      demi-diagonale (`_focusRadius` > 0) — sans ce décalage-là, la pointe viserait le CŒUR d'une boîte,
+      « enfoncée » dedans malgré le `depthTest: false`. */
   protected updateFocusArrow(): void {
     if (!this.scene) return;
     const show = !!this.opts.showFocusArrow && !!this._focusAnchor;
