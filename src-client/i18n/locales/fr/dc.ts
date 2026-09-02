@@ -137,6 +137,10 @@ export const dc = {
     dupWp: "Ce point de passage est déjà dans la route",
     exitTerminal: "Un exit est TERMINAL pour sa salle — le câble doit sortir avant tout autre waypoint de salle.",
     endDiffers: "Le port terminal doit différer du port de départ",
+    // AVERTISSEMENT AU GESTE (T3) : le traçage acceptait n'importe quels deux ports en silence, et le
+    // câble se retrouvait figé en brouillon sans explication. On le dit maintenant, au bon moment.
+    pairImpossible: "Bouts incompatibles (« {{a}} » vs « {{b}} ») : ils ne se branchent même pas. Le câble restera un BROUILLON.",
+    pairAberrant: "Connecteur {{connector}} des deux côtés, mais signaux différents (« {{a}} » vs « {{b}} ») : ça se branche, ça ne fonctionne pas. Le câble restera un BROUILLON.",
     cardTitle: "Route en cours",
     startPrefix: "Départ : ",
     clickStart: "Cliquez le PORT de départ…",

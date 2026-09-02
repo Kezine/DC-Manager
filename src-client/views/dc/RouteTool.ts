@@ -16,6 +16,7 @@ import { IconButton } from "../../ui/IconButton";
 import { Icons } from "../../ui/Icons";
 import { Dialog } from "../../ui/Dialog";
 import { Html } from "../../core/Html";
+import { PortCompatibility } from "../../core/PortCompatibility";   // verdict PUR d'appariement des deux bouts — T3
 import { I18n } from "../../i18n/I18n";
 import { Waypoint } from "../../models/Waypoint";
 import type { Store } from "../../store";
@@ -89,14 +90,39 @@ export class RouteTool {
     }
     this.cancel();
   }
-  /** Termine la route sur `endPortId` → ouvre le formulaire de câblage prérempli. */
+  /** Termine la route sur `endPortId` → ouvre le formulaire de câblage prérempli.
+
+      🚨 AVERTISSEMENT D'APPARIEMENT (T3, 2026-09-02). Cet outil acceptait NIMPORTE quels deux ports
+      sans rien dire ; le câble se retrouvait ensuite figé en BROUILLON (`cableIsComplete` exige la même
+      famille aux deux bouts) sans que personne n'ait jamais expliqué pourquoi. Symptôme rapporté :
+      « le câble reste en brouillon » — un refus silencieux et différé, découvert longtemps après le geste.
+
+      On avertit donc ICI, au moment du geste, et on NOMME le cas : « ça ne rentre même pas » (connecteurs
+      différents) ou « ça rentre mais ça n'a aucun sens » (même cage, familles différentes — un FC 32G
+      dans une SFP28). Le comportement, lui, ne change pas d'un iota : le câble reste bloqué en brouillon
+      (décision utilisateur du 2026-09-02, prise contre la recommandation « passer après confirmation »).
+      On n'INTERDIT pas non plus le geste : la route peut avoir été tracée pour préparer un câblage dont
+      les types de port seront corrigés ensuite — refuser d'ouvrir le formulaire ferait perdre la route. */
   finish(endPortId: string): void {
     const rb = this.state; if (!rb || !rb.fromPortId) return;
     if (endPortId === rb.fromPortId) { Notify.toast(I18n.t("dc.route.endDiffers"), "err"); return; }
     const fromPortId = rb.fromPortId, wpIds = rb.wpIds.slice();
     this.state = null; this.host.render();
+    this.warnIfIncompatible(fromPortId, endPortId);
     // dialogue de câblage prérempli ; à la création effective, on rend le câble visible dans la vue.
     this.host.openCableForm({ fromPortId, toPortId: endPortId, waypointIds: wpIds, onCreated: (id) => this.host.showCable(id) });
+  }
+
+  /** Toast d'avertissement si les deux bouts ne s'apparient pas (cf. `finish`). Silencieux quand
+      l'appariement est bon OU indécidable (un port sans type : l'incomplétude vient d'ailleurs, et
+      prétendre juger serait pire que se taire). */
+  protected warnIfIncompatible(fromPortId: string, toPortId: string): void {
+    const typeOf = (portId: string) => { const p: any = this.store.get("ports", portId); return p ? this.store.get("portTypes", p.port_type_id) : null; };
+    const v = PortCompatibility.compare(typeOf(fromPortId), typeOf(toPortId));
+    if (!PortCompatibility.blocks(v.verdict)) return;
+    Notify.toast(v.verdict === "aberrant"
+      ? I18n.t("dc.route.pairAberrant", { a: v.familyA, b: v.familyB, connector: v.connectorA })
+      : I18n.t("dc.route.pairImpossible", { a: v.familyA, b: v.familyB }), "err");
   }
 
   /* ---- surbrillance 2D ---- */

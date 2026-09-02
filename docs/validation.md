@@ -397,3 +397,41 @@ DataValidator.validateDependents(parentColl, parentRecord, findChildren, fetch)
 L'injection par interface reste un patron LÉGITIME quand le découplage se justifie sur son propre mérite
 (cf. `src-shared/PowerAnalysis`, qui REÇOIT son store) — mais plus aucun collaborateur n'est injecté dans
 la validation.
+
+## 11. HORS périmètre partagé — l'APPARIEMENT de deux ports (règle CLIENT)
+
+> ⚠ Cette règle ne vit **pas** dans `src-shared/` : elle n'est appliquée qu'au CLIENT. Elle est
+> documentée ici parce que c'est là qu'un lecteur vient chercher « pourquoi l'app refuse-t-elle
+> mon câble ? » — pas parce qu'elle appartiendrait au code partagé.
+
+**La règle d'écriture n'a pas changé depuis toujours** : un câble n'est COMPLET que si sa famille et
+celle de ses DEUX ports coïncident (`Store.cableCompatible`) ; sinon `cableMaxStatus` le force à
+**brouillon**. Décision utilisateur du 2026-09-02, prise **contre** la recommandation d'assouplir :
+un appariement fautif **reste bloqué en brouillon**, il n'est pas « autorisé après confirmation ».
+
+**Ce qui a changé (retour terrain T3), c'est le MESSAGE et son MOMENT.** Le refus était silencieux et
+différé : l'outil de traçage de route acceptait n'importe quels deux ports, et le câble se retrouvait
+figé en brouillon sans que personne n'ait dit pourquoi. Deux surfaces parlent désormais — le **geste**
+(`RouteTool.finish` → toast) et le **formulaire** (hint) —, à partir d'un seul verdict :
+[`core/PortCompatibility`](../src-client/core/PortCompatibility.ts) (module PUR, codes jamais phrases).
+
+Il distingue **deux échecs que l'app confondait**, en lisant enfin une donnée présente depuis le début :
+
+| Verdict | Situation | Exemple du catalogue livré |
+|---|---|---|
+| `ok` | mêmes familles | SFP28 ⇄ SFP28 · FC 32G ⇄ FC 16G (familles identiques, cages différentes) |
+| `aberrant` | familles différentes, **même connecteur** — ça se branche, ça ne fonctionne pas | **FC 32G ⇄ SFP28** : `family` `FC` vs `SFP28`, `connector` `SFP28` **des deux côtés** |
+| `impossible` | familles ET connecteurs différents — ça ne se rencontre même pas | RJ45 ⇄ SFP28 · patch FO-SM ⇄ SFP28 |
+| `unknown` | un port sans type — on ne juge pas | — |
+
+🚨 **Le connecteur ne sert QU'À FORMULER, jamais à refuser.** Le verdict « bloque-t-on ? » ne dépend
+que de la **famille**, exactement comme avant ; `connector` ne fait que choisir le libellé. C'est ce qui
+rend la règle sûre sur des données réelles : les types de port sont saisis à la main, et un `connector`
+vide ou fantaisiste doit dégrader le MESSAGE, jamais le comportement. La propriété est verrouillée par
+test (`test-route-eligibility.js`, section « PortCompatibility »), dans les deux sens : même famille ⇒
+toujours `ok` quel que soit le connecteur ; familles différentes ⇒ toujours bloqué.
+
+⚠ **`aberrant` est le cas que T5 fera disparaître**, pas celui qu'il autorisera : le chantier
+« terminaisons / transceivers » donnera aux ports une famille EFFECTIVE (celle du transceiver posé dans
+la cage), et un FC 32G dans une SFP28 cessera alors d'être une contradiction — il deviendra un montage
+décrit. Jusque-là, le nommer est tout ce qu'on peut faire d'utile.

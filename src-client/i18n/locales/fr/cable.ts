@@ -78,7 +78,11 @@ export const cable = {
     statusField: "Statut",
     statusHint: "« Brouillon » tant que l'assignation est incomplète OU la route invalide ; « Câblé » exige les 2 bouts posés.",
     selfLoop: "Un câble ne peut pas relier un port à lui-même.",
-    famDiffer: "Familles différentes (« {{a}} » vs « {{b}} ») — incompatible : le câble restera un BROUILLON.",
+    famDiffer: "Familles différentes (« {{a}} » vs « {{b}} ») — ces deux bouts ne se branchent même pas : le câble restera un BROUILLON.",
+    // Cas « même cage, signal incompatible » (ex. FC 32G dans une SFP28) : physiquement possible,
+    // logiquement aberrant. MÊME refus que ci-dessus — c'est le LIBELLÉ qui change, pour que le
+    // blocage soit compris au lieu d'être subi (retour terrain T3).
+    famAberrant: "Connecteur {{connector}} des deux côtés, mais signaux différents (« {{a}} » vs « {{b}} ») : ça se branche, ça ne fonctionne pas — le câble restera un BROUILLON.",
     routeInvalidDraft: "Route invalide ({{message}}) → enregistré en « Brouillon ».",
     incompleteDraft: "Assignation incomplète → « Brouillon ». Renseignez les 2 ports + un type compatible pour le planifier.",
     unplacedPlanned: "Équipement(s) non placé(s) → statut maximal « Planifié » ; « Câblé » attendra la pose des deux bouts.",

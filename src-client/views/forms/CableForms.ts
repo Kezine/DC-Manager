@@ -6,6 +6,7 @@ import { LiveValidation } from "./LiveValidation";
 import { ColorPalette } from "../../ui/ColorPalette";
 import { Notify } from "../../ui/Notify";
 import { Html } from "../../core/Html";
+import { PortCompatibility } from "../../core/PortCompatibility";   // verdict PUR d'appariement de deux ports (famille + connecteur) — T3
 import { CableStatuses } from "../../domain/CableStatuses";
 import { Waypoint } from "../../models/Waypoint";
 import { PortRoles } from "../../registries/PortRoles";
@@ -346,9 +347,20 @@ export class CableForms extends EquipmentForms {
     const curDraft = () => ({ from_port_id: selPortA.value || null, to_port_id: selPortB.value || null, cable_type_id: selType.value || null, waypoint_ids: wpState.ids });
     const updateHint = (max: string) => {
       hint.classList.remove("warn", "err");
-      const a = selPortA.value, b = selPortB.value, fa = familyOf(a), fb = familyOf(b);
+      const a = selPortA.value, b = selPortB.value, fa = familyOf(a);   // `fa` sert au message de SUCCÈS (« complet · <famille> »)
       if (a && b && a === b) { hint.textContent = I18n.t("cable.cable.selfLoop"); hint.classList.add("err"); return; }
-      if (a && b && fa && fb && fa !== fb) { hint.textContent = I18n.t("cable.cable.famDiffer", { a: fa, b: fb }); hint.classList.add("warn"); return; }
+      // APPARIEMENT DES DEUX BOUTS (T3) : le verdict distingue « ça ne rentre même pas » de « ça rentre
+      // mais ça n'a aucun sens » (même cage, familles différentes — un FC 32G dans une SFP28). Les DEUX
+      // bloquent, comme avant : la règle d'écriture n'a pas bougé, c'est le message qui devient précis.
+      if (a && b) {
+        const verdict = PortCompatibility.compare(store.get("portTypes", (store.get("ports", a) || {}).port_type_id), store.get("portTypes", (store.get("ports", b) || {}).port_type_id));
+        if (PortCompatibility.blocks(verdict.verdict)) {
+          hint.textContent = verdict.verdict === "aberrant"
+            ? I18n.t("cable.cable.famAberrant", { a: verdict.familyA, b: verdict.familyB, connector: verdict.connectorA })
+            : I18n.t("cable.cable.famDiffer", { a: verdict.familyA, b: verdict.familyB });
+          hint.classList.add("warn"); return;
+        }
+      }
       const r = store.cableRoute(curDraft());
       if (!r.valid) { hint.textContent = I18n.t("cable.cable.routeInvalidDraft", { message: r.errors[0].message }); hint.classList.add("warn"); return; }
       if (max === CABLE_STATUS_DRAFT) { hint.textContent = I18n.t("cable.cable.incompleteDraft"); hint.classList.add("warn"); return; }

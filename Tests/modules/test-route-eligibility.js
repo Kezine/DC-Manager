@@ -7,7 +7,7 @@
 
    Harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, PlacementContainers, RouteEligibility, makeStore } = require("./harness.js");
+const { ck, section, path, PlacementContainers, RouteEligibility, PortCompatibility, makeStore } = require("./harness.js");
 
 /** Décor commun : deux salles + une troisième, un étage, des exits, des points, un non posé.
     Volontairement calqué sur les fixtures de `test-core-store.js` (mêmes idiomes, même bâtiment). */
@@ -328,5 +328,86 @@ module.exports = async () => {
     ck.eq(plan.flat[0].usable, true, "le popover annonce l'exit B utilisable…");
     ck.eq(RouteEligibility.stepErrors(apres, analyse).filter((e) => e).length, 0, "…et l'ajout réel produit bien une route sans erreur d'étape");
     ck.eq(RouteEligibility.isTransit(analyse(apres)), false, "…qui n'est plus en transit (le tronçon est refermé)");
+  });
+
+  /* ============================================================================================
+     🚨 APPARIEMENT DE DEUX PORTS (`core/PortCompatibility`, pur) — retour terrain T3.
+
+     « On sait connecter du FC sur du SFP28, physiquement possible mais logiquement aberrant, au
+     moins afficher un warning. » Le catalogue livré dit exactement ça : « FC 32G » a
+     `family: "FC"` et `connector: "SFP28"` — MÊME CAGE, signal incompatible. L'app ne lisait que
+     la famille ; le connecteur ne servait qu'à la taille 3D.
+
+     ⚠ CE QUE CE MODULE NE FAIT PAS : assouplir quoi que ce soit. Arbitrage utilisateur du
+     2026-09-02 (contre ma recommandation) : un appariement fautif reste BLOQUÉ EN BROUILLON. Le
+     connecteur ne sert donc QU'À FORMULER le message, jamais à refuser — propriété vérifiée
+     ci-dessous, et c'est elle qui rend le module sûr sur des types de port saisis à la main.
+     ============================================================================================ */
+  await section("🚨 PortCompatibility : « ça ne rentre pas » ≠ « ça rentre mais c'est absurde » (T3)", async () => {
+    // Les types RÉELS du catalogue livré (defaultCatalogs) — pas des fixtures inventées.
+    const SFP28 = { family: "SFP28", connector: "SFP28" };
+    const FC32 = { family: "FC", connector: "SFP28" };      // ⚠ même cage que SFP28
+    const FC16 = { family: "FC", connector: "SFP+" };
+    const RJ45 = { family: "RJ45", connector: "RJ45" };
+    const FO_SM = { family: "FO-SM", connector: "LC" };
+
+    // ---- OK : même famille ----
+    ck.eq(PortCompatibility.compare(SFP28, SFP28).verdict, "ok", "deux SFP28 : appariement normal");
+    ck.eq(PortCompatibility.compare(FC32, FC16).verdict, "ok", "FC 32G ⇄ FC 16G : MÊME famille, connecteurs différents — la famille seule décide, comme avant");
+    ck.eq(PortCompatibility.blocks("ok"), false, "…et « ok » ne bloque rien");
+
+    // ---- ABERRANT : le cas exact du retour terrain ----
+    const aberrant = PortCompatibility.compare(FC32, SFP28);
+    ck.eq(aberrant.verdict, "aberrant", "🚨 FC 32G ⇄ SFP28 : même cage SFP28, signaux différents — LE cas signalé");
+    ck.eq(aberrant.connectorA, "SFP28", "…le message peut nommer la cage commune");
+    ck.eq(aberrant.familyA + "/" + aberrant.familyB, "FC/SFP28", "…et les deux familles en conflit");
+    ck.eq(PortCompatibility.blocks("aberrant"), true, "🚨 ARBITRAGE 2026-09-02 : « aberrant » BLOQUE (brouillon), il n'est pas seulement signalé");
+
+    // ---- IMPOSSIBLE : ça ne se rencontre même pas physiquement ----
+    ck.eq(PortCompatibility.compare(RJ45, SFP28).verdict, "impossible", "RJ45 ⇄ SFP28 : ni la famille ni la cage");
+    ck.eq(PortCompatibility.compare(FO_SM, SFP28).verdict, "impossible", "patch FO-SM ⇄ SFP28 : le cas T5 — LC contre cage SFP28");
+    ck.eq(PortCompatibility.blocks("impossible"), true, "« impossible » bloque aussi");
+
+    // ---- UNKNOWN : on ne juge pas ce qu'on ne sait pas ----
+    ck.eq(PortCompatibility.compare(null, SFP28).verdict, "unknown", "port sans type → aucun verdict");
+    ck.eq(PortCompatibility.compare({ family: "" }, SFP28).verdict, "unknown", "famille vide → idem");
+    ck.eq(PortCompatibility.blocks("unknown"), false, "🚨 « unknown » ne bloque PAS : l'incomplétude vient d'ailleurs, prétendre juger serait pire que se taire");
+
+    // ---- 🚨 LA PROPRIÉTÉ DE SÛRETÉ : le connecteur ne change QUE le libellé, JAMAIS le refus ----
+    const memeFamille = [[SFP28, { family: "SFP28", connector: "" }], [SFP28, { family: "SFP28", connector: "n'importe quoi" }]];
+    for (const [a, b] of memeFamille) {
+      ck.eq(PortCompatibility.compare(a, b).verdict, "ok",
+        "🚨 même famille ⇒ « ok » quel que soit le connecteur — une donnée cosmétique fausse ne peut PAS faire échouer un câblage légitime");
+    }
+    const famillesDiff = [[FC32, SFP28], [RJ45, SFP28], [FO_SM, SFP28]];
+    for (const [a, b] of famillesDiff) {
+      ck.eq(PortCompatibility.blocks(PortCompatibility.compare(a, b).verdict), true,
+        "🚨 familles différentes ⇒ BLOQUÉ dans tous les cas — le connecteur ne départage que le message");
+    }
+
+    // ---- tolérances de saisie : ces valeurs sont tapées à la main ----
+    ck.eq(PortCompatibility.compare({ family: "FC", connector: " sfp28 " }, SFP28).verdict, "aberrant", "connecteur : casse et espaces de bord ignorés");
+    ck.eq(PortCompatibility.connectorOf({ family: "RJ45" }), "RJ45", "connecteur ABSENT → repli sur la famille (règle du modèle `PortType`)");
+    ck.eq(PortCompatibility.sameConnector("", ""), false, "🚨 deux connecteurs INCONNUS ne sont jamais « les mêmes » — on ne déduit rien d'une absence");
+
+    /* -- Le VERROU du câblage, sur les SOURCES : les deux surfaces PARLENT, et le refus n'a pas bougé. -- */
+    const fs = require("fs");
+    const src = (...p) => fs.readFileSync(path.join(__dirname, "..", "..", "src-client", ...p), "utf8");
+
+    const routeTool = src("views", "dc", "RouteTool.ts");
+    ck(/warnIfIncompatible\(fromPortId, endPortId\);/.test(routeTool),
+      "🚨 le traçage de route AVERTIT au geste (il acceptait n'importe quels deux ports en silence)");
+    ck(/PortCompatibility\.blocks\(v\.verdict\)/.test(routeTool), "…via le verdict partagé, jamais une règle réécrite sur place");
+    ck(/openCableForm\(\{ fromPortId, toPortId: endPortId/.test(routeTool),
+      "…mais il n'INTERDIT PAS le geste : le formulaire s'ouvre quand même, sinon la route tracée serait perdue");
+
+    const cableForms = src("views", "forms", "CableForms.ts");
+    ck(/PortCompatibility\.blocks\(verdict\.verdict\)/.test(cableForms), "le formulaire consomme LE MÊME verdict (une seule règle pour les deux surfaces)");
+    ck(/famAberrant/.test(cableForms), "…et sait nommer le cas « même cage, signaux différents »");
+
+    // Le REFUS lui-même est resté chez le Store, inchangé : c'est la garantie que ce lot n'a rien assoupli.
+    const store = src("store", "Store.ts");
+    ck(/if \(ct\.family !== pf \|\| ct\.family !== pt\)/.test(store),
+      "🚨 `Store.cableCompatible` INCHANGÉ : même famille partout, sinon refus — le lot T3 n'a touché QUE le message");
   });
 };

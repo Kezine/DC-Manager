@@ -127,6 +127,8 @@ export const dc = {
     dupWp: "This waypoint is already in the route",
     exitTerminal: "An exit is TERMINAL for its room — the cable must leave before any other room waypoint.",
     endDiffers: "The end port must differ from the start port",
+    pairImpossible: "Incompatible ends (« {{a}} » vs « {{b}} »): they do not even plug together. The cable will stay a DRAFT.",
+    pairAberrant: "Same {{connector}} connector on both sides, but different signals (« {{a}} » vs « {{b}} »): it plugs in, it will not work. The cable will stay a DRAFT.",
     cardTitle: "Route in progress",
     startPrefix: "Start: ",
     clickStart: "Click the START port…",
