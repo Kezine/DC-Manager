@@ -547,6 +547,11 @@ export abstract class DcBase {
     this.renderSide(dc);
     this.persistView();
     this._three.applyOptionsDiff(this.webglOptions(), dc.id, this.webglCtx());
+    // Le focus « Localiser » est REJOUÉ après le diff, comme `renderThreeD` le fait déjà : un diff peut
+    // RECONSTRUIRE la catégorie de l'objet localisé (`rebuildFree` sur masquage d'équipement libre) — la
+    // surbrillance et l'ancre de la FLÈCHE pointeraient alors des meshes détruits — ou déplacer des salles
+    // (delta de portée) et périmer l'ancre. Sans focus actif, c'est un quasi no-op (listes vides).
+    this.applyFocus3D();
   }
 
   /* ---- SPIKE : rendu via le moteur WebGL (Three.js) ---- */

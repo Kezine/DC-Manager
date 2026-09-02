@@ -185,6 +185,21 @@ export abstract class DcThreeCamera extends DcThreeBase {
       // Les LIGNES (arêtes de boîte) et les sprites n'ajoutent rien d'utile à l'étendue et peuvent
       // fausser le centre ; on ne retient que les meshes, qui sont le corps de l'objet.
       if (!(o as any).isMesh) return;
+      // Une salle MASQUÉE (cache chaud hors portée d'affichage) garde ses meshes : les mesurer pointerait
+      // la flèche dans le vide, là où la salle n'est plus dessinée. On écarte donc tout mesh invisible —
+      // chaîne de parents comprise (la visibilité de salle vit sur le groupe `outer`, pas sur le mesh).
+      // Tout masqué → ancre null → flèche cachée, et elle revient au prochain refit qui ré-affiche.
+      for (let a: THREE.Object3D | null = o; a; a = a.parent) if (!a.visible) return;
+      // 🐛 matrixWorld À JOUR AVANT la mesure — c'était la cause du « coin de salle ». Cette méthode court
+      // SYNCHRONEMENT juste après un (re)build / roomDelta, AVANT la frame RAF qui recalcule les matrices :
+      // les groupes de salle fraîchement créés ou repositionnés (pavage Vue étage) ont encore une
+      // matrixWorld d'IDENTITÉ, et `Box3.setFromObject` ne remonte JAMAIS la chaîne des parents
+      // (`updateWorldMatrix(false, false)` dans three). L'ancre perdait l'offset de salle ET la position
+      // de la baie : flèche posée au coin de la salle, à la bonne hauteur (le z vit dans le mesh). Sur une
+      // scène déjà RENDUE le bug était invisible (matrices à jour) — d'où le symptôme « ça ne marche que
+      // si la salle était déjà affichée ». On force donc la chaîne des ancêtres ici, comme `getWorldPosition`
+      // le fait pour les marqueurs à taille écran.
+      o.updateWorldMatrix(true, false);
       const b = new THREE.Box3().setFromObject(o);
       if (b.isEmpty()) return;
       if (empty) { box.copy(b); empty = false; } else box.union(b);
