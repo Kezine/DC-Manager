@@ -11,9 +11,14 @@ import { U_MM } from "../../../domain/constants";
 
 /* ---- PULSE de la mise en évidence « Localiser » (arbitrage utilisateur 2026-08-13) ----
    Tant qu'un focus est actif, la surbrillance ambre RESPIRE : sinusoïde ~1 Hz entre une teinte éteinte
-   et une teinte claire, centrée sur l'ambre statique de `setFocusHi` (HI 0xf5a623 / HIC 0xffce8a).
+   et une teinte claire, centrée sur l'ambre statique de `setFocusHi` (HI 0xf5a623).
    Période ALIGNÉE sur l'animation CSS `dc-locate-pulse` des plans 2D (dc-manager.css) : une seule
-   respiration visuelle, quel que soit le moteur. */
+   respiration visuelle, quel que soit le moteur.
+   ⚠ DEUX RAMPES, et elles ne s'appliquent plus au même public depuis le 2026-09-02 :
+     · `EMISSIVE` module les matériaux à émissive (corps d'équipement, ports) — la mise en évidence ;
+     · `BASIC` module une teinte de BASE, et son seul consommateur est désormais la FLÈCHE de
+       localisation (sprite, sans émissive). Elle servait aux TEXTURES d'image de façade, qu'on
+       n'altère plus du tout (décision utilisateur — cf. `canHighlight`). */
 /** Période PARTAGÉE de la respiration (exportée : le bouton « Réinitialiser la localisation » de la
     toolbar — DcPanels — cale la PHASE de son pulse CSS sur la même horloge, cf. updateResetLocate). */
 export const FOCUS_PULSE_PERIOD_MS = 1200;
@@ -137,18 +142,57 @@ export abstract class DcThreeCamera extends DcThreeBase {
       // troisième groupe, « Localiser » un posé d'étage cadrait la caméra sans rien allumer.
       [this.gRacks, this.gFree, this.gFloorDecor].forEach((g) => g && g.traverse((o: any) => {
         const ud = o.userData; if (!ud) return;
+        // 🚨 Les PLANS d'image de façade sont ÉCARTÉS (décision utilisateur 2026-09-02) : on ne touche
+        // plus du tout aux images. Ils étaient retenus par leur tag `eqId` puis teintés en ambre, ce qui
+        // dénaturait la photo pour un gain de lisibilité quasi nul. La FLÈCHE les remplace. Les matériaux
+        // d'image des boîtes 6 faces sont écartés ailleurs, par `canHighlight` — l'image y étant un
+        // matériau de la boîte, l'objet lui-même reste légitimement dans la liste (son corps s'allume).
+        if (ud.layer === "faceImage") return;
         const p = ud.pick;
-        if (eqId && ((p && p.type === "occ" && p.id === eqId) || ud.eqId === eqId)) this._focusObjs.push(o);   // équipement (+ ses plans d'image, tagués eqId)
+        if (eqId && ((p && p.type === "occ" && p.id === eqId) || ud.eqId === eqId)) this._focusObjs.push(o);   // équipement
         else if (portId && p && p.type === "port" && p.id === portId) this._focusObjs.push(o);                 // port (même surbrillance ambre)
       }));
       this._focusObjs.forEach((o) => this.setFocusHi(o, true));
     }
+    this.computeFocusAnchor();   // point que la FLÈCHE désigne (null si plus rien n'est localisé)
+    this.updateFocusArrow();
     if (had || this._focusObjs.length) this.request();
     // PULSE CONTINU tant que la localisation est active — exception ASSUMÉE au rendu à la demande
     // (cf. le bloc « rendu À LA DEMANDE » de DcThreeBase). `setFocusEquip` étant réappliqué à CHAQUE
     // rendu (applyFocus3D), c'est LE point unique où le focus apparaît et disparaît : start/stop y
     // suffisent — la reconstruction et la destruction passent, elles, par disposeContent/dispose.
     if (this._focusObjs.length) this.startFocusPulse(); else this.stopFocusPulse();
+  }
+
+  /** Calcule le point que la FLÈCHE désigne : le centre MONDE de l'objet localisé, et sa demi-diagonale
+      (de combien remonter vers la caméra pour se poser sur la face regardée plutôt qu'au cœur de l'objet).
+
+      POURQUOI DEPUIS LES MESHES, et pas depuis le modèle. Les objets sous focus viennent d'être collectés
+      par `setFocusEquip` — ils portent donc DÉJÀ la vérité de ce que la scène DESSINE, à travers les cinq
+      chemins de placement (baie, libre, étagère, paroi, posé d'étage) et leurs transformées de groupe.
+      Recalculer la position depuis le store rouvrirait la question « où est cet objet ? » à un deuxième
+      endroit, avec la divergence que ça finit toujours par produire — c'est exactement le défaut que
+      `core/Locatable` a refermé pour les boutons « Localiser ».
+
+      Un PORT localisé donne une boîte quasi plate : sa demi-diagonale est minuscule, donc la flèche se
+      pose pratiquement sur le connecteur — ce qui est le comportement voulu (c'est là qu'elle sert le
+      plus, un port faisant quelques pixels à l'écran). */
+  protected computeFocusAnchor(): void {
+    if (!this._focusObjs.length) { this._focusAnchor = null; this._focusRadius = 0; return; }
+    const box = new THREE.Box3();
+    let empty = true;
+    this._focusObjs.forEach((o) => {
+      // Les LIGNES (arêtes de boîte) et les sprites n'ajoutent rien d'utile à l'étendue et peuvent
+      // fausser le centre ; on ne retient que les meshes, qui sont le corps de l'objet.
+      if (!(o as any).isMesh) return;
+      const b = new THREE.Box3().setFromObject(o);
+      if (b.isEmpty()) return;
+      if (empty) { box.copy(b); empty = false; } else box.union(b);
+    });
+    if (empty) { this._focusAnchor = null; this._focusRadius = 0; return; }
+    this._focusAnchor = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    this._focusRadius = 0.5 * Math.sqrt(size.x * size.x + size.y * size.y + size.z * size.z);
   }
 
   /* ---- boucle de PULSE du focus « Localiser » (cf. constantes FOCUS_PULSE_* en tête de fichier) ---- */
@@ -192,8 +236,13 @@ export abstract class DcThreeCamera extends DcThreeBase {
     const basicHex = this._pulseColor.lerpColors(FOCUS_PULSE_BASIC_DIM, FOCUS_PULSE_BASIC_BRIGHT, k).getHex();
     this._focusObjs.forEach((o) => {
       const m = this.highlightMaterials(o); if (!m) return;
-      (Array.isArray(m) ? m : [m]).forEach((x: any) => { if (!x) return; if (x.emissive) x.emissive.setHex(emissiveHex); else if (x.color) x.color.setHex(basicHex); });
+      (Array.isArray(m) ? m : [m]).forEach((x: any) => { if (this.canHighlight(x)) x.emissive.setHex(emissiveHex); });
     });
+    // La FLÈCHE respire AVEC la mise en évidence — même horloge, même phase, donc les deux ne peuvent
+    // pas se déphaser (demande utilisateur : « la flèche doit pulser de la même manière »). Son sprite
+    // n'a pas d'émissive : c'est sa teinte de base qui module, d'où la rampe `basic` — la MÊME que
+    // celle qui servait aux images de façade, désormais libre de tout autre usage.
+    if (this._focusArrow && this._focusArrow.visible) (this._focusArrow.material as any).color.setHex(basicHex);
     this.request();
     this._pulseRaf = requestAnimationFrame(this.focusPulseFrame);
   };
@@ -210,29 +259,25 @@ export abstract class DcThreeCamera extends DcThreeBase {
     // jeux (faces sans image) y figurent deux fois : même valeur écrite/restaurée deux fois, sans effet.
     const m = this.highlightMaterials(mesh); if (!m) return;
     if (Array.isArray(m)) {
-      const HIC = 0xffce8a;   // teinte ambre pour les faces texturées (MeshBasic sans emissive)
       if (on) {
         if ((mesh as any).userData._focArr == null) {
-          (mesh as any).userData._focArr = m.map((x: any) => (x && x.emissive) ? x.emissive.getHex() : -1);
-          (mesh as any).userData._focColArr = m.map((x: any) => (x && !x.emissive && x.color) ? x.color.getHex() : -1);
+          // −1 = « ce matériau n'est pas surlignable » (image de façade) : il n'est ni lu ni écrit,
+          // ni à l'application, ni au pulse, ni à la restauration. Cf. `canHighlight`.
+          (mesh as any).userData._focArr = m.map((x: any) => this.canHighlight(x) ? x.emissive.getHex() : -1);
         }
-        m.forEach((x: any) => { if (!x) return; if (x.emissive) x.emissive.setHex(HI); else if (x.color) x.color.setHex(HIC); });
+        m.forEach((x: any) => { if (this.canHighlight(x)) x.emissive.setHex(HI); });
       } else if ((mesh as any).userData._focArr) {
         m.forEach((x: any, i: number) => {
-          if (!x) return;
-          if (x.emissive && (mesh as any).userData._focArr[i] >= 0) x.emissive.setHex((mesh as any).userData._focArr[i]);
-          else if (x.color && (mesh as any).userData._focColArr && (mesh as any).userData._focColArr[i] >= 0) x.color.setHex((mesh as any).userData._focColArr[i]);
+          if (this.canHighlight(x) && (mesh as any).userData._focArr[i] >= 0) x.emissive.setHex((mesh as any).userData._focArr[i]);
         });
-        (mesh as any).userData._focArr = null; (mesh as any).userData._focColArr = null;
+        (mesh as any).userData._focArr = null;
       }
       return;
     }
     if (on) {
-      if (m.emissive) { (mesh as any).userData._focEmi = m.emissive.getHex(); m.emissive.setHex(HI); }
-      else if (m.color) { (mesh as any).userData._focCol = m.color.getHex(); m.color.setHex(0xffce8a); }   // plan d'image (MeshBasic) → teinte ambre
+      if (this.canHighlight(m)) { (mesh as any).userData._focEmi = m.emissive.getHex(); m.emissive.setHex(HI); }
     } else {
       if ((mesh as any).userData._focEmi != null && m.emissive) { m.emissive.setHex((mesh as any).userData._focEmi); (mesh as any).userData._focEmi = null; }
-      if ((mesh as any).userData._focCol != null && m.color) { m.color.setHex((mesh as any).userData._focCol); (mesh as any).userData._focCol = null; }
     }
   }
 
@@ -246,6 +291,21 @@ export abstract class DcThreeCamera extends DcThreeBase {
     const ud = (mesh as any).userData, swap = ud && ud.faceImageSwap;
     return swap ? swap.avec.concat(swap.sans) : (mesh as any).material;
   }
+
+  /** Ce matériau peut-il porter la mise en évidence « Localiser » ? OUI s'il a une ÉMISSIVE
+      (`MeshStandard` : corps d'équipement, ports, boîtes unies), NON sinon.
+
+      🚨 UN MATÉRIAU SANS ÉMISSIVE, ICI, EST UNE IMAGE DE FAÇADE — et on n'y touche PLUS
+      (décision utilisateur 2026-09-02). L'app teintait ces textures en ambre (`0xffce8a` posé
+      sur `color`) faute d'émissive : sur une photo de façade, une teinte MULTIPLIÉE se voit à
+      peine tout en dénaturant l'image, qu'on regarde justement pour lire des sérigraphies et
+      des repères. La désignation passe désormais par la FLÈCHE (`FocusArrowMarker`), qui
+      s'AJOUTE à la scène au lieu d'altérer ce qu'elle montre.
+
+      Conséquence ASSUMÉE : un équipement dont la face regardée porte une image n'a plus aucun
+      glow visible de ce côté — c'est exactement ce que la flèche vient remplacer. Le glow
+      subsiste partout où il était déjà lisible (corps, arêtes, faces sans image, ports). */
+  protected canHighlight(material: any): boolean { return !!(material && material.emissive); }
 
   /** Recentre le PIVOT d'orbite sur le point de scène au CENTRE de l'écran (1re surface, sinon plan du sol). Ce point
       est sur le rayon central → déplacer la cible le long de ce rayon NE BOUGE PAS l'image en ORTHO. En PERSPECTIVE, le
@@ -338,6 +398,7 @@ export abstract class DcThreeCamera extends DcThreeBase {
     cam.updateProjectionMatrix();
     this.updateScreenScales();   // marqueurs à taille écran constante (dépend du zoom)
     this.updatePivot();          // marqueur du centre de rotation : suit la cible, taille écran constante
+    this.updateFocusArrow();     // flèche de localisation : reste du côté CAMÉRA de l'objet visé, taille écran constante
   }
 
   /** Rescale les marqueurs taggés `screenSize`/`worldSize` ; les power bolts ne sont visibles que DE PRÈS

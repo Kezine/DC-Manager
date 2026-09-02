@@ -21,6 +21,7 @@ import { FloorLayout } from "../../../geometry/FloorLayout";
 // transporte, la couche caméra la consomme — une seule définition pour les deux (principe n°3).
 import type { PivotAabb } from "../../../geometry/PivotBounds";
 import { PivotMarker } from "./PivotMarker";   // style + tracé PURS du marqueur de centre de rotation (thème, halo, cache)
+import { FocusArrowMarker } from "./FocusArrowMarker";   // style + tracé PURS de la flèche de localisation (jumeau de PivotMarker)
 import type { CableCurveStyle } from "../../../geometry/CableSpline";
 import type { DatacenterHost } from "../shared";
 
@@ -98,6 +99,8 @@ export interface DcThreeOptions {
   showFloorGrid: boolean; // grilles des plans d'étage (multi-salles)
   showOrientMarks: boolean;   // liserés/repères d'orientation (front)
   showPivot: boolean;     // marqueur du CENTRE DE ROTATION de la caméra (croix + anneau, taille écran constante)
+  showFocusArrow: boolean;   // FLÈCHE de localisation : sprite billboard, taille écran constante, pointe posée sur l'objet localisé
+
   markerScale: number;    // facteur de taille des marqueurs de waypoint + pastilles (slider — s'applique aux DEUX modes)
   markerRealSize: boolean;   // true = taille RÉELLE (monde : waypoint 5 cm, pastille ⌀ 1 cm à 100 %) · false = taille ÉCRAN constante
   cablesOnTop: boolean;   // câbles toujours au-dessus des équipements/baies (depthTest off) — défaut activé
@@ -178,8 +181,17 @@ export abstract class DcThreeBase {
   protected frameArgs: [number, number, number, number, number, number] | null = null;   // derniers args de cadrage
 
   // options d'affichage (poussées par DcBase ; défauts = tout visible)
-  protected opts: DcThreeOptions = { hideFrontEq: false, hideRearEq: false, colorMode: "face", showAllCables: true, selCables: new Set(), hiddenRacks: new Set(), hiddenEquips: new Set(), showFigure: false, figure: null, showWaypoints: true, showConduits: true, cableSplineK: 1 / 6, cableCurveStyle: "fillet", cablePortNormal: false, showEqNames: true, showRackSides: false, showRackNames: true, showPorts: true, showDoors: true, showRoomDoors: true, showDoorSwing: false, showPlaceholders: true, showFloorGrid: true, showOrientMarks: true, showPivot: false, markerScale: 1, markerRealSize: false, cablesOnTop: true, showFaceImages: true, powerBoltSpacingMm: 300 };
+  protected opts: DcThreeOptions = { hideFrontEq: false, hideRearEq: false, colorMode: "face", showAllCables: true, selCables: new Set(), hiddenRacks: new Set(), hiddenEquips: new Set(), showFigure: false, figure: null, showWaypoints: true, showConduits: true, cableSplineK: 1 / 6, cableCurveStyle: "fillet", cablePortNormal: false, showEqNames: true, showRackSides: false, showRackNames: true, showPorts: true, showDoors: true, showRoomDoors: true, showDoorSwing: false, showPlaceholders: true, showFloorGrid: true, showOrientMarks: true, showPivot: false, showFocusArrow: true, markerScale: 1, markerRealSize: false, cablesOnTop: true, showFaceImages: true, powerBoltSpacingMm: 300 };
   protected _pivot: THREE.Sprite | null = null;   // marqueur du centre de rotation (sprite billboard, taille écran constante)
+  /** FLÈCHE de localisation (sprite billboard, taille écran constante, pointe ancrée sur la cible).
+      Vit sous `scene` comme le pivot — donc HORS `content` : elle survit aux reconstructions de données,
+      ce qui évite de la voir disparaître/reparaître à chaque événement SSE pendant qu'on lit l'objet visé. */
+  protected _focusArrow: THREE.Sprite | null = null;
+  /** Point que la flèche désigne : centre de l'objet localisé, en MONDE. null = aucune localisation. */
+  protected _focusAnchor: THREE.Vector3 | null = null;
+  /** Demi-diagonale de l'objet localisé (mm) : de combien remonter vers la caméra pour que la pointe
+      se pose SUR la face regardée plutôt qu'au cœur de l'objet. 0 pour un point (port, waypoint). */
+  protected _focusRadius = 0;
   // FOCUS « Localiser » : cible caméra demandée par la vue (centre + emprise). Appliquée juste avant le rendu,
   // donc APRÈS le cadrage par défaut d'un éventuel (re)build → le focus prime. En attente tant que la scène n'est pas prête.
   protected pendingFocus: { p: { x: number; y: number; z: number }; extent: number; face: { az: number; el: number } | null } | null = null;
@@ -314,6 +326,13 @@ export abstract class DcThreeBase {
       const m: any = this._pivot.material;
       if (m) { if (m.map) m.map.dispose(); m.dispose?.(); }
       this._pivot = null;
+    }
+    // MÊME raison pour la flèche de localisation (sprite sous `scene`, texture CanvasTexture propre).
+    if (this._focusArrow) {
+      this.scene?.remove(this._focusArrow);
+      const m: any = this._focusArrow.material;
+      if (m) { if (m.map) m.map.dispose(); m.dispose?.(); }
+      this._focusArrow = null;
     }
     this.scene = null; this.camera = null; this.host_el = null;
   }
@@ -524,6 +543,69 @@ export abstract class DcThreeBase {
     this._pivot.visible = true;
     this._pivot.position.copy(this.target);
     this._pivot.scale.setScalar(PivotMarker.SCREEN_SIZE_PX * this.worldPerPixel());   // taille écran constante, quel que soit le zoom
+  }
+
+  /** Texture (mutualisée, DÉPENDANTE DU THÈME) de la flèche de localisation — jumelle de `pivotTexture`.
+      Le tracé vit dans le module pur `FocusArrowMarker` ; ici on ne fait que fournir le canvas. */
+  protected focusArrowTexture(): THREE.CanvasTexture | null {
+    if (typeof document === "undefined") return null;
+    const backgroundHex = this.theme ? this.theme.bg : 0x0e1116;
+    const key = FocusArrowMarker.cacheKey(backgroundHex);
+    const cached = this.texCache.get(key); if (cached) return cached;
+    const s = FocusArrowMarker.TEXTURE_SIZE_PX, cv = document.createElement("canvas"); cv.width = cv.height = s;
+    const g = cv.getContext("2d"); if (!g) return null;
+    FocusArrowMarker.draw(g, s, FocusArrowMarker.ink(backgroundHex));
+    const tex = new THREE.CanvasTexture(cv); tex.needsUpdate = true; this.texCache.set(key, tex); return tex;
+  }
+
+  /** (Re)pose et dimensionne la FLÈCHE de localisation sur l'objet localisé, ou la masque.
+      Appelée à chaque mise à jour de caméra (comme `updatePivot`) : c'est ce qui la maintient du BON CÔTÉ
+      de l'objet quand on orbite, et à taille écran constante quand on zoome.
+
+      TROIS conditions pour l'afficher, et elles sont indépendantes : le toggle est allumé, une
+      localisation est active (`_focusAnchor`), et la scène existe. Aucune n'est devinée ailleurs.
+
+      POSITION. La flèche est ancrée par son BORD INFÉRIEUR (`center = (0.5, 0)`, cf. l'en-tête du module) :
+      sa pointe tombe donc EXACTEMENT sur le point rendu ici, et son corps monte au-dessus sans jamais
+      recouvrir la cible. Ce point est le centre de l'objet REMONTÉ vers la caméra de sa demi-diagonale :
+      sans ce décalage la pointe viserait le CŒUR de l'objet, donc l'intérieur d'une boîte — visible
+      seulement grâce au `depthTest: false`, mais visuellement « enfoncée » dedans. Le décalage suit la
+      caméra, donc la flèche reste sur la face qu'on regarde, quel que soit l'angle. */
+  protected updateFocusArrow(): void {
+    if (!this.scene) return;
+    const show = !!this.opts.showFocusArrow && !!this._focusAnchor;
+    if (!show) { if (this._focusArrow) this._focusArrow.visible = false; return; }
+    const tex = this.focusArrowTexture(); if (!tex) return;
+    if (!this._focusArrow || this._focusArrow.parent !== this.scene) {
+      this._focusArrow = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: FocusArrowMarker.OPACITY, depthTest: false, depthWrite: false }));
+      this._focusArrow.center.set(0.5, 0);   // ancrage par le BAS : la pointe se pose sur la cible
+      this._focusArrow.renderOrder = 31;     // au-dessus du pivot (30) : c'est une désignation, elle prime
+      this.scene.add(this._focusArrow);
+    } else {
+      // Même raison que pour le pivot : le sprite n'est créé QU'UNE FOIS et garderait sinon la texture
+      // du thème dans lequel il est né (`applyThemeChange` ne remappe que des couleurs de matériau).
+      const mat = this._focusArrow.material as THREE.SpriteMaterial;
+      if (mat.map !== tex) { mat.map = tex; mat.needsUpdate = true; }
+    }
+    this._focusArrow.visible = true;
+    const p = this._focusAnchor as THREE.Vector3;
+    const cam = this.camera;
+    if (cam && this._focusRadius > 0) {
+      // direction CAMÉRA → objet, normalisée : on remonte du centre vers la caméra.
+      const dir = cam.position.clone().sub(p);
+      const len = dir.length();
+      if (len > 1e-6) this._focusArrow.position.copy(p).addScaledVector(dir.multiplyScalar(1 / len), this._focusRadius);
+      else this._focusArrow.position.copy(p);
+    } else this._focusArrow.position.copy(p);
+    // ÉCHELLE : la MÊME règle que `updateScreenScales`, et pas `worldPerPixel()` seul. En PERSPECTIVE le
+    // mm/px dépend de la distance CAMÉRA↔OBJET, pas de la distance à la CIBLE d'orbite : la flèche vit
+    // devant l'objet localisé, qui n'est presque jamais le pivot (on peut avoir orbité depuis). Prendre le
+    // plan de la cible la ferait gonfler ou rétrécir au fil de l'orbite — exactement le défaut que la note
+    // d'`updateScreenScales` documente pour les marqueurs.
+    const h = Math.max(1, this.host_el ? this.host_el.clientHeight : 1);
+    const perspK = (2 * Math.tan(this.fov * Math.PI / 360)) / h;
+    const mmPerPx = (this.perspective && cam) ? perspK * cam.position.distanceTo(this._focusArrow.position) : this.worldPerPixel();
+    this._focusArrow.scale.setScalar(FocusArrowMarker.SCREEN_SIZE_PX * mmPerPx);   // taille écran constante
   }
 
   /** Texture (mutualisée) d'un DISQUE plein blanc — teinté par la couleur du sprite (pastille de câble 2D). */

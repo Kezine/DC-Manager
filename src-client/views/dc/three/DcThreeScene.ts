@@ -488,6 +488,7 @@ export class DcThreeScene extends DcThreeCamera {
     // catégorie ne couvre pas les changements de contenu d'une salle conservée (mêmes salles + mêmes options).
     if (this._forceBuild) { this.build(dcId); this.request(); return; }
     if (old.showPivot !== opts.showPivot) { this.updatePivot(); this.request(); }   // centre de rotation : simple (dé)masquage, aucun rebuild
+    if (old.showFocusArrow !== opts.showFocusArrow) { this.updateFocusArrow(); this.request(); }   // flèche de localisation : idem, aucun rebuild
     // TOUS les toggles d'affichage sont en VISIBILITÉ (couches taguées, toujours construites) — AUCUN rebuild :
     // ports, noms, portes, débattement, emplacements, images, masquage av/ar, conduits, waypoints, grilles, repères,
     // capots/parois (rackshell) et masquage de baies (hidden3dRacks). Cas particulier des IMAGES sur les boîtes

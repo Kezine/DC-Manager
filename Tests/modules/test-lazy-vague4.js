@@ -297,7 +297,9 @@ module.exports = async () => {
 
     // -- 3. Le câblage de l'hôte appelle le bon point d'entrée --
     const mainTs = src("app", "main.ts");
-    const accroche = /store\.onLazyReloadDeferred\s*=\s*\(collections\)\s*=>\s*\{([\s\S]*?)\n  \};/.exec(mainTs);
+    // `\r?\n` : le dépôt stocke en LF, la copie de travail Windows est en CRLF (autocrlf) — un motif ancré
+    // sur `\n` seul casserait selon la machine, ce qui ferait un faux négatif au lieu d'un verrou.
+    const accroche = /store\.onLazyReloadDeferred\s*=\s*\(collections\)\s*=>\s*\{([\s\S]*?)\r?\n  \};/.exec(mainTs);
     ck(!!accroche, "le point d'accroche G3 `onLazyReloadDeferred` est bien lu dans main.ts");
     ck(/forgetServerData\(\)/.test(accroche[1]), "🚨 main.ts appelle forgetServerData() sur le listing de la collection différée");
     ck.eq(/forgetServerPage/.test(mainTs), false, "aucun reste de l'ancien nom dans main.ts");

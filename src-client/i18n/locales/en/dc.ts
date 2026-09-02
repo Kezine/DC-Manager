@@ -295,6 +295,7 @@ export const dc = {
     tAnchor: "Floor anchor point",
     tFigure: "Scale figure (~1.75 m) — view marker, not saved; movable in a room and on the floor",
     tPivot: "Rotation center",
+    tFocusArrow: "Locate arrow: marks the located object with a screen-facing arrow of constant size, breathing with the highlight. Face images are never altered.",
     sCableSpline: "Cable rounding",
     cableStyle: "Cable style",
     cableStyleSpline: "Spline (classic)",

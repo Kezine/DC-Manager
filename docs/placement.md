@@ -869,6 +869,25 @@ nombres et rend un nombre, ce qui la rend testable en Node — le moteur 3D, lui
   constantes sont donc RECALIBRÉES (700 → 1 250, 2 500 → 3 500, 1 200 → 1 900) pour que le monde cadré reste celui
   d'avant à 1,5 % près. Écarté : les reprendre telles quelles — la nouvelle règle aurait resserré ces trois vues
   de 30 à 45 %, alors que le lot ne doit changer que ce qui est signalé.
+- 🎯 **LA DÉSIGNATION EST UNE FLÈCHE, PLUS UNE ALTÉRATION DE CE QU'ON MONTRE** (décision utilisateur
+  2026-09-02). La mise en évidence repose sur une émissive ambre posée sur les matériaux de l'objet —
+  **invisible dès qu'une IMAGE DE FAÇADE couvre la face regardée** : l'image est soit un plan posé devant
+  la boîte, soit un matériau texturé DE la boîte, et dans les deux cas l'émissive est derrière ou absente.
+  L'app compensait en teintant ces images en ambre ; c'était le mauvais échange — une teinte multipliée
+  dans une photo se voit à peine, tout en dénaturant précisément ce qu'on vient y lire (sérigraphies,
+  repères, étiquettes). **On n'altère donc plus aucune image de façade** (`DcThreeCamera.canHighlight` :
+  seul un matériau à émissive est surlignable ; les plans d'image sont écartés de la collecte du focus),
+  et la désignation passe par un repère **AJOUTÉ** à la scène : `FocusArrowMarker`, un sprite —
+  donc toujours face au viewport par construction — de **taille écran constante**, dont la pointe est
+  ancrée par le bas (`center = (0.5, 0)`) sur l'objet localisé, remontée vers la caméra de sa
+  demi-diagonale pour se poser sur la face regardée plutôt qu'au cœur de l'objet. Elle **respire sur la
+  même frame** que la mise en évidence (aucun déphasage possible) et se coupe par le toggle « Flèche de
+  localisation », voisin du « Centre de rotation » dans le panneau 3D (état persisté avec les autres
+  bascules de vue). Conséquence ASSUMÉE : un équipement dont la face regardée porte une image n'a plus
+  de glow visible de ce côté — c'est exactement ce que la flèche remplace. Écarté : **baisser l'opacité
+  des images** pendant la localisation — ça marche pour les plans (occupants de baie, la boîte ambre
+  apparaît derrière) mais rend TRANSPARENTS les équipements libres, dont l'image est un matériau de la
+  boîte elle-même : on verrait la salle au travers, pas un glow.
 - 🐛 **LA FACE VISÉE EST CELLE DU PORT, pas le côté de MONTAGE de son équipement** (correctif T1,
   2026-09-01). « Localiser » un port déduisait son azimut d'`aimAtEquip`, qui ne connaît que
   `rack_side` : un port de face **arrière** porté par un équipement monté à l'**avant** était donc

@@ -838,6 +838,8 @@ export abstract class DcPanels extends DcViews2D {
       realSize: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5l9 9.5-9 9.5-9-9.5z"/><text x="12" y="14.6" text-anchor="middle" font-size="7" font-weight="700" fill="currentColor" stroke="none">1:1</text></svg>',
       conduit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="8" rx="1"/><path d="M3 12h18" stroke-dasharray="2.5 2.5"/></svg>',
       pivot: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5.5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/></svg>',
+      // Flèche VERS LE BAS pointant une cible : même geste que le sprite 3D (pointe posée sur l'objet).
+      focusArrow: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="3" x2="12" y2="14"/><path d="M7.5 10.5L12 15l4.5-4.5"/><line x1="5" y1="20" x2="19" y2="20"/></svg>',
       orient: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 5.5l2.4 8.5L12 12l-2.4 2z" fill="currentColor" stroke="none"/></svg>',
       anchor: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2.5"/><line x1="12" y1="7.5" x2="12" y2="21"/><path d="M5 13a7 7 0 0 0 14 0"/><line x1="5" y1="13" x2="8.5" y2="13"/><line x1="15.5" y1="13" x2="19" y2="13"/></svg>',
       perp: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4v14h14"/><path d="M10.5 18a4.5 4.5 0 0 1 4.5-4.5"/></svg>',
@@ -884,6 +886,9 @@ export abstract class DcPanels extends DcViews2D {
     tgi(["floor"], I.anchor, I18n.t("dc.panels.tAnchor"), () => this.showFloorAnchor, (v) => { this.showFloorAnchor = v; redraw(); });
     tgi(ALL, I.person, I18n.t("dc.panels.tFigure"), () => this.showFigure, (v) => { this.showFigure = v; if (v) this.figureEnsure(this.current()); this.persistView(); redraw(); });
     tgi(D3, I.pivot, I18n.t("dc.panels.tPivot"), () => this.showPivot, (v) => { this.showPivot = v; r3(); });
+    // FLÈCHE de localisation — posée DANS LA MÊME SECTION que le centre de rotation (demande utilisateur
+    // 2026-09-02) : ce sont les deux repères de la vue qui désignent un point plutôt qu'un objet du modèle.
+    tgi(D3, I.focusArrow, I18n.t("dc.panels.tFocusArrow"), () => this.showFocusArrow, (v) => { this.showFocusArrow = v; r3(); });
     // Sliders AFFECTANT AUSSI le rendu 2D (arrondi des câbles, taille des marqueurs/pastilles/éclairs) → exposés dans
     // TOUTES les vues. On met à jour la scène WebGL EN DIRECT (setCableSpline/setMarkerScale, pour la vue 3D et le retour
     // ultérieur), ET on re-dessine le SVG quand on est EN 2D — sinon le 2D n'était mis à jour qu'après un aller-retour 3D.

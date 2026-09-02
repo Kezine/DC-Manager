@@ -164,6 +164,9 @@
   reduce` (lu par `matchMedia` au DÉMARRAGE de la boucle) désactive le pulse — surbrillance statique, l'information
   ne dépend jamais de l'animation. Le pendant 2D est une animation CSS (`@keyframes dc-locate-pulse`,
   `dc-manager.css`) sur les classes `.sel` des plans, même période, même garde reduced-motion.
+  - **CE QUE LE PULSE MODULE, depuis le 2026-09-02** : les matériaux à ÉMISSIVE (corps d'équipement, ports) —
+    et la **FLÈCHE de localisation**, qui respire sur la MÊME frame, donc sans déphasage possible. Il ne touche
+    plus **aucune texture d'image de façade** : cf. la décision ci-dessous.
 
 ## ⏳ À faire (consigné, NON implémenté)
 

@@ -83,6 +83,10 @@ export abstract class DcBase {
   hideFrontEq = false; hideRearEq = false; showPlaceholders = true; showRackSides = true; showRackNames = true;
   showWaypoints = true; showConduits = true; showPorts = true; showEqNames = true;
   showOrientMarks = true; showPivot = false;
+  /** FLÈCHE de localisation (sprite billboard). ALLUMÉE par défaut : elle ne se voit QUE pendant une
+      localisation active, donc elle n'encombre jamais une vue au repos — et c'est elle qui porte la
+      désignation depuis qu'on ne teinte plus les images de façade (cf. `FocusArrowMarker`). */
+  showFocusArrow = true;
   showFloorAnchor = true;                // vue Étage : marqueur de point d'ancrage (déplaçable, discret) — masquable
   // PERSONNAGE d'échelle (repère PERSONNEL, vue seule — NON enregistré dans le document) : humanoïde ~1,75 m
   // positionnable en salle (dcX/dcY) et sur l'étage (floorX/floorY). Persisté dans l'état de vue (localStorage).
@@ -549,7 +553,7 @@ export abstract class DcBase {
   /** Options d'affichage poussées au moteur WebGL (sous-ensemble implémenté ; le reste est sans effet). */
   protected webglOptions(): any {
     // COPIE de selCables : applyOptionsDiff compare old vs new ; une même référence (mutée) masquerait le changement.
-    return { hideFrontEq: this.hideFrontEq, hideRearEq: this.hideRearEq, colorMode: this.colorMode, showAllCables: this.showAllCables, selCables: new Set(this.selCables), hiddenRacks: new Set(this.hidden3dRacks), hiddenEquips: new Set(this.hidden3dEquips), showWaypoints: this.showWaypoints, showConduits: this.showConduits, cableSplineK: this.cableSplineK, cableCurveStyle: this.cableCurveStyle, cablePortNormal: this.cablePortNormal, showEqNames: this.showEqNames, showRackSides: this.showRackSides, showRackNames: this.showRackNames, showPorts: this.showPorts, showDoors: this.showDoors, showRoomDoors: this.showRoomDoors, showPlaceholders: this.showPlaceholders, showFloorGrid: this.showFloorGrid, showOrientMarks: this.showOrientMarks, showPivot: this.showPivot, markerScale: this.markerScale, markerRealSize: this.markerRealSize, cablesOnTop: this.cablesOnTop, showFaceImages: this.showFaceImages, showDoorSwing: this.showDoorSwing, powerBoltSpacingMm: this.powerBoltSpacingMm, showFigure: this.showFigure, figure: this.figure ? { ...this.figure } : null };
+    return { hideFrontEq: this.hideFrontEq, hideRearEq: this.hideRearEq, colorMode: this.colorMode, showAllCables: this.showAllCables, selCables: new Set(this.selCables), hiddenRacks: new Set(this.hidden3dRacks), hiddenEquips: new Set(this.hidden3dEquips), showWaypoints: this.showWaypoints, showConduits: this.showConduits, cableSplineK: this.cableSplineK, cableCurveStyle: this.cableCurveStyle, cablePortNormal: this.cablePortNormal, showEqNames: this.showEqNames, showRackSides: this.showRackSides, showRackNames: this.showRackNames, showPorts: this.showPorts, showDoors: this.showDoors, showRoomDoors: this.showRoomDoors, showPlaceholders: this.showPlaceholders, showFloorGrid: this.showFloorGrid, showOrientMarks: this.showOrientMarks, showPivot: this.showPivot, showFocusArrow: this.showFocusArrow, markerScale: this.markerScale, markerRealSize: this.markerRealSize, cablesOnTop: this.cablesOnTop, showFaceImages: this.showFaceImages, showDoorSwing: this.showDoorSwing, powerBoltSpacingMm: this.powerBoltSpacingMm, showFigure: this.showFigure, figure: this.figure ? { ...this.figure } : null };
   }
 
   /** Personnage d'échelle : garantit une position (centre de la salle courante / de l'étage) au 1er affichage. */
@@ -823,7 +827,7 @@ export abstract class DcBase {
 
   /* ---- persistance de l'état de vue (par fichier, localStorage) ---- */
   protected viewStateKey(): string { return "dcmanager.view3d." + ((this.store.meta && this.store.meta.fileId) ? this.store.meta.fileId : "__nofile"); }
-  protected static readonly TOGGLE_KEYS = ["hideFrontEq", "hideRearEq", "showPlaceholders", "showRackSides", "showRackNames", "showPorts", "showEqNames", "showAllCables", "showWaypoints", "showConduits", "showOrientMarks", "showPivot", "showFloorAnchor", "showFaceImages", "showDoors", "showRoomDoors", "showDoorSwing", "showFloorGrid", "cablePortNormal", "webglPerspective", "cablesOnTop", "showFigure", "markerRealSize"];
+  protected static readonly TOGGLE_KEYS = ["hideFrontEq", "hideRearEq", "showPlaceholders", "showRackSides", "showRackNames", "showPorts", "showEqNames", "showAllCables", "showWaypoints", "showConduits", "showOrientMarks", "showPivot", "showFocusArrow", "showFloorAnchor", "showFaceImages", "showDoors", "showRoomDoors", "showDoorSwing", "showFloorGrid", "cablePortNormal", "webglPerspective", "cablesOnTop", "showFigure", "markerRealSize"];
 
   /** Écrit l'état (débouncé 300 ms) — évite une écriture par frame de pan/zoom. Un FLUSH synchrone
       (`flushViewState`) est déclenché à la fermeture/masquage de page pour ne pas perdre la dernière bascule. */
@@ -860,7 +864,7 @@ export abstract class DcBase {
     // défauts (état propre par fichier)
     this.az = CAM_PRESETS.iso[0]; this.el = CAM_PRESETS.iso[1]; this.scale = null; this.tx = 0; this.ty = 0; this.camTarget = null;
     this.hideFrontEq = false; this.hideRearEq = false; this.showPlaceholders = true; this.showRackSides = true; this.showRackNames = true; this.showPorts = true; this.showEqNames = true; this.showAllCables = true; this.showWaypoints = true; this.showConduits = true;
-    this.showOrientMarks = true; this.showPivot = false; this.showFloorAnchor = true; this.showFaceImages = true; this.showDoors = true; this.showRoomDoors = true; this.showDoorSwing = false; this.showFloorGrid = true; this.cablePortNormal = false;
+    this.showOrientMarks = true; this.showPivot = false; this.showFocusArrow = true; this.showFloorAnchor = true; this.showFaceImages = true; this.showDoors = true; this.showRoomDoors = true; this.showDoorSwing = false; this.showFloorGrid = true; this.cablePortNormal = false;
     this.useWebGL = true; this.webglPerspective = false; this.cablesOnTop = true;   // WebGL = unique moteur 3D ; projection/cables-on-top restaurés depuis TOGGLE_KEYS
     this.colorMode = "face"; this.cableSplineK = CABLE_SPLINE_K; this.cableCurveStyle = CABLE_CURVE_STYLE_DEFAULT; this.markerScale = 1; this.markerRealSize = false;
     this.siteScaleKm = SITE_SCALE_DEFAULT_M_PER_KM; this.siteScaleLog = false;

@@ -1,7 +1,7 @@
 /* Tests modules — vues & outils pilotés par hôte injecté (Graph/Datacenter, outils 2D/3D, images).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, mkStorage, RichTooltip, FormSave, Store, BrowserStorageAdapter, PlacementContainers, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FilterChips, Ip, Prefs, DatacenterView, FloorLayout, Positioning, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, SceneLayoutSignature, FaceImagePolicy, PivotBounds, PivotMarker, ImageStore, FaceImage, SaveState, ShellNav, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, mkStorage, RichTooltip, FormSave, Store, BrowserStorageAdapter, PlacementContainers, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, GraphGeometry, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, FilterChips, Ip, Prefs, DatacenterView, FloorLayout, Positioning, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, MeasureTool, RouteTool, SceneLayoutSignature, FaceImagePolicy, PivotBounds, PivotMarker, FocusArrowMarker, ImageStore, FaceImage, SaveState, ShellNav, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("FormSave : un formulaire n'annonce JAMAIS un succès que le Store a REFUSÉ", async () => {
@@ -2300,13 +2300,13 @@ module.exports = async () => {
     const src = (...p) => fs.readFileSync(path.join(__dirname, "..", "..", "src-client", ...p), "utf8");
 
     const dcInteract = src("views", "dc", "DcInteract.ts");
-    const resolveur = /resolveLaneToCable\(port: any\): Promise<any> \{([\s\S]*?)\n  \}/.exec(dcInteract);
+    const resolveur = /resolveLaneToCable\(port: any\): Promise<any> \{([\s\S]*?)\r?\n  \}/.exec(dcInteract);
     ck(!!resolveur, "DcInteract.resolveLaneToCable existe (le geste qui rend les lanes atteignables)");
     ck(/isBreakoutParent\(port\)/.test(resolveur[1]), "…il ne s'active QUE sur un trunk (un port ordinaire passe tout droit)");
     ck(/breakoutLanes\(port\.id\)/.test(resolveur[1]), "…et propose les lanes DU trunk cliqué");
     ck(/cableOnPort/.test(resolveur[1]), "…en signalant celles qui sont déjà câblées (jamais un choix qui échouera)");
 
-    const connect = /protected async connectPort\(portClique: any\): Promise<void> \{([\s\S]*?)\n    const cands/.exec(dcInteract);
+    const connect = /protected async connectPort\(portClique: any\): Promise<void> \{([\s\S]*?)\r?\n    const cands/.exec(dcInteract);
     ck(!!connect, "connectPort est bien lu");
     ck(/await this\.resolveLaneToCable\(portClique\)/.test(connect[1]),
       "🚨 le clic de port PASSE par la résolution de lane — c'est le chemin que le clic 3D ET le menu contextuel empruntent tous deux");
@@ -2345,7 +2345,10 @@ module.exports = async () => {
 
     ck(/protected _webglMountSeq = 0;/.test(dcBase), "DcBase porte un compteur de montage 3D (`_webglMountSeq`)");
 
-    const corps = /protected renderWebGL\(dc: any\): void \{([\s\S]*?)\n  \}\n/.exec(dcBase);
+    // ⚠ `\r?\n` PARTOUT dans les verrous qui lisent des SOURCES : le dépôt stocke en LF mais la copie de
+    // travail Windows est en CRLF (autocrlf). Un motif ancré sur `\n` seul passe ou casse selon la machine
+    // et selon l'outil qui a écrit le fichier en dernier — c'est un faux négatif qui ne prouve rien.
+    const corps = /protected renderWebGL\(dc: any\): void \{([\s\S]*?)\r?\n  \}\r?\n/.exec(dcBase);
     ck(!!corps, "renderWebGL est bien lu");
 
     const iSeq = corps[1].indexOf("const seq = ++this._webglMountSeq;");
@@ -2364,6 +2367,91 @@ module.exports = async () => {
     // L'overlay doit être levé MÊME quand le montage différé abandonne, sinon « Rendu 3D… » resterait à l'écran.
     ck(/doMount\(\)\.finally\(\(\) => Notify\.idle\(\)\)/.test(corps[1]),
       "🚨 l'overlay est levé dans un `finally` : un montage qui ABANDONNE ne doit pas laisser « Rendu 3D… » collé à l'écran");
+  }
+  });
+
+  /* ============================================================================================
+     FLÈCHE DE LOCALISATION — style, thème, clé de cache et GÉOMÉTRIE du contour.
+
+     Deux décisions utilisateur (2026-09-02) que ce bloc verrouille :
+       1. **on ne touche PLUS aux images de façade** — l'app les teintait en ambre pour compenser
+          l'émissive invisible sous une texture, ce qui dénaturait la photo pour un gain nul ;
+       2. la désignation passe par une flèche AJOUTÉE à la scène, toujours face au viewport, de
+          taille écran constante, qui **respire avec la mise en évidence**.
+
+     Ce qui est décidable se teste ici (module PUR, jumeau de `PivotMarker`) ; le reste — un sprite
+     Three, une texture rastérisée — se regarde. Le point 1, qui vit dans le moteur (non chargeable
+     hors navigateur), est verrouillé par lecture des SOURCES en fin de section.
+     ============================================================================================ */
+  await section("Flèche de localisation : contour, encres par thème, clé de cache, et images de façade INTACTES", async () => {
+  {
+    const NOIR = 0x0e1116, BLANC = 0xffffff;
+
+    // ---- même règle de thème que le pivot : une seule dans l'app (Color.isLightHex) ----
+    ck.eq(FocusArrowMarker.isLight(NOIR), false, "fond sombre → thème sombre");
+    ck.eq(FocusArrowMarker.isLight(BLANC), true, "fond blanc → thème clair");
+    ck.eq(FocusArrowMarker.isLight(0x818181), Color.isLightHex(0x818181), "…c'est la règle PARTAGÉE, pas une seconde règle");
+
+    // ---- CLÉ DE CACHE dépendante du thème (les clés « ## » ne sont JAMAIS évincées) ----
+    ck.eq(FocusArrowMarker.cacheKey(NOIR), "##focusarrow|dark", "clé de cache : variante SOMBRE nommée");
+    ck.eq(FocusArrowMarker.cacheKey(BLANC), "##focusarrow|light", "clé de cache : variante CLAIRE nommée");
+    ck(FocusArrowMarker.cacheKey(NOIR) !== FocusArrowMarker.cacheKey(BLANC), "🚨 clé DIFFÉRENTE par thème (sinon la texture du 1er thème serait resservie à vie)");
+    ck(FocusArrowMarker.cacheKey(NOIR) !== PivotMarker.cacheKey(NOIR), "…et distincte de celle du pivot (deux sprites, deux textures)");
+
+    // ---- ENCRES : le CORPS est neutre (sa couleur utile vient du PULSE), le halo suit le fond ----
+    const surSombre = FocusArrowMarker.ink(NOIR), surClair = FocusArrowMarker.ink(BLANC);
+    ck.eq(surSombre.core, "#ffffff", "corps BLANC : c'est le pulse qui le teinte à l'exécution, pas la texture");
+    ck.eq(surClair.core, "#ffffff", "…dans les deux thèmes (la forme est neutre, la couleur est dynamique)");
+    ck(surClair.halo !== surSombre.halo, "🚨 le HALO, lui, suit le thème — c'est lui qui détache la flèche d'un fond quelconque");
+
+    // ---- GÉOMÉTRIE du contour : c'est la seule partie décidable du dessin ----
+    const S = 128, pts = FocusArrowMarker.outline(S);
+    ck.eq(pts.length, 7, "contour à 7 sommets (pointe + 2 ailerons + 2 épaules + 2 coins de hampe)");
+    ck.eq(pts[0].x, S / 2, "la POINTE est centrée horizontalement");
+    ck(pts[0].y > S * 0.9, "🚨 la POINTE est EN BAS du canvas — c'est ce qui, avec l'ancrage par le bas, la pose sur la cible sans la recouvrir");
+    ck.eq(pts[0].y, Math.max(...pts.map((p) => p.y)), "…et c'est le point le plus bas du contour");
+    // symétrie gauche/droite autour de l'axe : une flèche de travers se verrait, mais tard.
+    const miroir = pts.map((p) => S - p.x).sort((a, b) => a - b);
+    const droits = pts.map((p) => p.x).sort((a, b) => a - b);
+    ck.eq(miroir.join(","), droits.join(","), "contour SYMÉTRIQUE par rapport à l'axe vertical");
+    // la tête doit être plus large que la hampe, sinon ce n'est plus une flèche mais un trait.
+    ck(FocusArrowMarker.HEAD_HALF_RATIO > FocusArrowMarker.SHAFT_HALF_RATIO, "la TÊTE est plus large que la hampe");
+    ck(FocusArrowMarker.SCREEN_SIZE_PX > PivotMarker.SCREEN_SIZE_PX, "la flèche est plus grande que le pivot : elle DÉSIGNE, quand le pivot se cherche");
+
+    // ---- TRACÉ : contexte 2D ENREGISTREUR (aucun canvas, aucun DOM) — halo D'ABORD, corps ENSUITE ----
+    const journal = [];
+    const g = {
+      set fillStyle(v) { journal.push(["fillStyle", v]); }, set strokeStyle(v) { journal.push(["strokeStyle", v]); },
+      set lineWidth(v) { journal.push(["lineWidth", v]); }, set lineJoin(v) {}, set lineCap(v) {},
+      beginPath() { journal.push(["beginPath"]); }, moveTo() {}, lineTo() {}, closePath() {},
+      fill() { journal.push(["fill"]); }, stroke() { journal.push(["stroke"]); },
+    };
+    FocusArrowMarker.draw(g, S, surSombre);
+    const iStroke = journal.findIndex((e) => e[0] === "stroke");
+    const iFill = journal.findIndex((e) => e[0] === "fill");
+    ck(iStroke >= 0 && iFill >= 0, "le tracé fait bien les DEUX passes");
+    ck(iStroke < iFill, "🚨 HALO d'abord (stroke), CORPS ensuite (fill) — inversé, le halo mangerait le corps");
+    ck.eq(journal.filter((e) => e[0] === "beginPath").length, 2, "un chemin RECONSTRUIT pour chaque passe (un fill après un stroke ne rejoue pas le chemin)");
+    ck.eq(journal.find((e) => e[0] === "strokeStyle")[1], surSombre.halo, "la passe au trait utilise l'encre de HALO");
+    ck.eq(journal.find((e) => e[0] === "fillStyle")[1], surSombre.core, "la passe remplie utilise l'encre de CORPS");
+
+    /* -- Le VERROU du point 1, sur les SOURCES : plus AUCUNE altération des images de façade. -- */
+    const fs = require("fs");
+    const cam = fs.readFileSync(path.join(__dirname, "..", "..", "src-client", "views", "dc", "three", "DcThreeCamera.ts"), "utf8");
+    ck(/canHighlight\(material: any\): boolean \{ return !!\(material && material\.emissive\); \}/.test(cam),
+      "🚨 `canHighlight` : SEUL un matériau à ÉMISSIVE est surlignable — un matériau sans émissive EST une image de façade");
+    // La teinte ambre des TEXTURES a disparu du CODE. On vise le corps de `setFocusHi`, pas le fichier
+    // entier : les commentaires citent encore l'ancienne valeur pour dire d'où l'on vient, et c'est utile.
+    const hiBody = /protected setFocusHi\(mesh: THREE\.Object3D \| null, on: boolean\): void \{([\s\S]*?)\r?\n  \}/.exec(cam);
+    ck(!!hiBody, "setFocusHi est bien lu");
+    ck.eq(/\.color\.setHex\(/.test(hiBody[1]), false,
+      "🚨 setFocusHi n'écrit PLUS AUCUNE couleur de base — c'est elle qui dénaturait les photos de façade");
+    ck(/emissive\.setHex\(HI\)/.test(hiBody[1]), "…mais il pose toujours l'émissive ambre là où elle existe (corps, ports)");
+    ck(/if \(ud\.layer === "faceImage"\) return;/.test(cam),
+      "🚨 les PLANS d'image de façade sont ÉCARTÉS de la collecte du focus (ils y entraient par leur tag `eqId`)");
+    // …et la flèche, elle, respire bien avec le reste.
+    ck(/_focusArrow[\s\S]{0,120}color\.setHex\(basicHex\)/.test(cam),
+      "🚨 la FLÈCHE est modulée par la MÊME frame de pulse que la mise en évidence (même horloge, aucun déphasage possible)");
   }
   });
 };

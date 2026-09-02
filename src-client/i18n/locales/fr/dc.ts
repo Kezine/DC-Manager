@@ -305,6 +305,7 @@ export const dc = {
     tAnchor: "Point d'ancrage de l'étage",
     tFigure: "Personnage d'échelle (~1,75 m) — repère de vue, non enregistré ; déplaçable en salle et sur l'étage",
     tPivot: "Centre de rotation",
+    tFocusArrow: "Flèche de localisation : désigne l'objet localisé par une flèche toujours face à l'écran, de taille constante, qui respire avec la mise en évidence. Les images de façade, elles, ne sont jamais altérées.",
     sCableSpline: "Arrondi des câbles",
     cableStyle: "Style des câbles",
     cableStyleSpline: "Spline (classique)",
