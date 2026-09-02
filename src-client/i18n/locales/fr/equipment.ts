@@ -336,6 +336,7 @@ export const equipment = {
     saveFailed: "L'équipement n'a pas pu être enregistré (voir les erreurs).",
     createFailed: "L'équipement n'a pas pu être créé (voir les erreurs).",
     someSaveFailed: "Certains éléments n'ont pas pu être enregistrés (voir les erreurs) — corrigez-les.",
+    portsSaveFailed: "Enregistrement refusé — port(s) en cause : {{ports}} (voir les erreurs).",
     updated: "Équipement mis à jour",
     created: "Équipement créé",
     patchNetWillRemove: "{{count}} réseau(x) de port seront retirés à l'enregistrement : un patch ne porte pas de réseau (il le déduit).",

@@ -583,7 +583,8 @@ rechargée sur événement SSE, sa copie en cache peut donc être PÉRIMÉE (un 
 pièce jointe vers l'équipement qu'on supprime) ; et une pièce jamais absorbée n'entre pas dans notre
 plan, mais compte dans le TOTAL affiché par la pastille.
 
-Mesuré : `POST /transact` (le chemin de TOUTE suppression du client, cf. `Store._removeTargets`)
+Mesuré : `POST /transact` (le chemin de TOUTE suppression du client — `Store._removeTargets` et, depuis
+le chantier T9, le lot mixte `Store.saveBatch`)
 répondait **204 sans corps** — il n'y avait donc rien sur quoi purger. Il rend désormais un **compte
 rendu du résidu** (changement ADDITIF : aucun appelant ne lisait ce corps) :
 
@@ -881,9 +882,11 @@ LOCAL ne voit que les spares ABSORBÉS : sans M4b, un spare en cache détaché p
 resterait affiché rattaché à un équipement disparu — c'est la limite « `residual.updates` rapporté
 mais non exploité » que M4 avait documentée, désormais **LEVÉE**.
 
-`Store._refreshResidualUpdates` (branché au MÊME endroit que M4 : `_removeTargets`, après
-`_applyResidualDeletes` — TOUTES les suppressions du client passent par là ; les autres `transact`
-du Store, `updateBatch` et le clonage, ne portent aucun delete → résidu vide par construction) :
+`Store._refreshResidualUpdates` (branché aux DEUX chemins du Store qui portent des suppressions,
+après `_applyResidualDeletes` : `_removeTargets` — `remove`/`removeMany` — et, depuis le chantier T9,
+le **lot MIXTE** `saveBatch`, qui supprime des racines dans la même transaction qu'il crée et met à
+jour. Le clonage, lui, ne porte aucun delete → résidu vide par construction ; `updateBatch` non plus,
+étant devenu un lot à `updates` seuls) :
 
 - **tous les ids rapportés** sont refetchés — un enregistrement d'une collection HYDRATÉE doit
   impérativement l'être (son cache serait faux), un enregistrement pas encore en cache d'une

@@ -14,6 +14,7 @@ const { summary } = require("./harness.js");
 
 const DOMAINS = [
   "./test-core-store.js",        // entités + Store + helpers core
+  "./test-store-savebatch.js",   // LOT MIXTE du Store (chantier T9) : `Store.saveBatch` — creates+updates+removes en UNE transaction (donc 1 révision, 1 SSE, 1 pas d'undo), fusion CASCADE ⇄ lot par CHAMP (détachement conservé sur les champs que le lot ne touche pas, intention de l'utilisateur gagnante sur ceux qu'il touche, suppression prioritaire sur mise à jour), refus TOUT-OU-RIEN aux erreurs qui DÉSIGNENT la ligne fautive, filtre NO-OP (save à blanc ⇒ zéro écriture, parité updateBatch), et les deux règles qui exigeaient des pré-passes séquentielles (T7 patch_panel · T-POE1/T-POE2) validées contre l'état POST-lot
   "./test-geometry.js",          // géométrie pure
   "./test-views-tools.js",       // vues & outils (hôtes injectés)
   "./test-route-eligibility.js", // éditeur de route : éligibilité d'un waypoint + erreur → étape (core/RouteEligibility)

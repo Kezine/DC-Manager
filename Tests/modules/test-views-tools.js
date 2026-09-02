@@ -51,7 +51,9 @@ module.exports = async () => {
        peuvent être contrôlées, et plusieurs le sont déjà. */
     const fs = require("fs"), dir = path.join(__dirname, "..", "..", "src-client", "views", "forms");
     // `updateBatch` est du même défaut : il rend le NOMBRE d'écritures, donc 0 en cas de refus.
-    const ECRITURE_JETEE = /(^|[^=]\s|\{\s*)await\s+(this\.)?store\.(create|update|updateBatch)\s*\(/;
+    // `saveBatch` (chantier T9) aussi : il rend un VERDICT `{ ok, written, errors }` — l'ignorer, c'est annoncer
+    // un succès sur un lot entièrement REFUSÉ, dont RIEN n'a été écrit. Même piège, donc même verrou.
+    const ECRITURE_JETEE = /(^|[^=]\s|\{\s*)await\s+(this\.)?store\.(create|update|updateBatch|saveBatch)\s*\(/;
     const SUCCES = /Notify\.toast\(/;
     /* ⚠ NEUTRALISER LES COMMENTAIRES avant de juger — sinon le verrou mord sur la PROSE. Il l'a fait :
        l'en-tête de `FormSave.ts` CITE le motif fautif pour l'expliquer, et se faisait accuser de le
@@ -93,6 +95,10 @@ module.exports = async () => {
     ck.eq(fautesDe(sondeErreur, "sonde.ts").length, 0, "VERROU : un toast d'ERREUR après écriture n'est pas une annonce de succès");
     const sondeLot = '        await store.updateBatch(ops);\n        Notify.toast(I18n.t("face.saved"));';
     ck.eq(fautesDe(sondeLot, "sonde.ts").length, 1, "VERROU : `updateBatch` est couvert (il rend 0 au refus, donc le même piège)");
+    const sondeLotMixte = '        await store.saveBatch({ updates: ops, removes: rm });\n        Notify.toast(I18n.t("equipment.equip.updated"));';
+    ck.eq(fautesDe(sondeLotMixte, "sonde.ts").length, 1, "VERROU : `saveBatch` est couvert (verdict `ok` ignoré = succès annoncé sur un lot refusé)");
+    const sondeLotMixteCapture = '        const saved = await store.saveBatch({ updates: ops });\n        Notify.toast(I18n.t("equipment.equip.updated"));';
+    ck.eq(fautesDe(sondeLotMixteCapture, "sonde.ts").length, 0, "VERROU : … et le verdict CAPTURÉ n'est pas jugé ici (le contrôle lui appartient)");
     // -- le décommentage ne doit NI aveugler le verrou, NI le laisser mordre sur de la prose --
     const sondeProse = '/* Exemple à NE PAS suivre :\n       await store.update("sites", x.id, p);\n       Notify.toast("Site mis à jour");\n    */';
     ck.eq(fautesDe(sondeProse, "sonde.ts").length, 0, "VERROU : le motif CITÉ dans un commentaire n'est pas une faute (c'est le cas de l'en-tête de FormSave)");

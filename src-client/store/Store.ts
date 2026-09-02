@@ -67,6 +67,35 @@ export interface CollectionReadAccess {
   canReadCollection(collection: string): boolean;
 }
 
+/** OPÉRATIONS d'un LOT MIXTE (`Store.saveBatch`) — la forme cliente du corps de `POST /transact`.
+    Les trois familles sont FACULTATIVES et se combinent librement ; c'est tout l'intérêt du point d'entrée
+    (enregistrer un équipement, c'est créer/modifier/supprimer des ports dans le MÊME geste). */
+export interface SaveBatchOps {
+  /** CRÉATIONS. 🚨 L'id est **PRÉ-GÉNÉRÉ par l'appelant** (`Id.uid()`) : sans lui, une FK interne au lot —
+      un port qui vise l'équipement créé dans le même lot — n'aurait aucune valeur à écrire. */
+  creates?: ReadonlyArray<{ collection: string; record: Record<string, any> }>;
+  /** MISES À JOUR (patch partiel, normalisé et diffé ici : un patch sans effet est retiré du lot). */
+  updates?: ReadonlyArray<{ collection: string; id: string; patch: Record<string, any> }>;
+  /** SUPPRESSIONS — **RACINES** de cascade : leurs effets (enfants supprimés, FK détachées) sont calculés par
+      le lot lui-même, en UN plan pour toutes les racines. L'appelant n'a donc aucun ordre à respecter. */
+  removes?: ReadonlyArray<{ collection: string; id: string }>;
+}
+
+/** VERDICT d'un lot mixte. ⚠ `ok` et `written` répondent à DEUX questions distinctes, et les confondre est
+    le piège que ce type existe pour fermer : `{ ok: true, written: 0 }` = « il n'y avait rien à écrire »
+    (save à blanc — un SUCCÈS), tandis qu'un refus de validation rend `ok: false` avec les erreurs, chacune
+    portant la `collection` et l'`id` de la ligne fautive (de quoi la désigner dans un formulaire). */
+export interface SaveBatchResult {
+  /** Le lot a-t-il été ACCEPTÉ ? (`false` = refus de validation, RIEN n'a été écrit). */
+  ok: boolean;
+  /** Nombre d'opérations réellement émises dans la transaction (créations + mises à jour + suppressions,
+      effets de cascade compris). `0` avec `ok: true` = aucune écriture, donc aucune révision ni SSE. */
+  written: number;
+  /** Violations relevées (vide si `ok`). Déjà notifiées via `onInvalid` — elles sont ici pour l'appelant qui
+      veut en faire quelque chose de plus précis qu'un toast global. */
+  errors: ValidationError[];
+}
+
 export interface ListStoreOptions {
   page?: number;
   pageSize?: number;
@@ -717,13 +746,27 @@ export class Store {
   private accepts(collection: string, record: Record<string, any>): boolean {
     return this.acceptsWith(collection, record, this.entityFetcher, this.recordFinder);
   }
-  /** Comme `accepts`, mais avec des lecteurs INJECTÉS (pour la validation CONSCIENTE DU LOT — cf. updateBatch,
+  /** Comme `accepts`, mais avec des lecteurs INJECTÉS (pour la validation CONSCIENTE DU LOT — cf. saveBatch,
       parité avec le `/transact` serveur : chaque op est validée contre l'état POST-lot). */
   private acceptsWith(collection: string, record: Record<string, any>, fetcher: EntityFetcher, finder: ChildFinder): boolean {
-    const errors = DataValidator.validateRecord(collection, record, fetcher, finder);
-    if (!errors.length) errors.push(...DataValidator.validateDependents(collection, record, finder, fetcher));
+    const errors = this._validationErrors(collection, record, fetcher, finder);
     if (errors.length) { this.onInvalid?.(errors); return false; }
     return true;
+  }
+  /** ERREURS de validation d'UN enregistrement — mêmes règles et MÊME ENCHAÎNEMENT que le `/transact` serveur
+      (`api.ts` : normalise+valide chaque op, puis rejoue les DÉPENDANTS V5b des parents écrits). Extrait
+      d'`acceptsWith` parce qu'un LOT doit COLLECTER les erreurs de toutes ses lignes avant de trancher, là où
+      une écriture unitaire n'a qu'à répondre oui/non : le refus tout-ou-rien de `saveBatch` doit pouvoir
+      DÉSIGNER la (ou les) ligne(s) fautive(s) à l'appelant (cf. docs/validation.md § 5 « Forme des erreurs »).
+      Les erreurs portent déjà `collection` et `id` : `validateRecord` estampille l'id du record validé, et
+      `validateDependents` renvoie celles de l'ENFANT fautif — c'est ce qui permet à un formulaire de nommer
+      la ligne refusée plutôt qu'un échec global. */
+  private _validationErrors(collection: string, record: Record<string, any>, fetcher: EntityFetcher, finder: ChildFinder): ValidationError[] {
+    const errors = DataValidator.validateRecord(collection, record, fetcher, finder);
+    // Les dépendants ne sont rejoués que si l'enregistrement lui-même passe : sur un record déjà invalide,
+    // leur verdict serait du bruit (et le serveur applique la même économie, cf. api.ts).
+    if (!errors.length) errors.push(...DataValidator.validateDependents(collection, record, finder, fetcher));
+    return errors;
   }
   /** Normalise les CHAMPS PATCHÉS (forme canonique partagée) à partir du résultat fusionné — fixe l'incohérence
       historique où un patch posait des valeurs brutes (ex. `u_count: "10"`). */
@@ -775,35 +818,181 @@ export class Store {
     this._emit();
     return obj;
   }
-  /* Plusieurs patchs (multi-collections) en UNE transaction = UN pas d'undo. */
+  /** Plusieurs patchs (multi-collections) en UNE transaction = UN pas d'undo.
+      CAS PARTICULIER de `saveBatch` (lot à `updates` seuls) depuis le chantier T9 : les deux points d'entrée
+      partageaient déjà la préparation, la validation consciente du lot et l'application en mémoire — les
+      garder séparés aurait fait diverger deux copies de la même mécanique (principe n°3), et laissé au seul
+      `saveBatch` le filtre no-op qui vaut EXACTEMENT autant ici.
+      Rend le NOMBRE d'enregistrements écrits — donc **0 aussi bien pour un refus que pour un lot sans effet**
+      (lot vide, ou entièrement no-op). Cette ambiguïté est ANCIENNE et assumée à ce niveau ; l'appelant qui a
+      besoin de trancher passe par `FormSave.batch` (ou `saveBatch` directement, dont le verdict est explicite). */
   async updateBatch(ops: Array<{ collection: string; id: string; patch: Record<string, any> }>): Promise<number> {
-    // 1) prépare tout (normalisation + état fusionné) SANS muter.
-    const prepared: Array<{ obj: any; collection: string; id: string; patch: Record<string, any>; merged: Record<string, any> }> = [];
-    for (const { collection, id, patch } of ops) {
-      const obj = this.get(collection, id); if (!obj) continue;
-      const normalizedPatch = this._normalizePatch(collection, obj, patch);
-      prepared.push({ obj, collection, id, patch: normalizedPatch, merged: { ...obj.toJSON(), ...normalizedPatch } });
+    return (await this.saveBatch({ updates: ops })).written;
+  }
+
+  /** LOT MIXTE — créations + mises à jour + suppressions-RACINES en UNE SEULE transaction adapter, donc UNE
+      révision serveur, UN événement SSE et UN pas d'undo, quel que soit le nombre d'opérations.
+
+      🚨 LA PANNE QU'IL FERME (chantier T9). « Enregistrer » un switch 24 ports depuis `EquipmentForms`
+      enchaînait 27 écritures unitaires awaitées (l'équipement, ses agrégats, chaque port) : chaque
+      `create`/`update`/`remove` produit sa propre `transact`, donc son `POST /transact`, sa révision, son
+      événement SSE réveillant tous les autres clients — et, en mode fichier, son pas d'undo (défaire la
+      saisie demandait 27 Ctrl+Z). C'est la violation frontale du contrat « 1 action logique de l'UI =
+      1 transact() » écrit en tête de `DataAdapter`. Le SERVEUR, lui, savait déjà tout faire en un lot
+      (`POST /transact` accepte creates+updates+deletes) : il ne manquait que ce point d'entrée client.
+
+      GARANTIES (dans l'ordre où elles s'appliquent) :
+      1. **Cascade partagée** — les suppressions sont des RACINES : leurs effets (suppressions enfants,
+         détachements de FK) sont calculés en UN SEUL plan `Cascade.planMany` pour toutes les racines, comme
+         `removeMany`. C'est une exigence de CORRECTION, pas une optimisation : la composition des retraits de
+         liste et la garde anti-résurrection ne valent que dans la portée d'un appel (cf. src-shared/Cascade.ts).
+         Corollaire : l'appelant n'a AUCUN ordre à respecter — retirer les lanes avant leur trunk n'a plus de
+         sens, la règle `ports` emporte les lanes et leurs câbles par récursion.
+      2. **Fusion cascade ⇄ lot PAR CHAMP** — une même ligne peut être touchée par les DEUX (supprimer un
+         agrégat détache `aggregate_id` des ports que le lot réécrit par ailleurs). Elle ne produit alors
+         qu'UNE entrée d'`updates` : les détachements posent le socle, le patch EXPLICITE du lot passe
+         PAR-DESSUS. L'intention de l'utilisateur gagne sur les champs qu'elle touche, le détachement survit
+         sur ceux qu'elle ne touche pas. Ce cas est NORMAL, jamais un motif de refus.
+         ⚠ Une ligne à la fois MISE À JOUR par le lot et SUPPRIMÉE par la cascade : la SUPPRESSION gagne
+         (la mettre à jour pour la supprimer dans la même transaction serait absurde, et l'écrire la
+         RESSUSCITERAIT côté serveur — les exécuteurs appliquent deletes PUIS updates).
+      3. **Filtre no-op** — une mise à jour sans effet APRÈS normalisation est retirée du lot, exactement
+         comme le court-circuit d'`update()`. C'est lui qui fait qu'un « Enregistrer » d'un formulaire NON
+         MODIFIÉ n'écrit RIEN : ni transaction, ni révision, ni SSE, ni `touch()` sur `updated_date`.
+      4. **Tout-ou-rien, validé AVANT d'écrire** — tout le lot est normalisé puis validé de façon CONSCIENTE
+         DU LOT (état POST-lot : `buildBatchFetcher`/`buildBatchChildFinder`, cf. docs/validation.md § 8.4),
+         AVANT la moindre mutation mémoire ou réseau. C'est la PARITÉ exacte du `/transact` serveur, y compris
+         la re-validation V5b des ENFANTS des parents écrits. Le moindre échec ⇒ RIEN n'est écrit, et les
+         erreurs remontent à l'appelant (elles portent `collection` + `id`) ET via `onInvalid`.
+         Sans cette conscience du lot, un save légitime serait rejeté à tort : re-typer un équipement en
+         « patch » pendant que le MÊME lot vide le réseau de ses ports (T7), ou couper `poe_device` pendant
+         qu'il rétrograde ses ports PoE (T-POE1/T-POE2) — les deux se lisent contre l'état POST-lot.
+
+      `ops.creates` porte des enregistrements à id **PRÉ-GÉNÉRÉ** par l'appelant : sans lui, les FK internes
+      au lot (un port qui vise l'équipement créé dans le même lot) ne pourraient pas s'écrire. Le constructeur
+      d'entité en fournit un à défaut, mais l'appelant ne le connaîtrait pas — c'est une sécurité, pas un mode
+      d'emploi.
+
+      Le verdict distingue « rien à écrire » (`ok: true, written: 0` — succès, il n'y avait rien à refuser) d'un
+      REFUS (`ok: false`, `errors` non vide) : les confondre ferait annoncer un échec sur un save à blanc. */
+  async saveBatch(ops: SaveBatchOps): Promise<SaveBatchResult> {
+    /* 1) RACINES de suppression → plan de cascade UNIQUE (ids inconnus et doublons écartés en amont : sans ce
+       filtre, la transaction porterait des suppressions sans objet — même règle que `removeMany`). */
+    const removeTargets = this._existingTargetsOf(ops.removes || []);
+    const plan = removeTargets.length ? this._cascadePlan(removeTargets) : { deletes: [] as CascadeDelete[], detaches: [] as CascadeDetach[] };
+    const deleteRows: Array<{ collection: string; id: string }> = [
+      ...plan.deletes.map((d) => ({ collection: d.c, id: d.id })),
+      ...removeTargets.map((t) => ({ collection: t.collection, id: t.id })),
+    ];
+    const deletedKeys = new Set<string>(deleteRows.map((d) => Store.recordKey(d.collection, d.id)));
+
+    /* 2) DÉTACHEMENTS de la cascade, regroupés PAR LIGNE (le plan est déjà réduit à un détachement par
+       (collection, id, clé), donc l'ordre d'insertion suffit). Ils forment le SOCLE des patchs (garantie 2). */
+    const cascadePatches = new Map<string, { collection: string; id: string; patch: Record<string, any> }>();
+    for (const d of plan.detaches) {
+      const key = Store.recordKey(d.c, d.id);
+      const entry = cascadePatches.get(key) || { collection: d.c, id: d.id, patch: {} as Record<string, any> };
+      entry.patch[d.key] = ("value" in d) ? d.value : null;
+      cascadePatches.set(key, entry);
     }
-    // 2) VALIDE tout AVANT de muter, de façon CONSCIENTE DU LOT (parité `/transact` serveur) : chaque op est
-    // validée contre l'état POST-lot. Sans ça, un repositionnement MULTIPLE (ex. reflow d'étagère où A prend la
-    // place que B va libérer) déclencherait un faux chevauchement (V6e) contre les positions PRÉ-lot. Le moindre
-    // échec annule le lot entier (atomicité).
-    const body = { updates: prepared.map((p) => ({ collection: p.collection, record: p.merged })) };
+
+    /* 3) CRÉATIONS : on instancie les entités TOUT DE SUITE (normalisation du constructeur, id connu) mais on
+       ne touche PAS au cache — l'insertion n'a lieu qu'après validation du lot entier (patron de `create`). */
+    const creations: Array<{ collection: string; obj: any }> = [];
+    for (const c of ops.creates || []) {
+      if (!c || !c.collection || !ENTITY_CLASSES[c.collection]) continue;
+      creations.push({ collection: c.collection, obj: c.record instanceof Entity ? c.record : new ENTITY_CLASSES[c.collection](c.record) });
+    }
+
+    /* 4) MISES À JOUR : fusion cascade ⇄ lot par CHAMP, UNE entrée par ligne (garantie 2). L'ordre de l'appelant
+       est préservé ; les lignes que SEULE la cascade touche viennent ensuite. */
+    const mergedPatches = new Map<string, { collection: string; id: string; raw: Record<string, any> }>();
+    for (const u of ops.updates || []) {
+      if (!u || !u.collection || !u.id) continue;
+      const key = Store.recordKey(u.collection, u.id);
+      if (deletedKeys.has(key)) continue;   // la SUPPRESSION gagne (garantie 2) — et écrire la ligne la ressusciterait
+      let entry = mergedPatches.get(key);
+      if (!entry) {
+        // socle = détachements de cascade de CETTE ligne, consommés ici pour ne pas produire une 2e entrée
+        const cascade = cascadePatches.get(key);
+        cascadePatches.delete(key);
+        entry = { collection: u.collection, id: u.id, raw: cascade ? { ...cascade.patch } : {} };
+        mergedPatches.set(key, entry);
+      }
+      Object.assign(entry.raw, u.patch || {});   // l'intention de l'utilisateur PASSE PAR-DESSUS
+    }
+    for (const [key, entry] of cascadePatches) mergedPatches.set(key, { collection: entry.collection, id: entry.id, raw: entry.patch });
+
+    /* 5) PRÉPARATION : normalisation des champs patchés + filtre NO-OP (garantie 3), toujours sans muter. */
+    const prepared: Array<{ obj: any; collection: string; id: string; patch: Record<string, any>; merged: Record<string, any> }> = [];
+    for (const entry of mergedPatches.values()) {
+      const obj = this.get(entry.collection, entry.id);
+      // Ligne absente du cache (supprimée entre-temps par un autre client, double-clic — ou visée à la fois par
+      // un `create` et un `update` du même lot, auquel cas c'est le RECORD DE CRÉATION qui fait foi) : rien à
+      // patcher. Même tolérance que l'`updateBatch` historique : une op sans objet est ignorée, pas refusée.
+      if (!obj) continue;
+      const normalizedPatch = this._normalizePatch(entry.collection, obj, entry.raw);
+      if (!PatchDiff.changes(obj.toJSON(), normalizedPatch)) continue;   // no-op → aucune écriture, aucun touch
+      prepared.push({ obj, collection: entry.collection, id: entry.id, patch: normalizedPatch, merged: { ...obj.toJSON(), ...normalizedPatch } });
+    }
+
+    /* 6) VALIDATION CONSCIENTE DU LOT, AVANT toute mutation (garantie 4). Les lecteurs voient l'état POST-lot :
+       créations et mises à jour superposées au persisté, suppressions retirées.
+       ⚠ Les mises à jour ISSUES DE LA CASCADE sont validées elles aussi — `_removeTargets` (remove/removeMany), lui,
+       envoie ses détachements sans les juger. Ce n'est pas une incohérence mais la PARITÉ avec le serveur, qui valide
+       DÉJÀ toutes les `updates` d'un `/transact`, cascade cliente comprise (`api.ts`) : ce qui passait ici passerait
+       le réseau pour finir en 400. On échoue donc plus tôt, et proprement. Corollaire assumé : une ligne LEGACY déjà
+       invalide, touchée par un détachement, fait tomber le lot en mode fichier là où `removeMany` l'aurait laissée
+       filer — c'est le mode fichier qui rattrape le mode API, pas l'inverse. Et de toute façon, un détachement fondu
+       dans un patch explicite (garantie 2) ne serait plus séparable de lui pour être exempté. */
+    const body = {
+      creates: creations.map((c) => ({ collection: c.collection, record: c.obj.toJSON() })),
+      updates: prepared.map((p) => ({ collection: p.collection, record: p.merged })),
+      deletes: deleteRows,
+    };
     const fetcher = DataValidator.buildBatchFetcher(this.entityFetcher, body);
     const finder = DataValidator.buildBatchChildFinder(this.recordFinder, body);
-    for (const p of prepared) { if (!this.acceptsWith(p.collection, p.merged, fetcher, finder)) return 0; }
-    // 3) applique + persiste
-    const updates: Transaction["updates"] = [];
-    for (const { obj, collection, id, patch } of prepared) {
-      this._applyPatch(collection, obj, patch);
-      updates!.push({ collection, id, record: obj.toJSON() });
-    }
-    if (updates!.length) {
-      await this.adapter.transact({ updates });
-      this._facets.invalidate([...new Set(updates!.map((u) => u.collection))]);   // G8 : mêmes motifs que `update`
-      this._emit();
-    }
-    return updates!.length;
+    const errors: ValidationError[] = [];
+    // On COLLECTE tout (pas d'arrêt à la première faute) : l'appelant doit pouvoir désigner TOUTES les lignes
+    // refusées d'un coup, sinon l'utilisateur corrige au compte-gouttes, un save par erreur.
+    for (const c of body.creates) errors.push(...this._validationErrors(c.collection, c.record, fetcher, finder));
+    for (const u of body.updates) errors.push(...this._validationErrors(u.collection, u.record, fetcher, finder));
+    if (errors.length) { this.onInvalid?.(errors); return { ok: false, written: 0, errors }; }
+
+    /* 7) RIEN À ÉCRIRE ⇒ succès sans la moindre écriture : pas de transaction, pas de révision consommée, pas
+       d'événement SSE, pas de pas d'undo. Testé AVANT de muter le cache (il n'y a alors rien à muter). */
+    const written = creations.length + prepared.length + deleteRows.length;
+    if (!written) return { ok: true, written: 0, errors: [] };
+
+    /* 8) MUTATION du cache. Les trois ensembles sont DISJOINTS par construction (une ligne supprimée n'est
+       jamais mise à jour — étape 4 —, et les créations portent des ids neufs), donc l'ordre n'a ici aucune
+       incidence ; chaque étape reprend le geste exact du chemin unitaire correspondant. Côté PERSISTANCE, en
+       revanche, l'ordre est imposé : les deux exécuteurs (RelationalRepository et BrowserStorageAdapter)
+       appliquent deletes → updates → creates, et c'est ce qui rend une mise à jour sur une ligne supprimée
+       RESSUSCITANTE (par upsert) — d'où la priorité donnée à la suppression à l'étape 4. */
+    for (const p of prepared) this._applyPatch(p.collection, p.obj, p.patch);
+    const delByCollection = this._purgeFromCache(deleteRows);
+    for (const c of creations) { this.data[c.collection].push(c.obj); this._indexAdd(c.collection, c.obj); }
+
+    /* 9) UNE transaction pour tout le lot. Les enregistrements d'`updates` sont relus APRÈS mutation
+       (horodatage `updated_date` posé par `_applyPatch`), comme le faisaient `updateBatch` et `_removeTargets`. */
+    const tx: Transaction = {
+      creates: creations.map((c) => ({ collection: c.collection, record: c.obj.toJSON() })),
+      updates: prepared.map((p) => ({ collection: p.collection, id: p.id, record: p.obj.toJSON() })),
+      deletes: deleteRows,
+    };
+    const result = await this.adapter.transact(tx);
+    // G6 : seules créations et suppressions font bouger un TOTAL de collection (pastilles d'onglet).
+    this._counts.invalidate([...new Set([...creations.map((c) => c.collection), ...Object.keys(delByCollection)])]);
+    // G8 : TOUTE collection touchée (création, mise à jour, suppression, détachement) peut avoir changé son
+    // ensemble de valeurs distinctes — mêmes motifs que `update` / `_removeTargets`.
+    this._facets.invalidate([...new Set([...creations.map((c) => c.collection), ...prepared.map((p) => p.collection), ...Object.keys(delByCollection)])]);
+    // M4 / M4b : le SERVEUR a pu supprimer ou détacher PLUS que notre plan (corpus partiel, copie périmée) —
+    // on applique son résidu comme le fait `_removeTargets` (cf. docs/hydratation.md § Vagues 2 et 4).
+    this._applyResidualDeletes(result);
+    void this._refreshResidualUpdates(result);
+    this._emit();
+    return { ok: true, written, errors: [] };
   }
   async remove(collection: string, id: string): Promise<void> {
     await this._removeTargets([{ collection, id }]);
@@ -872,18 +1061,51 @@ export class Store {
     return plan || this.cascadePreview(collection, unique);
   }
 
-  /* Racines RÉELLEMENT supprimables d'un lot : ids vides, doublons et entités absentes du cache écartés.
-     Partagé par `removeMany` et `cascadePreview` pour qu'aperçu et exécution portent sur le MÊME ensemble. */
+  /** CLÉ COMPOSITE (collection, id) des ensembles internes — le séparateur est un caractère de contrôle ASCII
+      écrit en SÉQUENCE D'ÉCHAPPEMENT, jamais tapé en clair (même précaution que `Cascade.KEY_SEP` : un
+      séparateur exotique littéral est déjà ressorti en NUL brut dans du JS compilé). */
+  private static readonly KEY_SEP = "\u001f";
+  private static recordKey(collection: string, id: string): string { return collection + Store.KEY_SEP + id; }
+
+  /* Racines RÉELLEMENT supprimables d'un lot d'UNE collection : ids vides, doublons et entités absentes du
+     cache écartés. Partagé par `removeMany` et `cascadePreview` pour qu'aperçu et exécution portent sur le
+     MÊME ensemble. Enveloppe mono-collection de `_existingTargetsOf`. */
   private _existingTargets(collection: string, ids: ReadonlyArray<string>): CascadeTarget[] {
+    return this._existingTargetsOf((ids || []).map((id) => ({ collection, id })));
+  }
+
+  /* Même filtre, sur des cibles MULTI-COLLECTIONS (lot mixte de `saveBatch` : un save d'équipement retire des
+     agrégats ET des ports dans le même geste). C'est ici que vit la règle — la variante mono-collection n'en
+     est qu'un cas particulier, et les dupliquer les aurait laissées diverger (principe n°3). */
+  private _existingTargetsOf(rows: ReadonlyArray<{ collection: string; id: string }>): CascadeTarget[] {
     const targets: CascadeTarget[] = [];
     const seen = new Set<string>();
-    for (const id of ids || []) {
-      if (!id || seen.has(id)) continue;
-      seen.add(id);
-      if (!this.get(collection, id)) continue;   // racine absente du cache → rien à supprimer
-      targets.push({ collection, id });
+    for (const row of rows || []) {
+      if (!row || !row.collection || !row.id) continue;
+      const key = Store.recordKey(row.collection, row.id);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (!this.get(row.collection, row.id)) continue;   // racine absente du cache → rien à supprimer
+      targets.push({ collection: row.collection, id: row.id });
     }
     return targets;
+  }
+
+  /* Retire du CACHE un ensemble de lignes (index primaire + index secondaires + tableau de collection), et rend
+     les ids retirés par collection — de quoi invalider ensuite compteurs (G6) et facettes (G8). Extrait de
+     `_removeTargets` pour que `saveBatch` applique EXACTEMENT la même purge : deux copies auraient divergé
+     dès le premier ajustement d'index. */
+  private _purgeFromCache(rows: ReadonlyArray<{ collection: string; id: string }>): Record<string, Set<string>> {
+    const delByCollection: Record<string, Set<string>> = {};
+    rows.forEach((d) => { if (this._idIndex[d.collection]) (delByCollection[d.collection] = delByCollection[d.collection] || new Set()).add(d.id); });
+    Object.keys(delByCollection).forEach((c) => {
+      delByCollection[c].forEach((did) => {
+        const o = this._idIndex[c].get(did);
+        if (o) { if (this._fk[c]) this._fk[c].remove(o); this._idIndex[c].delete(did); }
+      });
+      this.data[c] = this.data[c].filter((o) => !delByCollection[c].has(o.id));
+    });
+    return delByCollection;
   }
 
   /* Suppression EFFECTIVE d'un ENSEMBLE de racines : plan de cascade → mutation du cache → UNE transaction.
@@ -897,19 +1119,12 @@ export class Store {
       const o = this.get(d.c, d.id);
       if (o) this._withReindex(d.c, o, (x) => { x[d.key] = ("value" in d) ? d.value : null; if (x.touch) x.touch(); });
     });
-    const delByColl: Record<string, Set<string>> = {};
-    deletes.concat(targets.map((t) => ({ c: t.collection, id: t.id }))).forEach((d) => { (delByColl[d.c] = delByColl[d.c] || new Set()).add(d.id); });
-    Object.keys(delByColl).forEach((c) => {
-      delByColl[c].forEach((did) => {
-        const o = this._idIndex[c].get(did);
-        if (o) { if (this._fk[c]) this._fk[c].remove(o); this._idIndex[c].delete(did); }
-      });
-      this.data[c] = this.data[c].filter((o) => !delByColl[c].has(o.id));
-    });
+    const deleteRows = deletes.map((d) => ({ collection: d.c, id: d.id })).concat(targets.map((t) => ({ collection: t.collection, id: t.id })));
+    const delByColl = this._purgeFromCache(deleteRows);
     // 3. UNE transaction : détachements (updates) + suppressions enfants + cibles.
     const tx: Transaction = {
       updates: detaches.map((d) => { const o = this.get(d.c, d.id); return o ? { collection: d.c, id: d.id, record: o.toJSON() } : null; }).filter(Boolean) as Transaction["updates"],
-      deletes: deletes.map((d) => ({ collection: d.c, id: d.id })).concat(targets.map((t) => ({ collection: t.collection, id: t.id }))),
+      deletes: deleteRows,
     };
     const result = await this.adapter.transact(tx);
     this._counts.invalidate(Object.keys(delByColl));   // G6 : les totaux des collections purgées ont bougé

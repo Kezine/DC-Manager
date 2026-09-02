@@ -26,6 +26,15 @@ export interface LoadOptions { skipCollections?: readonly string[]; }
    Contrat transactionnel : 1 action logique de l'UI = 1 transact() (jamais de
    re-sérialisation de tout l'état). BULK (load/replaceAll/saveMeta) : réservé au
    boot / import / nouveau document. UNDO/REDO : géré par l'adapter.
+
+   🚨 CE CONTRAT SE TIENT PAR LE STORE, PAS PAR L'APPELANT. Une action d'UI qui
+   touche plusieurs enregistrements (enregistrer un équipement = l'équipement +
+   ses agrégats + ses ports) ne doit JAMAIS boucler sur create/update/remove : ces
+   trois-là routent chacun vers un transact(), donc N écritures = N révisions
+   serveur, N événements SSE réveillant les autres clients, et N pas d'undo en
+   mode fichier. Les points d'entrée qui HONORENT le contrat sont `Store.saveBatch`
+   (lot MIXTE creates + updates + suppressions-racines, cascade comprise),
+   `Store.updateBatch` (son cas « updates seuls ») et `Store.removeMany`.
    ============================================================================= */
 export abstract class DataAdapter {
   /* ---- bulk (boot / import) ---- */

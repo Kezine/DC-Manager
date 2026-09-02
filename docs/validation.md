@@ -104,9 +104,11 @@ ValidationError = { collection, id?, path, code, message }
   (mapper `path → contrôle`). NB : la live n'apporte de la valeur que sur les champs à
   contrainte « libre » (texte requis, format IP/CIDR, cross-entité) ; les champs à choix
   (select) sont déjà contraints par construction.
-- **Client — `Store`** (`create`/`update`/`updateBatch`) : normalise puis valide AVANT
-  d'écrire ; bloque + notifie (`store.onInvalid`) si invalide. C'est le **SEUL garde-fou
-  en mode FICHIER** (pas de serveur), et un filet sous la validation live.
+- **Client — `Store`** (`create`/`update`/`saveBatch`, dont `updateBatch` est le cas particulier
+  « updates seuls ») : normalise puis valide AVANT d'écrire ; bloque + notifie (`store.onInvalid`)
+  si invalide. C'est le **SEUL garde-fou en mode FICHIER** (pas de serveur), et un filet sous la
+  validation live. Le LOT (`saveBatch`) valide **contre l'état POST-lot**, en parité stricte avec
+  `/transact` — cf. §8.5.
 - **Serveur** (`create`/`update`/`transact`) : re-valide en **autorité** → `400` (couvre
   aussi toute interface tierce qui poste sans passer par le `Store`).
 
@@ -229,6 +231,48 @@ crossEntity?: Array<(record, fetch: EntityFetcher) => ValidationError | null>
 4. **Coût / portée.** La dépendance inverse rend la validation O(enfants) sur une écriture de
    parent — elle n'est donc déclenchée que par les champs concernés (ex. `cidr`), via des FK
    indexées.
+
+### 8.5 Le LOT CÔTÉ CLIENT — `Store.saveBatch` (parité stricte avec `/transact`)
+
+Tout ce qui précède décrivait le lot **serveur**. Le client en a désormais l'exact pendant :
+`Store.saveBatch(ops)` applique **créations + mises à jour + suppressions-racines en UNE
+transaction adapter**, et les valide de la même façon consciente du lot. C'est le point d'entrée
+d'une action d'UI qui touche plusieurs enregistrements — « Enregistrer » un équipement écrit
+l'équipement, ses agrégats et ses ports d'un seul geste.
+
+**Pourquoi ce point d'entrée existe** : sans lui, un formulaire n'avait que des écritures
+unitaires. Enregistrer un switch 24 ports produisait 27 `transact`, donc 27 révisions, 27
+événements SSE et 27 pas d'undo, en violation du contrat « 1 action logique de l'UI =
+1 `transact()` » (`data/DataAdapter`).
+
+**Ce que la conscience du lot débloque, concrètement** — deux règles étaient jusque-là
+infranchissables en une passe et obligeaient le formulaire d'équipement à des PRÉ-PASSES
+séquentielles (qui ont disparu avec elles) :
+
+| Règle | Écritures séquentielles | Lot unique |
+|---|---|---|
+| **T7** — un port de `patch_panel` n'assert aucun réseau | l'équipement re-typé partait AVANT ses ports → V5b refusait ⇒ pré-passe « vider le réseau des ports persistés » | l'état POST-lot montre des ports déjà vidés ⇒ accepté |
+| **T-POE1 / T-POE2** — pas de port `poe` sans `poe_device` | couper la capacité partait AVANT la rétrogradation des ports ⇒ pré-passe « role ← data, direction vidée, budget null » | même mécanisme, une seule écriture |
+
+**L'enchaînement, identique à celui d'`api.ts`** : normaliser chaque op → valider chaque op avec
+`buildBatchFetcher` / `buildBatchChildFinder` → rejouer `validateDependents` sur les parents écrits.
+Le moindre échec rejette **tout** le lot, avant la moindre mutation mémoire ou réseau. Les erreurs
+remontent à l'appelant en plus du `onInvalid` habituel : elles portent `collection` et `id`
+(cf. §5), ce qui permet à un formulaire de **désigner la ligne fautive** au lieu d'annoncer un échec
+global.
+
+**Deux règles propres au client**, sans équivalent serveur parce qu'elles portent sur des concepts
+que le serveur ne reçoit pas :
+
+- **Fusion cascade ⇄ lot par CHAMP.** Les suppressions sont des RACINES : leur cascade est calculée
+  ici (`Cascade.planMany`, un plan pour toutes les racines). Une ligne touchée par la cascade ET par
+  le lot ne produit qu'**une** entrée d'`updates` — les détachements posent le socle, le patch
+  explicite passe par-dessus. Une ligne à la fois mise à jour et **supprimée** par la cascade :
+  la suppression gagne (l'écrire la ressusciterait, les exécuteurs appliquant deletes puis updates).
+- **Filtre no-op.** Une mise à jour sans effet après normalisation est retirée du lot (même
+  court-circuit qu'`update()`), y compris pour `updateBatch`, qui n'est plus qu'un lot à `updates`
+  seuls. Un lot devenu vide est un **succès sans écriture** — pas un refus : `{ ok: true,
+  written: 0 }`. C'est ce qui fait qu'un « Enregistrer » d'un formulaire non modifié n'émet rien.
 
 ## 9. V6 — contraintes d'unicité / portée
 

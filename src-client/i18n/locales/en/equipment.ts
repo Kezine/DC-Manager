@@ -330,6 +330,7 @@ export const equipment = {
     saveFailed: "The equipment could not be saved (see the errors).",
     createFailed: "The equipment could not be created (see the errors).",
     someSaveFailed: "Some items could not be saved (see the errors) — fix them.",
+    portsSaveFailed: "Save refused — offending port(s): {{ports}} (see the errors).",
     updated: "Equipment updated",
     created: "Equipment created",
     patchNetWillRemove: "{{count}} port network(s) will be removed on save: a patch does not carry a network (it infers it).",

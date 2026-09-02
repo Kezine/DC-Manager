@@ -49,14 +49,18 @@ export class FormSave {
   }
 
   /** Applique un LOT d'écritures et dit si le `Store` l'a ACCEPTÉ (validation CONSCIENTE DU LOT : chaque
-      op est vérifiée contre l'état POST-lot, cf. `Store.updateBatch`).
+      op est vérifiée contre l'état POST-lot, cf. `Store.saveBatch`).
 
       ⚠ Existe pour lever une AMBIGUÏTÉ, pas seulement pour raccourcir : `updateBatch` rend le NOMBRE
-      d'enregistrements écrits, donc **`0` aussi bien pour un refus que pour un lot vide**. Un appelant
-      qui écrirait `if (!await store.updateBatch(ops))` traiterait « rien à faire » comme un échec. Un lot
-      vide est ici un SUCCÈS — il n'y avait rien à refuser. */
+      d'enregistrements écrits, donc **`0` aussi bien pour un refus que pour un lot sans effet**. Un appelant
+      qui écrirait `if (!await store.updateBatch(ops))` traiterait « rien à faire » comme un échec.
+      « Rien à faire » recouvre DEUX cas, et le second est arrivé avec le filtre no-op du chantier T9 : le lot
+      VIDE (aucune op), et le lot dont toutes les ops sont SANS EFFET (le fameux « Enregistrer » d'un formulaire
+      non modifié — depuis T9 il n'écrit plus rien, donc ne compte plus rien). Les deux sont des SUCCÈS : il n'y
+      avait rien à refuser. D'où le passage par `saveBatch`, dont le verdict `ok` répond exactement à la question
+      posée ici, au lieu d'un comptage qu'il fallait ré-interpréter. */
   static async batch(store: Store, ops: Array<{ collection: string; id: string; patch: Record<string, any> }>): Promise<boolean> {
     if (!ops.length) return true;
-    return (await store.updateBatch(ops)) > 0;
+    return (await store.saveBatch({ updates: ops })).ok;
   }
 }

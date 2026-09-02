@@ -260,11 +260,17 @@ export class RackForms extends CableForms {
               confirmLabel: I18n.t("rack.rack.resizeConfirm"), danger: true,
             });
             if (!ok) return false;
-            await store.updateBatch([{ collection: "racks", id: rk.id, patch: payload }].concat(
-              fo.equipmentIds.map((id: string) => ({ collection: "equipments", id, patch: { placement_mode: "manual", rack_id: null, rack_u: null } }))));
-            // Suppressions APRÈS le lot d'écriture : chacune porte sa propre cascade (détachement des invités
-            // d'étagère), ce que `updateBatch` ne sait pas exprimer → `remove` un par un.
-            for (const id of fo.itemIds) await store.remove("rackItems", id);
+            /* TOUT le redimensionnement en UN SEUL lot mixte (chantier T9) : la baie, les équipements évacués et
+               les pseudo-occupants supprimés partent ensemble — donc UNE transaction, UNE révision, UN événement
+               SSE et UN pas d'undo, là où ce bloc écrivait 1 + N fois (une boucle de `remove` par pseudo-occupant).
+               Les suppressions sont des RACINES : leur cascade (détachement des équipements posés sur une étagère
+               supprimée, qui redeviennent « Non placé ») est calculée par le lot, en un plan pour toutes. */
+            const resized = await store.saveBatch({
+              updates: [{ collection: "racks", id: rk.id, patch: payload }].concat(
+                fo.equipmentIds.map((id: string) => ({ collection: "equipments", id, patch: { placement_mode: "manual", rack_id: null, rack_u: null } }))),
+              removes: fo.itemIds.map((id: string) => ({ collection: "rackItems", id })),
+            });
+            if (!resized.ok) return false;   // REFUSÉ par le Store (toast rouge nommant la règle) : ne rien annoncer
             host.setDirty?.(true); Notify.toast(I18n.t("rack.rack.resized")); onSaved?.(); return true;
           }
         }
@@ -1263,16 +1269,19 @@ export class RackForms extends CableForms {
     const ordered = others.slice().sort((a: any, bb: any) => (a.tray_x || 0) - (bb.tray_x || 0));
     const arrangeEqs = ordered.map((o: any) => o.toJSON()).concat([Object.assign({}, eq.toJSON(), { dc_orientation: orient })]);
     const layout = RackGeometry.trayArrange(rack, tray, arrangeEqs);
-    let ok = 0;
+    // ACCEPTÉ (et non « nombre d'écritures ») : depuis le filtre no-op du chantier T9, un lot dont rien ne change
+    // écrit 0 sans être un refus — compter les écritures ferait annoncer un échec à tort. `FormSave.batch` porte
+    // exactement cette distinction.
+    let ok = false;
     if (layout) {
       const ops = ordered.map((o: any, i: number) => ({ collection: "equipments", id: o.id, patch: { tray_x: Math.round(layout[i].x), tray_y: Math.round(layout[i].y) } }));
       const mine = layout[layout.length - 1];
       ops.push({ collection: "equipments", id: res.eqId, patch: Object.assign({ tray_x: Math.round(mine.x), tray_y: Math.round(mine.y) }, place) });
-      ok = await store.updateBatch(ops);
+      ok = await FormSave.batch(store, ops);
     } else {
       const spot = RackGeometry.trayFindSpot(rack, tray, Object.assign({}, eq.toJSON(), { dc_orientation: orient }), others);
       if (!spot) { Notify.toast(I18n.t("rack.tray.noRoom"), "err"); return; }
-      ok = (await store.update("equipments", res.eqId, Object.assign({ tray_x: Math.round(spot.x), tray_y: Math.round(spot.y) }, place))) ? 1 : 0;
+      ok = !!(await store.update("equipments", res.eqId, Object.assign({ tray_x: Math.round(spot.x), tray_y: Math.round(spot.y) }, place)));
     }
     if (!ok) { Notify.toast(I18n.t("rack.tray.placeRefused"), "err"); return; }
     await store.applyCableBreaks(res.eqId);   // le (dé)placement peut invalider des routes — même garde que les autres montages

@@ -935,6 +935,11 @@ export class EquipmentForms extends FormBase {
     // ÉTAT d'expansion des lignes de port (`<details>`) — préservé À TRAVERS les re-rendus (renderPorts reconstruit
     // la liste ; sans ça, éditer un champ refermerait la ligne). Clé = id du port.
     const openPorts = new Set<string>();
+    // Ports REFUSÉS par le dernier enregistrement (le lot est TOUT-OU-RIEN : rien n'a été écrit). Ils sont surlignés
+    // jusqu'à la tentative suivante, qui repart de zéro — sans quoi le seul retour serait un toast global laissant
+    // chercher la ligne fautive parmi 48. Réutilise `data-err`, déjà stylé pour la survente PoE : aucune règle CSS
+    // de plus, donc aucun risque de divergence avec le design system.
+    const invalidPortIds = new Set<string>();
 
     const renderAggs = () => {
       aggList.innerHTML = "";
@@ -1021,7 +1026,7 @@ export class EquipmentForms extends FormBase {
       const overHere = isPoeP && p.direction === "source" && p.poe_budget_w != null && portLoadW > p.poe_budget_w;
       const det = document.createElement("details"); det.className = "port";
       if (openPorts.has(p.id)) det.open = true;
-      if (overHere) det.setAttribute("data-err", "");
+      if (overHere || invalidPortIds.has(p.id)) det.setAttribute("data-err", "");   // survente PoE OU refus du dernier lot
       det.addEventListener("toggle", () => { if (det.open) openPorts.add(p.id); else openPorts.delete(p.id); });
 
       // -- TÊTE compacte --
@@ -1344,59 +1349,43 @@ export class EquipmentForms extends FormBase {
           payload.tray_item_id = null; payload.tray_x = null; payload.tray_y = null;   // placements exclusifs
         }
         if (live.check(payload).length) return false;   // validation live : champ(s) surligné(s), enregistrement bloqué
-        let eqId: string;
         // édition d'un équipement existant OU re-save d'une création DÉJÀ persistée (N1 : createdId) → UPDATE, jamais
         // un 2e create. La LiveValidation équipement n'a pas de `find` (portée non pré-vérifiée : collision de U…) :
-        // un refus store RÉEL reste possible avec live.check vert → on GARDE le retour null (P3) au lieu de continuer.
+        // un refus store RÉEL reste possible avec live.check vert → le lot peut encore être refusé (P3), on le regarde.
         const existingId = eq ? eq.id : createdId;
-        // P4a : le dependent equipments→ports (T7) refuse de passer un équipement à « patch » tant que ses ports
-        // PERSISTÉS assertent un réseau. Le formulaire a vidé les DRAFTS (toast au change) mais les persistés ne le
-        // sont qu'à la réconciliation, APRÈS l'équipement → on les vide ICI, avant l'update, pour un save cohérent
-        // (le vidage réseau ne peut pas échouer : il ne fait que relâcher des contraintes).
-        if (existingId && payload.type === "patch_panel") {
-          for (const p of store.portsOf(existingId)) {
-            if (p.network_id || (Array.isArray(p.network_ids) && p.network_ids.length)) await store.update("ports", p.id, { network_id: null, network_ids: [] });
-          }
-        }
-        // Symétrique (T-POE2) : passer poe_device à FAUX est refusé tant qu'un port POE PERSISTÉ existe. Le formulaire
-        // garantit qu'aucun DRAFT n'est POE (bascule verrouillée sinon), mais les ports persistés ne sont réconciliés
-        // qu'APRÈS l'équipement → on relâche leur rôle « poe » ET on neutralise leur direction + budget PoE ICI, avant
-        // l'update, pour que la désactivation passe. Purger la direction est INDISPENSABLE : un rôle « data » interdit
-        // désormais toute direction résiduelle (T12) — un simple { role: "data" } serait refusé à cause du sink/source
-        // laissé en place. (La réconciliation des ports plus bas scelle le rôle définitif du draft, ou les supprime.)
-        if (existingId && payload.poe_device === false) {
-          for (const p of store.portsOf(existingId)) {
-            if (p.role === "poe") await store.update("ports", p.id, { role: "data", direction: "", poe_budget_w: null });
-          }
-        }
-        if (existingId) {
-          const savedEq = await store.update("equipments", existingId, payload);
-          if (!savedEq) { Notify.toast(I18n.t("equipment.equip.saveFailed"), "err"); return false; }
-          eqId = existingId;
-          // le (dé)placement peut invalider des routes de câbles — même casse contrôlée que les actions
-          // des vues 2D/3D (assignSideSlot/assignWallSlot…) ; no-op si les routes restent valides.
-          await store.applyCableBreaks(eqId);
-        }
-        else {
-          const created: any = await store.create("equipments", payload);
-          if (!created) { Notify.toast(I18n.t("equipment.equip.createFailed"), "err"); return false; }   // refus (ex. collision de U) : pas de TypeError sur created.id
-          eqId = created.id; createdId = eqId;   // mémorisé : un re-save après échec de port UPDATE au lieu de recréer (N1)
-        }
+        /* 🚨 UN SEUL LOT pour TOUT le save (chantier T9). L'équipement, ses agrégats et ses ports partent ensemble
+           dans un `store.saveBatch` — donc UNE transaction, UNE révision serveur, UN événement SSE et UN pas d'undo.
+           Avant, ce bloc enchaînait une écriture unitaire AWAITÉE par enregistrement : créer un switch 24 ports à
+           2 agrégats produisait 27 transactions, 27 révisions, 27 événements SSE réveillant tous les autres clients,
+           et 27 Ctrl+Z pour défaire la saisie. C'était la violation frontale du contrat « 1 action logique de l'UI =
+           1 transact() » (cf. l'en-tête de `data/DataAdapter`).
 
-        // Store.create/update renvoient null si la validation refuse (pas de throw) : on NE doit NI annoncer un succès
-        // NI fermer la modale si un agrégat OU un port a été rejeté (P3 : les agrégats étaient auparavant non gardés).
-        let saveError = false;
+           L'id de création est PRÉ-GÉNÉRÉ ici : les agrégats et les ports du même lot doivent pouvoir écrire leur
+           `equipment_id` avant que quoi que ce soit ne soit persisté. Les FK INTERNES au lot se résolvent contre
+           l'état POST-lot (lecteurs conscients du lot, cf. `Store.saveBatch` et docs/validation.md § 8.4).
+
+           ⚠ Les DEUX PRÉ-PASSES qui vivaient ici ont DISPARU, et ce n'est pas un oubli. Elles vidaient le réseau des
+           ports PERSISTÉS avant de passer l'équipement en « patch » (P4a/T7), et rétrogradaient ses ports PoE avant
+           de couper `poe_device` (T-POE2). Elles n'existaient QUE parce que les écritures étaient SÉQUENTIELLES :
+           l'équipement partait avant ses ports, donc l'état intermédiaire était momentanément illégal. Le lot unique
+           supprime cet état intermédiaire — les deux règles se lisent contre l'état POST-lot, où les ports sont déjà
+           vidés/rétrogradés (prouvé par `Tests/modules/test-store-savebatch.js`). */
+        const eqId = existingId || Id.uid();
+        const creates: Array<{ collection: string; record: Record<string, any> }> = [];
+        const updates: Array<{ collection: string; id: string; patch: Record<string, any> }> = [];
+        const removes: Array<{ collection: string; id: string }> = [];
+        if (existingId) updates.push({ collection: "equipments", id: existingId, patch: payload });
+        else creates.push({ collection: "equipments", record: Object.assign({ id: eqId }, payload) });
 
         // -- réconciliation agrégats --
         const draftAggIds = new Set(draftAggs.map((a) => a.id));
         for (const a of draftAggs) {
           const ex: any = store.get("aggregates", a.id);
-          const savedAgg = (ex && ex.equipment_id === eqId)
-            ? await store.update("aggregates", a.id, { name: (a.name || "").trim(), description: (a.description || "").trim() })
-            : await store.create("aggregates", { id: a.id, equipment_id: eqId, name: (a.name || "").trim(), description: (a.description || "").trim() });
-          if (!savedAgg) saveError = true;
+          const aggPatch = { name: (a.name || "").trim(), description: (a.description || "").trim() };
+          if (ex && ex.equipment_id === eqId) updates.push({ collection: "aggregates", id: a.id, patch: aggPatch });
+          else creates.push({ collection: "aggregates", record: Object.assign({ id: a.id, equipment_id: eqId }, aggPatch) });
         }
-        for (const a of store.aggregatesOf(eqId)) if (!draftAggIds.has(a.id)) await store.remove("aggregates", a.id);
+        for (const a of store.aggregatesOf(eqId)) if (!draftAggIds.has(a.id)) removes.push({ collection: "aggregates", id: a.id });
 
         // -- réconciliation ports --
         const draftPortIds = new Set(draftPorts.map((p) => p.id));
@@ -1431,16 +1420,48 @@ export class EquipmentForms extends FormBase {
           const poeEnabled = isPoePort ? (p.poe_enabled !== false) : true;   // injection/conso PoE (défaut true) — sans effet hors PoE
           const patch: any = { equipment_id: eqId, name: (p.name || "").trim(), port_type_id: p.port_type_id || null, role, aggregate_id: agg, sub_equipment_id: subEq, description: (p.description || "").trim(), parent_port_id: p.parent_port_id || null, lane: (p.lane != null) ? p.lane : null, face_x: (p.face_x != null) ? p.face_x : null, face_y: (p.face_y != null) ? p.face_y : null, face_side: p.face_side, bundle_id: bundleId, strand_a: strandA, strand_b: strandB, network_id: netPrimary, network_ids: netIds, direction, power_max_a: powerMaxA, phase, poe_budget_w: poeBudgetW, poe_enabled: poeEnabled };
           const ex: any = store.get("ports", p.id);
-          const saved = ex ? await store.update("ports", p.id, patch) : await store.create("ports", Object.assign({ id: p.id }, patch));
-          if (!saved) saveError = true;   // validation refusée (ex. brin en double, Tx=Rx) → échec signalé plus bas
+          if (ex) updates.push({ collection: "ports", id: p.id, patch });
+          else creates.push({ collection: "ports", record: Object.assign({ id: p.id }, patch) });
         }
-        // retirer les lanes AVANT leur trunk (un trunk supprimé cascade ses lanes)
-        const toRemove = store.portsOf(eqId).filter((p: any) => !draftPortIds.has(p.id));
-        for (const p of toRemove) if (p.parent_port_id) await store.remove("ports", p.id);
-        for (const p of toRemove) if (!p.parent_port_id && store.get("ports", p.id)) await store.remove("ports", p.id);
+        // Ports RETIRÉS du brouillon → RACINES de cascade du lot. L'ordre « lanes avant leur trunk » a DISPARU avec
+        // les écritures unitaires : le plan est calculé en UNE fois sur toutes les racines (`Cascade.planMany`), qui
+        // déduplique et emporte lanes et câbles par récursion. Trier ici ne servait qu'à éviter qu'un `remove` de
+        // lane vienne après le `remove` du trunk qui l'avait déjà supprimée.
+        for (const p of store.portsOf(eqId)) if (!draftPortIds.has(p.id)) removes.push({ collection: "ports", id: p.id });
+
+        const saved = await store.saveBatch({ creates, updates, removes });
+        if (!saved.ok) {
+          /* REFUS TOUT-OU-RIEN : rien n'a été écrit, la modale reste ouverte et la saisie intacte. Le Store a déjà
+             annoncé QUELLE règle est violée (toast `onInvalid`) ; ce qui manquait, c'est SUR QUOI — d'où le
+             surlignage des lignes de port fautives (attribut `data-err` déjà stylé, cf. le liseré de survente PoE)
+             et un toast qui les NOMME, plutôt que l'échec global « certains éléments… » qui laissait chercher.
+             Les erreurs portent `collection` + `id` : c'est la validation partagée qui les estampille.
+             ⚠ Les lignes de breakout (trunk/lane) ne sont pas des `<details class="port">` : elles ne portent pas le
+             surlignage, seulement le nom dans le toast — assumé, plutôt qu'une règle CSS de plus pour ce seul cas. */
+          const hadHighlight = invalidPortIds.size > 0;   // un port corrigé doit PERDRE son surlignage
+          invalidPortIds.clear();
+          saved.errors.forEach((e) => { if (e.collection === "ports" && e.id && draftPortIds.has(e.id)) invalidPortIds.add(e.id); });
+          const faultyNames = [...invalidPortIds]
+            .map((id) => draftPorts.find((p) => p.id === id))
+            .map((p: any) => (p && (p.name || "").trim()) || I18n.t("equipment.common.portParen"));
+          if (hadHighlight || invalidPortIds.size) { invalidPortIds.forEach((id) => openPorts.add(id)); renderPorts(); }
+          // L'ÉQUIPEMENT lui-même refusé garde son message historique (c'est l'objet de la modale, et le cas le plus
+          // fréquent : collision de U, nom déjà pris) ; sinon on nomme les ports ; sinon seulement, l'échec générique.
+          const message = saved.errors.some((e) => e.collection === "equipments")
+            ? I18n.t(existingId ? "equipment.equip.saveFailed" : "equipment.equip.createFailed")
+            : faultyNames.length ? I18n.t("equipment.equip.portsSaveFailed", { ports: faultyNames.join(", ") })
+              : I18n.t("equipment.equip.someSaveFailed");
+          Notify.toast(message, "err");
+          return false;
+        }
+        if (!existingId) createdId = eqId;   // mémorisé : un re-save de la même modale UPDATE au lieu de recréer (N1)
+        // le (dé)placement peut invalider des routes de câbles — même casse contrôlée que les actions des vues
+        // 2D/3D (assignSideSlot/assignWallSlot…) ; no-op si les routes restent valides. Reste un appel SÉPARÉ,
+        // APRÈS le lot : il lit les câbles à leur état POST-save (ceux que la cascade vient d'emporter avec un port
+        // retiré n'ont plus à être cassés) et `updateBatch` le groupe déjà en une transaction, conditionnelle.
+        if (existingId) await store.applyCableBreaks(eqId);
 
         host.setDirty?.(true);
-        if (saveError) { Notify.toast(I18n.t("equipment.equip.someSaveFailed"), "err"); return false; }
         Notify.toast(eq ? I18n.t("equipment.equip.updated") : I18n.t("equipment.equip.created")); onSaved?.(); return true;
       },
     });
