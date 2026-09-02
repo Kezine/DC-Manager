@@ -379,6 +379,15 @@ question « quels candidats {kind, id, label} pour cette saisie, dans ces famill
 
 ### Ce qui reste CLIENT, et pourquoi (`EntityPicker` / `OptionSearch`)
 
+> **Rendu (retour terrain T6, 2026-09-02).** Les deux régimes affichent une seule rangée. **Sans
+> valeur** : le champ de recherche. **Une valeur posée FERME le champ** — la rangée se réduit à la
+> pastille + le ✕, et la pastille devient un **bouton** (rôle ARIA, focusable, Entrée/Espace) qui
+> **rouvre** la recherche (le champ réapparaît, prend le focus, son popover s'ouvre). Le grief était le
+> « select qui n'a plus lieu d'être » resté affiché à côté de la valeur choisie. Corollaires : choisir un
+> résultat re-ferme le champ ; le ✕ efface la valeur (le champ revient) ; toute pose PROGRAMMATIQUE
+> (`.value`, `setOptions`, un pick) et toute réouverture ABANDONNÉE (focus sorti sans choisir) ramènent
+> l'état fermé. Correction dans la **primitive** : les 22 sites d'appel sont inchangés.
+
 Les **sélecteurs d'entité des FORMULAIRES** (`ui/EntityPicker` composé par `FormControls.entityPicker`,
 filtrage `core/OptionSearch`) **ne bougent PAS**. Leurs options ne sont pas une recherche transverse : ce
 sont des **RÈGLES MÉTIER par formulaire** (filtre par famille de port, contrainte de conteneur, options

@@ -799,6 +799,13 @@
     border: 1px solid var(--line-2); background: var(--bg-3); color: var(--fg);
     font-size: 11px; white-space: nowrap;
   }
+  /* Pastille INTERACTIVE du sélecteur d'entité (ui/EntityPicker, retour terrain T6) : quand une
+     valeur est posée, la pastille remplace le champ et CLIQUER dessus rouvre la recherche. Seule
+     affordance ajoutée (rôle bouton + focus clavier viennent d'ailleurs : ARIA côté JS, anneau via
+     la règle :focus-visible globale). Scopée par [role="button"] pour n'affecter AUCUNE autre
+     pastille (chips de filtre, valeurs figées). */
+  .chip[role="button"] { cursor: pointer; }
+  .chip[role="button"]:hover { border-color: var(--accent); }
   .chip-x { cursor: pointer; color: var(--fg-dim); font-size: 13px; line-height: 1; }
   .chip-x:hover { color: var(--err); }
   .chip.colored-pill .chip-x { color: var(--pill-fg); opacity: 0.7; }

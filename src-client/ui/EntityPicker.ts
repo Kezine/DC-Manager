@@ -43,13 +43,32 @@ import { I18n } from "../i18n/I18n";
    restent donc lisibles comme avant, et `LiveValidation` continue de surligner le
    champ (il remonte au `.form-field` parent et trouve l'input enveloppé).
 
-   RENDU — une seule rangée : [pastille de la valeur] [✕] [champ de recherche].
-   Aucune CSS nouvelle : `.chip` (valeur), `.icon-action` (effacer) et
-   `.lc-searchpop` (champ) existent déjà et portent le thème. Quand la liste
-   n'offre RIEN à choisir (elle se réduit à son option de tête : « Choisir un
-   équipement d'abord », « Aucun port compatible »), le champ de recherche cède la
-   place à ce libellé — un champ de recherche sans rien à chercher serait un
-   mensonge, là où le `<select>` affichait justement ce texte.
+   RENDU — une seule rangée. SANS valeur : [champ de recherche]. Une valeur POSÉE
+   FERME le champ (retour terrain T6, « une fois l'équipement sélectionné, le select
+   n'a plus lieu d'être ; idem pour le port ») : la rangée se réduit à [pastille de
+   la valeur] [✕], et la pastille devient INTERACTIVE — la CLIQUER (ou Entrée/Espace
+   au clavier) ROUVRE la recherche : le champ réapparaît, prend le focus, et son
+   popover s'ouvre (minChars 0 → la liste s'ouvre au focus). Choisir un nouveau
+   résultat REMPLACE la valeur et re-ferme le champ ; le ✕ efface la valeur (le champ
+   réapparaît alors, faute de valeur à montrer). POURQUOI ce cycle de fermeture : un
+   champ de recherche qui reste affiché À CÔTÉ d'une valeur déjà choisie est le
+   « select qui n'a plus lieu d'être » — le contrôle ne montre donc le moyen de
+   CHERCHER que tant qu'il n'y a rien de choisi, ou que l'utilisateur redemande à
+   changer. Deux garde-fous en découlent : une valeur reposée PAR PROGRAMME (`.value`,
+   `setOptions`, un `onPick`) revient TOUJOURS à l'état fermé (l'état « rouvert » est
+   propre à un geste utilisateur, pas à l'état de la donnée) ; et une recherche
+   rouverte puis ABANDONNÉE (focus sorti sans rien choisir) se RE-FERME d'elle-même,
+   sans quoi on retomberait sur le champ inutile que T6 dénonce.
+
+   Aucune CSS nouvelle sauf l'AFFORDANCE de la pastille interactive (une seule règle
+   `.chip[role="button"]` commentée, dans dc-manager.css : curseur + survol ; l'anneau
+   de focus clavier vient de la règle `:focus-visible` globale) : `.chip` (valeur),
+   `.icon-action` (effacer) et le champ SearchPop existent déjà et portent le thème.
+   Quand la liste (état SANS valeur) n'offre RIEN à choisir (elle se réduit à son
+   option de tête : « Choisir un équipement d'abord », « Aucun port compatible »), le
+   champ de recherche cède la place à ce libellé — un champ de recherche sans rien à
+   chercher serait un mensonge, là où le `<select>` affichait justement ce texte. Cet
+   état ne concerne QUE l'absence de valeur.
 
    POPOVER EN PORTAIL (toujours) : tout entityPicker vit dans un conteneur qui rogne (corps
    défilant de modale, panneau 3D `.dc-side`) ; le `SearchPop` est donc monté en `portal: true`
@@ -118,16 +137,27 @@ export class EntityPicker {
     const limit = opts.limit != null ? opts.limit : OptionSearch.DEFAULT_LIMIT;
     let options: PickableOption[] = opts.options.slice();
     let selected = OptionSearch.resolveValue(options, opts.value);
+    /** Recherche ROUVERTE sur une valeur POSÉE (retour terrain T6) : sans valeur, le champ est de
+        toute façon montré ; avec valeur, il n'apparaît QUE si ce drapeau est vrai — un geste
+        utilisateur (clic/clavier sur la pastille) l'arme, tout chemin PROGRAMMATIQUE le désarme. */
+    let reopened = false;
 
     const root = document.createElement("div") as EntityPickerElement;
     root.style.cssText = "display:flex;align-items:center;gap:6px;flex-wrap:wrap";
 
-    // Rangée de VALEUR : pastille + bouton d'effacement, insérées avant le champ de recherche.
-    const { chip, chipText } = EntityPicker.buildValueChip();
+    // Rouvre la recherche sur une valeur posée : on réaffiche le champ PUIS on lui donne le focus,
+    // ce qui ouvre son popover (minChars 0). C'est le geste que déclenchent le clic pastille ET le
+    // `focus()` externe (formulaires) quand une valeur masque déjà le champ.
+    const openSearch = (): void => { reopened = true; render(); pop.focus(); };
+
+    // Rangée de VALEUR : pastille (INTERACTIVE — rouvre la recherche) + bouton d'effacement.
+    const { chip, chipText } = EntityPicker.buildValueChip(openSearch);
     const clearBtn = IconButton.build({
       icon: Icons.CLOSE,
       label: I18n.t("ui.entityPicker.clear"),
-      onClick: () => { selected = OptionSearch.EMPTY_VALUE; render(); emitChange(); },
+      // Effacer = revenir à l'état SANS valeur (le champ réapparaît de lui-même) : on désarme aussi
+      // la réouverture, l'état « rouvert » n'ayant de sens qu'en présence d'une valeur.
+      onClick: () => { selected = OptionSearch.EMPTY_VALUE; reopened = false; render(); emitChange(); },
     });
 
     // Repli affiché à la place du champ quand il n'y a RIEN à chercher (libellé de l'option de tête).
@@ -158,49 +188,62 @@ export class EntityPicker {
         if (outcome.hidden) results.push({ id: "", label: I18n.t("ui.autocomplete.overflow", { count: outcome.hidden }), disabled: true });
         return Promise.resolve(results);
       },
-      onPick: (result) => { selected = result.id; pop.reset(); render(); emitChange(); },
+      // Choisir REMPLACE la valeur et re-ferme le champ (T6) : `reopened` retombe à faux.
+      onPick: (result) => { selected = result.id; reopened = false; pop.reset(); render(); emitChange(); },
     });
 
     const emitChange = (): void => { root.dispatchEvent(new Event("change", { bubbles: true })); };
 
     const render = (): void => {
       const label = OptionSearch.labelOf(options, selected);
+      const hasValue = label !== null;
       // Valeur sélectionnée → pastille + ✕ ; sinon la rangée commence directement par le champ.
-      if (label !== null) {
+      if (hasValue) {
         chipText.textContent = label;
         chip.title = label;   // le libellé est ellipsé : le texte entier reste lisible au survol
         if (!chip.parentNode) root.insertBefore(chip, root.firstChild);
         if (!clearBtn.parentNode) root.insertBefore(clearBtn, chip.nextSibling);
       } else { chip.remove(); clearBtn.remove(); }
-      // Rien à choisir → on montre le libellé de tête au lieu d'un champ de recherche inerte.
+      // T6 — le champ n'est montré que sans valeur, ou sur réouverture explicite d'une valeur posée.
+      const showSearch = !hasValue || reopened;
+      // Rien à choisir → on montre le libellé de tête au lieu d'un champ inerte (état SANS valeur).
       const searchable = OptionSearch.selectableCount(options) > 0;
       const placeholder = OptionSearch.placeholderLabel(options);
-      if (searchable) {
+      if (showSearch && searchable) {
         emptyNote.remove();
         pop.setPlaceholder(placeholder || I18n.t("ui.entityPicker.searchPlaceholder"));
         if (!pop.element.parentNode) root.appendChild(pop.element);
-      } else {
+      } else if (showSearch) {
         pop.element.remove();
         emptyNote.textContent = placeholder;
         if (!emptyNote.parentNode) root.appendChild(emptyNote);
+      } else {
+        // Valeur posée, recherche fermée → ni champ ni note : seulement [pastille] [✕].
+        pop.element.remove();
+        emptyNote.remove();
       }
     };
 
-    EntityPicker.wireSearchReset(root, pop);
+    // Recherche rouverte PUIS abandonnée (focus sorti sans choisir) : on la re-ferme (désarme
+    // `reopened` et re-rend), en plus du reset de saisie — sinon le champ inutile de T6 réapparaît.
+    EntityPicker.wireSearchReset(root, pop, () => { reopened = false; render(); });
 
     Object.defineProperty(root, "value", {
       get() { return selected; },
-      set(v: string | null) { selected = OptionSearch.resolveValue(options, v == null ? OptionSearch.EMPTY_VALUE : String(v)); render(); },
+      // Pose PROGRAMMATIQUE d'une valeur → état fermé (T6) : `reopened` retombe à faux.
+      set(v: string | null) { selected = OptionSearch.resolveValue(options, v == null ? OptionSearch.EMPTY_VALUE : String(v)); reopened = false; render(); },
       configurable: true,
     });
     root.setOptions = (next: PickableOption[], value?: string | null): void => {
       options = next.slice();
       selected = OptionSearch.resolveValue(options, value);
+      reopened = false;   // repeuplement programmatique → retour à l'état fermé (T6)
       render();
     };
-    // `focus()` d'un `<div>` ne fait rien : on le relaie au champ de recherche, pour que les
-    // formulaires qui posent le focus initial (ou celui du 1er champ fautif) atteignent bien le contrôle.
-    root.focus = () => { pop.focus(); };
+    // `focus()` d'un `<div>` ne fait rien : on le relaie au champ. Si une valeur MASQUE le champ
+    // (T6), `focus()` doit le ROUVRIR (même geste que le clic pastille) — sinon le focus initial des
+    // formulaires et le focus du 1er champ fautif de LiveValidation tomberaient dans le vide.
+    root.focus = () => { openSearch(); };
 
     render();
     return root;
@@ -216,15 +259,24 @@ export class EntityPicker {
     /** Libellé CONNU de la sélection — null AVEC une valeur non vide = résolution EN VOL, la
         pastille affiche « Chargement… » en attendant (arbitrage du chantier, cf. `applyValue`). */
     let selectedLabel: string | null = null;
+    /** Recherche ROUVERTE sur une valeur posée (T6) — parité stricte avec le régime sync : la
+        pastille « Chargement… » masque aussi le champ (une valeur EST posée), et la clic/clavier la
+        rouvre. Tout chemin programmatique (`applyValue`, `onPick`, effacement) le désarme. */
+    let reopened = false;
 
     const root = document.createElement("div") as EntityPickerAsyncElement;
     root.style.cssText = "display:flex;align-items:center;gap:6px;flex-wrap:wrap";
 
-    const { chip, chipText } = EntityPicker.buildValueChip();
+    // Rouvre la recherche sur une valeur posée (réaffiche le champ puis l'ouvre au focus) — geste
+    // partagé par le clic pastille et le `focus()` externe, comme au régime sync.
+    const openSearch = (): void => { reopened = true; render(); pop.focus(); };
+
+    const { chip, chipText } = EntityPicker.buildValueChip(openSearch);
     const clearBtn = IconButton.build({
       icon: Icons.CLOSE,
       label: I18n.t("ui.entityPicker.clear"),
-      onClick: () => { selected = OptionSearch.EMPTY_VALUE; selectedLabel = null; render(); emitChange(); },
+      // Effacer → état sans valeur (le champ réapparaît seul) ; on désarme la réouverture (T6).
+      onClick: () => { selected = OptionSearch.EMPTY_VALUE; selectedLabel = null; reopened = false; render(); emitChange(); },
     });
 
     const pop = new SearchPop({
@@ -249,7 +301,8 @@ export class EntityPicker {
         return results;
       },
       // Au PICK, AUCUNE résolution : le libellé est DANS le résultat cliqué (arbitrage du chantier).
-      onPick: (result) => { selected = result.id; selectedLabel = result.label; pop.reset(); render(); emitChange(); },
+      // Choisir REMPLACE la valeur et re-ferme le champ (T6) : `reopened` retombe à faux.
+      onPick: (result) => { selected = result.id; selectedLabel = result.label; reopened = false; pop.reset(); render(); emitChange(); },
     });
 
     const emitChange = (): void => { root.dispatchEvent(new Event("change", { bubbles: true })); };
@@ -257,7 +310,8 @@ export class EntityPicker {
     const render = (): void => {
       // Valeur sélectionnée → pastille + ✕ (libellé connu, ou « Chargement… » pendant la
       // résolution) ; sinon la rangée commence directement par le champ — parité de rendu sync.
-      const label = selected === OptionSearch.EMPTY_VALUE ? null
+      const hasValue = selected !== OptionSearch.EMPTY_VALUE;
+      const label = !hasValue ? null
         : (selectedLabel !== null ? selectedLabel : I18n.t("ui.entityPicker.resolving"));
       if (label !== null) {
         chipText.textContent = label;
@@ -265,6 +319,9 @@ export class EntityPicker {
         if (!chip.parentNode) root.insertBefore(chip, root.firstChild);
         if (!clearBtn.parentNode) root.insertBefore(clearBtn, chip.nextSibling);
       } else { chip.remove(); clearBtn.remove(); }
+      // T6 — le champ n'est montré que sans valeur, ou sur réouverture explicite (parité sync).
+      if (!hasValue || reopened) { if (!pop.element.parentNode) root.appendChild(pop.element); }
+      else pop.element.remove();
     };
 
     /** Pose une valeur et résout son libellé — SYNC d'abord (cache, via `labelOf`), sinon pastille
@@ -273,6 +330,7 @@ export class EntityPicker {
         (l'utilisateur a pu choisir ou effacer entre-temps — sa décision prime sur une réponse tardive). */
     const applyValue = (id: string): void => {
       selected = id;
+      reopened = false;   // pose PROGRAMMATIQUE (init, setter `.value`) → état fermé (T6)
       if (id === OptionSearch.EMPTY_VALUE) { selectedLabel = null; render(); return; }
       const cached = source.labelOf(id);
       if (cached !== null) { selectedLabel = cached; render(); return; }
@@ -289,19 +347,24 @@ export class EntityPicker {
       );
     };
 
-    EntityPicker.wireSearchReset(root, pop);
+    // Recherche rouverte puis ABANDONNÉE (focus sorti sans choisir) → re-fermeture (T6), en plus
+    // du reset de saisie — parité stricte avec le régime sync.
+    EntityPicker.wireSearchReset(root, pop, () => { reopened = false; render(); });
 
     Object.defineProperty(root, "value", {
       get() { return selected; },
       // Le setter ne déclenche PAS `change` (même contrat que le sync) — mais il RELANCE la
-      // résolution du libellé : une valeur posée par programme doit s'afficher, elle aussi.
+      // résolution du libellé (et, via `applyValue`, ramène l'état fermé) : une valeur posée par
+      // programme doit s'afficher, elle aussi.
       set(v: string | null) { applyValue(v == null ? OptionSearch.EMPTY_VALUE : String(v)); },
       configurable: true,
     });
-    // `focus()` d'un `<div>` ne fait rien : relais au champ de recherche, comme au régime sync.
-    root.focus = () => { pop.focus(); };
+    // `focus()` d'un `<div>` ne fait rien : relais au champ. Si une valeur MASQUE le champ (T6), il
+    // faut le ROUVRIR (même geste que le clic pastille) — comme au régime sync.
+    root.focus = () => { openSearch(); };
 
-    root.appendChild(pop.element);
+    // Le montage du champ est désormais géré par `render` (T6) : `applyValue` l'appelle et l'ajoute
+    // tant qu'il n'y a pas de valeur, ou le retire dès qu'une valeur est posée.
     applyValue(selected);
     return root;
   }
@@ -309,11 +372,24 @@ export class EntityPicker {
   /* -------------------------------------------- briques PARTAGÉES des deux régimes -- */
 
   /** Pastille de la VALEUR courante (libellé ellipsé) — STRICTEMENT partagée sync/async : même
-      balisage, mêmes styles, aucun comportement (le remplissage appartient au `render` de chaque
-      régime). */
-  private static buildValueChip(): { chip: HTMLSpanElement; chipText: HTMLSpanElement } {
+      balisage, mêmes styles (le remplissage appartient au `render` de chaque régime). Elle est
+      INTERACTIVE (T6) : la CLIQUER rouvre la recherche. L'ACCESSIBILITÉ est portée ICI, dans la
+      primitive (principe n°14) : rôle bouton, nom accessible, focusable au clavier et actionnable à
+      Entrée/Espace — un `<span>` nu ne serait ni annoncé ni atteignable au clavier. L'anneau de
+      focus clavier vient de la règle `:focus-visible` GLOBALE ; l'affordance souris (curseur +
+      survol) de l'unique règle `.chip[role="button"]` de dc-manager.css. */
+  private static buildValueChip(onActivate: () => void): { chip: HTMLSpanElement; chipText: HTMLSpanElement } {
     const chip = document.createElement("span"); chip.className = "chip";
     chip.style.cssText = "max-width:100%;min-width:0";
+    chip.setAttribute("role", "button");
+    chip.tabIndex = 0;
+    chip.setAttribute("aria-label", I18n.t("ui.entityPicker.edit"));
+    chip.onclick = () => onActivate();
+    // Entrée/Espace = activation (parité d'un vrai `<button>`) ; on empêche le défilement de la barre
+    // d'espace. Le reste des touches passe (navigation clavier normale du formulaire).
+    chip.onkeydown = (e: KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onActivate(); }
+    };
     const chipText = document.createElement("span");
     chipText.style.cssText = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
     chip.appendChild(chipText);
@@ -322,11 +398,17 @@ export class EntityPicker {
 
   /** La saisie ne doit pas SURVIVRE à la sortie du champ : au retour, l'utilisateur retrouverait un
       filtre dont il ne se souvient pas. On attend la fin de la bascule de focus avant de trancher,
-      sinon un clic sur le ✕ interne (qui prend le focus) passerait pour une sortie. Câblage
-      STRICTEMENT partagé sync/async. */
-  private static wireSearchReset(root: HTMLElement, pop: SearchPop): void {
+      sinon un clic sur le ✕ interne (ou sur la pastille, qui prennent le focus) passerait pour une
+      sortie. `onLeave` (T6) est appelé APRÈS le reset quand le focus a bien quitté le contrôle : les
+      régimes s'en servent pour RE-FERMER une recherche rouverte puis abandonnée (désarmer `reopened`
+      + re-rendre). Câblage STRICTEMENT partagé sync/async. */
+  private static wireSearchReset(root: HTMLElement, pop: SearchPop, onLeave?: () => void): void {
     root.addEventListener("focusout", () => {
-      window.setTimeout(() => { if (!root.contains(document.activeElement)) pop.reset(); }, 0);
+      window.setTimeout(() => {
+        if (root.contains(document.activeElement)) return;
+        pop.reset();
+        if (onLeave) onLeave();
+      }, 0);
     });
   }
 }

@@ -74,6 +74,7 @@ export const ui = {
   },
   entityPicker: {
     clear: "Clear the selection",
+    edit: "Change selection",
     searchPlaceholder: "Search…",
     resolving: "Loading…",
   },

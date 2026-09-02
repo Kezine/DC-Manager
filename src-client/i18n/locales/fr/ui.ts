@@ -80,6 +80,7 @@ export const ui = {
   },
   entityPicker: {
     clear: "Effacer la sélection",
+    edit: "Modifier la sélection",
     searchPlaceholder: "Rechercher…",
     resolving: "Chargement…",
   },
