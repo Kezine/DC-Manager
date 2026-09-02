@@ -1134,8 +1134,9 @@ async function boot(): Promise<void> {
     subtitle: I18n.t("tabs.equipements.subtitle"),
     form: (id, done) => Forms.equipment(store, formHost, id, done), addLabel: I18n.t("app.add.equipment"),
     locate: "equipment",
-    // « Imprimer l'étiquette » de ligne (lot E étiquettes QR) : geste UNITAIRE — la planche s'obtient par
-    // la BAIE (« Planche du contenu »), la sélection multiple des listings est DIFFÉRÉE (décision E).
+    // « Imprimer l'étiquette » de ligne (lot E étiquettes QR) : geste UNITAIRE. Une planche s'obtient par
+    // la BAIE (« Planche du contenu ») ou par le PANIER — la sélection multiple « différée » du lot E a
+    // été livrée depuis par le chantier panier (cases des listings, cf. docs/panier.md).
     onPrint: (id) => {
       const eq: any = store.get("equipments", id);
       if (eq) LabelPrintDialog.open({ kind: "equipment", subjects: [LabelSubjects.equipment(store, eq)], source: eq.name || "" });

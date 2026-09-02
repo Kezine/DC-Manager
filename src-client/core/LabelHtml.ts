@@ -177,7 +177,7 @@ export class LabelHtml {
 .label-render .lab.cable.strip .ov{flex:none;background:repeating-linear-gradient(45deg,#fff 0 1mm,#e9e9e9 1mm 2mm)}
 .label-render .lab.compact .txt{gap:.2mm}
 .label-render .lab.compact .rule{margin:.4mm 0}
-.label-render .a4{width:210mm;height:297mm;background:#fff;padding:8mm;display:grid;gap:${CUT}mm;align-content:start;justify-content:start}
+.label-render .a4{width:${LabelLayout.A4_W}mm;height:${LabelLayout.A4_H}mm;background:#fff;padding:${LabelLayout.A4_MARGIN}mm;display:grid;gap:${CUT}mm;align-content:start;justify-content:start}
 .label-render .a4 .cell{position:relative;box-sizing:content-box;display:flex;align-items:center;justify-content:center}
 .label-render .a4 .cell::after{content:"";position:absolute;top:0;left:0;right:-${CUT}mm;bottom:-${CUT}mm;border:0 solid #999;border-right-width:${CUT}mm;border-bottom-width:${CUT}mm;pointer-events:none}
 .label-render .a4 .cell.cut-t::after{top:-${CUT}mm;border-top-width:${CUT}mm}
