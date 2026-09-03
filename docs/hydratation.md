@@ -943,7 +943,10 @@ Jumeau async `Store.sparesOfEquipmentAsync` (corps commun `_sectionRows`, FK ind
 reste INLINE dans `EquipmentForms` : une seule fiche affiche des spares — rien à factoriser tant
 qu'une deuxième surface n'existe pas. Le helper SYNCHRONE `sparesOfEquipment` trie désormais par nom
 lui aussi (parité STRICTE des jumeaux — l'ordre historique d'insertion de l'index FK n'aurait pas
-survécu au régime lazy).
+survécu au régime lazy). Un second jumeau, `Store.sparesAvailableAsync` (statut `available`, même corps
+`_sectionRows`, **sans** pendant synchrone), alimente le sélecteur de pièce du dialogue de terminaison
+([`terminaisons.md`](terminaisons.md)) : `status` n'est pas indexé, balayage assumé d'une collection qui se
+compte en dizaines.
 
 ### G10 — les consommateurs synchrones, un par un
 
