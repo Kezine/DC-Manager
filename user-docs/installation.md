@@ -128,11 +128,15 @@ npm run dev            # tsx watch src/index.ts
 ## 3. Docker (client + serveur dans une image)
 
 L'image embarque **le client buildé et le backend Node/SQLite**. Le `Dockerfile`
-([`src-server/Dockerfile`](../src-server/Dockerfile)) est multi-étapes :
+([`src-server/Dockerfile`](../src-server/Dockerfile)) a **trois étages** :
 
-1. build du client (`npm run build` → HTML autonome) ;
-2. build du serveur (`tsc`, puis `npm prune --omit=dev`, avec la chaîne native pour `better-sqlite3`) ;
-3. image finale qui sert le client et expose l'API sur le port **3000**.
+1. `client` — build du client (`npm run build` → HTML autonome) ;
+2. `server-build` — build du serveur (`tsc`, puis `npm prune --omit=dev`), avec la chaîne de
+   compilation native (`python3`/`make`/`g++`) nécessaire à `better-sqlite3` ;
+3. `runtime` — image livrée : ne récupère des étages précédents que le RÉSULTAT (client buildé,
+   dépendances serveur déjà installées, sortie `tsc`) et sert l'API sur le port **3000**. Elle ne
+   contient **aucune chaîne de compilation** — celle-ci reste confinée à l'étage `server-build`,
+   d'où une image sensiblement plus légère.
 
 > ⚠️ Le **contexte de build est la racine `DcManager/`** (le Dockerfile copie `src-client/`,
 > `src-server/` et `src-shared/`), même si le `Dockerfile` vit dans `src-server/`.
