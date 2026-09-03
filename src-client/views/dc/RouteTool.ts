@@ -117,7 +117,10 @@ export class RouteTool {
       l'appariement est bon OU indécidable (un port sans type : l'incomplétude vient d'ailleurs, et
       prétendre juger serait pire que se taire). */
   protected warnIfIncompatible(fromPortId: string, toPortId: string): void {
-    const typeOf = (portId: string) => { const p: any = this.store.get("ports", portId); return p ? this.store.get("portTypes", p.port_type_id) : null; };
+    // Type EFFECTIF (docs/terminaisons.md, Q5.11) : avec un transceiver dans la cage, c'est le média PRÉSENTÉ que
+    // le câble rencontre — comparer les cages déclarerait « aberrant » un montage correct. Le connecteur cité par
+    // le message est donc celui du média présenté (LC), c'est voulu.
+    const typeOf = (portId: string) => { const p: any = this.store.get("ports", portId); return p ? this.store.effectivePortType(p) : null; };
     const v = PortCompatibility.compare(typeOf(fromPortId), typeOf(toPortId));
     if (!PortCompatibility.blocks(v.verdict)) return;
     Notify.toast(v.verdict === "aberrant"

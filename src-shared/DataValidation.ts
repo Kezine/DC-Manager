@@ -698,6 +698,15 @@ const SPEC_FIELDS = {
       // déduit, l'analyse énergie et le graphe sont INCHANGÉS. Même forme qu'`aggregate_id` juste au-dessus
       // (N ports → 1 sous-équipement), et même règle cross-entité d'appartenance (T2c).
       sub_equipment_id: { type: "string", nullable: true, default: null, ref: "subEquipments" },
+      // TERMINAISON (transceiver — docs/terminaisons.md) : le type de port que la CAGE PRÉSENTE au câble (ex.
+      // « Fibre SM (LC) » dans une cage SFP28) + le libellé lisible du module (« SFP-10G-LR »). `port_type_id`
+      // reste la CAGE (taille 3D, montage aberrant nommé) ; c'est `Store.effectivePortType` qui substitue ce type
+      // à la lecture de la FAMILLE — une lane SANS terminaison hérite de celle de son trunk. null = pas de
+      // terminaison : comportement d'avant, au bit près (Q5.2). Le type présenté est un type de DONNÉES (règle
+      // cross-entité T-TERM1 ci-dessous). La PIÈCE inventoriée qui occupe la cage vit, elle, SUR la pièce
+      // (`spares.assigned_port_id`) et n'est jamais lue ici : `spares` est PARESSEUSE en mode API (clause C6).
+      termination_port_type_id: { type: "string", nullable: true, default: null, ref: "portTypes" },
+      termination_label: { type: "string", default: "" },
       // POSITION DE FAÇADE (normalisée 0..1 par le client) — LUE par l'invariant T1 (X et Y vont ensemble).
       // Pas de bornes : le constructeur Port.ts ne clampe pas, on n'invente pas une contrainte.
       face_x:         { type: "number", nullable: true, default: null },
@@ -972,6 +981,13 @@ const SPEC_FIELDS = {
       type:                  { type: "string", enum: SPARE_TYPE_IDS },
       status:                { type: "string", enum: SPARE_STATUS_IDS },
       assigned_equipment_id: { type: "string", nullable: true, default: null, ref: "equipments" },
+      // TERMINAISON (docs/terminaisons.md) : la CAGE (port) qu'occupe ce transceiver, à côté de l'équipement
+      // d'affectation — « la pièce pointe son emplacement » (T15/T16), jamais l'inverse : un `spare_id` sur le
+      // port ferait deux vérités pour une seule relation. Deux règles (bloc `spares` plus bas) : le port
+      // appartient à `assigned_equipment_id` (cross-entité) et seul un `transceiver` en pose une (invariant).
+      // Le MÉDIA présenté, lui, vit sur le port (`ports.termination_port_type_id`) : aucun chemin synchrone
+      // ne lit cette collection paresseuse pour calculer une famille (clause C6).
+      assigned_port_id:      { type: "string", nullable: true, default: null, ref: "ports" },
       // FICHE (chaînes libres, vides par défaut — parité constructeur Spare.ts). `assigned_free` =
       // attribution LIBRE (hors modèle), alternative à la FK ci-dessus.
       brand:            { type: "string", default: "" },
@@ -1415,6 +1431,17 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
         const eq = fetch("equipments", port.equipment_id);
         return (eq && eq.poe_device !== true) ? { path: "role", message: "Un port POE exige un équipement marqué « POE »." } : null;
       },
+      // T-TERM1 : le média PRÉSENTÉ par une terminaison est un type de port de DONNÉES — un port ne présente pas
+      //           de l'énergie. La règle lit le TYPE référencé (c'est lui qui porte `kind`, et c'est lui que
+      //           `Store.effectivePortType` substituera), pas le rôle du port. Le sélecteur du dialogue ne propose
+      //           que des types de données, mais un sélecteur n'est pas une garantie : l'API et l'import écrivent
+      //           sans lui (même motif que T2c).
+      (port, fetch) => {
+        if (!port.termination_port_type_id) return null;
+        const presented = fetch("portTypes", port.termination_port_type_id);
+        return (presented && presented.kind === "power")
+          ? { path: "termination_port_type_id", message: "Le média présenté par une terminaison doit être un type de port de données." } : null;
+      },
     ],
     scope: [
       // V6 : dans un faisceau, un brin PHYSIQUE n'est pioché qu'une fois PAR EXTRÉMITÉ (équipement). Deux ports du
@@ -1440,6 +1467,11 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
     dependents: [
       { collection: "cables", fkField: "from_port_id" },
       { collection: "cables", fkField: "to_port_id" },
+      // TERMINAISON : la règle « la cage appartient à l'équipement d'affectation » est vérifiée à l'écriture de la
+      // PIÈCE, mais c'est le PORT qui peut changer d'équipement (API/import) — même trou que T2c ⇄ subEquipments.
+      // Rejouée depuis le port, l'incohérence est REFUSÉE plutôt que laissée muette. ⚠ Côté client, `spares` est
+      // paresseuse : le `find` ne voit que les pièces absorbées — le serveur, lui, rejoue sur son état complet.
+      { collection: "spares", fkField: "assigned_port_id" },
     ],
   },
   aggregates: {
@@ -1699,6 +1731,24 @@ export const COLLECTION_SPECS: Record<string, CollectionSpec> = {
   },
   spares: {
     fields: SPEC_FIELDS.spares,
+    invariants: [
+      // TERMINAISON (docs/terminaisons.md) : seule une pièce de type `transceiver` occupe une CAGE. Un disque avec
+      // `assigned_port_id` serait une FK valide (le port existe) et un modèle faux EN SILENCE — même motif que T2c.
+      { path: "assigned_port_id", message: "Seul un transceiver occupe une cage.", holds: (sp) => !sp.assigned_port_id || sp.type === "transceiver" },
+    ],
+    crossEntity: [
+      // TERMINAISON : la cage occupée appartient à l'ÉQUIPEMENT D'AFFECTATION — et il y en a un : une pièce
+      // « disponible » qui occuperait encore une cage serait un mensonge d'inventaire. Décalque de T2c
+      // (port ⇄ sous-équipement). L'existence du port est l'affaire de V2 (`ref_missing`), pas de cette règle.
+      // ⚠ Rejouée aussi DEPUIS `ports` (ses `dependents`) : c'est le port qui peut changer d'équipement.
+      (spare, fetch) => {
+        if (!spare.assigned_port_id) return null;
+        const cage = fetch("ports", spare.assigned_port_id);
+        if (!cage) return null;
+        return (!spare.assigned_equipment_id || (cage.equipment_id && cage.equipment_id !== spare.assigned_equipment_id))
+          ? { path: "assigned_port_id", message: "La cage doit appartenir à l'équipement d'affectation." } : null;
+      },
+    ],
   },
   sites: {
     fields: SPEC_FIELDS.sites,

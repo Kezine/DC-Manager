@@ -214,6 +214,9 @@ module.exports = async () => {
       'CREATE INDEX IF NOT EXISTS "idx_dhcpRanges_network_id" ON "dhcpRanges" ("network_id")',
       'CREATE INDEX IF NOT EXISTS "idx_dhcpRanges_server_id" ON "dhcpRanges" ("server_id")',
       'CREATE INDEX IF NOT EXISTS "idx_spares_assigned_equipment_id" ON "spares" ("assigned_equipment_id")',
+      // spares.assigned_port_id (terminaisons, docs/terminaisons.md) : cascade `ports` (détacher la pièce logée
+      // dans une cage supprimée) + dépendance inverse ports → spares (V5b).
+      'CREATE INDEX IF NOT EXISTS "idx_spares_assigned_port_id" ON "spares" ("assigned_port_id")',
       'CREATE INDEX IF NOT EXISTS "idx_vms_host_equipment_id" ON "vms" ("host_equipment_id")',
       'CREATE INDEX IF NOT EXISTS "idx_vms_group_id" ON "vms" ("group_id")',
       // wifiClients (chantier provider wifi) : `provider_id` est le chemin CHAUD de la synchro
@@ -230,7 +233,7 @@ module.exports = async () => {
       'CREATE INDEX IF NOT EXISTS "idx_attachments_sub_equipment_id" ON "attachments" ("sub_equipment_id")',
     ];
     const allIndexes = RelationalSchema.allIndexDdls();
-    ck.eq(JSON.stringify(allIndexes), JSON.stringify(expectedIndexes), "index : liste exacte (43 index, ordre COLLECTIONS)");
+    ck.eq(JSON.stringify(allIndexes), JSON.stringify(expectedIndexes), "index : liste exacte (44 index, ordre COLLECTIONS)");
     // Et la phase TABLES ne contient QUE des CREATE TABLE, une par collection (le phasage tables → index
     // est la condition de l'évolution additive — cf. test-relational-evolution.js).
     const allTables = RelationalSchema.allTableDdls();

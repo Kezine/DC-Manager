@@ -18,6 +18,10 @@ export class Spare extends Entity implements Records.Spare {
   /** Statut : "available" | "assigned" | "decommissioned". */
   status: string;
   assigned_equipment_id: string | null;   // affecté à un équipement du modèle (FK)
+  /** TERMINAISON (docs/terminaisons.md) : la CAGE (FK → ports) qu'occupe ce transceiver, à côté de l'équipement
+      d'affectation — « la pièce pointe son emplacement ». Le port doit appartenir à `assigned_equipment_id`, et seul
+      un `transceiver` en pose une (validation partagée). Le MÉDIA présenté vit, lui, sur le port. null = aucune. */
+  assigned_port_id: string | null;
   assigned_free: string;                   // OU attribution libre (utilisateur / équipement hors gestion)
   assigned_date: string;                   // date d'attribution (ISO court), posée à la bascule "assigned"
 
@@ -52,6 +56,7 @@ export class Spare extends Entity implements Records.Spare {
     this.serial = p.serial || "";
     this.status = SpareStatuses.isStatus(p.status) ? p.status : SpareStatuses.DEFAULT;
     this.assigned_equipment_id = p.assigned_equipment_id || null;
+    this.assigned_port_id = p.assigned_port_id || null;
     this.assigned_free = p.assigned_free || "";
     this.assigned_date = p.assigned_date || "";
     this.purchase_date = p.purchase_date || "";
