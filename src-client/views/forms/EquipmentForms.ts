@@ -204,6 +204,14 @@ export class EquipmentForms extends FormBase {
         // cinq (port, type, rôle, agrégat, 3D) et une de plus la rendrait illisible dans une modale.
         const seRow: any = p.sub_equipment_id ? store.get("subEquipments", p.sub_equipment_id) : null;
         if (seRow) bk += `<div class="form-hint" style="margin:2px 0 0">${Html.escape(I18n.t("dc.interact.subEquipmentPrefix"))}${Html.escape(seRow.name || I18n.t("subEquipment.fallback"))}</div>`;
+        // TERMINAISON (docs/terminaisons.md) : pastille « ⇒ média présenté » sous le nom, atténuée si HÉRITÉE du trunk
+        // (même place que la pastille sous-équipement, pour la même raison : pas de 6ᵉ colonne).
+        const termination = store.terminationOf(p);
+        if (termination) {
+          const presented: any = store.get("portTypes", termination.typeId);
+          const pillText = I18n.t("equipment.equip.terminationPill", { type: presented ? presented.name : I18n.t("equipment.detail.typeUnknown") }) + (termination.label ? " · " + termination.label : "");
+          bk += `<div class="p-term-row"><span class="pill p-term${termination.inherited ? " inherited" : ""}" title="${Html.escape(I18n.t(termination.inherited ? "equipment.equip.terminationInherited" : "equipment.equip.terminationOwn"))}">${Html.escape(pillText)}</span></div>`;
+        }
         return `<tr${rowClass ? ` class="${rowClass}"` : ""}><td class="cell-name">${Html.escape(p.name || I18n.t("equipment.common.portParen"))}${bk}</td><td>${pt ? Html.escape(pt.name) + ' <span style="color:var(--fg-dimmer)">· ' + Html.escape(pt.family) + "</span>" : `<span style="color:var(--err)">${I18n.t("equipment.detail.typeUnknown")}</span>`}</td><td><span class="pill ${PortRoles.pillClass(p.role)}">${PortRoles.isPoe(p.role) ? Icons.POE_BOLT : ""}${Html.escape(PortRoles.label(p.role))}</span></td><td>${ag ? Html.escape(ag.name || I18n.t("equipment.detail.aggFallback")) : '<span style="color:var(--fg-dimmer)">—</span>'}</td><td class="cell-actions">${host.locate && store.portLocatable(p.id) ? `<button class="btn btn-ghost btn-sm icon-action" data-port-locate="${p.id}" title="${I18n.t("equipment.detail.locatePort")}" aria-label="${I18n.t("equipment.detail.locatePort")}">${Icons.LOCATE}</button>` : ""}</td></tr>`;
       }).join("");
       tw.innerHTML = `<table><thead><tr><th>${I18n.t("equipment.detail.colPort")}</th><th>${I18n.t("lists.col.type")}</th><th>${I18n.t("equipment.detail.colRole")}</th><th>${I18n.t("equipment.detail.colAgg")}</th><th style="text-align:right;">${I18n.t("equipment.detail.col3d")}</th></tr></thead><tbody>${rows}</tbody></table>`;
@@ -239,7 +247,9 @@ export class EquipmentForms extends FormBase {
       if (!spares.length) return;   // liste vide → conteneur laissé vide, la section reste masquée
       const dS = document.createElement("div"); dS.className = "section-divider"; dS.textContent = I18n.t("equipment.detail.sparesSection", { count: spares.length }); holder.appendChild(dS);
       const tw = document.createElement("div"); tw.className = "table-wrap";
-      const rows = spares.map((s: any) => `<tr><td class="cell-name">${Html.escape(s.displayName())}</td><td><span class="pill">${SpareTypes.svg(s.type)}${Html.escape(SpareTypes.label(s.type))}</span></td><td>${s.techSummary() ? Html.escape(s.techSummary()) : '<span style="color:var(--fg-dimmer)">—</span>'}</td><td>${s.serial ? Html.escape(s.serial) : '<span style="color:var(--fg-dimmer)">—</span>'}</td></tr>`).join("");
+      // Un transceiver logé dans une CAGE (docs/terminaisons.md) : suffixe « · cage <port> » après sa désignation.
+      const cageOf = (s: any) => { const cage: any = s.assigned_port_id ? store.get("ports", s.assigned_port_id) : null; return cage ? ` <span style="color:var(--fg-dimmer)">· ${Html.escape(I18n.t("equipment.detail.spareCage", { port: cage.name || I18n.t("equipment.common.portParen") }))}</span>` : ""; };
+      const rows = spares.map((s: any) => `<tr><td class="cell-name">${Html.escape(s.displayName())}${cageOf(s)}</td><td><span class="pill">${SpareTypes.svg(s.type)}${Html.escape(SpareTypes.label(s.type))}</span></td><td>${s.techSummary() ? Html.escape(s.techSummary()) : '<span style="color:var(--fg-dimmer)">—</span>'}</td><td>${s.serial ? Html.escape(s.serial) : '<span style="color:var(--fg-dimmer)">—</span>'}</td></tr>`).join("");
       tw.innerHTML = `<table><thead><tr><th>${I18n.t("lists.col.designation")}</th><th>${I18n.t("lists.col.type")}</th><th>${I18n.t("lists.col.characteristics")}</th><th>${I18n.t("equipment.detail.colSerial")}</th></tr></thead><tbody>${rows}</tbody></table>`;
       holder.appendChild(tw);
     });
@@ -565,6 +575,11 @@ export class EquipmentForms extends FormBase {
           type, name: nameI.value.trim(), brand: brandI.value.trim(), model_pn: pnI.value.trim(), serial: serialI.value.trim(),
           status,
           assigned_equipment_id: status === "assigned" ? eqId : null,
+          // TERMINAISON (docs/terminaisons.md) : la CAGE occupée ne survit que si la pièce reste attribuée au MÊME
+          // équipement — sinon la règle partagée « la cage appartient à l'équipement d'affectation » refuserait une
+          // ré-affectation légitime. Ce formulaire n'expose pas la cage (T16 le fera) : elle se pose depuis le dialogue
+          // de terminaison ; la terminaison du PORT, elle, n'est jamais touchée d'ici (décision utilisateur, §1.5).
+          assigned_port_id: (status === "assigned" && eqId && sp && sp.assigned_port_id && eqId === sp.assigned_equipment_id) ? sp.assigned_port_id : null,
           assigned_free: status === "assigned" && !eqId ? freeI.value.trim() : "",
           assigned_date: status === "assigned" ? assignDateI.value : "",
           purchase_date: purchaseI.value, po_ref: poI.value.trim(), storage_location: storageI.value.trim(), comment: commentI.value.trim(),
@@ -599,6 +614,8 @@ export class EquipmentForms extends FormBase {
     const draftAggs: any[] = eq ? store.aggregatesOf(eq.id).map((a: any) => ({ id: a.id, name: a.name, description: a.description })) : [];
     const draftPorts: PortDraft[] = eq ? store.portsOf(eq.id).map((p: any) => ({
       id: p.id, name: p.name, port_type_id: p.port_type_id, role: p.role, aggregate_id: p.aggregate_id, sub_equipment_id: p.sub_equipment_id, description: p.description,
+      // terminaison (transceiver) : média présenté + libellé — la PIÈCE liée n'est pas un brouillon (spares lazy, cf. pendingSpareLinks)
+      termination_port_type_id: p.termination_port_type_id || null, termination_label: p.termination_label || "",
       parent_port_id: p.parent_port_id || null, lane: (p.lane != null) ? p.lane : null, face_x: p.face_x, face_y: p.face_y, face_side: p.face_side,
       // terminaison de faisceau (patch) : faisceau + brins physiques piochés
       bundle_id: p.bundle_id || null, strand_a: (p.strand_a != null) ? p.strand_a : null, strand_b: (p.strand_b != null) ? p.strand_b : null,
@@ -1055,8 +1072,64 @@ export class EquipmentForms extends FormBase {
         },
       ];
     };
+    // ---- TERMINAISON (transceiver — docs/terminaisons.md § Les gestes) : 2e emplacement du menu ⋮ (clause C3) ----
+    // Le MÉDIA présenté vit dans le BROUILLON du port (enregistré avec lui). La PIÈCE liée, elle, n'est PAS un
+    // brouillon : `spares` est paresseuse (G7), on ne la lit qu'en async et on n'écrit rien avant le save — le choix
+    // est mémorisé ici (« lien en attente ») et appliqué AU SAVE, dans le MÊME lot que les ports (`saveBatch`).
+    // `spareId: null` = cage sans pièce (générique, ou pièce retirée) — la pièce logée EN BASE est alors détachée.
+    const pendingSpareLinks = new Map<string, { spareId: string | null }>();
+    /** Terminaison EFFECTIVE d'un port du BROUILLON : la sienne, sinon celle de son trunk (un niveau — l'UI n'imbrique
+        pas les breakouts). Miroir de `Store.terminationOf` sur des lignes pas encore enregistrées. */
+    const draftTerminationOf = (p: PortDraft): { typeId: string; label: string; inherited: boolean } | null => {
+      if (p.termination_port_type_id) return { typeId: p.termination_port_type_id, label: p.termination_label || "", inherited: false };
+      const parent = p.parent_port_id ? draftPorts.find((x) => x.id === p.parent_port_id) : null;
+      return (parent && parent.termination_port_type_id) ? { typeId: parent.termination_port_type_id, label: parent.termination_label || "", inherited: true } : null;
+    };
+    /** Pastille « ⇒ média présenté » d'une tête de port ; HÉRITÉE du trunk ⇒ atténuée, titre explicite. null si aucune. */
+    const terminationPill = (p: PortDraft): HTMLElement | null => {
+      const t = draftTerminationOf(p); if (!t) return null;
+      const presented: any = store.get("portTypes", t.typeId);
+      const s = document.createElement("span"); s.className = "pill p-term" + (t.inherited ? " inherited" : "");
+      s.textContent = I18n.t("equipment.equip.terminationPill", { type: presented ? presented.name : I18n.t("equipment.detail.typeUnknown") }) + (t.label ? " · " + t.label : "");
+      s.title = I18n.t(t.inherited ? "equipment.equip.terminationInherited" : "equipment.equip.terminationOwn");
+      return s;
+    };
+    /** « Poser / Modifier la terminaison… » : le dialogue écrit le BROUILLON du port et mémorise le lien de pièce. */
+    const configureTerminationOn = (p: PortDraft) => {
+      const pending = pendingSpareLinks.get(p.id);
+      // `spareId` OMIS quand rien n'est en attente : le dialogue retrouve lui-même la pièce logée dans la cage (async).
+      const current = p.termination_port_type_id ? { typeId: p.termination_port_type_id, label: p.termination_label || "", spareId: pending ? pending.spareId : undefined } : null;
+      this.configureTermination(store, { port: { id: p.id, name: p.name, equipmentId: eq ? eq.id : null, portTypeId: p.port_type_id }, current }).then((cfg) => {
+        if (!cfg) return;
+        p.termination_port_type_id = cfg.typeId; p.termination_label = cfg.label;
+        pendingSpareLinks.set(p.id, { spareId: cfg.spareId });
+        host.setDirty?.(true); renderPorts();
+      });
+    };
+    /** « Retirer la terminaison » : vide les deux champs du port ET détache la pièce logée (au save — `assigned_port_id`
+        → null ; l'affectation à l'équipement et le statut sont CONSERVÉS, brief §1.5). */
+    const removeTerminationOn = (p: PortDraft) => {
+      p.termination_port_type_id = null; p.termination_label = "";
+      pendingSpareLinks.set(p.id, { spareId: null });
+      host.setDirty?.(true); renderPorts();
+    };
+    /** Items de TERMINAISON du menu ⋮ (2e emplacement) : poser / modifier, et retirer quand elle est posée. Réservés aux
+        ports de DONNÉES (un port ne présente pas de l'énergie — T-TERM1) ; grisés avec la raison sinon. */
+    const terminationMenuItems = (p: PortDraft): RowMenuItem[] => {
+      const isData = PortRoles.kind(p.role) === "data";
+      const posed = !!p.termination_port_type_id;
+      const items: RowMenuItem[] = [{
+        label: I18n.t(posed ? "equipment.equip.terminationEdit" : "equipment.equip.terminationSet"), icon: Icons.SPARE,
+        disabled: !isData,
+        title: isData ? I18n.t("equipment.equip.terminationTitle") : I18n.t("equipment.equip.terminationRefusedNotData"),
+        onClick: () => { configureTerminationOn(p); },
+      }];
+      if (posed) items.push({ label: I18n.t("equipment.equip.terminationRemove"), icon: Icons.CLOSE, onClick: () => { removeTerminationOn(p); } });
+      return items;
+    };
     /** Les trois cellules de la GRAMMAIRE des têtes de port, en version ÉDITABLE (nom en `.sub-input`) — partagées par
-        l'en-tête du groupe (trunk) et par chaque lane, pour que les deux se lisent comme les ports ordinaires. */
+        l'en-tête du groupe (trunk) et par chaque lane, pour que les deux se lisent comme les ports ordinaires. Une
+        QUATRIÈME cellule, la pastille de terminaison, n'apparaît que si le port en présente une (posée ou héritée). */
     const portGrammar = (p: PortDraft, placeholder: string): HTMLElement[] => {
       const nameWrap = document.createElement("span"); nameWrap.className = "p-name";
       const nm = document.createElement("input"); nm.className = "sub-input"; nm.value = p.name; nm.placeholder = placeholder; nm.oninput = () => { p.name = nm.value; };
@@ -1065,15 +1138,20 @@ export class EquipmentForms extends FormBase {
       const metric = document.createElement("span"); metric.className = "p-metric";
       const tt: any = p.port_type_id ? store.get("portTypes", p.port_type_id) : null;
       const typeName = document.createElement("span"); typeName.className = "muted"; typeName.textContent = tt ? tt.name : I18n.t("equipment.detail.typeUnknown"); metric.appendChild(typeName);
-      return [nameWrap, catWrap, metric];
+      const termPill = terminationPill(p);
+      return termPill ? [nameWrap, catWrap, metric, termPill] : [nameWrap, catWrap, metric];
     };
-    /** Ligne de LANE : nom éditable · pastille catégorie · type · tag « lane N ». Non extensible (pas de corps). */
+    /** Ligne de LANE : nom éditable · pastille catégorie · type · tag « lane N » · menu ⋮ (terminaison PROPRE de la lane :
+        un fan-out sur le trunk se pose sur le trunk, une lane peut aussi présenter le sien). Non extensible (pas de corps). */
     const laneRow = (lane: PortDraft) => {
       const r = document.createElement("div"); r.className = "port-breakout-lane";
       if (invalidPortIds.has(lane.id)) r.setAttribute("data-err", "");
       r.append(...portGrammar(lane, I18n.t("equipment.equip.lanePh")));
       const tag = document.createElement("span"); tag.className = "p-lane"; tag.textContent = I18n.t("equipment.equip.laneTag", { lane: lane.lane || "?" });
       r.appendChild(tag);
+      const acts = document.createElement("span"); acts.className = "p-acts";
+      acts.appendChild(iconBtn(Icons.MORE, I18n.t("lists.chrome.rowMore"), false, (e) => RowMenu.open(e.currentTarget as HTMLElement, terminationMenuItems(lane))));
+      r.appendChild(acts);
       return r;
     };
     /** GROUPE breakout : en-tête du trunk (étiquette, nom, pastilles, ⋮) + ses lanes. */
@@ -1085,7 +1163,9 @@ export class EquipmentForms extends FormBase {
       head.appendChild(tag);
       head.append(...portGrammar(trunk, I18n.t("equipment.equip.trunkPh")));
       const acts = document.createElement("span"); acts.className = "p-acts";
-      acts.appendChild(iconBtn(Icons.MORE, I18n.t("lists.chrome.rowMore"), false, (e) => RowMenu.open(e.currentTarget as HTMLElement, trunkMenuItems(trunk, lanes))));
+      // Menu ⋮ du TRUNK : la terminaison D'ABORD (un fan-out se pose sur le trunk, ses lanes en héritent), puis
+      // défaire / supprimer le breakout.
+      acts.appendChild(iconBtn(Icons.MORE, I18n.t("lists.chrome.rowMore"), false, (e) => RowMenu.open(e.currentTarget as HTMLElement, [...terminationMenuItems(trunk), ...trunkMenuItems(trunk, lanes)])));
       head.appendChild(acts);
       box.appendChild(head);
       const body = document.createElement("div"); body.className = "port-breakout-lanes";
@@ -1121,6 +1201,7 @@ export class EquipmentForms extends FormBase {
       else if (isPoeP) { metric.innerHTML = Icons.POE_BOLT; const poeSrc = EquipmentTypes.isPoeSource(typeI.value); if (poeSrc && overHere) metric.style.color = "var(--err)"; if (poeSrc) metric.appendChild(document.createTextNode(" " + (p.poe_budget_w != null ? fmtW(p.poe_budget_w) : "—") + " W")); }
       else { const tt: any = p.port_type_id ? store.get("portTypes", p.port_type_id) : null; const m = document.createElement("span"); m.className = "muted"; m.textContent = tt ? tt.name : "—"; metric.appendChild(m); }
       head.appendChild(metric);
+      const termPill = terminationPill(p); if (termPill) head.appendChild(termPill);   // « ⇒ média présenté » (terminaison)
       const netSpan = document.createElement("span"); netSpan.className = "p-net"; const nn = netName(p); if (nn) netSpan.textContent = nn; else netSpan.innerHTML = '<span class="muted">—</span>'; head.appendChild(netSpan);
       const acts = document.createElement("span"); acts.className = "p-acts";
       acts.appendChild(iconBtn(Icons.CLONE, I18n.t("equipment.equip.duplicate"), false, (e) => {
@@ -1136,10 +1217,10 @@ export class EquipmentForms extends FormBase {
         }]);
       }));
       acts.appendChild(iconBtn(Icons.DELETE, I18n.t("equipment.detail.deletePort"), true, () => { const i = draftPorts.indexOf(p); if (i >= 0) draftPorts.splice(i, 1); renderPorts(); }));
-      // Menu ⋮ « plus d'actions » (ui/RowMenu, comme les listings) : UN emplacement à ITEMS dont « Éclater en N lanes… »
-      // est aujourd'hui le seul (clause C3 du cadrage breakout : la terminaison T5 y posera le sien — on ne livre pas
-      // d'item factice grisé). Le refus est NOMMÉ au moment du geste (item grisé + raison), pas découvert au save.
-      acts.appendChild(iconBtn(Icons.MORE, I18n.t("lists.chrome.rowMore"), false, (e) => RowMenu.open(e.currentTarget as HTMLElement, [splitMenuItem(p)])));
+      // Menu ⋮ « plus d'actions » (ui/RowMenu, comme les listings) : menu à EMPLACEMENTS — « Éclater en N lanes… »
+      // (breakout, clause C3) puis « Poser / Modifier / Retirer la terminaison » (docs/terminaisons.md). Le refus est
+      // NOMMÉ au moment du geste (item grisé + raison), pas découvert au save.
+      acts.appendChild(iconBtn(Icons.MORE, I18n.t("lists.chrome.rowMore"), false, (e) => RowMenu.open(e.currentTarget as HTMLElement, [splitMenuItem(p), ...terminationMenuItems(p)])));
       head.appendChild(acts);
       det.appendChild(head);
 
@@ -1503,7 +1584,10 @@ export class EquipmentForms extends FormBase {
           // budget de port = CAPACITÉ de SOURCE → conservé uniquement sur un port PSE de switch, neutralisé sinon.
           const poeBudgetW = (isPoePort && poeSourceEq && p.poe_budget_w != null) ? p.poe_budget_w : null;
           const poeEnabled = isPoePort ? (p.poe_enabled !== false) : true;   // injection/conso PoE (défaut true) — sans effet hors PoE
-          const patch: any = { equipment_id: eqId, name: (p.name || "").trim(), port_type_id: p.port_type_id || null, role, aggregate_id: agg, sub_equipment_id: subEq, description: (p.description || "").trim(), parent_port_id: p.parent_port_id || null, lane: (p.lane != null) ? p.lane : null, face_x: (p.face_x != null) ? p.face_x : null, face_y: (p.face_y != null) ? p.face_y : null, face_side: p.face_side, bundle_id: bundleId, strand_a: strandA, strand_b: strandB, network_id: netPrimary, network_ids: netIds, direction, power_max_a: powerMaxA, phase, poe_budget_w: poeBudgetW, poe_enabled: poeEnabled };
+          // terminaison (docs/terminaisons.md) : un port de DONNÉES seulement (T-TERM1 — un port d'énergie ne présente rien) ; libellé trimé.
+          const terminationTypeId = (PortRoles.kind(role) === "data" && p.termination_port_type_id) ? p.termination_port_type_id : null;
+          const terminationLabel = terminationTypeId ? (p.termination_label || "").trim() : "";
+          const patch: any = { equipment_id: eqId, name: (p.name || "").trim(), port_type_id: p.port_type_id || null, role, aggregate_id: agg, sub_equipment_id: subEq, description: (p.description || "").trim(), parent_port_id: p.parent_port_id || null, lane: (p.lane != null) ? p.lane : null, face_x: (p.face_x != null) ? p.face_x : null, face_y: (p.face_y != null) ? p.face_y : null, face_side: p.face_side, bundle_id: bundleId, strand_a: strandA, strand_b: strandB, network_id: netPrimary, network_ids: netIds, direction, power_max_a: powerMaxA, phase, poe_budget_w: poeBudgetW, poe_enabled: poeEnabled, termination_port_type_id: terminationTypeId, termination_label: terminationLabel };
           const ex: any = store.get("ports", p.id);
           if (ex) updates.push({ collection: "ports", id: p.id, patch });
           else creates.push({ collection: "ports", record: Object.assign({ id: p.id }, patch) });
@@ -1513,6 +1597,25 @@ export class EquipmentForms extends FormBase {
         // déduplique et emporte lanes et câbles par récursion. Trier ici ne servait qu'à éviter qu'un `remove` de
         // lane vienne après le `remove` du trunk qui l'avait déjà supprimée.
         for (const p of store.portsOf(eqId)) if (!draftPortIds.has(p.id)) removes.push({ collection: "ports", id: p.id });
+
+        // -- TERMINAISONS : liens de PIÈCE en attente (docs/terminaisons.md), dans le MÊME lot que les ports --
+        // La vérité « quelle pièce occupe cette cage EN BASE » est relue ici, en async (spares lazy — G7), plutôt que
+        // mémorisée au moment du geste : c'est elle qu'on détache si le choix a changé. Une pièce choisie est logée
+        // (cage + équipement d'accueil + statut « attribué », date du jour si vide). Rien n'est écrit pour les ports
+        // sortis du brouillon : la cascade du lot détache leur pièce d'elle-même.
+        if (pendingSpareLinks.size) {
+          const lodgedInBase = new Map<string, any>();   // portId → pièce qui occupe la cage EN BASE
+          if (existingId) (await store.sparesOfEquipmentAsync(existingId)).forEach((s: any) => { if (s.assigned_port_id) lodgedInBase.set(s.assigned_port_id, s); });
+          pendingSpareLinks.forEach((link, portId) => {
+            if (!draftPortIds.has(portId)) return;
+            const previous = lodgedInBase.get(portId);
+            if (previous && previous.id !== link.spareId) updates.push({ collection: "spares", id: previous.id, patch: { assigned_port_id: null } });
+            if (link.spareId) {
+              const chosen: any = store.get("spares", link.spareId);   // absorbée par le sélecteur du dialogue
+              updates.push({ collection: "spares", id: link.spareId, patch: { assigned_port_id: portId, assigned_equipment_id: eqId, status: "assigned", assigned_date: (chosen && chosen.assigned_date) || this.todayIso() } });
+            }
+          });
+        }
 
         const saved = await store.saveBatch({ creates, updates, removes });
         if (!saved.ok) {
@@ -1540,6 +1643,7 @@ export class EquipmentForms extends FormBase {
           return false;
         }
         if (!existingId) createdId = eqId;   // mémorisé : un re-save de la même modale UPDATE au lieu de recréer (N1)
+        pendingSpareLinks.clear();   // liens de pièce APPLIQUÉS : un re-save de la même modale ne les rejoue pas
         // le (dé)placement peut invalider des routes de câbles — même casse contrôlée que les actions des vues
         // 2D/3D (assignSideSlot/assignWallSlot…) ; no-op si les routes restent valides. Reste un appel SÉPARÉ,
         // APRÈS le lot : il lit les câbles à leur état POST-save (ceux que la cascade vient d'emporter avec un port

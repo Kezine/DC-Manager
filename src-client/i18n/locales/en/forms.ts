@@ -34,6 +34,32 @@ export const forms = {
     splitPortHint: "It keeps its name, type and faceplate position; it will no longer carry a cable itself — the lanes do.",
     errSplitName: "Name the port on its row first: the lanes inherit its name (« name/1 », « name/2 », …).",
   },
+  // TERMINATION dialog (`FormBase.configureTermination`, docs/terminaisons.md): presented medium (a data port
+  // type), module label, OPTIONAL inventoried part — the « generic transceiver » is the default choice and has NO
+  // existence in the database. The part ⇄ cage/medium warning never blocks.
+  termination: {
+    needPortTypes: "Create a data port type first (e.g. SM fiber (LC)).",
+    title: "Add a termination",
+    editTitle: "Edit the termination",
+    confirm: "Add",
+    editConfirm: "Update",
+    portField: "Port (cage)",
+    portHint: "The port's own type stays the cage: that is what the 3D view draws.",
+    mediaField: "Medium presented to the cable",
+    mediaHint: "What the transceiver presents: this is the family the cable compatibility reads.",
+    labelField: "Module label",
+    labelPlaceholder: "SFP-10G-LR",
+    labelHint: "Free text — empty ⇒ « Generic ».",
+    genericLabel: "Generic",
+    spareField: "Inventoried part",
+    spareHint: "Optional: link a transceiver from stock or already assigned to this equipment. The generic one creates no part.",
+    genericSpare: "Generic transceiver (not inventoried)",
+    spareOtherCage: "{{spare}} — already in cage {{port}}",
+    warnForm: "The part is a {{form}}, the cage a {{cage}}.",
+    warnMedia: "The part presents « {{media}} », the chosen medium is « {{connector}} ».",
+    warnMismatch: "Check: {{issues}} Nothing is blocked.",
+    errMedia: "Choose the presented medium.",
+  },
   cap: {
     kept_one: "{{count}} cell kept: a pin is placed on it.",
     kept_other: "{{count}} cells kept: a pin is placed on them.",

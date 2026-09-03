@@ -38,6 +38,32 @@ export const forms = {
     splitPortHint: "Il garde son nom, son type et sa position de façade ; il ne portera plus de câble lui-même — ce sont les lanes qui les portent.",
     errSplitName: "Nommez d'abord le port sur sa ligne : les lanes héritent de son nom (« nom/1 », « nom/2 », …).",
   },
+  // Dialogue de TERMINAISON (`FormBase.configureTermination`, docs/terminaisons.md) : média présenté (un type de
+  // port de données), libellé du module, pièce inventoriée FACULTATIVE — le « transceiver générique » est le choix
+  // par défaut et n'a AUCUNE existence en base. L'avertissement pièce ⇄ cage/média ne bloque jamais.
+  termination: {
+    needPortTypes: "Créez d'abord un type de port de données (ex. Fibre SM (LC)).",
+    title: "Poser une terminaison",
+    editTitle: "Modifier la terminaison",
+    confirm: "Poser",
+    editConfirm: "Modifier",
+    portField: "Port (cage)",
+    portHint: "Le type propre du port reste la cage : c'est elle qui se dessine en 3D.",
+    mediaField: "Média présenté au câble",
+    mediaHint: "Ce que le transceiver présente : c'est cette famille que la compatibilité de câble lira.",
+    labelField: "Libellé du module",
+    labelPlaceholder: "SFP-10G-LR",
+    labelHint: "Libre — vide ⇒ « Générique ».",
+    genericLabel: "Générique",
+    spareField: "Pièce inventoriée",
+    spareHint: "Facultatif : lier un transceiver du stock ou déjà affecté à cet équipement. Le générique ne crée aucune pièce.",
+    genericSpare: "Transceiver générique (non inventorié)",
+    spareOtherCage: "{{spare}} — déjà dans la cage {{port}}",
+    warnForm: "La pièce est un {{form}}, la cage un {{cage}}.",
+    warnMedia: "La pièce présente « {{media}} », le média choisi est « {{connector}} ».",
+    warnMismatch: "Vérifiez : {{issues}} Rien n'est bloqué.",
+    errMedia: "Choisissez le média présenté.",
+  },
   cap: {
     kept_one: "{{count}} cellule conservée : un pin y est posé.",
     kept_other: "{{count}} cellules conservées : un pin y est posé.",

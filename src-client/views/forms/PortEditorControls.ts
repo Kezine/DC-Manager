@@ -30,6 +30,10 @@ export interface PortDraft {
   aggregate_id: string | null;
   /** Sous-équipement DESSERVI par ce port (étiquette de destination — le port reste au maître). */
   sub_equipment_id?: string | null;
+  /** TERMINAISON (docs/terminaisons.md) : média PRÉSENTÉ au câble (type de port de données) + libellé du module.
+      La PIÈCE liée n'est PAS ici : `spares` est paresseuse, le lien s'applique au save (EquipmentForms). */
+  termination_port_type_id?: string | null;
+  termination_label?: string;
   description: string;
   parent_port_id?: string | null;
   lane?: number | null;

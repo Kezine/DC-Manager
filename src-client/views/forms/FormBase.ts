@@ -24,6 +24,7 @@ import {
   RACK_EAR_MM
 } from "../../domain/constants";
 import { Schema } from "../../../src-shared/Schema";   // types MIME d'images acceptés — liste PARTAGÉE (le serveur applique la même)
+import { TerminationSpareSource } from "../../core/TerminationSpareSource";   // candidats du sélecteur de PIÈCE du dialogue de terminaison (spares lazy — G7)
 import { I18n } from "../../i18n/I18n";
 
 /** Résultat du dialogue de breakout (`FormBase.configureBreakout`) : de quoi créer le trunk (mode `new`) ou
@@ -42,6 +43,26 @@ export type BreakoutDialogOptions =
   | { mode: "new" }
   /** Port EXISTANT à éclater : nom et type AFFICHÉS, figés (clause C5 — le port garde son identité). */
   | { mode: "split"; trunk: { name: string; portTypeId: string | null } };
+
+/** Options du dialogue de TERMINAISON (`FormBase.configureTermination`, docs/terminaisons.md). */
+export interface TerminationDialogOptions {
+  /** La CAGE : le port qui reçoit le transceiver (son type propre = la cage ; `equipmentId` = l'équipement
+      d'accueil de la pièce liée). */
+  port: { id: string; name: string; equipmentId: string | null; portTypeId: string | null };
+  /** Terminaison DÉJÀ posée (mode « modifier »). `spareId` OMIS = le dialogue retrouve lui-même la pièce qui occupe
+      la cage (celle dont `assigned_port_id` = ce port) ; `null` = aucune, déjà su de l'appelant (lien en attente). */
+  current?: { typeId: string; label: string; spareId?: string | null } | null;
+  /** Média SUGGÉRÉ — formulaire câble : le type EFFECTIF de l'autre bout (« prend automatiquement les bonnes specs »). */
+  suggestedTypeId?: string | null;
+}
+/** Résultat du dialogue de terminaison : le média présenté, le libellé, la pièce liée (`null` = transceiver
+    GÉNÉRIQUE, aucune pièce) et la pièce qui occupait la cage à l'OUVERTURE — à DÉTACHER par l'appelant si elle change. */
+export interface TerminationConfig {
+  typeId: string;
+  label: string;
+  spareId: string | null;
+  previousSpareId: string | null;
+}
 
 export class FormBase {
   /** Bibliothèque d'images de façade (injectée au boot) — singleton applicatif (hors modèle). */
@@ -82,16 +103,16 @@ export class FormBase {
     const split = opts.mode === "split" ? opts.trunk : null;
     // Un breakout est une affaire de ports de DONNÉES (les lanes sont créées en rôle `data`) : les types d'ÉNERGIE
     // n'ont rien à y faire — proposés, ils donnaient des lanes « (hors rôle) » dans le formulaire.
-    const types = store.all("portTypes").filter((t: any) => t.kind !== "power").sort((a: any, b: any) => (a.family || "").localeCompare(b.family || "") || a.name.localeCompare(b.name));
+    const types = FormBase.dataPortTypes(store);
     if (!types.length) { Notify.toast(I18n.t("forms.breakout.needPortTypes"), "err"); return Promise.resolve(null); }
     const connOf = (t: any) => (t.connector || t.family || "").toUpperCase();
     const guessTrunk = types.find((t: any) => connOf(t).startsWith("QSFP")) || types[0];
     const guessLane = types.find((t: any) => connOf(t) === "SFP+") || types.find((t: any) => connOf(t).startsWith("SFP")) || types[0];
     // Sélecteurs À RECHERCHE (principe n°14) : `entityPicker` prend la MÊME liste que `select`, mais n'a pas
     // d'<optgroup> (un popover de recherche n'en a pas) → la FAMILLE entre dans le LIBELLÉ, où elle devient
-    // CHERCHABLE (taper « SFP » remonte toute la famille). Le connecteur, s'il diffère de la famille, y reste.
+    // CHERCHABLE (cf. `portTypeOptionLabel`, partagé avec le dialogue de terminaison).
     // L'option de tête vide porte le libellé de l'état « rien de choisi » : c'est là que le contrôle le lit.
-    const typeLabel = (t: any) => t.name + (t.connector && t.connector !== t.family ? " (" + t.connector + ")" : "") + " · " + (t.family || I18n.t("equipment.equip.noFamily"));
+    const typeLabel = (t: any) => FormBase.portTypeOptionLabel(t);
     const typeOpts = [{ value: "", label: I18n.t("equipment.equip.typeQ") }].concat(types.map((t: any) => ({ value: t.id, label: typeLabel(t) })));
     const nameI = FormControls.text("QSFP1", I18n.t("forms.breakout.namePlaceholder"));
     const trunkSel = FormControls.entityPicker(typeOpts, guessTrunk ? guessTrunk.id : "");
@@ -155,6 +176,109 @@ export class FormBase {
             return true as const;
           },
           collect: (): BreakoutConfig => ({ name: trunkName(), trunkTypeId: trunkTypeId(), laneTypeId: laneSel.value, count: span as number }),
+        };
+      },
+    });
+  }
+
+  /** Types de port de DONNÉES, triés famille puis nom — la liste des deux dialogues (breakout, terminaison) : un type
+      d'énergie n'a rien à y faire (lanes « hors rôle » ; média présenté refusé par la règle partagée T-TERM1). */
+  private static dataPortTypes(store: Store): any[] {
+    return store.all("portTypes").filter((t: any) => t.kind !== "power").sort((a: any, b: any) => (a.family || "").localeCompare(b.family || "") || a.name.localeCompare(b.name));
+  }
+  /** Libellé d'un type de port dans un sélecteur À RECHERCHE : `entityPicker` n'a pas d'<optgroup>, la FAMILLE entre donc
+      dans le libellé, où elle devient CHERCHABLE (taper « SFP » remonte toute la famille) ; le connecteur, s'il diffère
+      de la famille, y reste — c'est lui qu'on lit pour distinguer une cage (SFP28) d'un média présenté (LC). */
+  private static portTypeOptionLabel(t: any): string {
+    return t.name + (t.connector && t.connector !== t.family ? " (" + t.connector + ")" : "") + " · " + (t.family || I18n.t("equipment.equip.noFamily"));
+  }
+  /** Date du jour en ISO court (YYYY-MM-DD) — le format des dates d'attribution des pièces (`assigned_date`). Écrite
+      UNE fois : le formulaire d'équipement et le formulaire câble la posent tous deux en liant une pièce à une cage. */
+  protected static todayIso(): string { return new Date().toISOString().slice(0, 10); }
+
+  /** Dialogue de TERMINAISON (docs/terminaisons.md § Les gestes) : un transceiver dans la cage. Trois champs —
+        • le MÉDIA PRÉSENTÉ au câble : un type de port de DONNÉES (Q5.10), sélecteur à recherche ; valeur initiale =
+          la terminaison posée, sinon le média SUGGÉRÉ (formulaire câble : le type effectif de l'autre bout), sinon,
+          pour une cage SFP/QSFP, un type fibre LC — monomode d'abord (« Fibre SM (LC) », le cas T5) ; sinon rien de
+          présélectionné (brief §1.3) ;
+        • le LIBELLÉ du module, libre (vide ⇒ « Générique ») ;
+        • la PIÈCE inventoriée, FACULTATIVE — sélecteur ASYNC (`spares` est paresseuse, garde G7 : jamais
+          `all("spares")`) dont l'entrée de tête « Transceiver générique (non inventorié) » est le choix PAR DÉFAUT —
+          le DUMMY n'a AUCUNE existence en base. Une pièce logée dans une AUTRE cage est listée grisée, cage nommée.
+          Si les `tx_*` de la pièce contredisent la cage ou le média, on AVERTIT sous le champ, jamais bloquant (§1.4).
+      Rien n'est ÉCRIT ici : le résultat est appliqué par l'appelant — brouillon du formulaire d'équipement (lien de
+      pièce appliqué au save, même lot), ou écriture IMMÉDIATE depuis le formulaire câble (Q5.4). `null` si annulé. */
+  protected static configureTermination(store: Store, opts: TerminationDialogOptions): Promise<TerminationConfig | null> {
+    const port = opts.port, current = opts.current || null;
+    const types = FormBase.dataPortTypes(store);
+    if (!types.length) { Notify.toast(I18n.t("forms.termination.needPortTypes"), "err"); return Promise.resolve(null); }
+    const cage: any = port.portTypeId ? store.get("portTypes", port.portTypeId) : null;
+    const connOf = (t: any) => String(t.connector || t.family || "").toUpperCase();
+    // Défaut du média (§1.3) : une cage SFP/QSFP reçoit d'ordinaire un module optique LC — monomode d'abord (le cas T5
+    // mot pour mot), à défaut n'importe quel LC ; une autre cage (RJ45, SAS…) n'a pas de défaut raisonnable.
+    const cageIsSfp = !!cage && /^Q?SFP/.test(connOf(cage));
+    const defaultLc = cageIsSfp ? (types.find((t: any) => connOf(t) === "LC" && /SM/i.test(String(t.family || ""))) || types.find((t: any) => connOf(t) === "LC")) : null;
+    const initialTypeId = (current && current.typeId) || opts.suggestedTypeId || (defaultLc ? defaultLc.id : "");
+    const typeOpts = [{ value: "", label: I18n.t("equipment.equip.typeQ") }].concat(types.map((t: any) => ({ value: t.id, label: FormBase.portTypeOptionLabel(t) })));
+    const mediaSel = FormControls.entityPicker(typeOpts, initialTypeId);
+    const labelI = FormControls.text(current ? current.label : "", I18n.t("forms.termination.labelPlaceholder"));
+    // La CAGE, montrée comme une pastille (aucune saisie — même forme que le trunk figé du dialogue breakout) : la
+    // distinction cage ⇄ média est tout le sens de ce dialogue, elle doit se lire d'un coup d'œil.
+    const cageInfo = document.createElement("div");
+    const chip = document.createElement("span"); chip.className = "chip"; chip.textContent = (port.name || "").trim() || I18n.t("equipment.common.portParen");
+    const cagePill = document.createElement("span"); cagePill.className = "pill"; cagePill.textContent = cage ? FormBase.portTypeOptionLabel(cage) : I18n.t("equipment.detail.typeUnknown");
+    cageInfo.append(chip, document.createTextNode(" "), cagePill);
+    // PIÈCE : source ASYNC dédiée — transceivers affectés à l'équipement + stock, par les jumeaux async du Store.
+    const spareLabel = (record: any): string => (typeof record.displayName === "function" ? record.displayName() : (record.name || record.id));
+    const source = new TerminationSpareSource({
+      candidates: async () => {
+        const [assigned, available] = await Promise.all([port.equipmentId ? store.sparesOfEquipmentAsync(port.equipmentId) : Promise.resolve([] as any[]), store.sparesAvailableAsync()]);
+        return assigned.concat(available);
+      },
+      get: (id) => store.get("spares", id) || null,
+      fetchOne: (id) => store.fetchOne("spares", id),
+      portName: (portId) => { const p: any = store.get("ports", portId); return p ? (p.name || null) : null; },
+    }, port.id, {
+      generic: I18n.t("forms.termination.genericSpare"),
+      spare: spareLabel,
+      otherCage: (spare, cageName) => I18n.t("forms.termination.spareOtherCage", { spare, port: cageName }),
+    });
+    const knownSpare = !!current && current.spareId !== undefined;   // l'appelant SAIT quelle pièce est liée (lien en attente)
+    const spareSel = FormControls.entityPickerAsync(source, knownSpare ? (current!.spareId || "") : "", { placeholder: I18n.t("forms.termination.genericSpare"), fallbackLabel: (id) => id });
+    // Pièce qui occupe la cage à l'OUVERTURE — sue de l'appelant, ou retrouvée dans les candidats (async) ; dans ce
+    // second cas elle devient la valeur du sélecteur, sauf si l'utilisateur a déjà choisi (sa décision prime).
+    let previousSpareId: string | null = knownSpare ? (current!.spareId || null) : null;
+    let userPicked = false;
+    // AVERTISSEMENT doux (§1.4) : `tx_form` vs connecteur de la CAGE, `tx_media` vs connecteur du MÉDIA — insensible
+    // à la casse, sur le premier mot (« LC (fibre) » vaut « LC ») ; contradiction ⇒ texte sous le champ, rien de bloquant.
+    const warn = document.createElement("div"); warn.className = "form-hint warn"; warn.style.display = "none";
+    const head = (s: unknown) => String(s || "").trim().toUpperCase().split(/[\s(]/)[0];
+    const refreshWarn = () => {
+      const spare: any = spareSel.value ? source.record(spareSel.value) : null;
+      const media: any = mediaSel.value ? store.get("portTypes", mediaSel.value) : null;
+      const issues: string[] = [];
+      if (spare && cage && head(spare.tx_form) && head(spare.tx_form) !== head(cage.connector || cage.family)) issues.push(I18n.t("forms.termination.warnForm", { form: spare.tx_form, cage: cage.connector || cage.family }));
+      if (spare && media && head(spare.tx_media) && head(spare.tx_media) !== head(media.connector || media.family)) issues.push(I18n.t("forms.termination.warnMedia", { media: spare.tx_media, connector: media.connector || media.family }));
+      warn.style.display = issues.length ? "" : "none";
+      warn.textContent = issues.length ? I18n.t("forms.termination.warnMismatch", { issues: issues.join(" ") }) : "";
+    };
+    if (!knownSpare) source.currentSpareId().then((id) => { previousSpareId = id; if (id && !userPicked && !spareSel.value) spareSel.value = id; refreshWarn(); });
+    spareSel.addEventListener("change", () => { userPicked = true; refreshWarn(); });
+    mediaSel.addEventListener("change", refreshWarn);
+    refreshWarn();
+    return Dialog.custom({
+      title: I18n.t(current ? "forms.termination.editTitle" : "forms.termination.title"),
+      confirmLabel: I18n.t(current ? "forms.termination.editConfirm" : "forms.termination.confirm"),
+      build: (root) => {
+        root.appendChild(FormControls.fieldRow(I18n.t("forms.termination.portField"), cageInfo, I18n.t("forms.termination.portHint")));
+        root.appendChild(FormControls.fieldRow(I18n.t("forms.termination.mediaField"), mediaSel, I18n.t("forms.termination.mediaHint")));
+        root.appendChild(FormControls.fieldRow(I18n.t("forms.termination.labelField"), labelI, I18n.t("forms.termination.labelHint")));
+        const spareRow = FormControls.fieldRow(I18n.t("forms.termination.spareField"), spareSel, I18n.t("forms.termination.spareHint"));
+        spareRow.appendChild(warn);
+        root.appendChild(spareRow);
+        return {
+          validate: () => (mediaSel.value ? true as const : I18n.t("forms.termination.errMedia")),
+          collect: (): TerminationConfig => ({ typeId: mediaSel.value, label: labelI.value.trim(), spareId: spareSel.value || null, previousSpareId }),
         };
       },
     });

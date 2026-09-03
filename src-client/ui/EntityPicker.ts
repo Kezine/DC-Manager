@@ -291,8 +291,11 @@ export class EntityPicker {
       // PORTAIL : défaut de SearchPop — mêmes conteneurs qui rognent qu'au régime sync.
       fetch: async (query) => {
         const batch = await source.fetch(query);
+        // `disabled` RELAYÉ comme au régime sync : une source peut griser un candidat en le nommant (une
+        // pièce déjà logée dans une autre cage — `core/TerminationSpareSource`) ; le taire le rendrait
+        // sélectionnable, et l'erreur ne surgirait qu'au refus d'écriture.
         const results: SearchPopResult[] = batch.options.map((option) => ({
-          id: option.value, label: option.label, data: option,
+          id: option.value, label: option.label, disabled: option.disabled, data: option,
         }));
         // Surplus du PARCOURS annoncé — même mécanique et même clé pluralisée que le régime sync
         // (un plafond silencieux ferait croire qu'une entité n'existe pas). La RECHERCHE, elle,
