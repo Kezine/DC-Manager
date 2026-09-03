@@ -91,7 +91,10 @@ export const INDEX_SPEC: Record<string, string[]> = {
   ipAddresses:   ["network_id", "equipment_id", "vm_id", "address"],   // vm_id : la cascade vms détache par ce champ
   dhcpRanges:    ["network_id", "server_id"],
   networks:      ["ip_network_id"],
-  spares:        ["assigned_equipment_id"],
+  // SPARES : `assigned_port_id` (terminaison — docs/terminaisons.md) est le chemin CHAUD de la cascade `ports`
+  // (détacher la pièce logée dans une cage supprimée) et de la dépendance inverse ports → spares (V5b) ;
+  // côté client, `Store._byFk` s'en sert pour la même cascade sur les pièces absorbées.
+  spares:        ["assigned_equipment_id", "assigned_port_id"],
   vms:           ["host_equipment_id", "group_id", "group_ids"],   // cascades hôte + groupes
   // CLIENTS WIFI : `provider_id` est le chemin CHAUD de la synchro (`WifiReconcile` réconcilie le
   // périmètre d'UN provider, retrouvé par `repo.findBy("wifiClients","provider_id",…)` à CHAQUE passe —

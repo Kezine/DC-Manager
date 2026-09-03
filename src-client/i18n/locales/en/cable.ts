@@ -70,6 +70,12 @@ export const cable = {
     selfLoop: "A cable cannot link a port to itself.",
     famDiffer: "Different families (« {{a}} » vs « {{b}} ») — these two ends do not even plug together: the cable will stay a DRAFT.",
     famAberrant: "Same {{connector}} connector on both sides, but different signals (« {{a}} » vs « {{b}} »): it plugs in, it will not work — the cable will stay a DRAFT.",
+    // TERMINATION (docs/terminaisons.md): when the pairing blocks, the hint OFFERS the gesture — one button per
+    // data end. The port is written IMMEDIATELY (Q5.4), outside the cable draft: hence the toast.
+    terminationSet: "Add a termination on {{port}}",
+    terminationEdit: "Edit the termination of {{port}}",
+    terminationPosed: "Termination set on {{port}}",
+    terminationFailed: "The termination could not be saved.",
     routeInvalidDraft: "Invalid route ({{message}}) → saved as « Draft ».",
     incompleteDraft: "Incomplete assignment → « Draft ». Fill both ports + a compatible type to plan it.",
     unplacedPlanned: "Unplaced equipment → maximum status « Planned »; « Cabled » will wait for both ends to be placed.",

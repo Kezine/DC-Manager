@@ -74,9 +74,9 @@ Chaque ligne de port porte un menu **⋮** (`ui/RowMenu`, le même que les listi
 | trunk | **Défaire le breakout** | les lanes quittent le brouillon ; le trunk **reste** et redevient une carte ordinaire au re-rendu. Le retrait en base passe par l'enregistrement (les ports absents du brouillon sont supprimés, cascade comprise) | item grisé nommant les lanes câblées (`canUnsplit`) |
 | trunk | **Supprimer le port et ses lanes** (danger) | retire trunk et lanes du brouillon | — |
 
-Le menu d'un port ordinaire n'a qu'**un** item aujourd'hui, et c'est voulu : la forme accueille un
-second emplacement (« poser une terminaison ») sans être refaite — clause C3 ci-dessous. On ne livre pas
-d'item factice grisé.
+Le menu est à **emplacements** (clause C3 ci-dessous) : le premier est celui du breakout, le second celui de la
+terminaison (« Poser / Modifier / Retirer la terminaison », [`terminaisons.md`](terminaisons.md)) — sur les ports
+ordinaires, les trunks et les lanes.
 
 Le bouton **« + Breakout »** (trunk neuf) existe toujours ; il ouvre le même dialogue en mode `new`.
 
@@ -114,19 +114,22 @@ Aucun écart : tout est **logique client** (brouillon du formulaire, `BreakoutRu
 **validation partagée** (règle T2). Éclater, défaire, nommer, câbler une lane fonctionnent à l'identique
 en mode fichier et en mode API — rien n'exige le serveur (principe n°15).
 
-## Terminaison (à venir)
+## Terminaison
 
 Le breakout modélise la **multiplicité** (« ce port se comporte comme N ports ») ; la terminaison
-modélisera le **média** (« ce que la cage présente au câble » — un transceiver). Ce sont deux notions
-orthogonales, donc **deux modèles autonomes**, reliés par un seul point de lecture : `Store.portFamily`
-deviendra la famille **effective** du port (terminaison du port ?? terminaison du trunk ?? famille du
-type). Pour que la terminaison s'ajoute sans rien défaire, le breakout tient six clauses :
+([`terminaisons.md`](terminaisons.md)) modélise le **média** (« ce que la cage présente au câble » — un
+transceiver). Ce sont deux notions orthogonales, donc **deux modèles autonomes**, reliés par un seul point de
+lecture : `Store.portFamily` est la famille **effective** du port (terminaison du port ?? terminaison du
+trunk ?? famille du type — `Store.effectivePortType`). Une terminaison posée sur un **trunk** est héritée par
+ses lanes (montage « transceiver fan-out ») ; le menu ⋮ des lignes de port porte l'item « Poser une
+terminaison… » au second emplacement. Pour que les deux couches coexistent sans se défaire, le breakout tient
+six clauses :
 
 | # | Clause |
 |---|---|
 | **C1** | Toute **logique** lit la famille par `Store.portFamily`, jamais `pt.family` en direct (l'affichage d'un libellé peut lire le type). |
 | **C2** | Les lanes **gardent leur `port_type_id` propre** ; la terminaison surchargera, elle ne changera pas le type de la lane. |
-| **C3** | Le menu ⋮ des lignes de port est un menu à **emplacements** : « éclater » en occupe un, « poser une terminaison » en occupera un autre. |
+| **C3** | Le menu ⋮ des lignes de port est un menu à **emplacements** : « éclater » en occupe un, « poser une terminaison » occupe l'autre. |
 | **C4** | Le **trunk éclaté reste incâblable** ; un trunk qui perd toutes ses lanes redevient câblable. |
 | **C5** | Éclater un port **existant conserve son identité et sa position de façade** — c'est ce qui rend l'opération réversible (défaire). |
 | **C6** | **Aucune donnée du breakout ne migre vers `spares`**, et aucun chemin synchrone n'en lit : `spares` est une collection paresseuse en mode API, la famille effective d'un port ne pourra jamais s'y lire. |

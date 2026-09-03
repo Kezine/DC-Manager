@@ -475,7 +475,9 @@ vide ou fantaisiste doit dégrader le MESSAGE, jamais le comportement. La propri
 test (`test-route-eligibility.js`, section « PortCompatibility »), dans les deux sens : même famille ⇒
 toujours `ok` quel que soit le connecteur ; familles différentes ⇒ toujours bloqué.
 
-⚠ **`aberrant` est le cas que T5 fera disparaître**, pas celui qu'il autorisera : le chantier
-« terminaisons / transceivers » donnera aux ports une famille EFFECTIVE (celle du transceiver posé dans
-la cage), et un FC 32G dans une SFP28 cessera alors d'être une contradiction — il deviendra un montage
-décrit. Jusque-là, le nommer est tout ce qu'on peut faire d'utile.
+⚠ **`aberrant` nomme un montage que la terminaison sait DÉCRIRE** ([`terminaisons.md`](terminaisons.md)) :
+les deux surfaces comparent les types **EFFECTIFS** des ports (`Store.effectivePortType` — le média que le
+transceiver posé dans la cage présente au câble, sinon la cage). Un port SFP28 qui présente une fibre LC
+monomode s'apparie donc avec un tiroir FO-SM sans être « aberrant » ; le connecteur cité par le message est
+alors celui du média présenté. Le verdict reste `aberrant` tant qu'aucune terminaison n'est posée — et c'est
+précisément là que le hint du formulaire câble **propose** de la poser.

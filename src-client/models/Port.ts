@@ -20,6 +20,18 @@ export class Port extends Entity implements Records.Port {
       le câble, le réseau déduit et l'analyse énergie ne changent pas. Le sous-équipement visé doit appartenir
       au même équipement que le port (règle cross-entité T2c). */
   sub_equipment_id: string | null;
+
+  /* ---- TERMINAISON (transceiver — docs/terminaisons.md) ----
+     Un transceiver logé dans la cage (SFP28…) PRÉSENTE au câble un autre média (LC duplex monomode…). Le type PROPRE
+     du port (`port_type_id`) reste la CAGE : il pilote la taille 3D du connecteur et permet de nommer un montage
+     aberrant. La terminaison SURCHARGE ce que le port présente — c'est `Store.effectivePortType` qui la lit pour la
+     compatibilité de câble ; une LANE sans terminaison propre hérite de celle de son trunk (montage fan-out). La
+     PIÈCE inventoriée qui occupe la cage n'est pas ici mais SUR la pièce (`Spare.assigned_port_id`) : `spares` est
+     paresseuse, la famille effective d'un port ne s'y lit jamais. */
+  /** FK → portTypes : le MÉDIA que la cage présente au câble. null = pas de terminaison (comportement d'avant). */
+  termination_port_type_id: string | null;
+  /** Libellé lisible du module (« SFP-10G-LR ») ; vide = transceiver générique. */
+  termination_label: string;
   /** BREAKOUT : FK → ports (le trunk parent). null = port normal/trunk. */
   parent_port_id: string | null;
   /** Index de lane (1..N) si breakout. null = non-lane. */
@@ -80,6 +92,8 @@ export class Port extends Entity implements Records.Port {
     this.role = p.role || "data";
     this.aggregate_id = p.aggregate_id || null;
     this.sub_equipment_id = p.sub_equipment_id || null;
+    this.termination_port_type_id = p.termination_port_type_id || null;
+    this.termination_label = p.termination_label || "";
     this.parent_port_id = p.parent_port_id || null;
     this.lane = (p.lane != null) ? (p.lane | 0) : null;
     this.face_x = (p.face_x != null) ? p.face_x : null;

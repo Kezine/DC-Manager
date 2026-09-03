@@ -146,6 +146,14 @@ export abstract class DcInteract extends DcPanels {
     // rôle + connecteur (type de port + famille) sur une ligne
     const pt: any = port.port_type_id ? this.store.get("portTypes", port.port_type_id) : null;
     rows.push(this.tipRow(`<b>${Html.escape(PortRoles.label(port.role))}</b>${pt ? " · " + Html.escape(pt.name) + (pt.family ? " (" + Html.escape(pt.family) + ")" : "") : ""}`));
+    // TERMINAISON (docs/terminaisons.md, Q5.5 — la 3D reste LOGIQUE, seule la bulle en parle) : ce que la cage
+    // PRÉSENTE au câble — posée sur ce port, ou héritée du trunk (montage fan-out). La ligne du type ci-dessus
+    // continue de nommer la CAGE : c'est la distinction que l'utilisateur doit lire.
+    const termination = this.store.terminationOf(port);
+    if (termination) {
+      const presented: any = this.store.get("portTypes", termination.typeId);
+      rows.push(this.tipRow(`${Html.escape(I18n.t("dc.interact.terminationPrefix"))}<b>${Html.escape(termination.label || I18n.t("forms.termination.genericLabel"))}</b> ⇒ ${Html.escape(presented ? presented.name : I18n.t("equipment.detail.typeUnknown"))}${termination.inherited ? Html.escape(I18n.t("dc.interact.terminationInherited")) : ""}`));
+    }
     // spécificités électriques : POE (PSE/PD · budget W) ou power (sens · calibre A · phase)
     if (PortRoles.isPoe(port.role)) {
       const sens = port.direction === "source" ? I18n.t("forms.port.pse") : port.direction === "sink" ? I18n.t("forms.port.pd") : null;

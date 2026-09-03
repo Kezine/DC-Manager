@@ -1005,6 +1005,15 @@
   .port .p-metric.poe { color: var(--role-poe); display: inline-flex; align-items: center; gap: 3px; justify-content: flex-end; }
   .port .p-metric.poe svg { width: 11px; height: 11px; }
   .port .p-metric .muted { color: var(--fg-dimmer); }
+  /* TERMINAISON (docs/terminaisons.md) : pastille « ⇒ média présenté » sur la tête de port (formulaire, groupe breakout)
+     et sous le nom du port (fiche). HÉRITÉE du trunk → atténuée et tiretée : l'information vient d'une autre ligne, elle
+     ne se modifie pas ici. Tokens seulement (le thème clair suit de lui-même). */
+  .pill.p-term { border-color: var(--accent); color: var(--accent-text); flex: none; max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; }
+  .pill.p-term.inherited { border-style: dashed; border-color: var(--line-2); color: var(--fg-dim); }
+  .p-term-row { margin: 2px 0 0; }
+  .port-breakout-lane .p-acts { margin-left: 0; }   /* le tag « lane N » garde l'auto-marge : le ⋮ vient juste après lui */
+  /* Boutons d'ACTION proposés par un hint de formulaire (« Poser une terminaison sur A / B » du formulaire câble). */
+  .form-hint .hint-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
   .port .p-net { flex: 1; min-width: 0; color: var(--fg-dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .port .p-net .muted { color: var(--fg-dimmer); }
   .port .p-acts { display: flex; gap: 4px; flex: none; }

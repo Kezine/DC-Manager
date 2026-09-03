@@ -83,6 +83,12 @@ export const cable = {
     // logiquement aberrant. MÊME refus que ci-dessus — c'est le LIBELLÉ qui change, pour que le
     // blocage soit compris au lieu d'être subi (retour terrain T3).
     famAberrant: "Connecteur {{connector}} des deux côtés, mais signaux différents (« {{a}} » vs « {{b}} ») : ça se branche, ça ne fonctionne pas — le câble restera un BROUILLON.",
+    // TERMINAISON (docs/terminaisons.md) : quand l'appariement bloque, le hint PROPOSE le geste — un bouton par
+    // bout de données. L'écriture du port est IMMÉDIATE (Q5.4), hors du brouillon du câble : d'où le toast.
+    terminationSet: "Poser une terminaison sur {{port}}",
+    terminationEdit: "Modifier la terminaison de {{port}}",
+    terminationPosed: "Terminaison posée sur {{port}}",
+    terminationFailed: "La terminaison n'a pas pu être enregistrée.",
     routeInvalidDraft: "Route invalide ({{message}}) → enregistré en « Brouillon ».",
     incompleteDraft: "Assignation incomplète → « Brouillon ». Renseignez les 2 ports + un type compatible pour le planifier.",
     unplacedPlanned: "Équipement(s) non placé(s) → statut maximal « Planifié » ; « Câblé » attendra la pose des deux bouts.",

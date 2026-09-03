@@ -1,0 +1,640 @@
+<!doctype html>
+<html lang="fr" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Impression d'étiquettes QR — maquette</title>
+<style>
+  :root{
+    --bg:#0a0a0a;--bg-2:#111111;--bg-3:#161616;--line:#222222;--line-2:#2d2d2d;
+    --fg:#e8e8e8;--fg-dim:#9a9aa2;--fg-dimmer:#555555;
+    --accent-fill:oklch(0.67 0.19 46);--accent:oklch(0.72 0.175 50);--accent-text:oklch(0.80 0.15 62);
+    --ok:oklch(0.76 0.15 152);--warn:oklch(0.82 0.14 88);--err:oklch(0.66 0.19 27);--info:oklch(0.70 0.14 230);
+    --focus:var(--accent-text);--grid-size:24px;--radius-pill:5px;--control-h:34px;
+    --mono:ui-monospace,"SF Mono","Menlo","Consolas","Cascadia Mono","Roboto Mono",monospace;
+    --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  }
+  [data-theme="light"]{
+    --bg:#f4f4f1;--bg-2:#ffffff;--bg-3:#ebebe6;--line:#d6d6d0;--line-2:#b8b8b0;
+    --fg:#1a1a1a;--fg-dim:#5a5a55;--fg-dimmer:#8a8a82;
+    --accent-fill:oklch(0.57 0.18 42);--accent:oklch(0.58 0.17 45);--accent-text:oklch(0.55 0.18 45);
+    --ok:oklch(0.52 0.14 152);--warn:oklch(0.58 0.13 80);--err:oklch(0.52 0.19 27);--info:oklch(0.50 0.14 250);
+  }
+  *{box-sizing:border-box}
+  [hidden]{display:none!important}
+  html,body{margin:0}
+  body{background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px;line-height:1.5;background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);background-size:var(--grid-size) var(--grid-size);-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1220px;margin:0 auto;padding:40px 28px 120px}
+  a{color:var(--accent-text)}a:hover{color:var(--accent)}
+  code{color:var(--accent-text);font-family:var(--mono)}
+  :focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+  header.top{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;flex-wrap:wrap}
+  .eyebrow{font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:var(--accent-text)}
+  h1{font-size:24px;letter-spacing:.06em;margin:6px 0 0;font-weight:700}
+  .lede{font-family:var(--sans);color:var(--fg-dim);max-width:80ch;margin:14px 0 0;font-size:14px;text-wrap:pretty}
+  .theme-btn{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;background:var(--bg-2);color:var(--fg-dim);border:1px solid var(--line-2);border-radius:var(--radius-pill);padding:8px 12px;cursor:pointer;flex:none;min-height:var(--control-h);display:inline-flex;align-items:center;gap:7px}
+  .theme-btn:hover{color:var(--fg);border-color:var(--fg)}
+  .theme-btn svg{width:13px;height:13px}
+  section{margin-top:44px}
+  .sec-h{display:flex;align-items:baseline;gap:12px;border-bottom:1px solid var(--line-2);padding-bottom:8px;margin-bottom:20px;flex-wrap:wrap}
+  .sec-n{font-size:11px;color:var(--accent-text);letter-spacing:.12em}
+  .sec-t{font-size:15px;letter-spacing:.1em;text-transform:uppercase;font-weight:700}
+  .sec-tag{margin-left:auto;font-size:10px;color:var(--fg-dim);letter-spacing:.06em;text-transform:uppercase}
+  .card{background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:22px}
+  .prose{font-family:var(--sans);color:var(--fg-dim);font-size:13px;max-width:82ch;margin:0 0 18px;text-wrap:pretty}
+  .prose b,.prose strong{color:var(--fg);font-weight:600}
+  .notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-top:22px}
+  .note{border-left:2px solid var(--line-2);padding:2px 0 2px 12px}
+  .note.good{border-color:var(--ok)}.note.warn{border-color:var(--warn)}.note.info{border-color:var(--info)}.note.bad{border-color:var(--err)}
+  .note h4{margin:0 0 3px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dim)}
+  .note p{margin:0;font-family:var(--sans);font-size:12px;color:var(--fg);line-height:1.45;text-wrap:pretty}
+  .note p+p{margin-top:6px}
+  .btn{display:inline-flex;align-items:center;gap:8px;justify-content:center;background:var(--bg-3);border:1px solid var(--line-2);color:var(--fg);font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;border-radius:var(--radius-pill);min-height:40px;padding:0 14px;cursor:pointer}
+  .btn:hover{border-color:var(--fg)}
+  .btn>svg{width:14px;height:14px;flex:none}
+  .btn-primary{background:var(--accent-fill);border-color:var(--accent-fill);color:#000;font-weight:600}
+  .btn-primary:hover{filter:brightness(1.12)}
+  .btn-ghost{background:transparent;border-color:var(--line)}
+  .btn-sm{min-height:32px;font-size:10px;padding:0 10px}
+  @media (pointer:coarse){.btn{min-height:44px}}
+  .chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line-2);border-radius:var(--radius-pill);padding:2px 8px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dim)}
+  .chip.acc{border-color:var(--accent);color:var(--accent-text)}
+  input[type=checkbox]{appearance:none;width:16px;height:16px;border:1px solid var(--line-2);border-radius:3px;background:var(--bg-3);cursor:pointer;position:relative;flex:none;margin:0}
+  input[type=checkbox]:checked{background:var(--accent-fill);border-color:var(--accent-fill)}
+  input[type=checkbox]:checked::after{content:"";position:absolute;left:4px;top:1px;width:6px;height:10px;border-right:2px solid #000;border-bottom:2px solid #000;transform:rotate(38deg)}
+  select.ctl,input.ctl{width:100%;background:var(--bg);border:1px solid var(--line-2);border-radius:var(--radius-pill);color:var(--fg);font-family:var(--mono);font-size:12px;min-height:36px;padding:0 9px;outline:none}
+  select.ctl:focus,input.ctl:focus{border-color:var(--accent)}
+  .seg{display:flex;border:1px solid var(--line-2);border-radius:var(--radius-pill);overflow:hidden}
+  .seg button{flex:1;background:transparent;border:0;border-right:1px solid var(--line-2);color:var(--fg-dim);font-family:var(--mono);font-size:11px;letter-spacing:.06em;padding:0 8px;min-height:36px;cursor:pointer}
+  .seg button:last-child{border-right:0}
+  .seg button[aria-pressed=true]{background:var(--accent-fill);color:#000;font-weight:600}
+  @media (pointer:coarse){.seg button{min-height:44px}}
+
+  /* ---------- imprimé : noir sur blanc, cotes en mm ---------- */
+  .lab{background:#fff;color:#000;display:flex;align-items:center;gap:2mm;padding:1.5mm;overflow:hidden;font-family:var(--sans);print-color-adjust:exact;-webkit-print-color-adjust:exact}
+  .lab *{color:#000}
+  .lab .qr{flex:none;display:block}
+  .lab .txt{min-width:0;display:flex;flex-direction:column;gap:.5mm}
+  .lab .l-id{font-family:var(--mono);font-weight:700;line-height:1.08;letter-spacing:-.02em;overflow-wrap:anywhere}
+  .lab .l-f{font-family:var(--sans);line-height:1.18;color:#222;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .lab .l-f.mono{font-family:var(--mono)}
+  .lab.compact{padding:.8mm;gap:1.4mm}
+  .lab.qronly{flex-direction:column;justify-content:center;gap:.8mm}
+  .lab.qronly .txt{align-items:center;width:100%}
+  .lab.qronly .l-id{text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  .lab.s .l-id{font-size:8pt}.lab.s .l-f{font-size:6pt}
+  .lab.m .l-id{font-size:8.5pt}.lab.m .l-f{font-size:6.2pt}
+  .lab.l{gap:3mm;padding:3mm}
+  .lab.l .l-id{font-size:12pt}.lab.l .l-f{font-size:8pt}
+  .lab.rack{gap:5mm;padding:4mm}
+  .lab.rack .l-id{font-size:26pt;letter-spacing:-.03em}.lab.rack .l-f{font-size:10pt}
+  .lab.flag{padding:0;gap:0;align-items:stretch}
+  .lab.flag .pan{flex:none;display:flex;align-items:center;justify-content:center;gap:1.2mm;overflow:hidden;padding:.6mm}
+  .lab.flag .pan.b{justify-content:flex-start}
+  .lab.flag .wz{flex:none;border-left:.2mm dashed #999;border-right:.2mm dashed #999;background:repeating-linear-gradient(45deg,#fff 0 1mm,#e9e9e9 1mm 2mm)}
+  .lab.flag .pan .txt{flex:1;min-width:14mm}
+  .lab.flag .l-id{font-size:7pt;white-space:normal}
+  .lab.flag .l-f{font-size:5pt;white-space:normal;overflow-wrap:anywhere;line-height:1.2}
+  .lab.sleeve{padding:0;gap:0;align-items:stretch}
+  .lab.sleeve .cell{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:1mm 0;overflow:hidden;writing-mode:vertical-rl;border-right:.2mm dashed #ccc}
+  .lab.sleeve .cell .l-id{font-size:8pt;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  .lab.sleeve .cell .l-f{font-size:5pt;white-space:normal;overflow-wrap:anywhere;max-height:100%}
+  .lab.sleeve .ov{flex:none;background:repeating-linear-gradient(45deg,#fff 0 1mm,#e9e9e9 1mm 2mm);border-left:.2mm dashed #999}
+
+  /* ---------- panneau re-pensé ---------- */
+  .faces{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+  .face{background:var(--bg-2);border:1px solid var(--line-2);border-radius:var(--radius-pill);color:var(--fg-dim);font-family:var(--mono);font-size:11px;padding:9px 12px;cursor:pointer;text-align:left;min-height:44px;display:flex;flex-direction:column;gap:2px}
+  .face b{color:var(--fg);font-weight:600;letter-spacing:.04em}
+  .face span{font-size:10px;color:var(--fg-dimmer)}
+  .face[aria-pressed=true]{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,var(--bg-2))}
+  .face[aria-pressed=true] b,.face[aria-pressed=true] span{color:var(--accent-text)}
+  .modal{background:var(--bg-2);border:1px solid var(--line-2);border-radius:10px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.45)}
+  .m-head{display:flex;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .m-title{font-size:12px;letter-spacing:.12em;text-transform:uppercase;font-weight:700}
+  .m-body{display:grid;grid-template-columns:minmax(300px,340px) 1fr}
+  @media (max-width:920px){.m-body{grid-template-columns:1fr}}
+  .m-side{border-right:1px solid var(--line);display:flex;flex-direction:column}
+  @media (max-width:920px){.m-side{border-right:0;border-bottom:1px solid var(--line)}}
+  .ctx{padding:12px 16px;border-bottom:1px solid var(--line);background:var(--bg-3);display:flex;flex-direction:column;gap:6px}
+  .ctx .who{font-size:13px;color:var(--fg)}
+  .ctx .who b{color:var(--accent-text);font-weight:600}
+  .ctx .meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .stages{display:flex;flex-direction:column}
+  .stg{border-bottom:1px solid var(--line);padding:14px 16px}
+  .stg:last-child{border-bottom:0}
+  .stg-h{display:flex;align-items:baseline;gap:8px;margin-bottom:10px}
+  .stg-n{font-size:10px;color:var(--accent-text);letter-spacing:.1em;flex:none}
+  .stg-t{font-size:10px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;color:var(--fg)}
+  .stg-v{margin-left:auto;font-size:10px;color:var(--fg-dim);text-align:right}
+  .stg.lead{background:color-mix(in srgb,var(--accent) 7%,transparent)}
+  .why{font-family:var(--sans);font-size:11px;color:var(--fg-dimmer);margin:10px 0 0;display:flex;gap:7px;line-height:1.4;text-wrap:pretty}
+  .why svg{width:12px;height:12px;flex:none;margin-top:3px}
+  .opts{display:flex;flex-direction:column;gap:4px}
+  .opt{display:flex;align-items:center;gap:10px;background:transparent;border:1px solid transparent;border-radius:var(--radius-pill);color:var(--fg);font-family:var(--mono);font-size:12px;padding:7px 8px;cursor:pointer;text-align:left;min-height:38px;width:100%}
+  .opt .rad{width:13px;height:13px;border-radius:50%;border:1px solid var(--line-2);flex:none;position:relative}
+  .opt:hover{border-color:var(--line-2)}
+  .opt[aria-pressed=true]{background:color-mix(in srgb,var(--accent) 13%,transparent);border-color:var(--accent)}
+  .opt[aria-pressed=true] .rad{border-color:var(--accent);background:radial-gradient(circle,var(--accent-fill) 0 45%,transparent 46%)}
+  .opt .o-t{display:flex;flex-direction:column;gap:1px;min-width:0}
+  .opt .o-t em{font-style:normal;font-size:10px;color:var(--fg-dimmer);font-family:var(--sans)}
+  .opt[disabled]{cursor:not-allowed;opacity:1;color:var(--fg-dimmer)}
+  .opt[disabled] .rad{border-style:dashed;opacity:.5}
+  .opt[disabled] .o-t em{color:var(--fg-dimmer)}
+  .opt .lock{margin-left:auto;flex:none;font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-dimmer);border:1px dashed var(--line-2);border-radius:3px;padding:1px 5px}
+  @media (pointer:coarse){.opt{min-height:44px}}
+  .mm-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(76px,1fr));gap:8px;margin-top:10px}
+  .mm-row label{display:flex;flex-direction:column;gap:4px;font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dimmer)}
+  .flds{display:flex;flex-direction:column;gap:1px}
+  .fld{display:flex;align-items:center;gap:10px;min-height:34px;cursor:pointer;padding:2px 0}
+  .fld .fl{font-size:12px;flex:none}
+  .fld .fv{margin-left:auto;font-size:10px;color:var(--fg-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46%;text-align:right}
+  .fld.fixed{color:var(--fg-dim);cursor:default}
+  @media (pointer:coarse){.fld{min-height:44px}}
+  .cnt-line{font-family:var(--sans);font-size:11px;color:var(--fg-dimmer);margin:0 0 9px}
+  .m-prev{background:var(--bg-3);display:flex;flex-direction:column;min-width:0}
+  .prev-top{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dim)}
+  .prev-top .sp{margin-left:auto}
+  .risk{margin:14px 16px 0;border:1px solid var(--warn);border-left-width:3px;border-radius:var(--radius-pill);background:color-mix(in srgb,var(--warn) 10%,transparent);padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+  .risk h6{margin:0;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--warn);display:flex;align-items:center;gap:6px}
+  .risk h6 svg{width:13px;height:13px;flex:none}
+  .risk p{margin:0;font-family:var(--sans);font-size:12px;color:var(--fg);line-height:1.4}
+  .risk p b{color:var(--warn)}
+  .prev-stage{flex:1;display:flex;align-items:center;justify-content:center;padding:26px 16px;overflow:auto;min-height:300px}
+  .prev-stage .pad{display:flex;flex-direction:column;align-items:center;gap:12px}
+  .prev-stage .cote{font-size:10px;color:var(--fg-dim);letter-spacing:.08em}
+  .lab-frame{border:1px dashed var(--line-2);padding:6px;border-radius:4px;background:#fff}
+  .a4{width:210mm;height:297mm;background:#fff;padding:8mm;display:grid;align-content:start;print-color-adjust:exact}
+  .a4-head{grid-column:1/-1;display:flex;justify-content:space-between;font-family:var(--mono);font-size:6pt;color:#666;padding-bottom:2mm}
+  .a4 .cell{border-right:.2mm dashed #bbb;border-bottom:.2mm dashed #bbb;overflow:hidden;display:flex}
+  .a4 .cell .lab{width:100%;height:100%}
+  .a4-hold{border:1px solid var(--line-2);border-radius:4px;overflow:hidden;flex:none}
+  .a4-scale{transform-origin:top left}
+  .m-foot{display:flex;align-items:center;gap:12px;padding:12px 16px;border-top:1px solid var(--line);flex-wrap:wrap}
+  .m-foot .sp{margin-left:auto}
+  .tirage-info{font-family:var(--sans);font-size:11px;color:var(--fg-dim);display:flex;gap:7px;align-items:center;line-height:1.35;max-width:52ch}
+  .tirage-info svg{width:13px;height:13px;flex:none;color:var(--info)}
+
+  /* ---------- avant / après ---------- */
+  .ba{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media (max-width:900px){.ba{grid-template-columns:1fr}}
+  .ba-col{border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--bg-2)}
+  .ba-h{padding:10px 14px;border-bottom:1px solid var(--line);font-size:10px;letter-spacing:.12em;text-transform:uppercase;display:flex;gap:10px;align-items:center}
+  .ba-col.before .ba-h{color:var(--err)}
+  .ba-col.after .ba-h{color:var(--ok)}
+  .ba-b{padding:14px}
+  .stackline{display:flex;flex-direction:column;gap:6px}
+  .sl{display:flex;align-items:center;gap:9px;border:1px solid var(--line-2);border-radius:var(--radius-pill);padding:8px 10px;font-size:11px;background:var(--bg-3)}
+  .sl .tag{margin-left:auto;font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-dimmer)}
+  .sl.ghost{border-style:dashed;color:var(--fg-dimmer);background:transparent}
+  .sl.acc{border-color:var(--accent);color:var(--accent-text)}
+  .flags{display:flex;flex-wrap:wrap;gap:5px;margin-top:12px}
+  .flags code{font-size:10px;border:1px dashed var(--line-2);border-radius:3px;padding:2px 5px;color:var(--fg-dim)}
+
+  /* ---------- matrice ---------- */
+  .tbl-scroll{overflow-x:auto}
+  table.mx{width:100%;border-collapse:collapse;font-size:11px;min-width:720px}
+  table.mx th,table.mx td{border-bottom:1px solid var(--line);padding:9px 10px;text-align:left;vertical-align:top}
+  table.mx thead th{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--fg-dimmer);font-weight:400;border-bottom:1px solid var(--line-2)}
+  table.mx tbody th{font-weight:400;color:var(--fg);white-space:nowrap}
+  table.mx .y{color:var(--ok)}
+  table.mx .n{color:var(--fg-dimmer)}
+  table.mx .n em{font-style:normal;font-family:var(--sans);color:var(--fg-dimmer)}
+  table.mx .only{color:var(--accent-text)}
+  @media print{body{background:#fff;background-image:none}.theme-btn,.faces{display:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+  <div>
+    <div class="eyebrow">Chantier étiquettes QR · T11 — re-design ergonomique</div>
+    <h1>Impression d'étiquettes QR</h1>
+    <p class="lede">Le rendu imprimé n'est pas en cause : c'est <b>le panneau de réglages</b> qui a dérivé, onze drapeaux de visibilité plus tard. La proposition : quatre étages fixes qui ne disparaissent jamais, un axe « Support » qui remplace le fourre-tout « Format », l'ordre des étages piloté par la volumétrie, et deux registres d'avertissement au lieu d'un tas.</p>
+  </div>
+  <button class="theme-btn" id="themeBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg><span id="themeLbl">Clair</span></button>
+</header>
+
+<section>
+  <div class="sec-h"><span class="sec-n">01</span><span class="sec-t">Le panneau, dans ses visages</span><span class="sec-tag">cliquez un visage — c'est leur coexistence qui est le sujet</span></div>
+  <p class="prose">Le même panneau, quatre contextes. <b>Aucun étage ne disparaît d'un visage à l'autre</b> : c'est leur contenu qui change, et chaque étage dit en pied ce qu'il n'offre pas ici et pourquoi. Le seul déplacement structurel autorisé est celui de l'étage <b>Tirage</b>, qui passe en tête dès qu'on imprime plus d'une étiquette.</p>
+  <div class="faces" id="faces"></div>
+  <div class="modal">
+    <div class="m-head">
+      <span class="m-title">Imprimer des étiquettes</span>
+      <span class="chip" id="headChip">—</span>
+      <span class="sp" style="margin-left:auto"></span>
+      <span style="font-size:10px;color:var(--fg-dimmer);letter-spacing:.06em;text-transform:uppercase">Réglages mémorisés pour ce contexte · session</span>
+    </div>
+    <div class="m-body">
+      <div class="m-side">
+        <div class="ctx">
+          <div class="who" id="ctxWho">—</div>
+          <div class="meta" id="ctxMeta"></div>
+        </div>
+        <div class="stages" id="stages"></div>
+      </div>
+      <div class="m-prev">
+        <div class="prev-top"><span id="prevKind">Aperçu</span><span class="sp"></span><span id="prevScale">taille réelle</span></div>
+        <div id="riskHost"></div>
+        <div class="prev-stage"><div class="pad"><div id="prevHost"></div><div class="cote" id="prevCote"></div></div></div>
+        <div class="m-foot">
+          <div class="tirage-info" id="tirageInfo"></div>
+          <span class="sp"></span>
+          <button class="btn btn-ghost btn-sm">Annuler</button>
+          <button class="btn btn-primary" id="printBtn">Imprimer</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="notes">
+    <div class="note good"><h4>Ce qui change vraiment</h4><p>Le panneau a une <b>forme constante</b> : contexte, puis 4 étages numérotés, puis le pied. L'utilisateur peut mémoriser la géographie du panneau, ce qui était impossible avec onze drapeaux.</p></div>
+    <div class="note good"><h4>« Support » remplace « Format »</h4><p>Trois objets physiques distincts — étiquette plate, drapeau + manchon, tête de baie — sont des <b>choix de support</b>, pas des lignes d'un même menu de tailles. Les cotes (mm, QR, Ø, longueur) descendent du support choisi.</p></div>
+    <div class="note info"><h4>Les deux extrémités remontent dans la modale</h4><p>« Un drapeau » / « les 2 extrémités » disparaît des fiches : une seule entrée, et une bascule <b>A / B / A+B</b> dans l'étage Support — décision de même nature que les autres.</p></div>
+    <div class="note warn"><h4>Absence : deux traitements, jamais trois</h4><p>Axe fixe (support, contenu) → l'option <b>reste visible, désactivée, avec sa raison</b>. Champ non déclaré par le sujet → <b>absent</b>, et le compte l'énonce (« 6 champs déclarés »). Pas de troisième régime.</p></div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-h"><span class="sec-n">02</span><span class="sec-t">Avant / après</span><span class="sec-tag">structure du panneau</span></div>
+  <div class="ba">
+    <div class="ba-col before">
+      <div class="ba-h">Aujourd'hui — 11 drapeaux, ordre figé</div>
+      <div class="ba-b">
+        <div class="stackline">
+          <div class="sl">Contenu<span class="tag">fixe</span></div>
+          <div class="sl">Format <span style="color:var(--fg-dimmer)">/ Taille du QR / Manchon</span><span class="tag">titre variable</span></div>
+          <div class="sl ghost">Sélecteur de taille<span class="tag">peut disparaître</span></div>
+          <div class="sl ghost">Larg. / Haut.<span class="tag">peut disparaître</span></div>
+          <div class="sl ghost">QR mm<span class="tag">peut disparaître</span></div>
+          <div class="sl ghost">Ø / longueur<span class="tag">peut disparaître</span></div>
+          <div class="sl">Densité<span class="tag">fixe</span></div>
+          <div class="sl ghost">Champs (quatuor figé)<span class="tag">peut disparaître</span></div>
+          <div class="sl">Propriétaire<span class="tag">équipement seul</span></div>
+          <div class="sl ghost">Planche<span class="tag">en bas, dominant au panier</span></div>
+          <div class="sl ghost">Avertissements en vrac<span class="tag">sans hiérarchie</span></div>
+        </div>
+        <div class="flags"><code>header×3</code><code>showSizeSelect</code><code>showWidthHeight</code><code>showQrMm</code><code>showDiaLen</code><code>showMmRow</code><code>showIdRow</code><code>showFieldsSection</code><code>fieldVisible</code><code>ends</code><code>showSheetSection</code></div>
+      </div>
+    </div>
+    <div class="ba-col after">
+      <div class="ba-h">Proposé — 4 étages, ordre piloté par la volumétrie</div>
+      <div class="ba-b">
+        <div class="stackline">
+          <div class="sl acc">Contexte : sujet · nombre · anatomie<span class="tag">jamais masqué</span></div>
+          <div class="sl">◈ Tirage<span class="tag">en tête si N &gt; 1</span></div>
+          <div class="sl">① Support<span class="tag">+ cotes du support</span></div>
+          <div class="sl">② Contenu<span class="tag">options désactivées visibles</span></div>
+          <div class="sl">③ Informations additionnelles<span class="tag">longueur variable</span></div>
+          <div class="sl acc">Risque de scan → collé à l'aperçu<span class="tag">registre 1</span></div>
+          <div class="sl acc">Conséquences de tirage → pied<span class="tag">registre 2</span></div>
+        </div>
+        <p class="prose" style="margin:14px 0 0;font-size:12px">Les onze drapeaux ne disparaissent pas du code : ils cessent d'être <b>visibles comme des trous</b>. La politique continue de dire « pas de donnée derrière » ; l'UI le dit à l'utilisateur au lieu de retirer le contrôle en silence.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-h"><span class="sec-n">03</span><span class="sec-t">Coexistence — 4 anatomies × les axes</span><span class="sec-tag">lecture de la politique, telle qu'elle se voit</span></div>
+  <div class="card">
+    <p class="prose">Ce tableau est ce que l'utilisateur doit pouvoir <b>prévoir</b>. Chaque « non » porte une raison ; c'est cette raison, et non l'absence, qui est affichée dans le panneau.</p>
+    <div class="tbl-scroll">
+      <table class="mx">
+        <thead><tr><th>Anatomie</th><th>Support</th><th>Contenu</th><th>Cotes</th><th>Extrémités</th><th>Champs déclarés</th></tr></thead>
+        <tbody>
+          <tr><th>Objet — <code>equipment</code></th><td>Étiquette S / M / L / libre</td><td class="y">QR + texte · QR seul</td><td>larg × haut · QR</td><td class="n">— <em>un seul objet</em></td><td>4 (dont propriétaire — <span class="only">le seul</span>)</td></tr>
+          <tr><th>Baie — <code>rack</code></th><td>Étiquette + <span class="only">tête de baie 100×60</span></td><td class="y">QR + texte · QR seul</td><td>larg × haut · QR</td><td class="n">— <em>un seul objet</em></td><td>3</td></tr>
+          <tr><th>Drapeau — <code>cable</code> · <code>bundle</code></th><td><span class="only">Drapeau</span> · <span class="only">manchon</span> · étiquette</td><td class="y">QR + texte · QR seul · <span class="only">manchon repère · manchon identifiant</span></td><td>Ø câble · longueur · QR</td><td class="y">A / B / A+B</td><td>3</td></tr>
+          <tr><th>Petit matériel — <code>spare</code> · <code>subEquipment</code></th><td>Étiquette S <em>(défaut)</em> / M / L / libre</td><td class="y">QR + texte · QR seul</td><td>larg × haut · QR</td><td class="n">— <em>un seul objet</em></td><td>4 à 8 <em>selon le type</em></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="notes">
+      <div class="note"><h4>Contenu : 4 valeurs, 2 réservées</h4><p>Les deux manchons restent listés pour tous, désactivés hors drapeau : « sans QR — réservé aux câbles et faisceaux ». Le vocabulaire de la modale devient stable d'un sujet à l'autre.</p></div>
+      <div class="note"><h4>Support : la carte des cotes</h4><p>Chaque support déclare son jeu de cotes. Plus besoin de <code>showWidthHeight</code> / <code>showDiaLen</code> côté UI : le support porte l'information.</p></div>
+      <div class="note info"><h4>Panier mono-famille</h4><p>Les N sujets d'un tirage partagent l'anatomie : le panneau garde exactement les mêmes visages, seule la volumétrie change. Aucun cas mixte à dessiner.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-h"><span class="sec-n">04</span><span class="sec-t">Informations additionnelles — longueur variable</span><span class="sec-tag">T10, arbitré le 2026-09-02</span></div>
+  <div class="card">
+    <p class="prose">La liste se peint depuis la déclaration du sujet ; <b>la valeur est affichée à droite de chaque case</b>. C'est là que la promesse « pas de case sans donnée » devient lisible : on voit ce qui s'imprimera, et l'absence d'une ligne ne se lit plus comme un contrôle qui a disparu mais comme une donnée que l'objet n'a pas.</p>
+    <div class="ba" id="declDemo"></div>
+    <div class="notes">
+      <div class="note good"><h4>Défauts sobres</h4><p>3 à 4 cases cochées quel que soit le nombre déclaré ; le reste est offert décoché. Un spare disque peut déclarer 8 champs sans que l'étiquette par défaut change de densité.</p></div>
+      <div class="note warn"><h4>Garde-fou de débordement</h4><p>Au-delà de ce que le gabarit peut tenir, l'aperçu tronque et le registre « risque de scan » le signale. Pas d'interdiction : on imprime pour son propre usage.</p></div>
+      <div class="note"><h4>Identifiant, non décochable</h4><p>Reste en tête de liste, en gris, avec sa valeur — présent pour être compris, pas pour être réglé.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-h"><span class="sec-n">05</span><span class="sec-t">Avertissements — deux registres</span></div>
+  <div class="card">
+    <p class="prose">Six avertissements cohabitaient sans hiérarchie. Ils se répartissent en deux familles, qui n'ont ni la même gravité ni le même point d'ancrage :</p>
+    <div class="notes" style="margin-top:0">
+      <div class="note warn"><h4>Registre 1 — risque de scan · collé à l'aperçu</h4><p>QR sous 18 mm · QR qui ne tient pas dans l'étiquette · manchon trop court pour son texte.</p><p><b>Pourquoi là :</b> ça se voit sur l'aperçu, et ça compromet l'objet imprimé. Bordure d'accent chaud, un seul bloc, formulation à conséquence (« ce QR pourra ne pas se scanner en baie »).</p></div>
+      <div class="note info"><h4>Registre 2 — conséquence de tirage · pied de modale</h4><p>Colonnes plafonnées · planche multi-feuilles · nombre d'étiquettes par feuille.</p><p><b>Pourquoi là :</b> ça ne compromet rien, ça décrit ce qui va sortir de l'imprimante — donc à côté du bouton Imprimer, en ton neutre.</p></div>
+      <div class="note"><h4>Aucun ne bloque</h4><p>Inchangé, et assumé : le bouton Imprimer reste actif dans tous les cas.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-h"><span class="sec-n">06</span><span class="sec-t">Recommandations tranchées &amp; reste à décider</span></div>
+  <div class="card">
+    <div class="notes" style="margin-top:0">
+      <div class="note good"><h4>Tranché — 1 entrée par objet</h4><p>Fusionner les deux gestes drapeau (fiches câble et faisceau) en une entrée « Étiqueter… », extrémités réglées dans la modale. 11 points d'entrée → 9.</p></div>
+      <div class="note good"><h4>Tranché — Tirage en tête si N &gt; 1</h4><p>Le seul déplacement d'étage autorisé, et il est prévisible : il suit le nombre de sujets reçus, affiché juste au-dessus.</p></div>
+      <div class="note good"><h4>Tranché — Densité rejoint le Tirage</h4><p>Compact / Confort n'est pas un choix de contenu mais de <b>compacité de tirage</b> ; il quitte le milieu du panneau pour l'étage Tirage, où il côtoie colonnes et traits de coupe.</p></div>
+      <div class="note warn"><h4>À décider — mémoire des réglages</h4><p>La mémoire session par sujet reste-t-elle silencieuse ? Proposition : une ligne dans le contexte (« repris de votre dernier tirage ») et un « Revenir aux défauts » discret. Coût faible, gain de prévisibilité fort.</p></div>
+      <div class="note warn"><h4>À décider — propriétaire libre</h4><p>Champ texte saisi à chaque tirage aujourd'hui. Le garder tel quel, ou le faire descendre du sujet comme les autres champs (donc plus de saisie libre) ?</p></div>
+      <div class="note info"><h4>À décider — gabarits nommés</h4><p>La question Avery reste ouverte du lot E. Si elle est tranchée « oui », sa place naturelle est l'étage Tirage (« papier »), pas Support.</p></div>
+    </div>
+  </div>
+</section>
+</div>
+
+<script>
+(function(){
+  const $=s=>document.querySelector(s);
+  const el=(t,c,h)=>{const n=document.createElement(t);if(c)n.className=c;if(h!=null)n.innerHTML=h;return n};
+  const ico={warn:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 4l9 16H3z"/><line x1="12" y1="10" x2="12" y2="14"/><line x1="12" y1="17" x2="12" y2="17"/></svg>',
+    info:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><line x1="12" y1="8" x2="12" y2="8"/></svg>',
+    lock:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>',
+    print:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M7 9V4h10v5"/><rect x="4" y="9" width="16" height="7" rx="1.5"/><path d="M7 16h10v4H7z"/></svg>'};
+
+  /* ---- sujets : chaque sujet DÉCLARE ses champs (T10) ---- */
+  const SUBJECTS={
+    equipment:{label:'Équipement',anat:'objet',id:'SW-B12-ACC-03',qrSeed:11,
+      fields:[{id:'loc',l:'Emplacement',v:'B12 · U23-24',on:1},{id:'type',l:'Type / famille',v:'Switch 48p 1G',on:1},{id:'sn',l:'N° de série',v:'FDO2231R0AB',on:0},{id:'owner',l:'Propriétaire',v:'ACME Industries',on:0}]},
+    rack:{label:'Baie',anat:'baie',id:'B12',qrSeed:4,
+      fields:[{id:'loc',l:'Salle · rangée',v:'S2 · rangée R4',on:1},{id:'model',l:'Modèle',v:'42U 800×1000',on:1},{id:'sn',l:'N° de série',v:'RK-88-0421',on:0}]},
+    cable:{label:'Câble',anat:'drapeau',id:'LNK-0421',qrSeed:21,
+      fields:[{id:'ends',l:'Extrémités A / B',v:'B12·U23 p12 → B14·U04 p03',on:1},{id:'type',l:'Type',v:'Cat6a S/FTP 3 m',on:1},{id:'role',l:'Rôle réseau',v:'Prod · VLAN 40',on:0}]},
+    bundle:{label:'Faisceau',anat:'drapeau',id:'FSC-012',qrSeed:33,
+      fields:[{id:'ends',l:'Extrémités A / B',v:'B12 → B14 · 12 brins',on:1},{id:'type',l:'Type',v:'Trunk MPO OM4',on:1},{id:'role',l:'Rôle réseau',v:'Interco cœur',on:0}]},
+    spare:{label:'Petit matériel (disque)',anat:'petit',id:'SPR-2291',qrSeed:57,
+      fields:[{id:'type',l:'Type',v:'Disque',on:1},{id:'specs',l:'Caractéristiques',v:'2 To · SAS · 2.5" · 7,2k',on:1},{id:'brand',l:'Marque',v:'Seagate',on:1},{id:'model',l:'Modèle',v:'ST2000NX0273',on:1},{id:'sn',l:'N° de série',v:'W460XYZ12',on:0},{id:'buy',l:"Infos d'achat",v:'2024-03-11 · CMD-8841',on:0},{id:'store',l:'Stockage',v:'Local B · bac 12',on:0}]},
+    subEquipment:{label:'Sous-équipement',anat:'petit',id:'SRV-014/CM-2',qrSeed:71,
+      fields:[{id:'master',l:'Maître · repère',v:'SRV-014 · CM-2',on:1},{id:'bm',l:'Marque modèle',v:'Dell iDRAC9',on:1},{id:'sn',l:'N° de série',v:'CN7412K',on:0},{id:'buy',l:"Infos d'achat",v:'2023-09-02 · CMD-7710',on:0}]}
+  };
+  const SUPPORTS={
+    label:{l:'Étiquette plate',hint:'autocollant façade ou bac',cotes:['w','h','qr']},
+    rackhead:{l:'Tête de baie — 100 × 60',hint:'grand format, une par baie',cotes:['qr'],only:'baie',why:'réservé aux baies'},
+    flag:{l:'Drapeau de câble',hint:'2 panneaux + zone d’enroulement',cotes:['dia','len','qr'],only:'drapeau',why:'réservé aux câbles et faisceaux'},
+    sleeve:{l:'Manchon',hint:'1,5 tour, demi-tour de recouvrement',cotes:['dia','len'],only:'drapeau',why:'réservé aux câbles et faisceaux'}
+  };
+  const SIZES={s:{l:'S — 50 × 20',w:50,h:20},m:{l:'M — 50 × 30',w:50,h:30},l:{l:'L — 70 × 40',w:70,h:40},custom:{l:'Cotes libres',w:60,h:28}};
+  const CONTENTS={
+    full:{l:'QR + texte',hint:'le cas courant'},
+    qr:{l:'QR seul',hint:'très petites façades'},
+    strip:{l:'Manchon — repère complet',hint:'sans QR',needFlag:1},
+    id:{l:'Manchon — identifiant seul',hint:'sans QR',needFlag:1}
+  };
+
+  /* ---- faux QR, dessiné au trait, crispEdges (contrainte 1) ---- */
+  function qr(mm,seed){
+    let s=seed*2654435761>>>0;const rnd=()=>((s=(s*1664525+1013904223)>>>0)/4294967296);
+    const n=21,r=[];const fin=(x,y)=>{for(let i=0;i<7;i++)for(let j=0;j<7;j++){const b=(i===0||i===6||j===0||j===6)||(i>1&&i<5&&j>1&&j<5);if(b)r.push([x+j,y+i])}};
+    fin(0,0);fin(14,0);fin(0,14);
+    const inFin=(x,y)=>((x<8&&y<8)||(x>12&&y<8)||(x<8&&y>12));
+    for(let y=0;y<n;y++)for(let x=0;x<n;x++){if(inFin(x,y))continue;if(rnd()<0.47)r.push([x,y])}
+    return '<svg class="qr" width="'+mm+'mm" height="'+mm+'mm" viewBox="0 0 21 21" shape-rendering="crispEdges" aria-hidden="true"><rect width="21" height="21" fill="#fff"/>'+r.map(p=>'<rect x="'+p[0]+'" y="'+p[1]+'" width="1" height="1" fill="#000"/>').join('')+'</svg>';
+  }
+
+  /* ---- état ---- */
+  const FACES=[
+    {k:'equipment',n:1,support:'label',size:'m',content:'full',dens:'normal',ends:'ab',cols:4,cut:1,qrmm:20,name:'Équipement seul',sub:'fiche · 1 étiquette M'},
+    {k:'cable',n:1,support:'sleeve',size:'m',content:'strip',dens:'compact',ends:'ab',cols:4,cut:1,qrmm:0,dia:6,len:25,name:'Drapeau de câble — manchon',sub:'fiche câble · extrémités A+B'},
+    {k:'equipment',n:150,support:'label',size:'m',content:'full',dens:'compact',ends:'ab',cols:4,cut:1,qrmm:20,name:'Planche de 150',sub:'panier · 150 équipements'},
+    {k:'spare',n:1,support:'label',size:'s',content:'full',dens:'compact',ends:'ab',cols:4,cut:1,qrmm:17,name:'Petit matériel — gabarit S',sub:'fiche spare · 8 champs déclarés'}
+  ];
+  let st=null,faceIdx=0;
+  function loadFace(i){
+    faceIdx=i;const f=FACES[i];
+    st={kind:f.k,n:f.n,support:f.support,size:f.size,content:f.content,dens:f.dens,ends:f.ends,cols:f.cols,cut:f.cut,
+      qrmm:f.qrmm||20,dia:f.dia||6,len:f.len||25,w:SIZES[f.size].w,h:SIZES[f.size].h,
+      on:new Set(SUBJECTS[f.k].fields.filter(x=>x.on).map(x=>x.id))};
+    render();
+  }
+  const anat=()=>SUBJECTS[st.kind].anat;
+  const isFlagSupport=()=>st.support==='flag'||st.support==='sleeve';
+  const supAvail=id=>{const s=SUPPORTS[id];return !s.only||s.only===anat()};
+  const contAvail=id=>!CONTENTS[id].needFlag||anat()==='drapeau';
+
+  /* ---- rendu du panneau ---- */
+  function render(){
+    const S=SUBJECTS[st.kind],sup=SUPPORTS[st.support];
+    document.querySelectorAll('.face').forEach((b,i)=>b.setAttribute('aria-pressed',i===faceIdx));
+    $('#headChip').textContent=st.n>1?st.n+' sujets · panier':'1 sujet';
+    $('#ctxWho').innerHTML=st.n>1?('<b>'+st.n+' '+S.label.toLowerCase()+'s</b> — sélection du panier'):('<b>'+S.id+'</b> — '+S.label.toLowerCase());
+    $('#ctxMeta').innerHTML='<span class="chip acc">anatomie : '+anat()+'</span>'+(st.n>1?'<span class="chip">tirage en planche</span>':'<span class="chip">tirage unitaire</span>')+'<span class="chip">'+S.fields.length+' champs déclarés</span>';
+
+    const host=$('#stages');host.textContent='';
+    const stage=(num,title,val,lead)=>{const s=el('div','stg'+(lead?' lead':''));s.appendChild(el('div','stg-h','<span class="stg-n">'+num+'</span><span class="stg-t">'+title+'</span><span class="stg-v">'+val+'</span>'));return s};
+    const why=(t)=>el('p','why',ico.info+'<span>'+t+'</span>');
+
+    /* étage TIRAGE — en tête dès N>1 */
+    const geo=sheet();
+    const tir=stage('◈','Tirage',st.n>1?(st.n+' étiquettes · '+geo.cols+' col.'):'1 étiquette',st.n>1);
+    if(st.n>1){
+      const seg=el('div','seg');[2,3,4].forEach(c=>{const b=el('button',null,c+' col.');b.setAttribute('aria-pressed',geo.cols===c);b.disabled=c>geo.max;if(c>geo.max)b.title='Plafonné : '+geo.max+' colonnes maximum pour '+st.w+' mm';b.onclick=()=>{st.cols=c;render()};seg.appendChild(b)});
+      tir.appendChild(seg);
+      const d=el('div','seg');d.style.marginTop='8px';[['compact','Compact'],['normal','Confort']].forEach(([k,l])=>{const b=el('button',null,l);b.setAttribute('aria-pressed',st.dens===k);b.onclick=()=>{st.dens=k;render()};d.appendChild(b)});
+      tir.appendChild(d);
+      const c=el('label','fld');c.innerHTML='<input type="checkbox" '+(st.cut?'checked':'')+'><span class="fl">Traits de coupe</span>';c.querySelector('input').onchange=e=>{st.cut=e.target.checked?1:0;render()};
+      tir.appendChild(c);
+      tir.appendChild(why('Planche A4, marge 8 mm. '+geo.per+' étiquettes par feuille → '+geo.sheets+' feuille'+(geo.sheets>1?'s':'')+'.'));
+    }else{
+      const d=el('div','seg');[['compact','Compact'],['normal','Confort']].forEach(([k,l])=>{const b=el('button',null,l);b.setAttribute('aria-pressed',st.dens===k);b.onclick=()=>{st.dens=k;render()};d.appendChild(b)});
+      tir.appendChild(d);
+      tir.appendChild(why('Un seul sujet : pas de planche, pas de colonnes. La page d’impression prend la cote exacte de l’étiquette (imprimante à rouleau).'));
+    }
+    host.appendChild(tir);
+
+    /* étage SUPPORT */
+    const s1=stage('①','Support',sup.l.split('—')[0].trim(),false);
+    const o1=el('div','opts');
+    Object.entries(SUPPORTS).forEach(([id,s])=>{
+      const ok=supAvail(id),b=el('button','opt');
+      b.setAttribute('aria-pressed',st.support===id);if(!ok)b.disabled=true;
+      b.innerHTML='<span class="rad"></span><span class="o-t"><span>'+s.l+'</span><em>'+(ok?s.hint:s.why)+'</em></span>'+(ok?'':'<span class="lock">indisponible</span>');
+      if(ok)b.onclick=()=>{st.support=id;if(id==='sleeve'&&!(st.content==='strip'||st.content==='id'))st.content='strip';if(id!=='sleeve'&&(st.content==='strip'||st.content==='id'))st.content='full';render()};
+      o1.appendChild(b);
+    });
+    s1.appendChild(o1);
+    /* cotes du support */
+    const row=el('div','mm-row');
+    const num=(lbl,key,min,max,step)=>{const l=el('label',null,lbl);const i=el('input','ctl');i.type='number';i.min=min;i.max=max;i.step=step||1;i.value=st[key];i.oninput=e=>{st[key]=+e.target.value||0;render()};l.appendChild(i);return l};
+    if(sup.cotes.includes('w')){
+      const seg=el('div','seg');seg.style.marginTop='10px';
+      Object.entries(SIZES).forEach(([id,z])=>{const b=el('button',null,id==='custom'?'Libre':id.toUpperCase());b.title=z.l;b.setAttribute('aria-pressed',st.size===id);b.onclick=()=>{st.size=id;st.w=z.w;st.h=z.h;render()};seg.appendChild(b)});
+      s1.appendChild(seg);
+      row.appendChild(num('Larg. mm','w',20,210));row.appendChild(num('Haut. mm','h',12,297));
+    }
+    if(sup.cotes.includes('dia'))row.appendChild(num('Ø câble mm','dia',3,30,.5));
+    if(sup.cotes.includes('len'))row.appendChild(num('Longueur mm','len',10,60));
+    if(sup.cotes.includes('qr'))row.appendChild(num('QR mm','qrmm',12,60));
+    s1.appendChild(row);
+    if(st.support==='sleeve')s1.appendChild(why('Le manchon fait 1,5 tour : le demi-tour excédentaire EST le recouvrement, la partie visible vaut un tour ('+(Math.PI*st.dia).toFixed(1)+' mm). Pas de QR ici — d’où l’absence de cote QR.'));
+    else if(st.support==='rackhead')s1.appendChild(why('Cotes fixées à 100 × 60 mm : la tête de baie est un format unique, seule la taille du QR reste réglable.'));
+    else if(st.support==='label')s1.appendChild(why('Ø et longueur ne s’affichent pas : ce sont des cotes de manchon, sans objet sur une étiquette plate.'));
+    /* extrémités */
+    if(anat()==='drapeau'){
+      const e=el('div');e.style.marginTop='12px';
+      e.appendChild(el('div','stg-h','<span class="stg-t" style="font-size:9px;color:var(--fg-dimmer)">Extrémités</span>'));
+      const seg=el('div','seg');[['a','A seule'],['b','B seule'],['ab','A + B']].forEach(([k,l])=>{const b=el('button',null,l);b.setAttribute('aria-pressed',st.ends===k);b.onclick=()=>{st.ends=k;render()};seg.appendChild(b)});
+      e.appendChild(seg);s1.appendChild(e);
+      s1.appendChild(why('Remonté depuis les fiches : « un drapeau » et « les 2 extrémités » étaient deux entrées pour une décision de même nature que celles-ci.'));
+    }
+    host.appendChild(s1);
+
+    /* étage CONTENU */
+    const s2=stage('②','Contenu',CONTENTS[st.content].l,false);
+    const o2=el('div','opts');
+    Object.entries(CONTENTS).forEach(([id,c])=>{
+      const ok=contAvail(id)&&!(id!=='strip'&&id!=='id'&&st.support==='sleeve')&&!((id==='strip'||id==='id')&&st.support!=='sleeve');
+      const b=el('button','opt');b.setAttribute('aria-pressed',st.content===id);if(!ok)b.disabled=true;
+      let reason=c.hint;
+      if(!contAvail(id))reason='sans QR — réservé aux câbles et faisceaux';
+      else if((id==='strip'||id==='id')&&st.support!=='sleeve')reason='demande le support « Manchon »';
+      else if(!ok)reason='le manchon ne porte pas de QR';
+      b.innerHTML='<span class="rad"></span><span class="o-t"><span>'+c.l+'</span><em>'+reason+'</em></span>'+(ok?'':'<span class="lock">indisponible</span>');
+      if(ok)b.onclick=()=>{st.content=id;render()};
+      o2.appendChild(b);
+    });
+    s2.appendChild(o2);
+    s2.appendChild(why('Les quatre contenus restent listés dans tous les contextes : ce qui change est leur disponibilité, énoncée sur la ligne. Le vocabulaire de la modale ne bouge plus d’un sujet à l’autre.'));
+    host.appendChild(s2);
+
+    /* étage INFOS ADDITIONNELLES */
+    const s3=stage('③','Informations additionnelles',st.content==='qr'?'aucune — QR seul':(st.on.size+' / '+S.fields.length),false);
+    if(st.content==='qr'){
+      s3.appendChild(why('« QR seul » n’imprime que l’identifiant sous le code : les cases sont sans effet, elles restent listées grisées pour que le retour à « QR + texte » soit prévisible.'));
+      const l=el('div','flds');
+      S.fields.forEach(f=>{const r=el('div','fld fixed');r.innerHTML='<input type="checkbox" disabled><span class="fl" style="color:var(--fg-dimmer)">'+f.l+'</span><span class="fv">'+f.v+'</span>';l.appendChild(r)});
+      s3.appendChild(l);
+    }else{
+      s3.appendChild(el('p','cnt-line','Ce '+S.label.toLowerCase()+' déclare <b style="color:var(--fg)">'+S.fields.length+' champs</b> — la liste vient de l’objet, pas de la modale.'));
+      const l=el('div','flds');
+      const fx=el('div','fld fixed');fx.innerHTML='<input type="checkbox" checked disabled><span class="fl">Identifiant</span><span class="fv">'+S.id+'</span>';l.appendChild(fx);
+      S.fields.forEach(f=>{
+        const r=el('label','fld');const on=st.on.has(f.id);
+        r.innerHTML='<input type="checkbox" '+(on?'checked':'')+'><span class="fl">'+f.l+'</span><span class="fv">'+f.v+'</span>';
+        r.querySelector('input').onchange=e=>{e.target.checked?st.on.add(f.id):st.on.delete(f.id);render()};
+        l.appendChild(r);
+      });
+      s3.appendChild(l);
+      s3.appendChild(why('Un champ non déclaré par l’objet n’apparaît pas — c’est structurel, et le compte ci-dessus l’énonce. Pas de case sans donnée derrière.'));
+    }
+    host.appendChild(s3);
+
+    preview();
+  }
+
+  /* ---- géométrie de planche ---- */
+  function sheet(){
+    const gap=st.dens==='compact'?0:2;
+    const usableW=210-16,usableH=297-16-6;
+    const max=Math.max(1,Math.floor(usableW/(st.w+gap)));
+    const cols=Math.min(st.cols,max);
+    const rows=Math.max(1,Math.floor(usableH/(st.h+gap)));
+    const per=cols*rows,sheets=Math.max(1,Math.ceil(st.n/per));
+    return {cols,rows,per,sheets,max,gap,capped:st.cols>max};
+  }
+
+  /* ---- rendu d'une étiquette ---- */
+  function labelHtml(fit){
+    const S=SUBJECTS[st.kind],dens=st.dens==='compact'?' compact':'';
+    const lines=S.fields.filter(f=>st.on.has(f.id)).map(f=>'<div class="l-f'+(/^(loc|sn|ends|specs|master)$/.test(f.id)?' mono':'')+'">'+f.v+'</div>').join('');
+    const sizeCls=st.size==='custom'?'m':st.size;
+    if(st.support==='sleeve'){
+      const turn=Math.PI*st.dia,total=turn*1.5;
+      const body=st.content==='id'?'<div class="l-id">'+S.id+'</div>':'<div class="l-id">'+S.id+'</div>'+lines;
+      return '<div class="lab sleeve'+dens+'" style="width:'+total.toFixed(1)+'mm;height:'+st.len+'mm"><div class="cell">'+body+'</div><div class="ov" style="width:'+(turn*.5).toFixed(1)+'mm"></div></div>';
+    }
+    if(st.support==='flag'){
+      const wz=Math.PI*st.dia,hgt=Math.max(12,Math.min(st.qrmm,st.len));
+      const qmm=Math.min(st.qrmm,hgt-2);
+      const pan=st.content==='qr'?qmm+3:qmm+20;
+      const q=qr(qmm,S.qrSeed);
+      const inner=st.content==='qr'?q:q+'<span class="txt"><span class="l-id">'+S.id+'</span>'+lines+'</span>';
+      const face=c=>'<div class="pan'+c+'" style="width:'+pan+'mm">'+inner+'</div>';
+      return '<div class="lab flag'+dens+'" style="height:'+hgt+'mm">'+face('')+'<div class="wz" style="width:'+wz.toFixed(1)+'mm"></div>'+face(' b')+'</div>';
+    }
+    const w=st.support==='rackhead'?100:st.w,h=st.support==='rackhead'?60:st.h;
+    const q=qr(Math.min(st.qrmm,h-2),S.qrSeed);
+    const cls='lab '+(st.support==='rackhead'?'rack':sizeCls)+dens+(st.content==='qr'?' qronly':'');
+    const inner=st.content==='qr'?q+'<div class="txt"><div class="l-id">'+S.id+'</div></div>':q+'<div class="txt"><div class="l-id">'+S.id+'</div>'+lines+'</div>';
+    return '<div class="'+cls+'" style="width:'+w+'mm;height:'+h+'mm">'+inner+'</div>';
+  }
+
+  /* ---- aperçu + les deux registres ---- */
+  function preview(){
+    const geo=sheet(),S=SUBJECTS[st.kind];
+    const risks=[],infos=[];
+    const qrEff=st.support==='sleeve'?0:Math.min(st.qrmm,(st.support==='rackhead'?60:st.h)-2);
+    if(st.support!=='sleeve'){
+      if(qrEff<18)risks.push('QR de <b>'+qrEff.toFixed(0)+' mm</b> — sous le plancher de 18 mm : ce code pourra ne pas se scanner à bout de bras en baie.');
+      if(st.qrmm>(st.support==='rackhead'?60:st.h)-2)risks.push('Le QR demandé (<b>'+st.qrmm+' mm</b>) ne tient pas dans '+(st.support==='rackhead'?60:st.h)+' mm de hauteur : il sera rogné à '+qrEff.toFixed(0)+' mm.');
+    }else{
+      const turn=Math.PI*st.dia;
+      if(turn<16)risks.push('Manchon de <b>'+turn.toFixed(1)+' mm</b> visible (Ø '+st.dia+' mm) : le repère risque de ne pas tenir sur un tour.');
+      if(st.len<14)risks.push('Longueur de <b>'+st.len+' mm</b> : texte tronqué dans le sens du câble.');
+    }
+    const nb=st.content!=='qr'?st.on.size:0;
+    if(st.content!=='qr'&&nb>=5&&st.h<=20&&st.support==='label')risks.push('<b>'+nb+' informations</b> sur un gabarit S : les dernières lignes seront tronquées.');
+    if(st.n>1){
+      if(geo.capped)infos.push(geo.max+' colonnes maximum pour une étiquette de '+st.w+' mm — réglage plafonné.');
+      infos.push(st.n+' étiquettes · '+geo.cols+' × '+geo.rows+' par feuille → <b>'+geo.sheets+' feuille'+(geo.sheets>1?'s A4':' A4')+'</b>'+(st.cut?' · traits de coupe':''));
+    }else{
+      infos.push('Tirage unitaire : page à la cote exacte '+(st.support==='sleeve'?(Math.PI*st.dia*1.5).toFixed(0)+' × '+st.len:(st.support==='rackhead'?'100 × 60':st.w+' × '+st.h))+' mm, marges nulles.');
+    }
+    $('#riskHost').innerHTML=risks.length?'<div class="risk"><h6>'+ico.warn+' Risque de scan</h6>'+risks.map(r=>'<p>'+r+'</p>').join('')+'</div>':'';
+    $('#tirageInfo').innerHTML=ico.info+'<span>'+infos.join(' · ')+'</span>';
+    $('#printBtn').innerHTML=ico.print+(st.n>1?'Imprimer '+st.n+' étiquettes':'Imprimer');
+    $('#prevKind').textContent=st.n>1?'Aperçu — planche A4 '+geo.cols+' × '+geo.rows:'Aperçu — '+SUPPORTS[st.support].l.split('—')[0].trim();
+
+    const hostP=$('#prevHost');
+    if(st.n>1){
+      const scale=Math.min(.42,Math.max(.3,340/794));
+      const cells=Math.min(geo.per,geo.cols*geo.rows);
+      let cellsHtml='';
+      for(let i=0;i<cells;i++)cellsHtml+='<div class="cell">'+labelHtml()+'</div>';
+      hostP.innerHTML='<div class="a4-hold" style="width:calc(210mm * '+scale+');height:calc(297mm * '+scale+')"><div class="a4-scale" style="transform:scale('+scale+')"><div class="a4" style="grid-template-columns:repeat('+geo.cols+',1fr);gap:'+geo.gap+'mm"><div class="a4-head"><span>'+S.label+'s — '+st.n+' étiquettes · feuille 1/'+geo.sheets+'</span><span>DC Manager · '+new Date().toISOString().slice(0,10)+'</span></div>'+cellsHtml+'</div></div></div>';
+      $('#prevScale').textContent='réduit à '+Math.round(scale*100)+' %';
+      $('#prevCote').textContent='A4 210 × 297 mm · '+geo.cols+' col. × '+geo.rows+' lignes · '+geo.sheets+' feuille'+(geo.sheets>1?'s':'');
+    }else{
+      hostP.innerHTML='<div class="lab-frame">'+labelHtml()+'</div>';
+      $('#prevScale').textContent='taille réelle';
+      $('#prevCote').textContent=st.support==='sleeve'?('manchon '+(Math.PI*st.dia*1.5).toFixed(1)+' × '+st.len+' mm · un tour visible = '+(Math.PI*st.dia).toFixed(1)+' mm'):(st.support==='flag'?('drapeau · Ø '+st.dia+' mm, zone d’enroulement '+(Math.PI*st.dia).toFixed(1)+' mm · QR '+Math.min(st.qrmm,Math.max(12,Math.min(st.qrmm,st.len))-2).toFixed(0)+' mm'):((st.support==='rackhead'?'100 × 60':st.w+' × '+st.h)+' mm · QR '+qrEff.toFixed(0)+' mm'));
+    }
+  }
+
+  /* ---- visages ---- */
+  const facesHost=$('#faces');
+  FACES.forEach((f,i)=>{const b=el('button','face','<b>'+f.name+'</b><span>'+f.sub+'</span>');b.onclick=()=>loadFace(i);facesHost.appendChild(b)});
+
+  /* ---- démo § 04 : deux déclarations côte à côte ---- */
+  const declHost=$('#declDemo');
+  [['equipment','Équipement — 4 champs'],['spare','Petit matériel (disque) — 7 champs']].forEach(([k,t])=>{
+    const S=SUBJECTS[k],col=el('div','ba-col');
+    col.appendChild(el('div','ba-h','<span style="color:var(--accent-text)">'+t+'</span>'));
+    const b=el('div','ba-b'),l=el('div','flds');
+    const fx=el('div','fld fixed');fx.innerHTML='<input type="checkbox" checked disabled><span class="fl">Identifiant</span><span class="fv">'+S.id+'</span>';l.appendChild(fx);
+    S.fields.forEach(f=>{const r=el('label','fld');r.innerHTML='<input type="checkbox" '+(f.on?'checked':'')+'><span class="fl">'+f.l+'</span><span class="fv">'+f.v+'</span>';l.appendChild(r)});
+    b.appendChild(l);b.appendChild(el('p','why',ico.info+'<span>'+(k==='spare'?'Les caractéristiques du type (disque : capacité · interface · form factor · rpm) sont déclarées par le type de spare ; un transceiver en déclarerait d’autres.':'Offre inchangée — zéro régression : les quatre champs historiques sont simplement déclarés par le sujet.')+'</span>'));
+    col.appendChild(b);declHost.appendChild(col);
+  });
+
+  /* ---- thème ---- */
+  $('#themeBtn').onclick=()=>{const d=document.documentElement,to=d.dataset.theme==='dark'?'light':'dark';d.dataset.theme=to;$('#themeLbl').textContent=to==='dark'?'Clair':'Sombre'};
+
+  loadFace(0);
+})();
+</script>
+</body>
+</html>

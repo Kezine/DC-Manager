@@ -345,6 +345,44 @@ export class CableForms extends EquipmentForms {
       selPortB.setOptions(portOpts(selEqB.value, pb, constraintFor("B")), pb);
     };
     const curDraft = () => ({ from_port_id: selPortA.value || null, to_port_id: selPortB.value || null, cable_type_id: selType.value || null, waypoint_ids: wpState.ids });
+    /** Bouton « Poser / Modifier la terminaison de <port> » du hint (docs/terminaisons.md § Les gestes, Q5.4 / Q5.7) :
+        pour un bout de DONNÉES seulement. Le média est PRÉ-REMPLI depuis le type EFFECTIF de l'autre bout (« prend
+        automatiquement les bonnes specs » — l'autre bout est un tiroir FO-SM ⇒ le générique présente FO-SM).
+        L'écriture du PORT est IMMÉDIATE, hors du brouillon du câble — assumé : le port est écrit même si le câble est
+        ensuite annulé, et le toast le dit — puis le formulaire se ré-évalue (options, statut, hint). UN lot pour le
+        port et la pièce liée/détachée : une transaction, une révision, un pas d'undo. */
+    const offerTermination = (portId: string, otherPortId: string): HTMLButtonElement | null => {
+      const port: any = store.get("ports", portId);
+      if (!port || store.portKind(port) !== "data") return null;
+      const own = store.terminationOf(port);
+      const hasOwn = !!own && !own.inherited;
+      const portName = port.name || I18n.t("cable.cable.port");
+      const btn = document.createElement("button"); btn.type = "button"; btn.className = "btn btn-ghost btn-sm";
+      btn.textContent = I18n.t(hasOwn ? "cable.cable.terminationEdit" : "cable.cable.terminationSet", { port: portName });
+      btn.onclick = async () => {
+        const other: any = store.get("ports", otherPortId);
+        const otherType: any = other ? store.effectivePortType(other) : null;
+        const cfg = await this.configureTermination(store, {
+          port: { id: port.id, name: port.name, equipmentId: port.equipment_id, portTypeId: port.port_type_id },
+          current: hasOwn ? { typeId: own!.typeId, label: own!.label } : null,
+          suggestedTypeId: otherType ? otherType.id : null,
+        });
+        if (!cfg) return;
+        const ops: Array<{ collection: string; id: string; patch: Record<string, any> }> = [
+          { collection: "ports", id: port.id, patch: { termination_port_type_id: cfg.typeId, termination_label: cfg.label } },
+        ];
+        if (cfg.previousSpareId && cfg.previousSpareId !== cfg.spareId) ops.push({ collection: "spares", id: cfg.previousSpareId, patch: { assigned_port_id: null } });
+        if (cfg.spareId) {
+          const chosen: any = store.get("spares", cfg.spareId);   // absorbée par le sélecteur du dialogue
+          ops.push({ collection: "spares", id: cfg.spareId, patch: { assigned_port_id: port.id, assigned_equipment_id: port.equipment_id, status: "assigned", assigned_date: (chosen && chosen.assigned_date) || this.todayIso() } });
+        }
+        if (!await FormSave.batch(store, ops)) { Notify.toast(I18n.t("cable.cable.terminationFailed"), "err"); return; }   // REFUSÉ par le Store (toast rouge nommant la règle)
+        host.setDirty?.(true);
+        Notify.toast(I18n.t("cable.cable.terminationPosed", { port: portName }));
+        refresh(); syncRoute(); syncStatus(true); renderNets();
+      };
+      return btn;
+    };
     const updateHint = (max: string) => {
       hint.classList.remove("warn", "err");
       const a = selPortA.value, b = selPortB.value, fa = familyOf(a);   // `fa` sert au message de SUCCÈS (« complet · <famille> »)
@@ -353,12 +391,19 @@ export class CableForms extends EquipmentForms {
       // mais ça n'a aucun sens » (même cage, familles différentes — un FC 32G dans une SFP28). Les DEUX
       // bloquent, comme avant : la règle d'écriture n'a pas bougé, c'est le message qui devient précis.
       if (a && b) {
-        const verdict = PortCompatibility.compare(store.get("portTypes", (store.get("ports", a) || {}).port_type_id), store.get("portTypes", (store.get("ports", b) || {}).port_type_id));
+        // Types EFFECTIFS (docs/terminaisons.md, Q5.11) : un transceiver dans la cage présente un autre média au
+        // câble — comparer les cages déclarerait « aberrant » un montage correct. Le connecteur cité est donc celui
+        // du média présenté, c'est voulu.
+        const verdict = PortCompatibility.compare(store.effectivePortType(store.get("ports", a)), store.effectivePortType(store.get("ports", b)));
         if (PortCompatibility.blocks(verdict.verdict)) {
           hint.textContent = verdict.verdict === "aberrant"
             ? I18n.t("cable.cable.famAberrant", { a: verdict.familyA, b: verdict.familyB, connector: verdict.connectorA })
             : I18n.t("cable.cable.famDiffer", { a: verdict.familyA, b: verdict.familyB });
-          hint.classList.add("warn"); return;
+          hint.classList.add("warn");
+          // T5 (docs/terminaisons.md) : « accepter puis PROPOSER » — le geste qui débloque, un bouton par bout de données.
+          const offers = [offerTermination(a, b), offerTermination(b, a)].filter((btn): btn is HTMLButtonElement => !!btn);
+          if (offers.length) { const row = document.createElement("div"); row.className = "hint-actions"; offers.forEach((btn) => row.appendChild(btn)); hint.appendChild(row); }
+          return;
         }
       }
       const r = store.cableRoute(curDraft());

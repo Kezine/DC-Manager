@@ -349,6 +349,9 @@ export const dc = {
     typePrefix: "Type : ",
     aggregatePrefix: "Agrégat : ",
     subEquipmentPrefix: "Dessert : ",
+    // TERMINAISON (docs/terminaisons.md) : « Terminaison : <module> ⇒ <média présenté> » (+ héritée du trunk).
+    terminationPrefix: "Terminaison : ",
+    terminationInherited: " (héritée du trunk)",
     lengthPrefix: "Longueur : ",
     endAPrefix: "A : ",
     endBPrefix: "B : ",

@@ -195,6 +195,14 @@ export class Cascade {
       // Lanes de BREAKOUT : une FK simple, donc déclarative. Leurs propres câbles (et un éventuel breakout
       // imbriqué) suivent par récursion — c'est cette règle-ci, rejouée sur chaque lane.
       delete: [{ coll: "ports", fk: "parent_port_id" }],
+      // TRANSCEIVER logé dans la cage (docs/terminaisons.md) : DÉTACHÉ (`spares.assigned_port_id` → null), jamais
+      // supprimé — la pièce survit, toujours affectée à l'équipement (`assigned_equipment_id` et `status` conservés),
+      // simplement plus à cette cage. FK simple, donc déclarative.
+      // ⚠ `spares` est chargée PARESSEUSEMENT en mode API (même caveat que la règle `equipments` ci-dessus) : côté
+      // CLIENT, `find` ne voit que les pièces ABSORBÉES — le plan local peut donc manquer ce détachement. C'est
+      // prévu : le SERVEUR rejoue cette même règle sur SON état (cascade résiduelle d'un /transact) et le client
+      // RAFRAÎCHIT au cache les enregistrements rapportés par `residual.updates` (M4b).
+      detach: [{ coll: "spares", fk: "assigned_port_id" }],
       // Câbles branchés : NON réductible à une FK simple (deux champs d'extrémité, à dédupliquer).
       custom: (find, _fetch, id, deletes) => {
         Cascade.cablesOnPort(find, id).forEach((c) => deletes.push({ c: "cables", id: c.id }));
@@ -264,7 +272,10 @@ export class Cascade {
     rackItems: {
       custom: (find, _fetch, id, _deletes, detaches) => Cascade.detachTrayGuests(find, id, detaches),
     },
-    portTypes: { detach: [{ coll: "ports", fk: "port_type_id" }] },
+    // Un type de port est référencé DEUX fois par un port : comme CAGE (`port_type_id`) et comme MÉDIA PRÉSENTÉ par
+    // une terminaison (`termination_port_type_id`, docs/terminaisons.md). Les deux se détachent — sans le second,
+    // supprimer le type laisserait une FK pendante que V2 refuserait à la prochaine écriture du port.
+    portTypes: { detach: [{ coll: "ports", fk: "port_type_id" }, { coll: "ports", fk: "termination_port_type_id" }] },
     cableTypes: { detach: [{ coll: "cables", fk: "cable_type_id" }, { coll: "cableBundles", fk: "cable_type_id" }] },
     // Supprimer un faisceau : détache les affectations de brins portées par les ports de patch
     // (bundle_id/strand_a/strand_b remis à zéro → ports redeviennent de simples ports).

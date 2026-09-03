@@ -96,6 +96,19 @@ export interface SaveBatchResult {
   errors: ValidationError[];
 }
 
+/** TERMINAISON EFFECTIVE d'un port (docs/terminaisons.md — cf. `Store.terminationOf`) : le média présenté au câble,
+    le libellé du module, le port qui la PORTE (lui-même, ou son trunk quand `inherited`). */
+export interface PortTermination {
+  /** FK → portTypes : le type que la cage présente au câble. */
+  typeId: string;
+  /** Libellé lisible du module (« SFP-10G-LR ») ; vide = transceiver générique. */
+  label: string;
+  /** Le port sur lequel la terminaison est POSÉE — le trunk pour une lane qui hérite. */
+  ownerPortId: string;
+  /** Héritée d'un parent (montage « transceiver fan-out sur un trunk éclaté ») plutôt que posée sur ce port. */
+  inherited: boolean;
+}
+
 export interface ListStoreOptions {
   page?: number;
   pageSize?: number;
@@ -1458,6 +1471,12 @@ export class Store {
       est chargée paresseusement en mode API ; la FK `assigned_equipment_id` est indexée des deux
       côtés, cf. INDEX_SPEC). Consommé par la section « Spares affectés » de la fiche équipement. */
   sparesOfEquipmentAsync(equipmentId: string): Promise<any[]> { return this._sectionRows("spares", "assigned_equipment_id", equipmentId); }
+  /** Spares DISPONIBLES (statut `available`) — jumeau ASYNC sans pendant synchrone (G7, terminaisons —
+      docs/terminaisons.md) : le sélecteur de pièce du dialogue de terminaison propose, en plus des transceivers
+      déjà affectés à l'équipement, ceux du stock. `status` n'est PAS indexé (ni ici ni en SQL) : c'est un balayage
+      de la collection `spares`, assumé — elle se compte en dizaines, et ce chemin n'est parcouru qu'à l'ouverture
+      d'un dialogue. En mode fichier : cache, aucun réseau (principe n°15). */
+  sparesAvailableAsync(): Promise<any[]> { return this._sectionRows("spares", "status", "available"); }
 
   /** Corps UNIQUE des jumeaux async (principe n°3) : cache si la collection est INTÉGRALEMENT en
       mémoire, lecture serveur par FK indexée sinon (`fetchBy`, qui ABSORBE les lignes — la fiche
@@ -1492,10 +1511,50 @@ export class Store {
   }
   hasFaceImageRefs(): boolean { return this.data.equipments.some((e) => Object.values(EQUIP_FACE_IMG_FIELD).some((fld) => e[fld])); }
   faceImageRefIds(): Set<string> { const s = new Set<string>(); this.data.equipments.forEach((e) => Object.values(EQUIP_FACE_IMG_FIELD).forEach((fld) => { if (e[fld]) s.add(e[fld]); })); return s; }
+  /* ---- TERMINAISON (transceiver — docs/terminaisons.md) : ce que la cage PRÉSENTE au câble ----
+
+     Une jarretière FO-SM ne peut jamais rejoindre un port SFP28 : `cableCompatible` exige l'égalité des familles.
+     Dans la réalité, un TRANSCEIVER s'interpose — il occupe la CAGE (SFP28) et PRÉSENTE un MÉDIA (LC monomode).
+     Le port porte ce média (`termination_port_type_id`, un type de port de données) ; la règle de jonction est :
+
+       type effectif(port) = type(terminaison du port) ?? type(terminaison du PARENT) ?? type(port)
+
+     Le 2e terme est le montage « transceiver fan-out sur un trunk éclaté » : ses lanes présentent son média —
+     la MÊME montée que `portConnectorSize`. `portFamily` (SEUL point de lecture de la famille, clause C1 du
+     breakout) est réécrit sur cette jonction : tous ses consommateurs (statut des câbles, candidats au clic,
+     formulaires) héritent gratuitement. `portConnectorSize`, lui, ne change PAS : c'est la CAGE qui se dessine.
+     ⚠ Chemin CHAUD (statut de chaque câble) : un port sans terminaison ni parent sort sans rien allouer. */
+
+  /** Terminaison EFFECTIVE d'un port : la sienne, sinon celle de son trunk (montée récursive — un breakout
+      imbriqué suivrait —, garde anti-cycle). `inherited` = vient d'un parent. null = aucune. */
+  terminationOf(port: any): PortTermination | null {
+    if (!port) return null;
+    if (port.termination_port_type_id) return { typeId: port.termination_port_type_id, label: port.termination_label || "", ownerPortId: port.id, inherited: false };
+    if (!port.parent_port_id) return null;
+    const seen = new Set<string>([port.id]);
+    let parentId: string | null = port.parent_port_id;
+    while (parentId && !seen.has(parentId)) {
+      seen.add(parentId);
+      const parent: any = this.get("ports", parentId);
+      if (!parent) return null;
+      if (parent.termination_port_type_id) return { typeId: parent.termination_port_type_id, label: parent.termination_label || "", ownerPortId: parent.id, inherited: true };
+      parentId = parent.parent_port_id || null;
+    }
+    return null;
+  }
+  /** Type de port EFFECTIF (celui que le câble rencontre) : le média présenté par la terminaison effective, sinon
+      le type PROPRE du port (la cage). Un média dont le type a disparu retombe sur la cage — jamais sur null. */
+  effectivePortType(port: any): any | null {
+    if (!port) return null;
+    const termination = this.terminationOf(port);
+    const presented: any = termination ? this.get("portTypes", termination.typeId) : null;
+    if (presented) return presented;
+    return port.port_type_id ? (this.get("portTypes", port.port_type_id) || null) : null;
+  }
+  /** Famille EFFECTIVE d'un port — SEUL point de lecture de la famille pour toute logique (clause C1). */
   portFamily(port: any): string | null {
-    if (!port || !port.port_type_id) return null;
-    const pt = this.get("portTypes", port.port_type_id);
-    return pt ? pt.family : null;
+    const effective = this.effectivePortType(port);
+    return effective ? effective.family : null;
   }
   cableCompatible(cableTypeId: string, fromPortId: string, toPortId: string): { ok: boolean; reason?: string } {
     const ct = this.get("cableTypes", cableTypeId);
