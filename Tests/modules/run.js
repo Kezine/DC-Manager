@@ -18,6 +18,7 @@ const DOMAINS = [
   "./test-geometry.js",          // géométrie pure
   "./test-views-tools.js",       // vues & outils (hôtes injectés)
   "./test-route-eligibility.js", // éditeur de route : éligibilité d'un waypoint + erreur → étape (core/RouteEligibility)
+  "./test-breakout.js",          // BREAKOUT (docs/breakout.md, retours terrain T2-B2/B3) : règle PURE core/BreakoutRules — verdicts d'ÉCLATEMENT (structurel avant circonstanciel) et de DÉFAIRE (refus qui NOMME les lanes câblées), schéma de nommage des lanes (source unique), structure trunk → lanes (lanes triées, orphelines jamais perdues) ; état relu au Store (cableOnPort) ; VERROUS sur les sources — le formulaire emprunte la règle, l'ancien « × » destructeur a disparu, sélecteurs de types À RECHERCHE, style inline des lanes remplacé par des classes thématisées sans couleur en dur
   "./test-ui-modalstack.js",     // primitives UI : politique de la PILE de modales (core/ModalStack)
   "./test-session-expiry.js",    // contrôle d'accès : verrou « session expirée (401) → retour au login » (core/SessionExpiry)
   "./test-ui-draglist.js",       // primitives UI : glisser-déposer de liste (ui/DragList — seule la décision de dépôt est pure)

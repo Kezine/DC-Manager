@@ -26,6 +26,23 @@ import {
 import { Schema } from "../../../src-shared/Schema";   // types MIME d'images acceptés — liste PARTAGÉE (le serveur applique la même)
 import { I18n } from "../../i18n/I18n";
 
+/** Résultat du dialogue de breakout (`FormBase.configureBreakout`) : de quoi créer le trunk (mode `new`) ou
+    retrouver le port éclaté (mode `split` — `name`/`trunkTypeId` sont alors ceux du port, renvoyés tels quels)
+    et ses `count` lanes de type `laneTypeId`. Les noms des lanes se dérivent par `BreakoutRules.laneNames`. */
+export interface BreakoutConfig {
+  name: string;
+  trunkTypeId: string;
+  laneTypeId: string;
+  count: number;
+}
+
+/** Mode du dialogue de breakout — cf. `FormBase.configureBreakout`. */
+export type BreakoutDialogOptions =
+  /** Trunk NEUF : nom et type du trunk saisis dans le dialogue. */
+  | { mode: "new" }
+  /** Port EXISTANT à éclater : nom et type AFFICHÉS, figés (clause C5 — le port garde son identité). */
+  | { mode: "split"; trunk: { name: string; portTypeId: string | null } };
+
 export class FormBase {
   /** Bibliothèque d'images de façade (injectée au boot) — singleton applicatif (hors modèle). */
   static images: ImageStore | null = null;
@@ -55,23 +72,46 @@ export class FormBase {
     if (face !== "front") return I18n.t("forms.faceRatio.rear", { u: uu });
     return I18n.t(withEars ? "forms.faceRatio.frontEars" : "forms.faceRatio.frontNoEars", { u: uu });
   }
-  protected static configureBreakout(store: Store): Promise<{ name: string; trunkTypeId: string; laneTypeId: string; count: number } | null> {
-    const types = store.all("portTypes").slice().sort((a: any, b: any) => (a.family || "").localeCompare(b.family || "") || a.name.localeCompare(b.name));
+  /** Dialogue de configuration d'un BREAKOUT (docs/breakout.md § Formulaire). Deux MODES, un seul dialogue :
+        • `new`   (bouton « + Breakout ») : trunk NEUF — on saisit son nom et son type, le type des lanes, leur nombre ;
+        • `split` (menu ⋮ d'une ligne de port, retour terrain T2-B2) : le trunk est un port EXISTANT — son nom et son
+          type sont AFFICHÉS, pas saisis (clause C5 : le port garde son identité), on ne choisit que le type des
+          lanes et leur nombre. Le calcul du ratio trunk/lane (`BREAKOUT_SPANS`, `PortTypes.speedGbps`) est le même.
+      Rend `null` si annulé ; en mode `split`, `name`/`trunkTypeId` sont ceux du port, renvoyés tels quels. */
+  protected static configureBreakout(store: Store, opts: BreakoutDialogOptions = { mode: "new" }): Promise<BreakoutConfig | null> {
+    const split = opts.mode === "split" ? opts.trunk : null;
+    // Un breakout est une affaire de ports de DONNÉES (les lanes sont créées en rôle `data`) : les types d'ÉNERGIE
+    // n'ont rien à y faire — proposés, ils donnaient des lanes « (hors rôle) » dans le formulaire.
+    const types = store.all("portTypes").filter((t: any) => t.kind !== "power").sort((a: any, b: any) => (a.family || "").localeCompare(b.family || "") || a.name.localeCompare(b.name));
     if (!types.length) { Notify.toast(I18n.t("forms.breakout.needPortTypes"), "err"); return Promise.resolve(null); }
     const connOf = (t: any) => (t.connector || t.family || "").toUpperCase();
     const guessTrunk = types.find((t: any) => connOf(t).startsWith("QSFP")) || types[0];
     const guessLane = types.find((t: any) => connOf(t) === "SFP+") || types.find((t: any) => connOf(t).startsWith("SFP")) || types[0];
-    // regroupés par FAMILLE (<optgroup>) ; le connecteur, s'il diffère de la famille, reste dans le libellé.
-    const typeOpts = types.map((t: any) => ({ value: t.id, label: t.name + (t.connector && t.connector !== t.family ? " (" + t.connector + ")" : ""), group: t.family || "(sans famille)" }));
+    // Sélecteurs À RECHERCHE (principe n°14) : `entityPicker` prend la MÊME liste que `select`, mais n'a pas
+    // d'<optgroup> (un popover de recherche n'en a pas) → la FAMILLE entre dans le LIBELLÉ, où elle devient
+    // CHERCHABLE (taper « SFP » remonte toute la famille). Le connecteur, s'il diffère de la famille, y reste.
+    // L'option de tête vide porte le libellé de l'état « rien de choisi » : c'est là que le contrôle le lit.
+    const typeLabel = (t: any) => t.name + (t.connector && t.connector !== t.family ? " (" + t.connector + ")" : "") + " · " + (t.family || I18n.t("equipment.equip.noFamily"));
+    const typeOpts = [{ value: "", label: I18n.t("equipment.equip.typeQ") }].concat(types.map((t: any) => ({ value: t.id, label: typeLabel(t) })));
     const nameI = FormControls.text("QSFP1", I18n.t("forms.breakout.namePlaceholder"));
-    const trunkSel = FormControls.select(typeOpts, guessTrunk ? guessTrunk.id : "");
-    const laneSel = FormControls.select(typeOpts, guessLane ? guessLane.id : "");
+    const trunkSel = FormControls.entityPicker(typeOpts, guessTrunk ? guessTrunk.id : "");
+    const laneSel = FormControls.entityPicker(typeOpts, guessLane ? guessLane.id : "");
+    // Mode `split` : le trunk est FIGÉ — nom et type du port, montrés comme une pastille (aucun contrôle de saisie).
+    const trunkName = () => (split ? split.name : nameI.value).trim();
+    const trunkTypeId = () => (split ? (split.portTypeId || "") : trunkSel.value);
+    const trunkInfo = document.createElement("div");
+    if (split) {
+      const splitType: any = split.portTypeId ? store.get("portTypes", split.portTypeId) : null;
+      const chip = document.createElement("span"); chip.className = "chip"; chip.textContent = split.name.trim() || I18n.t("equipment.common.portParen");
+      const typePill = document.createElement("span"); typePill.className = "pill"; typePill.textContent = splitType ? typeLabel(splitType) : I18n.t("equipment.detail.typeUnknown");
+      trunkInfo.append(chip, document.createTextNode(" "), typePill);
+    }
     const spanWrap = document.createElement("div");
     let span: number | null = null;   // nb de lanes retenu (null = combinaison invalide)
     const speedOf = (id: string) => { const t: any = store.get("portTypes", id); return { g: t ? PortTypes.speedGbps(t.speed) : null, s: t ? (t.speed || "") : "" }; };
     const refreshSpan = () => {
       spanWrap.innerHTML = "";
-      const tk = speedOf(trunkSel.value), ln = speedOf(laneSel.value);
+      const tk = speedOf(trunkTypeId()), ln = speedOf(laneSel.value);
       if (tk.g && ln.g) {
         const ratio = tk.g / ln.g;
         const h = document.createElement("div"); h.className = "form-hint";
@@ -90,23 +130,31 @@ export class FormBase {
         spanWrap.appendChild(FormControls.fieldRow(I18n.t("forms.breakout.lanesField"), sel, I18n.t("forms.breakout.lanesManualHint")));
       }
     };
-    trunkSel.onchange = refreshSpan; laneSel.onchange = refreshSpan; refreshSpan();
+    // `entityPicker` émet un `change` (bubbles) à chaque pick/effacement — même contrat qu'un <select>.
+    trunkSel.addEventListener("change", refreshSpan); laneSel.addEventListener("change", refreshSpan); refreshSpan();
     return Dialog.custom({
-      title: I18n.t("forms.breakout.title"), confirmLabel: I18n.t("forms.breakout.create"),
+      title: I18n.t(split ? "forms.breakout.splitTitle" : "forms.breakout.title"),
+      confirmLabel: I18n.t(split ? "forms.breakout.splitConfirm" : "forms.breakout.create"),
       build: (root) => {
-        root.appendChild(FormControls.fieldRow(I18n.t("forms.breakout.nameField"), nameI, I18n.t("forms.breakout.nameHint")));
-        root.appendChild(FormControls.fieldRow(I18n.t("forms.breakout.trunkField"), trunkSel, I18n.t("forms.breakout.trunkHint")));
+        if (split) {
+          root.appendChild(FormControls.fieldRow(I18n.t("forms.breakout.splitPortField"), trunkInfo, I18n.t("forms.breakout.splitPortHint")));
+        } else {
+          root.appendChild(FormControls.fieldRow(I18n.t("forms.breakout.nameField"), nameI, I18n.t("forms.breakout.nameHint")));
+          root.appendChild(FormControls.fieldRow(I18n.t("forms.breakout.trunkField"), trunkSel, I18n.t("forms.breakout.trunkHint")));
+        }
         root.appendChild(FormControls.fieldRow(I18n.t("forms.breakout.laneField"), laneSel, I18n.t("forms.breakout.laneHint")));
         root.appendChild(spanWrap);
         return {
           validate: () => {
-            if (!nameI.value.trim()) return I18n.t("forms.breakout.errName");
-            if (!trunkSel.value) return I18n.t("forms.breakout.errTrunk");
+            // Le nom du trunk est la RACINE du nom des lanes (`BreakoutRules.laneNames`) : requis dans les deux
+            // modes. En mode `split` il ne se corrige pas ici mais sur la ligne du port — le message le dit.
+            if (!trunkName()) return I18n.t(split ? "forms.breakout.errSplitName" : "forms.breakout.errName");
+            if (!split && !trunkSel.value) return I18n.t("forms.breakout.errTrunk");
             if (!laneSel.value) return I18n.t("forms.breakout.errLane");
             if (!span) return I18n.t("forms.breakout.errCombo", { spans: "{" + BREAKOUT_SPANS.join(", ") + "}" });
             return true as const;
           },
-          collect: () => ({ name: nameI.value.trim(), trunkTypeId: trunkSel.value, laneTypeId: laneSel.value, count: span as number }),
+          collect: (): BreakoutConfig => ({ name: trunkName(), trunkTypeId: trunkTypeId(), laneTypeId: laneSel.value, count: span as number }),
         };
       },
     });

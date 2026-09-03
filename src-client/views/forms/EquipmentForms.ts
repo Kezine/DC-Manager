@@ -16,6 +16,8 @@ import { ColorPalette } from "../../ui/ColorPalette";
 import { Notify } from "../../ui/Notify";
 import { Dialog } from "../../ui/Dialog";
 import { ContextMenu } from "../../ui/ContextMenu";
+import { RowMenu, type RowMenuItem } from "../../ui/RowMenu";   // menu ⋮ des lignes de port : éclater / défaire / supprimer (docs/breakout.md)
+import { BreakoutRules, type BreakoutSplitVerdict } from "../../core/BreakoutRules";   // verdicts PURS du breakout, nommage des lanes, ordre trunk → lanes
 import { Html } from "../../core/Html";
 import { Markdown } from "../../core/Markdown";   // rendu MARKDOWN des champs texte libre des FICHES (défauts sûrs, cf. core/Markdown)
 import { Color } from "../../core/Color";
@@ -190,16 +192,19 @@ export class EquipmentForms extends FormBase {
       const tw = document.createElement("div"); tw.className = "table-wrap";
       // Colonne « 3D » : bouton « Localiser » par port, sous le prédicat PARTAGÉ `store.portLocatable`
       // (miroir des refus de `DcInteract.locatePort`, cf. `core/Locatable`).
-      const rows = ports.map((p: any) => {
+      // BREAKOUT (docs/breakout.md § Fiche) : les lanes sont rangées IMMÉDIATEMENT sous leur trunk, quel que soit
+      // l'ordre de `portsOf` — la fiche montre la STRUCTURE, pas l'ordre de saisie. Les lignes portent une classe
+      // (`port-trunk` / `port-lane`) pour le retrait visuel et le repère de rattachement (CSS, aucun style inline).
+      const rows = BreakoutRules.orderWithLanes(ports).map((p: any) => {
         const pt: any = store.get("portTypes", p.port_type_id), ag: any = p.aggregate_id ? store.get("aggregates", p.aggregate_id) : null;
-        let bk = "";
-        if (store.isBreakoutParent(p)) bk = ` <span class="pill">${I18n.t("equipment.detail.trunkPill", { n: store.breakoutLanes(p.id).length })}</span>`;
-        else if (p.parent_port_id) { const par: any = store.get("ports", p.parent_port_id); bk = ` <span class="pill">${I18n.t("equipment.detail.lanePill", { lane: p.lane || "?", trunk: Html.escape(par ? (par.name || I18n.t("equipment.detail.trunkWord")) : I18n.t("equipment.detail.trunkWord")) })}</span>`; }
+        let bk = "", rowClass = "";
+        if (store.isBreakoutParent(p)) { rowClass = "port-trunk"; bk = ` <span class="pill">${I18n.t("equipment.detail.trunkPill", { n: store.breakoutLanes(p.id).length })}</span>`; }
+        else if (p.parent_port_id) { rowClass = "port-lane"; const par: any = store.get("ports", p.parent_port_id); bk = ` <span class="pill">${I18n.t("equipment.detail.lanePill", { lane: p.lane || "?", trunk: Html.escape(par ? (par.name || I18n.t("equipment.detail.trunkWord")) : I18n.t("equipment.detail.trunkWord")) })}</span>`; }
         // SOUS-ÉQUIPEMENT desservi : PASTILLE sous le nom du port, et non une 6ᵉ colonne — la table en a déjà
         // cinq (port, type, rôle, agrégat, 3D) et une de plus la rendrait illisible dans une modale.
         const seRow: any = p.sub_equipment_id ? store.get("subEquipments", p.sub_equipment_id) : null;
         if (seRow) bk += `<div class="form-hint" style="margin:2px 0 0">${Html.escape(I18n.t("dc.interact.subEquipmentPrefix"))}${Html.escape(seRow.name || I18n.t("subEquipment.fallback"))}</div>`;
-        return `<tr><td class="cell-name">${Html.escape(p.name || I18n.t("equipment.common.portParen"))}${bk}</td><td>${pt ? Html.escape(pt.name) + ' <span style="color:var(--fg-dimmer)">· ' + Html.escape(pt.family) + "</span>" : `<span style="color:var(--err)">${I18n.t("equipment.detail.typeUnknown")}</span>`}</td><td><span class="pill ${PortRoles.pillClass(p.role)}">${PortRoles.isPoe(p.role) ? Icons.POE_BOLT : ""}${Html.escape(PortRoles.label(p.role))}</span></td><td>${ag ? Html.escape(ag.name || I18n.t("equipment.detail.aggFallback")) : '<span style="color:var(--fg-dimmer)">—</span>'}</td><td class="cell-actions">${host.locate && store.portLocatable(p.id) ? `<button class="btn btn-ghost btn-sm icon-action" data-port-locate="${p.id}" title="${I18n.t("equipment.detail.locatePort")}" aria-label="${I18n.t("equipment.detail.locatePort")}">${Icons.LOCATE}</button>` : ""}</td></tr>`;
+        return `<tr${rowClass ? ` class="${rowClass}"` : ""}><td class="cell-name">${Html.escape(p.name || I18n.t("equipment.common.portParen"))}${bk}</td><td>${pt ? Html.escape(pt.name) + ' <span style="color:var(--fg-dimmer)">· ' + Html.escape(pt.family) + "</span>" : `<span style="color:var(--err)">${I18n.t("equipment.detail.typeUnknown")}</span>`}</td><td><span class="pill ${PortRoles.pillClass(p.role)}">${PortRoles.isPoe(p.role) ? Icons.POE_BOLT : ""}${Html.escape(PortRoles.label(p.role))}</span></td><td>${ag ? Html.escape(ag.name || I18n.t("equipment.detail.aggFallback")) : '<span style="color:var(--fg-dimmer)">—</span>'}</td><td class="cell-actions">${host.locate && store.portLocatable(p.id) ? `<button class="btn btn-ghost btn-sm icon-action" data-port-locate="${p.id}" title="${I18n.t("equipment.detail.locatePort")}" aria-label="${I18n.t("equipment.detail.locatePort")}">${Icons.LOCATE}</button>` : ""}</td></tr>`;
       }).join("");
       tw.innerHTML = `<table><thead><tr><th>${I18n.t("equipment.detail.colPort")}</th><th>${I18n.t("lists.col.type")}</th><th>${I18n.t("equipment.detail.colRole")}</th><th>${I18n.t("equipment.detail.colAgg")}</th><th style="text-align:right;">${I18n.t("equipment.detail.col3d")}</th></tr></thead><tbody>${rows}</tbody></table>`;
       root.appendChild(tw);
@@ -993,24 +998,100 @@ export class EquipmentForms extends FormBase {
       s.appendChild(document.createTextNode(PortRoles.label(role))); return s;
     };
 
-    // Ligne de port VERROUILLÉE (trunk/lane d'un breakout) : nom éditable + pastilles figées + retrait du breakout.
-    // Non extensible ; cohabite avec les cartes `<details>` (cf. maquette §5.9). Comportement inchangé.
-    const lockedRow = (p: any, kind: string) => {
-      const r = document.createElement("div"); r.className = "chip-row port-locked";
-      if (kind === "lane") r.style.cssText = "margin-left:18px;border-left:2px solid var(--line-2);padding-left:8px;";
-      const nm = document.createElement("input"); nm.className = "sub-input grow"; nm.value = p.name; nm.placeholder = kind === "trunk" ? I18n.t("equipment.equip.trunkPh") : I18n.t("equipment.equip.lanePh"); nm.oninput = () => { p.name = nm.value; };
-      r.appendChild(nm);
-      const rPill = document.createElement("span"); rPill.className = "pill " + PortRoles.pillClass(p.role); rPill.textContent = PortRoles.label(p.role);
+    // ---- BREAKOUT : section DÉDIÉE trunk + lanes (retour terrain T2-B2/B3 — docs/breakout.md § Formulaire) ----
+    // Un trunk et ses lanes forment UN groupe `.port-breakout`, visuellement distinct des cartes `<details class="port">` :
+    // en-tête (étiquette « Breakout · N lanes », nom du trunk éditable, pastilles, menu ⋮), puis les lanes DEDANS, dans
+    // la GRAMMAIRE des têtes de port (`.p-name` / `.p-cat` / `.p-metric`) mais SANS corps déplié : une lane n'a ni sens,
+    // ni budget, ni brins, ni position de façade — elle émerge du connecteur du trunk. Limite v1 assumée : son
+    // sous-équipement desservi ne se règle pas ici (docs/breakout.md § Limites).
+    // Les VERDICTS (éclater / défaire) viennent du module PUR `core/BreakoutRules` et sont TRADUITS ici ; « porte-t-il
+    // un câble ? » est relu au Store — un port brouillon jamais enregistré n'en a pas, ce qui est le comportement voulu.
+    const SPLIT_REFUSAL_KEYS: Record<Exclude<BreakoutSplitVerdict, "ok">, string> = {
+      "not-data": "equipment.equip.splitRefusedNotData",
+      "is-lane": "equipment.equip.splitRefusedIsLane",
+      "is-trunk": "equipment.equip.splitRefusedIsTrunk",
+      "cabled": "equipment.equip.splitRefusedCabled",
+    };
+    const removeDraftPorts = (ids: Set<string>) => { for (let i = draftPorts.length - 1; i >= 0; i--) if (ids.has(draftPorts[i].id)) draftPorts.splice(i, 1); };
+    /** ÉCLATER un port EXISTANT (clause C5 du contrat breakout ⇄ terminaison) : le port NE CHANGE PAS — mêmes id, nom,
+        type, position de façade, agrégat, réseau — il DEVIENT trunk par le seul fait d'avoir des lanes (`isDraftTrunk`).
+        Les lanes s'insèrent juste après lui dans le brouillon ; leur création en base passe par le save existant. */
+    const splitPort = (p: PortDraft) => this.configureBreakout(store, { mode: "split", trunk: { name: p.name, portTypeId: p.port_type_id } }).then((cfg) => {
+      if (!cfg) return;
+      const at = draftPorts.indexOf(p); if (at < 0) return;
+      host.setDirty?.(true);
+      const lanes: PortDraft[] = BreakoutRules.laneNames(cfg.name, cfg.count).map((laneName, index) => ({ id: Id.uid(), name: laneName, port_type_id: cfg.laneTypeId || null, role: "data", aggregate_id: null, description: "", parent_port_id: p.id, lane: index + 1 }));
+      draftPorts.splice(at + 1, 0, ...lanes);
+      renderPorts();
+    });
+    /** Item « Éclater en N lanes… » du menu ⋮ d'une ligne de port : le verdict est TRADUIT au rendu — item grisé + raison
+        en infobulle quand il n'est pas `ok`. PREMIER emplacement du menu (clause C3 : la terminaison y posera le sien). */
+    const splitMenuItem = (p: PortDraft): RowMenuItem => {
+      const verdict = BreakoutRules.canSplit({ kind: PortRoles.kind(p.role), isLane: !!p.parent_port_id, isTrunk: isDraftTrunk(p), hasCable: !!store.cableOnPort(p.id) });
+      return {
+        label: I18n.t("equipment.equip.splitPort"), icon: Icons.PORT,
+        disabled: verdict !== "ok",
+        title: verdict === "ok" ? I18n.t("equipment.equip.splitPortTitle") : I18n.t(SPLIT_REFUSAL_KEYS[verdict]),
+        onClick: () => { splitPort(p); },
+      };
+    };
+    /** Menu ⋮ d'un TRUNK : « Défaire le breakout » (Q2.4 — RÉTROGRADAGE en port ordinaire, REFUSÉ si une lane est câblée,
+        l'item nommant les lanes en cause) et « Supprimer le port et ses lanes » (danger — le comportement de l'ancien « × »). */
+    const trunkMenuItems = (trunk: PortDraft, lanes: PortDraft[]): RowMenuItem[] => {
+      const verdict = BreakoutRules.canUnsplit(lanes.map((l) => ({ id: l.id, name: l.name, hasCable: !!store.cableOnPort(l.id) })));
+      const laneIds = new Set(lanes.map((l) => l.id));
+      return [
+        {
+          label: I18n.t("equipment.equip.unsplit"), icon: Icons.BACK,
+          disabled: !verdict.ok,
+          title: verdict.ok ? I18n.t("equipment.equip.unsplitTitle") : I18n.t("equipment.equip.unsplitRefused", { count: verdict.cabledLanes.length, lanes: verdict.cabledLanes.map((l) => l.name || I18n.t("equipment.common.portParen")).join(", ") }),
+          // Les lanes quittent le brouillon ; le trunk RESTE (id, nom, type, façade intacts) et redevient une carte
+          // ordinaire au re-rendu, n'ayant plus de lanes. Leur retrait en base passe par le save (brouillon ⇄ portsOf).
+          onClick: () => { removeDraftPorts(laneIds); host.setDirty?.(true); renderPorts(); },
+        },
+        {
+          label: I18n.t("equipment.equip.removeBreakout"), icon: Icons.DELETE, danger: true,
+          onClick: () => { removeDraftPorts(new Set([trunk.id, ...laneIds])); renderPorts(); },
+        },
+      ];
+    };
+    /** Les trois cellules de la GRAMMAIRE des têtes de port, en version ÉDITABLE (nom en `.sub-input`) — partagées par
+        l'en-tête du groupe (trunk) et par chaque lane, pour que les deux se lisent comme les ports ordinaires. */
+    const portGrammar = (p: PortDraft, placeholder: string): HTMLElement[] => {
+      const nameWrap = document.createElement("span"); nameWrap.className = "p-name";
+      const nm = document.createElement("input"); nm.className = "sub-input"; nm.value = p.name; nm.placeholder = placeholder; nm.oninput = () => { p.name = nm.value; };
+      nameWrap.appendChild(nm);
+      const catWrap = document.createElement("span"); catWrap.className = "p-cat"; catWrap.appendChild(catPill(p.role));
+      const metric = document.createElement("span"); metric.className = "p-metric";
       const tt: any = p.port_type_id ? store.get("portTypes", p.port_type_id) : null;
-      const tPill = document.createElement("span"); tPill.className = "pill"; tPill.textContent = tt ? tt.name : I18n.t("equipment.detail.typeUnknown");
-      r.appendChild(rPill); r.appendChild(tPill);
-      if (kind === "trunk") {
-        const tag = document.createElement("span"); tag.className = "pill"; tag.textContent = I18n.t("equipment.equip.breakoutTag", { n: draftPorts.filter((c) => c.parent_port_id === p.id).length });
-        const rm = document.createElement("button"); rm.type = "button"; rm.className = "btn btn-danger btn-sm"; rm.textContent = "×"; rm.title = I18n.t("equipment.equip.removeBreakout");
-        rm.onclick = () => { const ids = new Set([p.id, ...draftPorts.filter((c) => c.parent_port_id === p.id).map((c) => c.id)]); for (let i = draftPorts.length - 1; i >= 0; i--) if (ids.has(draftPorts[i].id)) draftPorts.splice(i, 1); renderPorts(); };
-        r.appendChild(tag); r.appendChild(rm);
-      } else { const tag = document.createElement("span"); tag.className = "pill"; tag.textContent = I18n.t("equipment.equip.laneTag", { lane: p.lane || "?" }); r.appendChild(tag); }
+      const typeName = document.createElement("span"); typeName.className = "muted"; typeName.textContent = tt ? tt.name : I18n.t("equipment.detail.typeUnknown"); metric.appendChild(typeName);
+      return [nameWrap, catWrap, metric];
+    };
+    /** Ligne de LANE : nom éditable · pastille catégorie · type · tag « lane N ». Non extensible (pas de corps). */
+    const laneRow = (lane: PortDraft) => {
+      const r = document.createElement("div"); r.className = "port-breakout-lane";
+      if (invalidPortIds.has(lane.id)) r.setAttribute("data-err", "");
+      r.append(...portGrammar(lane, I18n.t("equipment.equip.lanePh")));
+      const tag = document.createElement("span"); tag.className = "p-lane"; tag.textContent = I18n.t("equipment.equip.laneTag", { lane: lane.lane || "?" });
+      r.appendChild(tag);
       return r;
+    };
+    /** GROUPE breakout : en-tête du trunk (étiquette, nom, pastilles, ⋮) + ses lanes. */
+    const breakoutGroup = (trunk: PortDraft, lanes: PortDraft[]) => {
+      const box = document.createElement("div"); box.className = "port-breakout";
+      if (invalidPortIds.has(trunk.id)) box.setAttribute("data-err", "");
+      const head = document.createElement("div"); head.className = "port-breakout-head";
+      const tag = document.createElement("span"); tag.className = "pill p-tag"; tag.textContent = I18n.t("equipment.equip.breakoutGroup", { count: lanes.length });
+      head.appendChild(tag);
+      head.append(...portGrammar(trunk, I18n.t("equipment.equip.trunkPh")));
+      const acts = document.createElement("span"); acts.className = "p-acts";
+      acts.appendChild(iconBtn(Icons.MORE, I18n.t("lists.chrome.rowMore"), false, (e) => RowMenu.open(e.currentTarget as HTMLElement, trunkMenuItems(trunk, lanes))));
+      head.appendChild(acts);
+      box.appendChild(head);
+      const body = document.createElement("div"); body.className = "port-breakout-lanes";
+      lanes.forEach((lane) => body.appendChild(laneRow(lane)));
+      box.appendChild(body);
+      return box;
     };
 
     // Ligne de port ÉDITABLE = `<details>` extensible (cf. maquette) : tête compacte (nom · pastille catégorie · sens ·
@@ -1055,6 +1136,10 @@ export class EquipmentForms extends FormBase {
         }]);
       }));
       acts.appendChild(iconBtn(Icons.DELETE, I18n.t("equipment.detail.deletePort"), true, () => { const i = draftPorts.indexOf(p); if (i >= 0) draftPorts.splice(i, 1); renderPorts(); }));
+      // Menu ⋮ « plus d'actions » (ui/RowMenu, comme les listings) : UN emplacement à ITEMS dont « Éclater en N lanes… »
+      // est aujourd'hui le seul (clause C3 du cadrage breakout : la terminaison T5 y posera le sien — on ne livre pas
+      // d'item factice grisé). Le refus est NOMMÉ au moment du geste (item grisé + raison), pas découvert au save.
+      acts.appendChild(iconBtn(Icons.MORE, I18n.t("lists.chrome.rowMore"), false, (e) => RowMenu.open(e.currentTarget as HTMLElement, [splitMenuItem(p)])));
       head.appendChild(acts);
       det.appendChild(head);
 
@@ -1132,14 +1217,13 @@ export class EquipmentForms extends FormBase {
       det.appendChild(body);
       return det;
     };
-    const portRow = (p: any, kind: string) => (kind === "trunk" || kind === "lane") ? lockedRow(p, kind) : detailsRow(p);
     const renderPorts = () => {
       portList.innerHTML = "";
       if (!draftPorts.length) { const e = document.createElement("div"); e.className = "form-hint"; e.textContent = I18n.t("equipment.detail.noPorts"); portList.appendChild(e); }
-      draftPorts.filter((p) => !p.parent_port_id).forEach((p) => {
-        if (isDraftTrunk(p)) { portList.appendChild(portRow(p, "trunk")); draftPorts.filter((c) => c.parent_port_id === p.id).sort((a, b) => (a.lane || 0) - (b.lane || 0)).forEach((l) => portList.appendChild(portRow(l, "lane"))); }
-        else portList.appendChild(portRow(p, "normal"));
-      });
+      // Structure trunk → lanes (`BreakoutRules.groupByTrunk`) : un GROUPE par trunk, une carte `<details>` par port
+      // ordinaire. Une lane ORPHELINE (parent absent du brouillon) est rendue comme un port ordinaire — jamais cachée,
+      // et son menu ⋮ refuse l'éclatement (« c'est une lane »).
+      BreakoutRules.groupByTrunk(draftPorts).forEach((group) => portList.appendChild(group.lanes.length ? breakoutGroup(group.port, group.lanes) : detailsRow(group.port)));
       renderPatchInfo();
       syncPoe();   // T-POE2 (verrou bascule) + visibilité du budget, recalculés à chaque re-rendu
     };
@@ -1162,7 +1246,8 @@ export class EquipmentForms extends FormBase {
       host.setDirty?.(true);
       const trunkId = Id.uid();
       draftPorts.push({ id: trunkId, name: cfg.name, port_type_id: cfg.trunkTypeId || null, role: "data", aggregate_id: null, description: "", parent_port_id: null, lane: null });
-      for (let i = 1; i <= cfg.count; i++) draftPorts.push({ id: Id.uid(), name: cfg.name + "/" + i, port_type_id: cfg.laneTypeId || null, role: "data", aggregate_id: null, description: "", parent_port_id: trunkId, lane: i });
+      // Noms des lanes : SEULE source du schéma = `BreakoutRules.laneNames` (partagée avec l'éclatement d'un port existant).
+      BreakoutRules.laneNames(cfg.name, cfg.count).forEach((laneName, index) => draftPorts.push({ id: Id.uid(), name: laneName, port_type_id: cfg.laneTypeId || null, role: "data", aggregate_id: null, description: "", parent_port_id: trunkId, lane: index + 1 }));
       renderPorts();
     });
     renderAggs(); renderPorts();
@@ -1436,8 +1521,8 @@ export class EquipmentForms extends FormBase {
              surlignage des lignes de port fautives (attribut `data-err` déjà stylé, cf. le liseré de survente PoE)
              et un toast qui les NOMME, plutôt que l'échec global « certains éléments… » qui laissait chercher.
              Les erreurs portent `collection` + `id` : c'est la validation partagée qui les estampille.
-             ⚠ Les lignes de breakout (trunk/lane) ne sont pas des `<details class="port">` : elles ne portent pas le
-             surlignage, seulement le nom dans le toast — assumé, plutôt qu'une règle CSS de plus pour ce seul cas. */
+             Les lignes de breakout (groupe `.port-breakout` d'un trunk, lignes `.port-breakout-lane`) portent le MÊME
+             attribut `data-err` : un trunk ou une lane refusés se voient comme un port ordinaire (docs/breakout.md). */
           const hadHighlight = invalidPortIds.size > 0;   // un port corrigé doit PERDRE son surlignage
           invalidPortIds.clear();
           saved.errors.forEach((e) => { if (e.collection === "ports" && e.id && draftPortIds.has(e.id)) invalidPortIds.add(e.id); });

@@ -27,6 +27,12 @@ export const forms = {
     errTrunk: "Choose the trunk type.",
     errLane: "Choose the lane type.",
     errCombo: "Non-standard trunk/lane combination: adjust the types (trunk rate = N × lane rate, N ∈ {{spans}}).",
+    // `split` mode of the same dialog (splitting an EXISTING port — docs/breakout.md): the trunk is shown, not typed.
+    splitTitle: "Split the port into lanes",
+    splitConfirm: "Split",
+    splitPortField: "Port to split (it becomes the trunk)",
+    splitPortHint: "It keeps its name, type and faceplate position; it will no longer carry a cable itself — the lanes do.",
+    errSplitName: "Name the port on its row first: the lanes inherit its name (« name/1 », « name/2 », …).",
   },
   cap: {
     kept_one: "{{count}} cell kept: a pin is placed on it.",
