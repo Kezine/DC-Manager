@@ -107,6 +107,8 @@ Architecture et conception, référencées depuis le code.
 
 - [`docs/deduction-reseau.md`](docs/deduction-reseau.md) — réseau déduit depuis les ports terminaux.
 - [`docs/faisceaux.md`](docs/faisceaux.md) — faisceaux (trunks) : contraintes et rendu du tracé.
+- [`docs/breakout.md`](docs/breakout.md) — breakout : un port trunk éclaté en N lanes (modèle, refus
+  d'éclatement/défaire, section dédiée du formulaire, fiche, contrat avec la future terminaison).
 - [`docs/power.md`](docs/power.md) — analyse énergie (source/sink, charges, PoE, avertissements).
 - [`docs/lifecycle.md`](docs/lifecycle.md) — cycle de vie matériel : veilleur d'alerte de garantie.
 
