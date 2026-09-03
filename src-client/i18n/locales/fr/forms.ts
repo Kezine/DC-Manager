@@ -31,6 +31,12 @@ export const forms = {
     errTrunk: "Choisissez le type du trunk.",
     errLane: "Choisissez le type des lanes.",
     errCombo: "Combinaison trunk/lane non standard : ajustez les types (débit trunk = N × débit lane, N ∈ {{spans}}).",
+    // Mode `split` du même dialogue (éclater un port EXISTANT — docs/breakout.md) : le trunk est affiché, pas saisi.
+    splitTitle: "Éclater le port en lanes",
+    splitConfirm: "Éclater",
+    splitPortField: "Port à éclater (il devient le trunk)",
+    splitPortHint: "Il garde son nom, son type et sa position de façade ; il ne portera plus de câble lui-même — ce sont les lanes qui les portent.",
+    errSplitName: "Nommez d'abord le port sur sa ligne : les lanes héritent de son nom (« nom/1 », « nom/2 », …).",
   },
   cap: {
     kept_one: "{{count}} cellule conservée : un pin y est posé.",

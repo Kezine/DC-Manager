@@ -979,7 +979,7 @@
 
   /* ---- Éditeur de ports : lignes extensibles <details> (support POE — cf. design-system/briefs/port-editor-poe) ----
      Tête compacte (nom · pastille catégorie · sens · métrique · réseau · actions) + corps déplié (champs
-     conditionnels). Tient la densité d'un switch 48 ports. Cohabite avec les lignes trunk/lane figées (.port-locked). */
+     conditionnels). Tient la densité d'un switch 48 ports. Cohabite avec les GROUPES de breakout (.port-breakout, plus bas). */
   .port { border: 1px solid var(--line-2); border-radius: 8px; background: var(--bg-2); overflow: hidden; }
   .port[data-err] { border-color: var(--err); }
   .port-head { display: flex; align-items: center; gap: 10px; padding: 9px 12px; cursor: pointer; list-style: none; user-select: none; }
@@ -1004,7 +1004,33 @@
   .port-body .body-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px 16px; align-items: start; }
   .port-body .body-grid .form-field { margin-bottom: 0; }
   .port-body .body-grid .rm-toggle { width: fit-content; max-width: 100%; }
-  .port-locked { opacity: 0.78; }
+  /* ---- BREAKOUT : section DÉDIÉE trunk + lanes du formulaire d'équipement (docs/breakout.md § Formulaire) ----
+     Un trunk éclaté et ses lanes forment UN groupe `.port-breakout`, clairement distinct des cartes `.port` : cadre à
+     liseré ACCENT à gauche (le repère du groupe), en-tête sur fond relevé (étiquette « Breakout · N lanes », nom du
+     trunk éditable, pastilles, menu ⋮), puis les lanes DEDANS. Les lanes reprennent la GRAMMAIRE des têtes de port
+     (.p-name / .p-cat / .p-metric) mais ne sont PAS extensibles (aucun corps) ; un repère vertical à gauche de chaque
+     lane la rattache visuellement au trunk. Tokens uniquement : le thème clair suit de lui-même. `data-err` = même
+     surlignage de refus que les cartes `.port` (liseré rouge). */
+  .port-breakout { border: 1px solid var(--line-2); border-left: 3px solid var(--accent); border-radius: 8px; background: var(--bg-2); overflow: hidden; box-shadow: var(--lift); }
+  .port-breakout[data-err] { border-color: var(--err); }
+  .port-breakout-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--bg-3); }
+  .port-breakout-head .p-tag { flex: none; color: var(--accent-text); border: 1px solid var(--accent); background: transparent; letter-spacing: 0.04em; text-transform: uppercase; }
+  .port-breakout .p-name { flex: 0 0 150px; min-width: 0; }
+  .port-breakout .p-name .sub-input { width: 100%; }
+  .port-breakout .p-cat { flex: 0 0 auto; }
+  .port-breakout .p-cat .pill svg { width: 11px; height: 11px; }
+  .port-breakout .p-metric { flex: 1 1 88px; min-width: 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .port-breakout .p-metric .muted { color: var(--fg-dimmer); }
+  .port-breakout .p-acts { display: flex; gap: 4px; flex: none; margin-left: auto; }
+  .port-breakout-lanes { display: flex; flex-direction: column; }
+  .port-breakout-lane { position: relative; display: flex; align-items: center; gap: 10px; padding: 6px 12px 6px 28px; border-top: 1px solid var(--line); }
+  .port-breakout-lane::before { content: ""; position: absolute; left: 13px; top: 0; bottom: 0; width: 2px; background: var(--line-2); }   /* repère de rattachement au trunk */
+  .port-breakout-lane[data-err] { box-shadow: inset 3px 0 0 var(--err); }
+  .port-breakout-lane .p-lane { flex: none; margin-left: auto; font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg-dim); white-space: nowrap; }
+  /* Fiche (lecture) : les lanes suivent leur trunk (ordre `BreakoutRules.orderWithLanes`) et se lisent en RETRAIT, avec
+     le même repère vertical — dessiné en dégradé TRANSPARENT ailleurs, pour laisser passer le survol de la ligne. */
+  tr.port-trunk > td.cell-name { color: var(--accent-text); }
+  tr.port-lane > td.cell-name { padding-left: 28px; font-weight: 500; color: var(--fg-dim); background-image: linear-gradient(to right, transparent 14px, var(--line-2) 14px, var(--line-2) 16px, transparent 16px); background-repeat: no-repeat; }
   .warn-strip { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 8px 10px; border: 1px solid var(--err); background: color-mix(in srgb, var(--err) 12%, transparent); color: var(--err); border-radius: 5px; font-size: 11px; }
   .warn-strip .gi svg { width: 15px; height: 15px; }
 
