@@ -3328,50 +3328,117 @@
     .scan-flash { animation: none; }
   }
 
-  /* ============ ÉTIQUETTES IMPRIMABLES — modale d'impression (chantier étiquettes QR, lot E) ============
-     Maquette de référence : design-system/briefs/qr-etiquettes-imprimables-maquette.html (elle FAIT FOI).
+  /* ============ ÉTIQUETTES IMPRIMABLES — modale d'impression (chantier étiquettes QR, lot E,
+     REFONDUE par le retour terrain T11 du 2026-09-03) ============
+     Maquette de référence : design-system/briefs/qr-print-redesign-maquette.html pour le PANNEAU ;
+     qr-etiquettes-imprimables-maquette.html fait toujours foi pour le RENDU imprimé.
      ⚠ Ces règles n'habillent que le CHROME de la modale (panneau de réglages + viewport d'aperçu) — le
      RENDU des étiquettes (`.label-render …`) vit dans `core/LabelHtml.CSS`, UNE source partagée entre
-     l'aperçu et le document d'impression (noir sur blanc, aucun token de thème là-bas). */
-  .label-print { display: grid; grid-template-columns: 250px 1fr; gap: 16px; align-items: start; }
-  @media (max-width: 760px) { .label-print { grid-template-columns: 1fr; } }
-  /* 🚨 `hidden` DOIT gagner DANS cette modale — sans quoi la matrice de visibilité contextuelle
-     (`core/LabelPrintPolicy`) pose des `hidden` parfaitement INERTES : c'était le retour terrain
-     « tous les contrôles dans tous les contextes » (2026-08-20). Raison exacte : `[hidden]{display:none}`
-     vient de la feuille du NAVIGATEUR, et TOUTE règle d'auteur qui pose un `display` la bat — quelle
-     que soit sa spécificité. Or les contrôles d'ici en portent tous une : `.btn` (inline-flex),
-     `.label-print-mm-field` (flex), `.label-print-fset` (flex), `.label-print-mm` (grid)… */
+     l'aperçu et le document d'impression (noir sur blanc, aucun token de thème là-bas).
+     🚨 T11 — LE PANNEAU EXPLIQUE AU LIEU DE CACHER : d'où les deux familles de règles nouvelles,
+     `.lp-opt[disabled]` (l'option refusée reste LISIBLE, avec sa raison sur sa propre ligne) et
+     `.lp-why` (le « pourquoi » de chaque étage). Un contrôle grisé illisible serait pire que le
+     contrôle caché d'avant : on baisse l'opacité du TITRE, jamais celle de la raison.
+     Cibles tactiles : les boutons-cartes font ≥ 44 px de haut (padding + line-height). */
+  .label-print { display: grid; grid-template-columns: 320px 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 860px) { .label-print { grid-template-columns: 1fr; } }
+  /* 🚨 `hidden` DOIT gagner DANS cette modale — sans quoi les masquages STRUCTURELS (une cote qui
+     n'existe pas sous ce support, un étage sans objet) sont parfaitement INERTES : c'était le retour
+     terrain « tous les contrôles dans tous les contextes » (2026-08-20). Raison exacte :
+     `[hidden]{display:none}` vient de la feuille du NAVIGATEUR, et TOUTE règle d'auteur qui pose un
+     `display` la bat — quelle que soit sa spécificité. Or les contrôles d'ici en portent tous une.
+     ⚠ T11 : `hidden` ne sert PLUS à cacher un VERDICT (une option indisponible est grisée avec sa
+     raison) — seulement une question qui ne se pose pas dans ce contexte. */
   .label-print [hidden] { display: none !important; }
-  .label-print-side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-  .label-print-fset { display: flex; flex-direction: column; gap: 8px; }
-  .label-print-h { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--fg-dimmer); }
-  .label-print-checks { display: flex; flex-direction: column; gap: 4px; align-items: stretch; }
-  /* Rangée des cotes libres (mm) : petits champs côte à côte, libellé au-dessus (maquette .mm-row). */
-  .label-print-mm { display: grid; grid-template-columns: repeat(auto-fit, minmax(64px, 1fr)); gap: 6px; margin-top: 4px; }
-  .label-print-mm-field { display: flex; flex-direction: column; gap: 4px; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-dimmer); }
-  /* Les inputs de l'app ne sont thématisés QUE sous `.form-field` — ces petits champs mm vivent
-     hors rangée de formulaire, on leur redonne la même robe (fond/bord/mono/focus). */
-  .label-print-mm-field input {
+  .lp-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+  /* -- CONTEXTE : qui, combien, avec quelle mémoire (jamais masqué) -- */
+  .lp-ctx { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; background: var(--bg-3); border: 1px solid var(--line); border-radius: 8px; }
+  .lp-ctx-who { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--fg); overflow-wrap: anywhere; }
+  .lp-ctx-meta { font-size: 11px; color: var(--fg-dim); }
+  .lp-ctx-mem { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+  .lp-ctx-memtext { font-size: 10px; letter-spacing: 0.04em; color: var(--fg-dimmer); }
+
+  /* -- UN ÉTAGE : numéro, titre, valeur courante à droite -- */
+  .lp-stage { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; }
+  /* L'étage de TÊTE (Tirage dès 2 étiquettes) se distingue par son relief, pas par une couleur. */
+  .lp-stage-lead { background: var(--bg-3); box-shadow: var(--lift); }
+  .lp-stage-head { display: flex; align-items: baseline; gap: 8px; }
+  .lp-stage-n { font-family: var(--mono); font-size: 11px; color: var(--accent-text); flex: none; }
+  .lp-stage-t { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--fg-dimmer); }
+  .lp-stage-v { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--fg-dim); text-align: right; overflow-wrap: anywhere; }
+
+  /* -- OPTIONS-CARTES (supports, contenus) : titre + ligne d'explication ou de refus -- */
+  .lp-opts { display: flex; flex-direction: column; gap: 4px; }
+  .lp-opt {
+    display: flex; align-items: flex-start; gap: 8px; width: 100%; min-height: 44px; text-align: left;
+    padding: 7px 10px; background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px;
+    color: var(--fg); font: inherit; cursor: pointer;
+  }
+  .lp-opt:hover:not([disabled]) { border-color: var(--fg-dimmer); background: var(--bg-2); }
+  .lp-opt[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); }
+  /* Refus : le TITRE s'estompe, la RAISON reste pleinement lisible (cf. en-tête). */
+  .lp-opt[disabled] { cursor: not-allowed; background: var(--bg); border-style: dashed; }
+  .lp-opt[disabled] .lp-opt-title { opacity: 0.5; }
+  .lp-opt[disabled] .lp-opt-hint { color: var(--warn); font-style: normal; }
+  .lp-opt-dot { flex: none; width: 10px; height: 10px; margin-top: 4px; border: 1px solid var(--fg-dimmer); border-radius: 50%; }
+  .lp-opt[aria-pressed="true"] .lp-opt-dot { border-color: var(--accent); background: var(--accent); }
+  .lp-opt-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .lp-opt-title { font-size: 12px; color: var(--fg); }
+  .lp-opt-hint { font-size: 10px; font-style: normal; color: var(--fg-dimmer); overflow-wrap: anywhere; }
+
+  /* -- CHAMPS d'un étage : un libellé, un contrôle -- */
+  .lp-field { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .lp-field-l { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-dimmer); }
+  /* Valeur à DROITE d'une case (décision Q11.6) : la valeur du champ, ou « déclaré par n / N ». */
+  .lp-field-v { margin-left: auto; padding-left: 8px; font-family: var(--mono); font-size: 10px; color: var(--fg-dimmer); max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lp-fields { display: flex; flex-direction: column; gap: 4px; align-items: stretch; }
+  .lp-count { margin: 0; font-size: 11px; color: var(--fg-dim); }
+
+  /* -- Rangée des cotes libres (mm) : petits champs côte à côte, libellé au-dessus -- */
+  .lp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 6px; }
+  .lp-mm { display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap: 6px; }
+  .lp-num { display: flex; flex-direction: column; gap: 4px; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-dimmer); }
+  /* Les inputs de l'app ne sont thématisés QUE sous `.form-field` — ces petits champs vivent hors
+     rangée de formulaire, on leur redonne la même robe (fond/bord/mono/focus). */
+  .lp-num input {
     width: 100%; min-width: 0; background: var(--bg); border: 1px solid var(--line-2);
     color: var(--fg); font-family: var(--mono); font-size: 13px; padding: 8px 10px; outline: none;
   }
-  .label-print-mm-field input:focus { border-color: var(--accent); }
-  /* Plafond rappelé sous le champ « Colonnes » de la planche (« max 6 ») : il dépend du gabarit,
-     donc l'afficher évite de faire deviner pourquoi la saisie se borne. */
-  .label-print-max { font-size: 9px; letter-spacing: 0; text-transform: none; color: var(--fg-dimmer); }
-  .label-print-warn { font-family: var(--sans); font-size: 12px; color: var(--warn); border-left: 2px solid var(--warn); padding: 2px 0 2px 10px; }
-  .label-print-preview { display: flex; flex-direction: column; gap: 10px; min-width: 0; background: var(--bg-3); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
-  .label-print-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-dim); }
-  .label-print-stat { font-family: var(--mono); text-transform: none; letter-spacing: 0; }
+  .lp-num input:focus { border-color: var(--accent); }
+
+  /* -- Le « pourquoi » d'un étage : ce que la modale explique au lieu de le faire deviner -- */
+  .lp-why { display: flex; align-items: flex-start; gap: 6px; margin: 0; font-family: var(--sans); font-size: 11px; line-height: 1.4; color: var(--fg-dimmer); }
+  .lp-why .gi { flex: none; width: 13px; height: 13px; margin-top: 1px; }
+
+  /* -- APERÇU -- */
+  .lp-preview { display: flex; flex-direction: column; gap: 10px; min-width: 0; background: var(--bg-3); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
+  .lp-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-dim); }
+  .lp-stat { font-family: var(--mono); text-transform: none; letter-spacing: 0; }
   /* Viewport : l'étiquette/planche est en mm CSS réels — on scrolle plutôt que d'écraser. */
-  .label-print-vp { overflow: auto; display: flex; justify-content: center; padding: 4px; }
-  .label-print-paper { background: #fff; padding: 6mm; border-radius: 3px; width: fit-content; }
+  .lp-vp { overflow: auto; display: flex; justify-content: center; padding: 4px; }
+  .lp-paper { background: #fff; padding: 6mm; border-radius: 3px; width: fit-content; }
   /* Planche A4 en aperçu : réduite de moitié dans un cadre à la taille RÉSULTANTE (le transform
      ne change pas la boîte de layout — sans le cadre, le viewport scrollerait sur du vide). */
-  .label-print-a4-hold { width: calc(210mm * 0.5); height: calc(297mm * 0.5); border: 1px solid var(--line-2); border-radius: 4px; overflow: hidden; flex: none; }
-  .label-print-a4-scale { transform: scale(0.5); transform-origin: top left; }
-  .label-print-msg { font-family: var(--sans); font-size: 13px; color: var(--fg-dim); padding: 30px 10px; text-align: center; }
-  .label-print-msg.err { color: var(--err); }
+  .lp-a4-hold { width: calc(210mm * 0.5); height: calc(297mm * 0.5); border: 1px solid var(--line-2); border-radius: 4px; overflow: hidden; flex: none; }
+  .lp-a4-scale { transform: scale(0.5); transform-origin: top left; }
+  .lp-msg { font-family: var(--sans); font-size: 13px; color: var(--fg-dim); padding: 30px 10px; text-align: center; }
+  .lp-msg.err { color: var(--err); }
+  .lp-foot-stat { font-family: var(--sans); font-size: 11px; color: var(--fg-dimmer); }
+
+  /* -- REGISTRE 1 « risque de scan » : collé sous l'aperçu, ce qui compromet l'objet imprimé -- */
+  .lp-risk { border: 1px solid var(--warn); border-left-width: 3px; border-radius: 6px; background: color-mix(in srgb, var(--warn) 12%, transparent); padding: 8px 10px; display: flex; flex-direction: column; gap: 5px; }
+  .lp-risk-h { margin: 0; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--warn); display: flex; align-items: center; gap: 6px; }
+  .lp-risk-h .gi { width: 13px; height: 13px; flex: none; }
+  .lp-risk p { margin: 0; font-family: var(--sans); font-size: 12px; line-height: 1.4; color: var(--fg); }
+
+  /* -- REGISTRE 2 « conséquence de tirage » : au pied, JUSTE À GAUCHE des actions, ton NEUTRE
+     (il ne compromet rien, il décrit ce qui va sortir de l'imprimante). Il voyage dans les
+     `footerActions` de la Modal, donc dans `.modal-footer-slot` — une rangée flex dont la largeur
+     suit son contenu : le `max-width` est ce qui l'empêche de repousser les boutons hors du pied
+     sur un texte long, et il est MASQUÉ quand il n'a rien à dire (sinon la gouttière du slot
+     laisserait un blanc devant « Exporter »). -- */
+  .lp-sheetnote { font-family: var(--sans); font-size: 11px; line-height: 1.35; color: var(--fg-dim); max-width: 46ch; }
 
 
   /* ===================== HABILLAGE GALERIE (design-system) ===================== */

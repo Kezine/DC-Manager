@@ -259,7 +259,7 @@ poste de bureau en `file://` (Chrome), elle fonctionne ; sur téléphone, servir
 
 ## Génération serveur
 
-**Route** : `GET <apiBase>/documents/:docId/qr/:collection/:id?format=png|svg&size=<px>`
+**Route** : `GET <apiBase>/documents/:docId/qr/:collection/:id?format=png|svg|matrix&size=<px>`
 (montée dans `api.ts`, routeur SCOPÉ par document, aux côtés de `/search`/`/facets`/`/maintenance`).
 
 - **Garde** : `this.access.requireCollection("read")` — permission de LECTURE de la collection
@@ -273,11 +273,21 @@ poste de bureau en `file://` (Chrome), elle fonctionne ; sur téléphone, servir
   l'app, jamais dérivée des en-têtes de requête (anti-spoofing — une URL tirée de `Host` finirait
   imprimée sur des étiquettes ; même doctrine qu'`OIDC_REDIRECT_URL`). Lue au bootstrap
   (`index.ts`) et passée à l'`Api` via `ServerOptions.publicBaseUrl`.
-- **Formats** : `?format=png` (défaut, `QRCode.toBuffer` → `image/png`) ou `?format=svg`
-  (`QRCode.toString({type:"svg"})` → `image/svg+xml`). `?size=` en pixels, BORNÉE à [64, 1024]
-  (défaut 256), niveau de correction M. Lib : `qrcode` (npm, pure JS) ; validation des paramètres =
-  module pur testable `src-server/src/QrCodeParams.ts` (format en liste blanche fermée, taille
-  bornée).
+- **Formats** — liste blanche FERMÉE (tout autre → 400), niveau de correction M, lib `qrcode`
+  (npm, pure JS) ; validation = module pur testable `src-server/src/QrCodeParams.ts` :
+  - `png` (défaut) — `QRCode.toBuffer` → `image/png` ;
+  - `svg` — 🚨 **plus `QRCode.toString`** : la route récupère la **matrice** (`QRCode.create`) et
+    émet **notre** SVG à **modules CARRÉS** via `src-server/src/QrSvg.ts` (module pur, testé en
+    isolation). La librairie dessinait un **trait par rangée** à coordonnées en demi-module, ce qui
+    rendait les modules inégaux à l'impression — cf. « QR à modules carrés » plus bas pour le
+    diagnostic complet. Quiet zone de **4 modules inchangée** ;
+  - `matrix` — la MÊME matrice en **JSON** `{ size, margin, rows }` (`rows` = une chaîne de `0`/`1`
+    par rangée, SANS la quiet zone). Ce n'est pas une image : `?size=` n'y a aucun effet. Consommée
+    par l'**export en images** des étiquettes, qui rasterise le QR à un nombre ENTIER de pixels par
+    module au lieu de mettre un SVG à l'échelle.
+
+  `?size=` en pixels, BORNÉE à [64, 1024] (défaut 256) — elle ne pose que les attributs
+  `width`/`height` du SVG, que le chemin d'impression écrase de toute façon par une cote en mm.
 - ⚠ Le **SVG est généré PAR NOUS** depuis des données maîtrisées (l'URL d'une fiche existante,
   composée par `EntityLink`) — aucun contenu tiers réinjecté : la doctrine anti-XSS-stocké des
   binaires UPLOADÉS (`putImage`/`createAttachment`) ne s'applique pas ici.
@@ -287,9 +297,13 @@ poste de bureau en `file://` (Chrome), elle fonctionne ; sur téléphone, servir
   lecture seule) ; **400** si `format`/`size` sont invalides ; **500** si la génération échoue.
 - **Lecture pure** : GET → moitié lecture de `resolveRepo` (aucune révision consommée, aucun SSE).
 
-Tests : `Tests/modules/test-qr-params.js` (logique pure `QrCodeParams` — défauts, format en liste
-blanche, bornes de taille). La route HTTP elle-même n'est pas montée en test (mêmes raisons
-qu'`api.ts` : Express/multer non résolus dans le programme de test — cf. en-tête de test-access.js).
+Tests : `Tests/modules/test-qr-params.js` — logique pure `QrCodeParams` (défauts, format en liste
+blanche, bornes de taille) **et** l'émetteur `QrSvg` (carrés à coordonnées entières, un seul chemin
+de modules, aucune coordonnée fractionnaire, `crispEdges` conservé), avec un **verrou d'intégration**
+sur le consommateur client : `core/LabelQrSvg.detectMarginModules` doit continuer de lire la quiet
+zone à 4 sur notre sortie — sinon `scaleToMm` la croirait insuffisante et **rétrécirait le QR en
+silence**. La route HTTP elle-même n'est pas montée en test (mêmes raisons qu'`api.ts` :
+Express/multer non résolus dans le programme de test — cf. en-tête de test-access.js).
 
 **Mode local** : la génération d'étiquettes est SERVEUR par décision d'architecture (« aucune lib
 de génération dans le client », GO 2026-08-18) — le mode fichier n'imprime donc pas d'étiquettes
@@ -298,22 +312,32 @@ masquage). Le SCAN, lui, fonctionne dans les deux modes (cf. « Mode local » ci
 
 ## Étiquettes imprimables
 
-La maquette `design-system/briefs/qr-etiquettes-imprimables-maquette.html` **fait foi** (gabarits,
-anatomie, flux), amendée par les décisions du cadrage E (2026-08-20) — notées ci-dessous. **Un seul
-écran de sortie** : la modale d'impression `ui/LabelPrintDialog` (pile de modales standard, principe
-n°11) ; ce qui change entre les points d'entrée est ce qu'elle **reçoit** (`LabelPrintContext` — un
-objet, les deux extrémités d'un câble, le contenu d'une baie).
+**Deux maquettes font foi, chacune sur sa moitié** : `qr-etiquettes-imprimables-maquette.html` sur le
+**rendu imprimé** (gabarits, anatomie, flux — amendée par les décisions du cadrage E du 2026-08-20),
+et `qr-print-redesign-maquette.html` sur le **panneau de réglages** (retour terrain T11 du
+2026-09-03). Les deux vivent dans `design-system/briefs/`. **Un seul écran de sortie** : la modale
+`ui/LabelPrintDialog` (pile de modales standard, principe n°11) ; ce qui change entre les points
+d'entrée est ce qu'elle **reçoit** (`LabelPrintContext` — les OBJETS à étiqueter, un par objet).
+
+> 🚨 **T11 en une phrase** : *« le rendu imprimé n'est pas en cause — c'est le panneau qui a dérivé,
+> onze drapeaux de visibilité plus tard. »* D'où **quatre étages qui ne disparaissent jamais**, un axe
+> **Support** qui remplace le fourre-tout « Format », une **disponibilité avec raison** au lieu d'un
+> masquage, le **tirage** décidé devant l'aperçu, et **deux registres** d'avertissement. Le moteur
+> d'impression (`LabelSpec`, `LabelLayout`, `LabelHtml`) et ses cinq pièges payés le 2026-08-25 n'ont
+> **pas bougé** — sauf le repère du bout local, ci-dessous.
 
 ### Découpe des modules
 
 | Module | Rôle |
 |---|---|
 | `core/LabelLayout` | **Géométrie PURE** (mm) : table des gabarits (cotes EXACTES de la maquette), **densités** (padding/gouttière), drapeau **dérivé du QR**, manchon (**1,5 tour, le demi-tour EST le recouvrement** + nombre de cases DÉDUIT), QR seul, **cellule de planche ≠ étiquette**, plafond de colonnes, capacité A4, bornes du personnalisé, **débordement en CODES** (`LabelWarning` — l'UI traduit) |
-| `core/LabelPrintPolicy` | Les **règles TRANSVERSES** (pures) : contenus/formats/défauts par sujet, **union d'offre de planche** `fieldOffer(sujets)`, règle contenu × champ `fieldVisible`, **verdict** `visibility(sujet, contenu, format, nombre, offre)` consommé tel quel par la modale, et `sanitize` qui fait RETOMBER un réglage mémorisé devenu invalide. 🚨 Depuis T10, **plus aucune table de cases par sujet** — l'offre descend des déclarations (cf. « Champs déclarés par sujet ») |
+| `core/LabelPrintPolicy` | Les **règles TRANSVERSES** (pures) : contenus/formats/défauts par sujet, **union d'offre de planche** `fieldOffer(sujets)`, règle contenu × champ `fieldVisible`, et `sanitize` qui fait RETOMBER un réglage mémorisé devenu invalide. 🚨 Depuis T10, **plus aucune table de cases par sujet** — l'offre descend des déclarations. 🚨 Depuis T11 : la **projection support ⇄ (gabarit, contenu)** (`supportOf`/`applySupport`), le verdict **`availability`** (disponible / **CODE de raison**, en remplacement de `visibility`), les **registres** d'avertissement, le **développement du tirage** (`expand`) et le **papier** (`paperOf`) |
 | `core/LabelQrSvg` | Retravail PUR du SVG servi par `/qr` : **quiet zone vérifiée** (marge en modules lue dans le tracé) et **compensée par un padding blanc calculé** si < 4 modules (un `?size=` plus grand n'y changerait rien — propriété en modules, pas en pixels), mise à l'échelle en mm |
 | `core/LabelHtml` | Rendu HTML PUR **partagé aperçu ⇄ imprimé** (une seule source, fidélité par construction) : étiquette, page de planche, document d'impression. **Noir sur blanc, aucun token de thème** ; les COTES (padding/gouttière) sont posées INLINE depuis `LabelLayout`. Porte aussi le **modèle** `LabelFieldDecl`/`LabelSubject` et rend la liste déclarée **génériquement** (une ligne par déclaration cochée, registre typographique déclaré) |
 | `core/LabelSubjects` | La matière d'une étiquette depuis un enregistrement (lecteur injecté) : équipement (« baie · U »), baie, câble (A/B = **ordre de la fiche**), **faisceau** (A/B = les deux patchs terminaux), spare, sous-équipement — la règle écrite UNE fois pour tous les points d'entrée. Depuis T10, chaque constructeur **DÉCLARE les champs imprimables** du sujet |
-| `ui/LabelPrintDialog` | La modale : panneau de réglages + aperçu fidèle réduit + avertissements + iframe d'impression. **N'écrit AUCUNE règle de visibilité** — elle applique le verdict de `LabelPrintPolicy` (pose `hidden`). Réglages **mémorisés en session** par contexte (jamais de Prefs persistées — dernier tirage repris) |
+| `core/LabelExportPlan` | 🚨 **T11** — arithmétique PURE de l'export en images : nommage cadré des fichiers, millimètres → pixels à un dpi, et la cote de QR à **k pixels entiers par module** (mêmes règles que l'impression, écrites une fois) |
+| `ui/LabelPrintDialog` | La modale : contexte + **quatre étages qui ne disparaissent jamais** + aperçu fidèle réduit + **deux registres** d'avertissement + iframe d'impression. **N'écrit AUCUNE règle de disponibilité** — elle consomme `availability` et pose `disabled` + la raison traduite (verrous de test sur cette source). Réglages **mémorisés en session** par contexte, et la mémoire est **visible** (jamais de Prefs persistées) |
+| `ui/LabelImageExport` | 🚨 **T11** — « Exporter en images » : rasterise le MÊME HTML d'étiquette (`<foreignObject>` → canvas → PNG), le QR étant peint **depuis la matrice** à k pixels entiers par module ; ZIP dès la deuxième image |
 
 ### Gabarits et planche
 
@@ -466,46 +490,177 @@ Choix de conception :
   d'entrée listing est l'action de ligne **unitaire** seulement.
 - Catalogue Avery nommé : NON (les colonnes réglables suffisent). Trace « imprimée le … » sur la
   fiche : NON.
-- **Câbles** : le geste principal imprime **les 2 extrémités** (deux drapeaux identiques), « Un
-  drapeau » reste offert ; sens A → B = l'**ordre de la fiche** (from → to).
+- **Câbles** : sens A → B = l'**ordre de la fiche** (from → to). ⚠ **Amendé par T11** : les deux
+  gestes ont fusionné en « Étiqueter… », le défaut reste les deux extrémités, et les deux drapeaux
+  ne sont plus identiques — **chacun marque le bout qu'il habille** (cf. « Le repère du bout local »).
 
-### Matrice de visibilité contextuelle (`core/LabelPrintPolicy`)
+### Disponibilité avec raison (`core/LabelPrintPolicy`)
 
-Le retour terrain était « **tous les contrôles dans tous les contextes** » : Ø de câble sur une baie,
-largeur/hauteur personnalisées sous un préréglage… La règle « quels contrôles pour (sujet, contenu,
-format, nombre) ? » était éparpillée dans le rendu DOM, donc invérifiable — elle vit désormais dans
-UN module pur, et la modale ne fait plus qu'**appliquer le verdict** (poser `hidden`).
+Le retour terrain de 2026-08-20 était « **tous les contrôles dans tous les contextes** » ; celui de
+2026-09-03 (T11) a montré la moitié manquante : à force de masquer, **le panneau changeait de
+vocabulaire d'un sujet à l'autre**, et une option disparue n'apprend rien. La règle vit donc toujours
+dans UN module pur — mais son verdict a changé de nature. `availability(sujet, support, contenu,
+offre)` rend, **par option**, soit `ok` soit un **CODE de raison** ; la modale **grise et traduit**
+(clés `labels.why.*`) là où elle posait `hidden`. Même famille que `PortCompatibility` /
+`BreakoutRules` : des codes, jamais de phrases.
 
-⚠ « Matrice » ne parle ici que de la **visibilité des contrôles**. La matrice des **cases par sujet**,
-elle, a disparu au profit des déclarations (section suivante) : `LabelPrintPolicy` ne garde de l'offre
-que ses règles TRANSVERSES — l'union de planche, la règle contenu × champ, la retombée `sanitize`.
+**Deux traitements, jamais trois** :
+
+| Situation | Traitement |
+|---|---|
+| Option d'un axe FIXE, indisponible ici (support, contenu, gabarit, bascule d'extrémités) | **listée, `disabled`, avec sa raison** sur sa propre ligne |
+| Question qui ne se pose pas dans ce contexte (cote sans objet sous ce support, bascule d'extrémités sur un objet sans bouts) | **absente** |
+| Case de champ non déclarée par le sujet | **absente** — structurel depuis T10 (« pas de case sans donnée ») |
+
+#### L'axe « Support » est une PROJECTION
+
+On ne choisit pas « un format ET un contenu » : on choisit **l'objet physique** qu'on va coller.
+`supportOf(gabarit, contenu)` le lit dans les réglages existants, `applySupport(sujet, support, …)`
+l'y réécrit — et l'invariant `supportOf(applySupport(x)) === x` est verrouillé par test. **`LabelSpec`,
+`LabelLayout` et `LabelHtml` n'en savent rien** : le moteur d'impression et ses cinq pièges payés le
+2026-08-25 sont intacts (décision Q11.1, voie A).
+
+| Support | Projection | Cotes réglables |
+|---|---|---|
+| **Étiquette plate** | gabarit ∈ {S, M, L, libre} et contenu ∈ {QR + texte, QR seul} | largeur/hauteur **sous « libre » seulement**, cote de QR quand elle est **libre** (QR seul ou cotes libres — sinon le préréglage l'impose) |
+| **Tête de baie** 100 × 60 | gabarit `rack` | cote de QR |
+| **Drapeau de câble** | gabarit `cable` | cote de QR — **elle seule** : toute la géométrie du drapeau en est dérivée (`flagGeometry`). La maquette y plaçait aussi Ø et longueur ; ils n'auraient aucun effet, et un contrôle sans effet est un mensonge |
+| **Manchon** | contenu ∈ {repère complet, identifiant seul} (le gabarit est ignoré) | Ø du câble, longueur le long du câble (pas de QR) |
+
+Le **couplage** que l'ancienne modale laissait à la charge de l'utilisateur est désormais écrit une
+fois : choisir « Manchon » force un contenu de manchon, et choisir un contenu de manchon force le
+support — dans les deux sens, par la même fonction.
+
+#### Les codes de raison
+
+| Code | Sens |
+|---|---|
+| `flag-only` | réservé aux câbles et faisceaux — ce qui s'enroule (un équipement ne s'enroule pas) |
+| `rack-only` | réservé aux baies (un autre sujet qui veut du 100 × 60 passe par les cotes libres) |
+| `needs-sleeve` | ce contenu demande le support « Manchon » |
+| `needs-not-sleeve` | le manchon ne porte pas de QR : ces contenus lui sont fermés |
+| `not-flag` | un rectangle S/M/L ne s'attache pas à un brin |
+| `no-text` | le contenu choisi n'imprime aucun texte : la case (ou la bascule) est sans effet |
+| `cols-capped` | colonnes plafonnées par la largeur réelle de l'étiquette |
+| `roll-no-cuts` | traits de coupe sans objet sur rouleau : chaque page EST une étiquette |
 
 - **Sujets** (`LabelPrintKind`) : `equipment`, `rack`, `cable`, **`bundle`** (faisceau/trunk — même
   anatomie que le câble : un identifiant, deux extrémités, donc le même drapeau), `spare`,
   **`subEquipment`** (même famille que le spare — `isSpareLike` : mêmes contenus, mêmes formats,
   même gabarit S par défaut ; ce qui les sépare est ce qu'ils DÉCLARENT, pas la politique).
-- **Contenus** : les manchons (repère complet / identifiant seul) n'existent que pour ce qui
-  s'ENROULE — câble et faisceau ; un équipement ne s'enroule pas.
-- **Formats** : « Câble — drapeau » = câble/faisceau seulement (et réciproquement : un rectangle
-  S/M/L ne s'attache pas à un brin) ; « Baie » 100×60 = baies seulement (un autre sujet qui veut ces
-  cotes passe par « Personnalisé »).
-- **Cotes mm** : Larg./Haut. **uniquement** sous « Personnalisé » ; la cote de QR quand elle est
-  LIBRE (QR seul, drapeau, personnalisé — sinon le préréglage l'impose) ; Ø et longueur
-  **uniquement** pour les manchons. La rangée entière disparaît quand aucune ne s'applique.
-- **Informations additionnelles** (ex-« Lisible humain », renommé sur retour terrain) : les cases ne
-  sont plus des contrôles figés — elles se peignent depuis les **déclarations des sujets** (section
-  suivante). Ne restent STRUCTURELLES que la rangée « Identifiant (toujours) » et la bascule
-  « **Extrémités A / B** », offerte aux seuls sujets à drapeau (leur rendu est une *anatomie* —
-  panneaux `A`/`B` — pas une ligne générique). La règle **contenu × champ** (`fieldVisible`) reste
-  ici : « QR seul » ne garde que les déclarations marquées `qrOnly` (la bande sous le carré,
-  historiquement le propriétaire) ; « identifiant seul » ne garde rien, section comprise ; un
-  manchon « repère complet » écarte le registre `sn`.
-- **Planche** : à partir de 2 étiquettes.
+- **Informations additionnelles** : les cases se peignent depuis les **déclarations des sujets**
+  (section suivante). Ne restent STRUCTURELLES que la rangée « Identifiant (toujours) » et la
+  bascule « **Extrémités A / B** » (imprimer ou non les LIGNES d'extrémité), offerte aux seuls
+  sujets à drapeau. La règle **contenu × champ** (`fieldVisible`) reste ici : « QR seul » ne garde
+  que les déclarations marquées `qrOnly` (la bande sous le carré, historiquement le propriétaire) ;
+  « identifiant seul » ne garde rien ; un manchon « repère complet » écarte le registre `sn`.
+  Chaque case porte **sa valeur à droite** : la valeur elle-même quand il n'y a qu'un sujet,
+  « **déclaré par n / N** » sur une planche (montrer la valeur d'un seul déclarant pour 150
+  étiquettes serait un mensonge ; l'infobulle donne celle du premier, à titre d'exemple).
 - **Mémoire de session** : `sanitize(kind, offre, settings)` tourne à CHAQUE ouverture — un réglage
   hérité devenu invalide (format drapeau sur un équipement) **retombe** sur le défaut du contexte,
-  et les cases mémorisées sont **réconciliées** avec l'offre du tirage courant (ids disparus retirés
+  les cases mémorisées sont **réconciliées** avec l'offre du tirage courant (ids disparus retirés
   — la mémoire d'une case morte ne doit pas resurgir sur un id un jour recyclé —, ids nouveaux semés
-  à leur état coché DÉCLARÉ), plutôt que de laisser un état que l'UI ne sait plus représenter.
+  à leur état coché DÉCLARÉ), et les réglages de tirage sont bornés (`endsMode` retombe sur `A + B`
+  hors sujet à drapeau, où il est sans objet). 🚨 **T11 : la mémoire est VISIBLE** — le panneau dit
+  « Réglages repris de votre dernier tirage · session » et offre « **Revenir aux défauts** ». Un
+  réglage qu'on ne s'explique pas est un réglage qu'on subit. Toujours session, **jamais persisté**.
+
+### L'étage Tirage (T11)
+
+Le tirage cesse d'être décidé par le point d'entrée pour devenir un réglage, **devant l'aperçu**.
+L'étage passe **en tête** dès que le tirage compte au moins deux étiquettes (seul déplacement
+structurel du panneau), sinon il vient en quatrième.
+
+| Réglage | Rôle |
+|---|---|
+| **Bascule A / B / A+B** (étage Support, sujets à drapeau) | combien de drapeaux **et** quel bout chacun MARQUE. Défaut **A+B** = le geste principal d'avant T11 |
+| **Occurrences × N** (1..20, défaut 1) | « une étiquette pour la boîte, une pour le disque ». Occurrences **groupées** : sujet, puis bout, puis copie — `A, A, B, B`, et les deux drapeaux d'un même câble restent voisins sur la planche (on les découpe ensemble pour les poser ensemble) |
+| **Papier : planche A4 / rouleau** | `auto` par défaut = la règle historique (1 étiquette ⇒ page à la cote exacte, ≥ 2 ⇒ planche), désormais **modifiable** : un rouleau de 5 étiquettes sort en 5 pages à la cote exacte |
+| **Résolution : 203 / 300 / 600 dpi** (défaut 300) | quantifie la cote du QR — cf. « QR à modules carrés » ci-dessous |
+| **Colonnes** | segments 1..8, ceux que la largeur réelle refuse étant grisés avec `cols-capped` (`LabelLayout.maxColumns` reste la règle) |
+| **Traits de coupe**, **Densité** (compact / confort) | inchangés ; la densité a rejoint cet étage |
+
+`expand(sujets, sujet, réglages)` développe la liste PLATE que la planche consomme — `LabelLayout`
+n'a rien à savoir de tout ceci. `paperOf(papier, nombre)` dit le régime effectif.
+
+### Les deux registres d'avertissement (T11)
+
+Les cinq codes de débordement (plus le sixième, ci-dessous) sont **classés**, pas empilés —
+`warningRegister(code)` est une classification pure :
+
+| Registre | Codes | Où, et pourquoi |
+|---|---|---|
+| **Risque de scan** | `qr-floor`, `qr-exceeds-label`, `sleeve-tight`, `module-too-small` | **collé sous l'aperçu**, bordure d'accent chaud, formulation à conséquence — ça compromet l'objet imprimé, et ça se voit sur l'aperçu |
+| **Conséquence de tirage** | `columns-capped`, `multi-page` | **au pied**, à côté du bouton, ton neutre — ça ne compromet rien, ça décrit ce qui va sortir de l'imprimante |
+
+**« Imprimer » reste toujours actif** : on imprime pour son propre usage, jamais pour satisfaire une
+règle.
+
+### QR à modules carrés (Q11.14)
+
+**Le défaut signalé** : « *la taille la plus petite du QR produit un QR illisible — chaque ligne du
+QR est altérée et ne produit plus des pixels de QR carrés* ». Le diagnostic, en trois lignes :
+
+1. La librairie `qrcode` ne dessine **pas des carrés** mais un **trait horizontal par rangée**
+   (`M4 4.5h7…`, `stroke-width` 1), d'où des coordonnées en **demi-module**.
+2. `shape-rendering="crispEdges"` — imposé le 2026-08-25 contre l'amincissement — colle chaque
+   rangée à la grille de sortie **indépendamment** : à 3,1 px par module (gabarit S sur thermique
+   203 dpi), les rangées alternent 3 et 4 px et les centres en `.5` font se chevaucher ou s'écarter
+   deux rangées voisines.
+3. Un module n'est un carré **qu'à un nombre ENTIER de pixels de sortie**, et seulement si on le
+   dessine comme un carré. C'est une question **physique**, pas logicielle.
+
+**Les quatre mesures** :
+
+- **Serveur** (`src-server/QrSvg`) : la route `/qr?format=svg` n'appelle plus `QRCode.toString` mais
+  récupère la **matrice** (`QRCode.create`) et émet **notre** SVG — un carré unitaire
+  `M x y h1 v1 h-1 z` par module sombre, coordonnées **entières**, réunis dans un seul `<path>`,
+  fond blanc plein cadre. Arêtes partagées, snapping cohérent sur les deux axes. **Quiet zone de
+  4 modules inchangée**, et `LabelQrSvg.detectMarginModules` continue de la lire à 4 (verrou de test :
+  si l'émetteur cassait cette lecture, `scaleToMm` croirait la quiet zone insuffisante et rétrécirait
+  le QR en silence).
+- **Client** (`LabelLayout.quantizeQrMm`) : la cote servie est **quantifiée** à un nombre entier de
+  pixels par module pour la résolution choisie — `px/module = ⌊(mm ÷ 25,4 × dpi) ÷ modules⌋`, puis
+  `mm = modules × px/module × 25,4 ÷ dpi`. **Arrondi vers le bas** : le QR rétrécit d'au plus un
+  pixel par module, donc il tient toujours dans la boîte qui l'attendait. Sans dpi (les goldens de
+  gabarits), `renderQrMm` rend exactement ce qu'il rendait.
+- **Nouvel avertissement `module-too-small`** (registre « risque de scan ») : émis quand la cote
+  **servie** rapportée au nombre de modules tombe sous **0,5 mm**. Le plancher de 18 mm parle de la
+  cote TOTALE ; il est déjà trop optimiste à 41 modules (l'URL d'une fiche, ~70 caractères en EC « M »,
+  donne une version 4 = 33 modules + 2 × 4 de quiet zone). Signalé, **jamais interdit**.
+- **Export PNG** : le QR est rasterisé **depuis la matrice** à k pixels entiers par module, jamais
+  par mise à l'échelle du SVG (cf. section suivante).
+
+> ⚠ **Limite assumée, et le vrai levier.** À 41 modules, il faut **20,5 mm** de QR pour tenir le
+> plancher de 0,5 mm : le gabarit M (20 mm) et le S (18 mm) le franchissent quelle que soit la
+> résolution — monter le dpi réduit la *perte de quantification*, il ne crée pas de place. Le levier
+> est de **raccourcir le payload** : une route courte `/q/<id>` au lieu du deep-link complet ferait
+> tomber la version 4 → 3 (33 → 29 modules, +14 % de taille de module). Cela touche `EntityLink` et
+> le scan — **hors périmètre**, à instruire à part.
+
+### Export en images (Q11.13)
+
+Bouton « **Exporter en images** » au pied, à gauche d'Imprimer, sous la même garde que l'impression
+(mode API — le QR vient du serveur).
+
+- **Une image PAR étiquette**, en **PNG** (un QR est du trait pur : le JPEG y fabrique le halo qui
+  fait rater un scan). Le besoin est de « *les ajouter moi-même dans un document* », donc une à une.
+- **N > 1 ⇒ une archive ZIP** (`@zip.js/zip.js`, déjà en dépendance) : un navigateur qui reçoit 150
+  téléchargements demande 150 confirmations. Les noms sont **cadrés** (`planche-001.png`) — un
+  dossier se trie `1, 10, 100, 11…`, et l'ordre de la planche EST l'ordre de pose.
+- **Option « la planche entière »** quand le tirage est une planche : une image par feuille A4, le
+  même `sheetPage` que l'aperçu et que l'imprimé.
+- **Fidélité par construction** : on rasterise le **même HTML** (`LabelHtml`), enveloppé dans un
+  `<foreignObject>` avec la même CSS et la même fonte embarquée. Aucun second rendu, donc aucune
+  divergence possible — c'est pourquoi la voie « produire un SVG vectoriel de l'étiquette » a été
+  écartée (deux sources de vérité pour le même dessin, cinq pièges à repayer sur la seconde).
+- 🚨 **Le QR vient de la MATRICE** (`?format=matrix`, JSON `{ size, margin, rows }`), peinte sur un
+  canvas à k pixels entiers par module : la boîte du QR fait `k × modules` pixels **exactement**, ses
+  modules sont carrés par construction, sans dépendre d'aucun moteur de rendu.
+- ⚠ **Safari** salit le canvas dès qu'un `foreignObject` entre dans le SVG et refuse l'export
+  (`SecurityError`). Aucun contournement propre : on attrape et on le **dit** (« export non pris en
+  charge par ce navigateur »), plutôt que de produire des étiquettes fausses par un repli dégradé.
 
 ### Champs déclarés par SUJET (retour terrain T10, 2026-09-02)
 
@@ -588,25 +743,45 @@ ligne** : c'est ce qui rend la planche mixte sûre sans le moindre cas particuli
 ⚠ **Corollaire CSS indissociable** : `.label-print [hidden] { display: none !important }`
 (`dc-manager.css`). Sans cette ligne les `hidden` de la modale sont **inertes** — `[hidden]` vient
 de la feuille du NAVIGATEUR, et toute règle d'auteur qui pose un `display` la bat, quelle que soit
-sa spécificité ; or `.btn`, `.label-print-fset`, `.label-print-mm` et `.label-print-mm-field` en
-posent une. C'était la cause première du retour terrain.
+sa spécificité ; or `.btn`, `.lp-num`, `.lp-mm` et `.lp-field` en posent une. C'était la cause
+première du retour terrain de 2026-08-20. ⚠ **T11 : `hidden` ne cache plus aucun VERDICT** — il ne
+sert qu'aux questions structurellement sans objet dans le contexte (cf. « Disponibilité avec raison »).
+
+### Le repère du bout local (Q11.2)
+
+Jusqu'à T11, les deux drapeaux d'une paire étaient **rigoureusement identiques** : rien ne disait au
+poseur lequel allait à quelle extrémité — et une bascule A / B / A+B n'aurait eu, dans ces
+conditions, qu'une seule valeur utile. `LabelFieldChoice` gagne donc `localEnd` : la ligne du bout
+que **cette** étiquette habille est pointée d'un « ▶ » et mise en gras.
+
+**Aucune cote ne bouge** : c'est un marquage sur une ligne DÉJÀ rendue, pas une ligne de plus (les
+goldens de géométrie le verrouillent). Le marquage vaut aussi pour le **manchon « repère complet »**,
+qui habille lui aussi un seul bout.
+
+> ⚠ **Limite assumée** : quand la bascule « Extrémités A / B » est **décochée**, il n'y a plus de
+> lettre à pointer — les drapeaux d'une paire redeviennent indiscernables. C'est le prix de la règle
+> « aucune cote ne bouge » : ajouter une ligne de repère ferait déborder les petits gabarits.
 
 ### Points d'entrée (tous sous `LabelPrintDialog.available()`)
+
+**Neuf** depuis T11 : « Un drapeau » et « Imprimer les 2 extrémités » ont fusionné sur les fiches câble et
+faisceau — c'était une décision de même nature que toutes celles de la modale, et elle se prenait
+avant d'avoir vu le moindre aperçu.
 
 | Où | Geste |
 |---|---|
 | Fiche équipement | « Imprimer l'étiquette » (pied de fiche) |
 | Listing équipements | Action de ligne « Imprimer l'étiquette » (menu ⋮ — les actions secondaires de ligne y vivent toutes, cf. `ListView._openRowMenu`) |
 | Fiche baie | « Étiquette de baie » (gabarit Baie) **et** « Planche du contenu (N) » (masquée si vide) — deux gestes distincts, deux papiers |
-| Fiche câble | « Un drapeau » / « Imprimer les 2 extrémités » |
-| Listing câbles | Action de ligne : les **2 extrémités** (le geste principal de la fiche — un câble s'étiquette par paire, la ligne n'a pas de raison d'en offrir un demi) |
-| Fiche faisceau | « Un drapeau » / « Imprimer les 2 extrémités » (les deux patchs terminaux) |
-| Listing faisceaux | Action de ligne : les **2 extrémités**, comme les câbles |
+| Fiche câble | « **Étiqueter…** » — un seul geste (T11) : *combien* de drapeaux et *quel bout* se décident dans la modale (bascule A / B / A+B, défaut **A+B**) |
+| Listing câbles | Action de ligne « Imprimer l'étiquette » — **un sujet**, défaut A+B comme la fiche |
+| Fiche faisceau | « **Étiqueter…** » — idem (les deux bouts sont les deux patchs terminaux) |
+| Listing faisceaux | Action de ligne « Imprimer l'étiquette », comme les câbles |
 | Fiche spare | « Imprimer l'étiquette » (gabarit S par défaut) |
 | Listing spares | Action de ligne « Imprimer l'étiquette » (parité avec la fiche) |
 | Fiche sous-équipement | « Imprimer l'étiquette » — sujet `subEquipment`, MÊME famille que le spare (`isSpareLike`, gabarit S par défaut) ; ses cases sont celles qu'il DÉCLARE (maître · repère, marque/modèle, série, achat — cf. « Champs déclarés par sujet ») |
 | Listing sous-équipements | Action de ligne « Imprimer l'étiquette » |
-| **Panier** (topbar) | « Imprimer les étiquettes (N) » — planche d'un lot préparé par les cases des listings (familles `links`, `components`, `equipments` — cf. `core/CartLabelPlan`), DEUX drapeaux par lien. 🚨 **Seul point d'entrée à planche HÉTÉROGÈNE** : l'offre de cases y est l'UNION des déclarations. Cf. [`panier.md`](panier.md) |
+| **Panier** (topbar) | « Imprimer les étiquettes (N) » — planche d'un lot préparé par les cases des listings (familles `links`, `components`, `equipments` — cf. `core/CartLabelPlan`). 🚨 **T11 : UN sujet par élément** — c'est la bascule de la modale qui multiplie (`defaultEndsMode: "ab"` pour les liens), la volumétrie restant réglable devant l'aperçu. 🚨 **Seul point d'entrée à planche HÉTÉROGÈNE** : l'offre de cases y est l'UNION des déclarations. Cf. [`panier.md`](panier.md) |
 
 ### Rendu d'impression
 
@@ -688,11 +863,16 @@ posent une. C'était la cause première du retour terrain.
 
 Les QR viennent de `GET <dataBase>/qr/:collection/:id?format=svg` (`RestAdapter.qrSvg` — fetch
 dédié : la réponse est du SVG brut, hors protocole JSON), mis à l'échelle en mm par `LabelQrSvg`
-puis **inlinés** dans un document print-CSS **isolé** (iframe cachée) : unitaire =
-`@page { size: <w>mm <h>mm; margin: 0 }`, planche = A4 + grille + traits de coupe. Tout étant
-inline, `print()` n'attend que le `load` de l'iframe. Les SVG sont tirés en parallèle et mis en
-cache le temps de la modale ; un échec (503 `PUBLIC_BASE_URL` absente, 404…) affiche le message
-serveur et désactive « Imprimer ».
+puis **inlinés** dans un document print-CSS **isolé** (iframe cachée) : **rouleau** =
+`@page { size: <w>mm <h>mm; margin: 0 }` et **une page par étiquette** (T11 — même à N), **planche**
+= A4 + grille + traits de coupe. Tout étant inline, `print()` n'attend que le `load` de l'iframe.
+Les SVG sont tirés en parallèle et mis en cache le temps de la modale ; un échec (503
+`PUBLIC_BASE_URL` absente, 404…) affiche le message serveur et désactive « Imprimer ».
+
+La route sert un **troisième format**, `?format=matrix` (`RestAdapter.qrMatrix`) : la matrice de
+modules en JSON `{ size, margin, rows }`, consommée **à la demande** par l'export en images — un
+tirage qu'on imprime sans exporter ne paie aucun aller serveur de plus. `?size=` n'y a aucun effet
+(ce n'est pas une image).
 
 **Zéro marge parasite** (vérifié par test) : `@page … margin: 0` dans les DEUX régimes, et
 `html, body { margin: 0; padding: 0 }` dans l'iframe — les cotes de l'étiquette sont la seule
@@ -712,8 +892,22 @@ Tests : `Tests/modules/test-labels.js` (gabarits golden, géométrie drapeau/man
 planche et plafonds, bornes du personnalisé, codes de débordement, quiet zone du SVG, rendu HTML
 partagé — échappement, `@page`, zéro token de thème dans l'imprimé ; **densités amendées et
 NON-DÉBORDEMENT du QR sur tous les préréglages × les deux densités**, cotes retrouvées au millimètre
-dans le HTML, marges de la fenêtre d'impression, **la matrice de visibilité** — offres par sujet,
-verdict, retombée sur défaut — et le sujet FAISCEAU ; **manchons** : goldens de l'enroulement par Ø
-(3/6/10/20), invariants « largeur = 1,5 × tour » et « visible = un tour », dérivation et bornes du
-nombre de cases, et 🚨 **égalité STRICTE des cases mesurée dans le HTML généré** — la régression du
-retour terrain).
+dans le HTML, marges de la fenêtre d'impression, offres par sujet, retombée sur défaut, sujet
+FAISCEAU ; **manchons** : goldens de l'enroulement par Ø (3/6/10/20), invariants « largeur = 1,5 ×
+tour » et « visible = un tour », dérivation et bornes du nombre de cases, et 🚨 **égalité STRICTE des
+cases mesurée dans le HTML généré**).
+
+**T11** ajoute, dans le même fichier : la **projection** support ⇄ (gabarit, contenu) et son
+invariant aller-retour sur tous les sujets × tous les supports disponibles ; la **disponibilité avec
+raison** (qui REMPLACE l'ancienne section « LA matrice » — le verrou n'a pas été supprimé, il a été
+réécrit pour le nouveau verdict) ; les **registres** d'avertissement et leur exhaustivité ; **`expand`**
+(groupement `A, A, B, B` et sujet en boucle extérieure) et le **papier** ; le `sanitize` des nouveaux
+réglages ; la **quantification** du QR et sa non-régression sans dpi ; l'avertissement **`module-too-small`** ;
+le **repère du bout local** dans le HTML rendu (avec la preuve que les cotes n'ont pas bougé) ; le
+plan d'**export** (`core/LabelExportPlan`) ; et des **verrous sur les sources** (patron T2-B1) : la
+modale ne réécrit aucune règle de disponibilité, aucun `hidden` n'est posé depuis un verdict,
+`DetailForms` n'a plus qu'une entrée drapeau par fiche, `main.ts` ne duplique plus les sujets du
+panier, tout code de refus a sa phrase dans les DEUX langues, et la CSS de la modale n'a aucune
+couleur en dur. Côté serveur, `Tests/modules/test-qr-params.js` verrouille l'émetteur **`QrSvg`**
+(carrés à coordonnées entières, un seul chemin, quiet zone toujours lue à 4 par `LabelQrSvg`) et le
+format `matrix` dans la liste blanche.
