@@ -91,11 +91,20 @@ cases sans que personne y pense.
 
 Le **plan** d'une famille porte deux règles, écrites une fois et testées :
 
-| Famille | `kind` | Étiquettes par élément |
+| Famille | `kind` | Défaut de la bascule d'extrémités |
 |---|---|---|
-| `links` | `cable` | **2** — un drapeau par extrémité (décision P9), en parité avec la fiche et l'action de ligne |
-| `components` | `spare` | **1** |
-| `equipments` | `equipment` | **1** |
+| `links` | `cable` | **A + B** — un drapeau par extrémité (décision P9), en parité avec la fiche et l'action de ligne |
+| `components` | `spare` | *(aucune — un spare n'a pas de bouts)* |
+| `equipments` | `equipment` | *(aucune)* |
+
+> 🚨 **Amendé par T11 (2026-09-03).** La seconde règle n'est plus un NOMBRE que le panier applique
+> lui-même (`labelsPerItem`, qui poussait **deux fois le même sujet** dans la modale) mais le
+> **défaut** d'une bascule que la modale offre — A / B / A+B. Le panier passe donc **UN sujet par
+> élément** et c'est `LabelPrintPolicy.expand` qui multiplie. Trois gains : la volumétrie reste
+> réglable **devant l'aperçu** (on peut n'en tirer qu'un, ou trois copies de chaque), la modale peut
+> **MARQUER** quel drapeau va sur quel bout (impossible avec deux sujets identiques), et le panier
+> redevient une simple liste d'objets. La décision P9 survit intacte : elle est désormais un défaut,
+> pas une imposition.
 
 Le `kind` unique ne pose aucun problème : une famille est **précisément** un ensemble de collections
 que `LabelPrintPolicy` traite à l'identique (`isFlagKind`, `isSpareLike`) — et depuis **T10** ce que
@@ -135,7 +144,7 @@ Le panier **survit au mode lecture seule** (`viewer-mode`) : imprimer une étiqu
 | Pas de synchro **entre onglets** | Un `BroadcastChannel` (le patron existe : `app/TabChannel`). |
 | Pas de dialogue de **remplacement** au conflit de famille — simple refus expliqué | Impossible à déclencher aujourd'hui : les cases n'apparaissent que sur les listings d'une seule famille. À livrer avec la 2e famille porteuse d'une action. |
 | La case d'en-tête coche la **page**, pas « les N résultats du filtre » | Un second geste explicite, plafonné. |
-| **2 drapeaux par lien** imposés (pas de case pour n'en tirer qu'un) | Une case dans le panneau du panier. |
+| ~~**2 drapeaux par lien** imposés~~ — **LEVÉ par T11** : la bascule A / B / A+B de la modale, doublée d'un multiplicateur d'occurrences, règle la volumétrie devant l'aperçu | — |
 | Les **baies** ne sont pas au panier | Une entrée de plus dans `CartLabelPlan` — leur anatomie d'étiquette existe déjà, et la fiche baie offre déjà « Planche du contenu ». |
 | Remplissage par **listings** seulement (ni fiches, ni scan en rafale) | Boutons de fiche ; mode lot du viseur (déjà cadré, `qr-scan.md` § « Extension future »). |
 

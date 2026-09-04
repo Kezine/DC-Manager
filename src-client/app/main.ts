@@ -300,6 +300,10 @@ async function boot(): Promise<void> {
     LabelPrintDialog.setup({
       openModal: (o) => formHost.openModal(o),
       fetchQrSvg: (collection, id) => (adapter as RestAdapter).qrSvg(collection, id),
+      // MATRICE de modules (`?format=matrix`) — l'export en images dessine le QR depuis elle,
+      // à un nombre ENTIER de pixels par module (diagnostic Q11.14) : c'est la seule façon
+      // d'obtenir des modules carrés dans un PNG. Appelée À LA DEMANDE, pas à l'ouverture.
+      fetchQrMatrix: (collection, id) => (adapter as RestAdapter).qrMatrix(collection, id),
       // FONTE EMBARQUÉE (data: URI) : le document d'impression est une iframe isolée, il ne voit
       // pas la feuille de l'app. Injectée depuis ICI et non importée par la modale — les woff2 ne
       // sont des chaînes que sous webpack, et la modale est chargée sous Node par les tests.
@@ -865,14 +869,20 @@ async function boot(): Promise<void> {
           const record: any = store.get(item.collection, item.id);
           const build = record ? CART_LABEL_SUBJECTS[item.collection] : null;
           if (!build) { missing++; continue; }
-          // `labelsPerItem` porte la règle « un lien s'étiquette par paire » (décision P9) — deux
-          // drapeaux pour un câble ou un faisceau, un seul pour du petit matériel. La modale
-          // dédoublonne les QR à récupérer, les répétitions ne coûtent donc aucun aller serveur.
-          for (let copy = 0; copy < plan.labelsPerItem; copy++) subjects.push({ ...build(record) });
+          // 🚨 T11 : UN sujet par élément. La règle « un lien s'étiquette par paire »
+          // (décision P9) n'est plus appliquée ICI en dupliquant le sujet — elle est le
+          // DÉFAUT de la bascule A / B / A+B de la modale (`plan.defaultEndsMode`), qui
+          // développe le tirage elle-même. Le panier redevient une simple liste d'OBJETS,
+          // et la volumétrie reste réglable devant l'aperçu.
+          subjects.push(build(record));
         }
         if (missing) Notify.toast(I18n.t("cart.missing", { n: missing }), "warn");
         if (!subjects.length) { Notify.toast(I18n.t("cart.nothing"), "err"); return; }
-        LabelPrintDialog.open({ kind: plan.kind, subjects, source: I18n.t("cart.printSource", { n: subjects.length / plan.labelsPerItem }) });
+        LabelPrintDialog.open({
+          kind: plan.kind, subjects,
+          source: I18n.t("cart.printSource", { n: subjects.length }),
+          ...(plan.defaultEndsMode ? { defaultEndsMode: plan.defaultEndsMode } : {}),
+        });
       },
     });
     shell.setCartAvailable(true);
@@ -1278,15 +1288,13 @@ async function boot(): Promise<void> {
     subtitle: I18n.t("tabs.cables.subtitle"),
     form: (id, done) => Forms.cable(store, formHost, id, done), addLabel: I18n.t("app.add.cable"),
     locate: "cable",
-    // « Imprimer l'étiquette » de ligne (retour terrain 2026-08-20 : l'action manquait ici). Elle
-    // rejoue le geste PRINCIPAL de la fiche câble — DEUX drapeaux identiques, un par extrémité
-    // (décision E) — plutôt qu'un seul : un câble s'étiquette par paire, la ligne n'a aucune raison
-    // d'en offrir un demi. « Un drapeau » reste accessible depuis la fiche.
+    // « Imprimer l'étiquette » de ligne (retour terrain 2026-08-20 : l'action manquait ici).
+    // T11 : UN sujet, comme la fiche — c'est la bascule A / B / A+B de la modale (défaut A+B)
+    // qui dit combien de drapeaux, et non plus le point d'entrée qui pousse le sujet en double.
     onPrint: (id) => {
       const cable: any = store.get("cables", id);
       if (!cable) return;
-      const subject = () => LabelSubjects.cable(store, cable);
-      LabelPrintDialog.open({ kind: "cable", subjects: [subject(), subject()], source: I18n.t("labels.entry.cableBothSource", { cable: cable.name || "" }) });
+      LabelPrintDialog.open({ kind: "cable", subjects: [LabelSubjects.cable(store, cable)], source: cable.name || "", defaultEndsMode: "ab" });
     },
   });
   // IPAM : la page PRINCIPALE de l'onglet est la liste des ADRESSES IP ; les réseaux (sous-réseaux) et les plages
@@ -1495,13 +1503,13 @@ async function boot(): Promise<void> {
     icon: Icons.BUNDLE,
     title: I18n.t("tabs.faisceaux.title"), subtitle: I18n.t("tabs.faisceaux.subtitle"),
     form: (id, done) => Forms.cableBundle(store, formHost, id, done), addLabel: I18n.t("app.add.bundle"), kind: "secondary", parent: "cables",
-    // Étiquette de FAISCEAU (retour terrain 2026-08-20) : même anatomie que le câble — un drapeau
-    // par extrémité, donc DEUX par défaut (les deux patchs terminaux, cf. docs/faisceaux.md).
+    // Étiquette de FAISCEAU (retour terrain 2026-08-20) : même anatomie que le câble — un
+    // drapeau par patch terminal (cf. docs/faisceaux.md), donc même défaut A+B, décidé dans la
+    // modale depuis T11 et non plus par un sujet poussé en double.
     onPrint: (id) => {
       const bundle: any = store.get("cableBundles", id);
       if (!bundle) return;
-      const subject = () => LabelSubjects.bundle(store, bundle);
-      LabelPrintDialog.open({ kind: "bundle", subjects: [subject(), subject()], source: I18n.t("labels.entry.cableBothSource", { cable: bundle.name || "" }) });
+      LabelPrintDialog.open({ kind: "bundle", subjects: [LabelSubjects.bundle(store, bundle)], source: bundle.name || "", defaultEndsMode: "ab" });
     },
   });
   addListTab("porttypes", I18n.t("tabs.porttypes.label"), ListConfigs.portTypes, {

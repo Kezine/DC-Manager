@@ -106,6 +106,15 @@ export interface LabelFontFace {
 export interface LabelFieldChoice {
   ends: boolean;
   checked: Readonly<Record<string, boolean>>;
+  /** T11 — le BOUT que CE drapeau habille (décision Q11.2). Jusqu'ici les deux drapeaux
+      d'une paire étaient rigoureusement IDENTIQUES : rien ne disait au poseur lequel allait
+      à quelle extrémité, et la bascule A / B / A+B n'aurait eu qu'une valeur utile. La
+      lettre du bout local est donc pointée d'un « ▶ » et sa ligne mise en gras.
+      🚨 AUCUNE COTE NE BOUGE : c'est un marquage sur une ligne DÉJÀ rendue, pas une ligne de
+      plus — d'où le corollaire assumé (documenté dans docs/qr-scan.md) : quand « Extrémités
+      A / B » est décoché, il n'y a plus de lettre à pointer et les drapeaux d'une paire
+      redeviennent indiscernables. */
+  localEnd?: "A" | "B";
 }
 
 export class LabelHtml {
@@ -208,6 +217,7 @@ export class LabelHtml {
 .label-render .lab.cable .l-id{font-size:7pt;line-height:1.1}
 .label-render .lab.cable .l-loc,.label-render .lab.cable .l-meta,.label-render .lab.cable .l-own{font-size:5pt;white-space:normal;overflow-wrap:anywhere;line-height:1.2}
 .label-render .lab.cable .l-loc b{font-family:var(--lp-mono);font-weight:700;color:#000}
+.label-render .lab.cable .l-loc.local{font-weight:700}
 .label-render .lab.cable.strip{align-items:stretch;gap:0;padding:0}
 .label-render .lab.cable.strip .cell2{flex:none;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:1mm 0;overflow:hidden;border-right:.2mm dashed #ccc;writing-mode:vertical-rl}
 .label-render .lab.cable.strip .cell2.fold{border-right-color:#999}
@@ -246,8 +256,14 @@ export class LabelHtml {
     const lineOf = (f: LabelFieldDecl): string => `<div class="l-${f.style}">${esc(f.value)}</div>`;
     const checked = (subject.fields || []).filter((f) => choice.checked[f.id] && LabelPrintPolicy.fieldVisible(f, spec.content));
     // Extrémités A / B — anatomie STRUCTURELLE des sujets à drapeau (hors liste déclarée, T10).
+    // T11 : la ligne du bout LOCAL (celui que cette étiquette-ci habille) est pointée et mise
+    // en gras — même géométrie, même nombre de lignes, un glyphe et une classe en plus.
+    const endMark = (letter: "A" | "B", value: string): string => {
+      const local = choice.localEnd === letter;
+      return `<div class="l-loc${local ? " local" : ""}"><b>${local ? "▶ " : ""}${letter}</b> ${esc(value)}</div>`;
+    };
     const endLines = choice.ends && (subject.endA || subject.endB)
-      ? `<div class="l-loc"><b>A</b> ${esc(subject.endA || "")}</div><div class="l-loc"><b>B</b> ${esc(subject.endB || "")}</div>`
+      ? endMark("A", subject.endA || "") + endMark("B", subject.endB || "")
       : "";
     const mm = (v: number) => +v.toFixed(2);
     // Les CASES de manchon se posent au MILLIÈME de mm, pas au centième comme les autres

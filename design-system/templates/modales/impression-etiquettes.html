@@ -1,0 +1,171 @@
+<!-- @dsCard group="Modales" name="Impression d'étiquettes QR" subtitle="modale large hideFooter : contexte + 4 étages fixes (Tirage en tête dès 2 étiquettes) ; option indisponible GRISÉE avec sa raison, jamais cachée ; deux registres d'avertissement" -->
+<!-- DÉRIVÉ de src-client/ui/LabelPrintDialog.ts (refonte T11, 2026-09-03) — maquette de référence :
+     design-system/briefs/qr-print-redesign-maquette.html. Visage figé : ÉQUIPEMENT, planche de 150
+     depuis le panier ⇒ l'étage « ◈ Tirage » passe EN TÊTE (`.lp-stage-lead`), seul déplacement
+     structurel du panneau.
+     🚨 CE QUE LA CARTE MONTRE, et qui est la thèse de la refonte : une option indisponible reste
+     LISTÉE, `disabled`, avec sa RAISON sur sa propre ligne (`.lp-opt[disabled] .lp-opt-hint`, en
+     ton d'alerte) — le panneau explique au lieu de faire deviner. Les CASES de champ non déclarées
+     par l'objet, elles, sont ABSENTES (T10) : deux traitements, jamais trois.
+     APERÇU STATIQUE : la modale est sortie de son overlay plein écran ; le QR est remplacé par un
+     carré gris légendé (la génération est SERVEUR — la galerie n'a pas de route `/qr`), et l'aperçu
+     de planche est schématisé plutôt que rendu en mm réels. Les segments et cases sont figés. -->
+<section class="ds-section">
+  <h2>Modale d'impression d'étiquettes QR</h2>
+  <p class="ds-note">Un seul écran de sortie pour les neuf points d'entrée ; ce qui change est ce qu'il <em>reçoit</em>. Quatre étages qui ne disparaissent jamais, pour que le vocabulaire de la modale ne bouge pas d'un sujet à l'autre. Ici : 150 équipements venus du panier, donc <strong>Tirage en tête</strong>.</p>
+  <div class="ds-demo">
+    <div class="modal wide" style="margin:0 auto;">
+      <div class="modal-header">
+        <div class="modal-header-left"><div class="modal-titles">
+          <div class="modal-title">Imprimer des étiquettes</div>
+          <div class="modal-subtitle">150 équipements du panier</div>
+        </div></div>
+        <div class="modal-header-actions">
+          <button type="button" class="modal-back" aria-label="Retour">{{ICON:BACK}}</button>
+          <button type="button" class="modal-close" aria-label="Fermer">{{ICON:CLOSE}}</button>
+        </div>
+      </div>
+      <div class="modal-body">
+        <div class="label-print">
+
+          <div class="lp-side">
+            <!-- CONTEXTE : qui, combien, avec quelle mémoire. Jamais masqué. -->
+            <div class="lp-ctx">
+              <div class="lp-ctx-who">150 objets sélectionnés</div>
+              <div class="lp-ctx-meta">équipement · 150 objets · 150 étiquettes</div>
+              <div class="lp-ctx-mem">
+                <span class="lp-ctx-memtext">Réglages repris de votre dernier tirage · session</span>
+                <button type="button" class="btn btn-ghost btn-sm">Revenir aux défauts</button>
+              </div>
+            </div>
+
+            <!-- ◈ TIRAGE — en TÊTE dès 2 étiquettes (`.lp-stage-lead`). -->
+            <div class="lp-stage lp-stage-lead">
+              <div class="lp-stage-head"><span class="lp-stage-n">◈</span><span class="lp-stage-t">Tirage</span><span class="lp-stage-v">150 étiquettes</span></div>
+              <div class="lp-grid">
+                <label class="lp-num"><span>Occurrences ×</span><input type="number" min="1" max="20" step="1" value="1" inputmode="numeric"></label>
+              </div>
+              <div class="lp-field">
+                <span class="lp-field-l">Papier</span>
+                <div class="rm-toggle" role="group" aria-label="Papier">
+                  <button type="button" class="on">Planche A4</button>
+                  <button type="button">Rouleau</button>
+                </div>
+              </div>
+              <div class="lp-field">
+                <span class="lp-field-l">Résolution d'impression</span>
+                <div class="rm-toggle" role="group" aria-label="Résolution d'impression">
+                  <button type="button">203 dpi</button>
+                  <button type="button" class="on">300 dpi</button>
+                  <button type="button">600 dpi</button>
+                </div>
+              </div>
+              <div class="lp-field">
+                <span class="lp-field-l">Colonnes</span>
+                <!-- Au-delà de la capacité réelle de la largeur d'étiquette : GRISÉ + raison en title. -->
+                <div class="rm-toggle" role="group" aria-label="Colonnes">
+                  <button type="button">1</button>
+                  <button type="button">2</button>
+                  <button type="button">3</button>
+                  <button type="button" class="on">4</button>
+                  <button type="button" disabled title="Plafonné : 4 colonnes au maximum pour cette étiquette">5</button>
+                  <button type="button" disabled title="Plafonné : 4 colonnes au maximum pour cette étiquette">6</button>
+                  <button type="button" disabled title="Plafonné : 4 colonnes au maximum pour cette étiquette">7</button>
+                  <button type="button" disabled title="Plafonné : 4 colonnes au maximum pour cette étiquette">8</button>
+                </div>
+              </div>
+              <div class="lp-field">
+                <span class="lp-field-l">Densité</span>
+                <div class="rm-toggle" role="group" aria-label="Densité">
+                  <button type="button" class="on">Compact</button>
+                  <button type="button">Confort</button>
+                </div>
+              </div>
+              <button type="button" class="btn btn-sm toggle-pill toggle-block active" role="switch" aria-checked="true"><span class="tgl-dot" aria-hidden="true"></span><span class="tgl-txt">Traits de coupe</span></button>
+              <p class="lp-why"><span class="gi" aria-hidden="true">{{ICON:INFO}}</span><span>Planche A4, marge 8 mm : 32 étiquettes par feuille → 5 feuilles. · papier choisi automatiquement</span></p>
+            </div>
+
+            <!-- ① SUPPORT : les quatre toujours listés ; indisponible ⇒ grisé AVEC sa raison. -->
+            <div class="lp-stage">
+              <div class="lp-stage-head"><span class="lp-stage-n">①</span><span class="lp-stage-t">Support</span><span class="lp-stage-v">Étiquette plate</span></div>
+              <div class="lp-opts">
+                <button type="button" class="lp-opt" aria-pressed="true"><span class="lp-opt-dot"></span><span class="lp-opt-body"><span class="lp-opt-title">Étiquette plate</span><em class="lp-opt-hint">autocollant façade ou bac</em></span></button>
+                <button type="button" class="lp-opt" aria-pressed="false" disabled title="réservé aux baies"><span class="lp-opt-dot"></span><span class="lp-opt-body"><span class="lp-opt-title">Tête de baie — 100 × 60</span><em class="lp-opt-hint">réservé aux baies</em></span></button>
+                <button type="button" class="lp-opt" aria-pressed="false" disabled title="réservé aux câbles et faisceaux — ce qui s'enroule"><span class="lp-opt-dot"></span><span class="lp-opt-body"><span class="lp-opt-title">Drapeau de câble</span><em class="lp-opt-hint">réservé aux câbles et faisceaux — ce qui s'enroule</em></span></button>
+                <button type="button" class="lp-opt" aria-pressed="false" disabled title="réservé aux câbles et faisceaux — ce qui s'enroule"><span class="lp-opt-dot"></span><span class="lp-opt-body"><span class="lp-opt-title">Manchon</span><em class="lp-opt-hint">réservé aux câbles et faisceaux — ce qui s'enroule</em></span></button>
+              </div>
+              <div class="lp-field">
+                <span class="lp-field-l">Gabarit</span>
+                <div class="rm-toggle" role="group" aria-label="Gabarit">
+                  <button type="button">S</button>
+                  <button type="button" class="on">M</button>
+                  <button type="button">L</button>
+                  <button type="button">Libre</button>
+                </div>
+              </div>
+              <!-- Cotes ABSENTES sous un préréglage : le gabarit les impose (question sans objet,
+                   pas refus) — d'où le `.lp-mm` masqué ici. -->
+              <p class="lp-why"><span class="gi" aria-hidden="true">{{ICON:INFO}}</span><span>QR 17,4 mm — sous le plancher de 18 mm.</span></p>
+            </div>
+
+            <!-- ② CONTENU : les quatre listés dans tous les contextes. -->
+            <div class="lp-stage">
+              <div class="lp-stage-head"><span class="lp-stage-n">②</span><span class="lp-stage-t">Contenu</span><span class="lp-stage-v">QR + texte</span></div>
+              <div class="lp-opts">
+                <button type="button" class="lp-opt" aria-pressed="true"><span class="lp-opt-dot"></span><span class="lp-opt-body"><span class="lp-opt-title">QR + texte</span><em class="lp-opt-hint">le cas courant</em></span></button>
+                <button type="button" class="lp-opt" aria-pressed="false"><span class="lp-opt-dot"></span><span class="lp-opt-body"><span class="lp-opt-title">QR seul</span><em class="lp-opt-hint">très petites façades</em></span></button>
+                <button type="button" class="lp-opt" aria-pressed="false" disabled title="réservé aux câbles et faisceaux — ce qui s'enroule"><span class="lp-opt-dot"></span><span class="lp-opt-body"><span class="lp-opt-title">Manchon — repère complet</span><em class="lp-opt-hint">réservé aux câbles et faisceaux — ce qui s'enroule</em></span></button>
+                <button type="button" class="lp-opt" aria-pressed="false" disabled title="réservé aux câbles et faisceaux — ce qui s'enroule"><span class="lp-opt-dot"></span><span class="lp-opt-body"><span class="lp-opt-title">Manchon — identifiant seul</span><em class="lp-opt-hint">réservé aux câbles et faisceaux — ce qui s'enroule</em></span></button>
+              </div>
+              <p class="lp-why"><span class="gi" aria-hidden="true">{{ICON:INFO}}</span><span>Les quatre contenus restent listés dans tous les contextes : ce qui change est leur disponibilité, énoncée sur la ligne.</span></p>
+            </div>
+
+            <!-- ③ INFORMATIONS ADDITIONNELLES : longueur VARIABLE (les cases descendent de
+                 l'objet, T10). Valeur à droite — « déclaré par n / N » sur une planche. -->
+            <div class="lp-stage">
+              <div class="lp-stage-head"><span class="lp-stage-n">③</span><span class="lp-stage-t">Informations additionnelles</span><span class="lp-stage-v">1 / 4</span></div>
+              <p class="lp-count">Cet objet déclare 4 champs imprimables — la liste vient de l'objet, pas de la modale.</p>
+              <div class="lp-fields">
+                <button type="button" class="btn btn-sm toggle-pill toggle-block active" role="switch" aria-checked="true" disabled><span class="tgl-dot" aria-hidden="true"></span><span class="tgl-txt">Identifiant (toujours)</span><span class="lp-field-v" title="SW-B12-ACC-03">déclaré par 150 / 150</span></button>
+                <button type="button" class="btn btn-sm toggle-pill toggle-block active" role="switch" aria-checked="true"><span class="tgl-dot" aria-hidden="true"></span><span class="tgl-txt">Emplacement</span><span class="lp-field-v" title="B12 · U23–U24">déclaré par 150 / 150</span></button>
+                <button type="button" class="btn btn-sm toggle-pill toggle-block" role="switch" aria-checked="false"><span class="tgl-dot" aria-hidden="true"></span><span class="tgl-txt">Type / famille</span><span class="lp-field-v" title="Switch 48p 1G">déclaré par 148 / 150</span></button>
+                <button type="button" class="btn btn-sm toggle-pill toggle-block" role="switch" aria-checked="false"><span class="tgl-dot" aria-hidden="true"></span><span class="tgl-txt">N° de série</span><span class="lp-field-v" title="SN FDO2231R0AB">déclaré par 96 / 150</span></button>
+                <button type="button" class="btn btn-sm toggle-pill toggle-block" role="switch" aria-checked="false"><span class="tgl-dot" aria-hidden="true"></span><span class="tgl-txt">Propriétaire</span><span class="lp-field-v" title="ACME Industries">déclaré par 12 / 150</span></button>
+              </div>
+              <p class="lp-why"><span class="gi" aria-hidden="true">{{ICON:INFO}}</span><span>Un champ non déclaré par l'objet n'apparaît pas : c'est structurel, il n'y a pas de case sans donnée derrière.</span></p>
+            </div>
+          </div>
+
+          <!-- APERÇU + REGISTRE 1 (« risque de scan »), collé dessous. -->
+          <div class="lp-preview">
+            <div class="lp-meta"><span>Aperçu — planche A4</span><span class="lp-stat">50 × 30 mm · 4 col. · 32 par feuille</span></div>
+            <div class="lp-vp">
+              <div style="width:220px;height:311px;background:#fff;border:1px solid var(--line-2);border-radius:4px;padding:8px;display:grid;grid-template-columns:repeat(4,1fr);gap:1px;align-content:start;">
+                <div style="grid-column:1/-1;font-size:6px;color:#666;font-family:var(--mono);display:flex;justify-content:space-between;padding-bottom:4px"><span>150 équipements du panier</span><span>150 étiquettes · 04/09/2026</span></div>
+                <div style="height:32px;background:#fff;border:0.5px solid #999;display:flex;align-items:center;gap:2px;padding:2px"><span style="width:22px;height:22px;background:#d9d9d9;flex:none"></span><span style="font-size:5px;color:#000;font-family:var(--mono);line-height:1.2">SW-B12-ACC-03<br>B12 · U23–U24</span></div>
+                <div style="height:32px;background:#fff;border:0.5px solid #999;display:flex;align-items:center;gap:2px;padding:2px"><span style="width:22px;height:22px;background:#d9d9d9;flex:none"></span><span style="font-size:5px;color:#000;font-family:var(--mono);line-height:1.2">SW-B12-ACC-04<br>B12 · U25–U26</span></div>
+                <div style="height:32px;background:#fff;border:0.5px solid #999;display:flex;align-items:center;gap:2px;padding:2px"><span style="width:22px;height:22px;background:#d9d9d9;flex:none"></span><span style="font-size:5px;color:#000;font-family:var(--mono);line-height:1.2">SW-B13-ACC-01<br>B13 · U02–U03</span></div>
+                <div style="height:32px;background:#fff;border:0.5px solid #999;display:flex;align-items:center;gap:2px;padding:2px"><span style="width:22px;height:22px;background:#d9d9d9;flex:none"></span><span style="font-size:5px;color:#000;font-family:var(--mono);line-height:1.2">SW-B13-ACC-02<br>B13 · U04–U05</span></div>
+                <div style="grid-column:1/-1;font-size:7px;color:#999;text-align:center;padding-top:8px;font-family:var(--mono)">… 28 étiquettes de plus sur cette feuille</div>
+              </div>
+            </div>
+            <div class="lp-foot-stat">150 étiquettes · 5 feuilles A4</div>
+            <div class="lp-risk">
+              <h6 class="lp-risk-h"><span class="gi" aria-hidden="true">{{ICON:WARNING}}</span><span>Risque de scan</span></h6>
+              <p>QR 17,4 mm : sous le plancher de 18 mm — ce code pourra ne pas se scanner à bout de bras en baie.</p>
+              <p>Module de 0,42 mm — sous 0,5 mm, illisible sur une thermique 203 dpi : montez la cote du QR ou la résolution.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- PIED : registre 2 (ton neutre, à gauche) + les deux actions. -->
+      <div class="modal-footer">
+        <div class="lp-sheetnote">150 étiquettes ne tiennent pas sur une feuille : 5 feuilles seront imprimées.</div>
+        <button type="button" class="btn btn-ghost"><span class="gi">{{ICON:EXPORT}}</span>Exporter en images</button>
+        <button type="button" class="btn btn-primary"><span class="gi">{{ICON:PRINT}}</span>Imprimer</button>
+      </div>
+    </div>
+  </div>
+  <p class="ds-note"><strong>Deux traitements, jamais trois.</strong> Une option d'un axe fixe qui n'a pas cours ici reste <em>listée</em>, <code>disabled</code>, avec sa raison sur sa propre ligne (<code>.lp-opt[disabled] .lp-opt-hint</code> — le titre s'estompe, la raison reste pleinement lisible). Une question <em>sans objet</em> dans ce contexte est <em>absente</em> (les cotes en mm sous un préréglage, la bascule d'extrémités sur un objet sans bouts). Une case de champ que l'objet ne déclare pas est <em>absente</em> aussi — structurel depuis T10. Les codes de refus viennent de <code>LabelPrintPolicy.availability</code> ; la modale n'écrit aucune règle, elle traduit un code.</p>
+  <p class="ds-note"><strong>Les deux registres d'avertissement.</strong> « Risque de scan » (<code>.lp-risk</code>) est <em>collé sous l'aperçu</em>, en ton d'alerte et formulé à conséquence : ça compromet l'objet imprimé, et ça se voit sur l'aperçu. « Conséquence de tirage » (<code>.lp-sheetnote</code>) vit <em>au pied, à côté du bouton</em>, en ton neutre : ça ne compromet rien, ça décrit ce qui va sortir de l'imprimante. <strong>« Imprimer » reste toujours actif</strong> — on imprime pour son propre usage.</p>
+</section>

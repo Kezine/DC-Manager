@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import QRCode from "qrcode";   // génération d'étiquettes QR (pure JS, sortie PNG/SVG côté Node — cf. la route `/qr`)
 import { Schema } from "./constants.js";
 import { QrCodeParams } from "./QrCodeParams.js";   // validation PURE des paramètres de rendu QR (format/size) — testée en isolation
+import { QrSvg } from "./QrSvg.js";   // émission PURE du SVG de QR à modules CARRÉS (diagnostic Q11.14) — testée en isolation
 import { EntityLink } from "../../src-shared/EntityLink.js";   // format d'URL PARTAGÉ des deep-links de fiche (source unique — le QR l'ENCODE)
 import { AttachmentFiles } from "./AttachmentFiles.js";   // binaires des pièces jointes : chemins sûrs + I/O disque (instance UNIQUE portée par DocumentStore)
 import { ContentDisposition } from "./ContentDisposition.js";   // en-tête de téléchargement assaini (D6 — nom d'origine = donnée utilisateur)
@@ -674,7 +675,7 @@ export class Api {
   };
 
   /* -- ÉTIQUETTES QR (chantier étiquettes QR / scan caméra) -- */
-  /** `GET …/qr/:collection/:id?format=png|svg&size=<px>` → image d'un QR encodant l'URL ABSOLUE de la fiche.
+  /** `GET …/qr/:collection/:id?format=png|svg|matrix&size=<px>` → QR encodant l'URL ABSOLUE de la fiche.
       La charge utile est `EntityLink.build(publicBaseUrl, …)` — le format d'URL est la SOURCE UNIQUE partagée
       (`src-shared/EntityLink`), jamais une URL forgée ici : hors app le navigateur ouvre la fiche, dans l'app
       le greffon de scan en extrait le deep-link sans tenir compte de l'hôte imprimé.
@@ -686,6 +687,15 @@ export class Api {
         · 404 si la collection est inconnue OU si l'enregistrement n'existe pas dans le document : on n'imprime
           pas d'étiquette morte (vérification par le dépôt, en lecture seule).
         · 400 si `format`/`size` sont invalides (validation PURE `QrCodeParams`, testée en isolation).
+
+      🚨 MODULES CARRÉS (diagnostic Q11.14, 2026-09-03) : le SVG n'est plus celui de la librairie —
+      elle dessine un TRAIT par rangée, à coordonnées en DEMI-module, ce qui rend les modules
+      inégaux dès que la cote d'impression ne tombe pas sur un nombre entier de pixels. On récupère
+      donc la MATRICE (`QRCode.create`) et on émet notre SVG à carrés unitaires (`QrSvg`, module pur
+      qui porte le diagnostic complet). Quiet zone de 4 modules INCHANGÉE.
+      Le format `matrix` sert la MÊME matrice en JSON : l'export en images des étiquettes rasterise
+      le QR à un nombre ENTIER de pixels par module au lieu de mettre un SVG à l'échelle. `size` n'y
+      a aucun effet (ce n'est pas une image).
 
       ⚠ SÉCURITÉ du SVG : il est généré PAR NOUS à partir de données MAÎTRISÉES (l'URL d'une fiche existante,
       composée par `EntityLink` — pas de saisie utilisateur réinjectée), donc la doctrine anti-XSS-stocké des
@@ -706,11 +716,17 @@ export class Api {
     if (!this.repoOf(req).getOne(collection, id)) { res.status(404).json({ error: "introuvable" }); return; }
     const url = EntityLink.build(this.publicBaseUrl, { docId, collection, id });
     try {
-      if (params.format === "svg") {
-        const svg = await QRCode.toString(url, { type: "svg", width: params.size, errorCorrectionLevel: "M" });
-        res.setHeader("Content-Type", "image/svg+xml; charset=utf-8");
+      if (params.format === "svg" || params.format === "matrix") {
+        // UNE matrice, DEUX sorties (cf. QrSvg) : le SVG à carrés et la charge JSON de l'export.
+        const rows = QrSvg.rows(QRCode.create(url, { errorCorrectionLevel: "M" }).modules);
+        if (!rows.length) throw new Error("matrice de QR vide");
         res.setHeader("Cache-Control", "private, max-age=60");   // parité images/pièces jointes ; `nosniff` est global (Server)
-        res.send(svg);
+        if (params.format === "matrix") {
+          res.json(QrSvg.matrixPayload(rows));
+        } else {
+          res.setHeader("Content-Type", "image/svg+xml; charset=utf-8");
+          res.send(QrSvg.svg(rows, params.size));
+        }
       } else {
         const buf = await QRCode.toBuffer(url, { type: "png", width: params.size, errorCorrectionLevel: "M" });
         res.setHeader("Content-Type", "image/png");

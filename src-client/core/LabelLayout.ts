@@ -43,7 +43,14 @@ export type LabelWarning =
   | "qr-exceeds-label"  // le QR (+ marges) ne tient pas dans l'étiquette demandée
   | "columns-capped"    // colonnes demandées > plafond par la largeur réelle
   | "multi-page"        // la planche déborde sur plusieurs feuilles A4
-  | "sleeve-tight";     // manchon : le texte estimé dépasse la longueur le long du câble
+  | "sleeve-tight"      // manchon : le texte estimé dépasse la longueur le long du câble
+  | "module-too-small"; // un MODULE de QR sous 0,5 mm — illisible sur une thermique 203 dpi (Q11.14)
+
+/** Résolution d'impression VISÉE, en points par pouce. Trois valeurs seulement, parce que
+    ce sont les trois classes de machines du terrain : thermique d'étiquettes (203), laser
+    bureautique (300, le défaut) et laser de production (600). Elle ne change RIEN au
+    document produit — elle sert uniquement à QUANTIFIER la cote du QR (cf. quantizeQrMm). */
+export type LabelDpi = 203 | 300 | 600;
 
 /** Un préréglage de gabarit : QR (mm), cote nominale (w × h) et CELLULE de planche. */
 export interface LabelPresetSpec {
@@ -69,6 +76,9 @@ export interface LabelSpec {
   len: number;
   /** « QR seul » : une ligne propriétaire ajoute une bande sous le carré. */
   hasOwner: boolean;
+  /** Résolution d'impression visée — SEUL champ ajouté au spec par le chantier T11.
+      Absente ⇒ aucune quantification (les gabarits golden restent au millimètre nominal). */
+  dpi?: LabelDpi;
 }
 
 export class LabelLayout {
@@ -86,6 +96,15 @@ export class LabelLayout {
       fiablement que de très près — signalé, jamais interdit (l'utilisateur imprime
       pour son usage ; un bac de spares à scanner à 10 cm est légitime). */
   static readonly QR_FLOOR_MM = 18;
+
+  /** Plancher de taille d'un MODULE (mm) — 🚨 diagnostic Q11.14 (2026-09-03). Le plancher
+      ci-dessus parle de la cote TOTALE du QR ; il est déjà trop optimiste dès que le code
+      compte beaucoup de modules. L'URL absolue d'une fiche (~70 caractères, EC « M ») donne
+      une version 4 = 33 modules, soit 41 de côté quiet zone comprise : à 18 mm, un module
+      fait 0,44 mm — 3,5 px sur une thermique 203 dpi. Sous 0,5 mm par module, la plupart des
+      thermiques ne résolvent plus les transitions et le code cesse d'être fiable, quelle que
+      soit la cote totale. Signalé (registre « risque de scan »), jamais interdit. */
+  static readonly MODULE_FLOOR_MM = 0.5;
 
   /** Planche A4 : marge 8 mm sur les 4 bords + une ligne d'en-tête de 6 mm HORS
       zone d'étiquettes (objet source · compte — utile quand trois planches traînent). */
@@ -196,9 +215,38 @@ export class LabelLayout {
       géométrie (drapeau, manchon, QR seul) gardent `qrSizeOf`, leurs cotes étant DÉRIVÉES du QR et
       donc jamais trop petites pour lui. Sans ce point de passage unique, le SVG pouvait être servi
       à une cote que la boîte ne pouvait pas contenir — et se faire rogner à l'impression. */
-  static renderQrMm(spec: LabelSpec, heightMm?: number): number {
-    if (spec.content === "full" && spec.size !== "cable") return LabelLayout.rectQrGeometry(spec, heightMm).qr;
-    return LabelLayout.qrSizeOf(spec);
+  static renderQrMm(spec: LabelSpec, heightMm?: number, quantize?: { dpi: number; totalModules: number }): number {
+    const wanted = (spec.content === "full" && spec.size !== "cable")
+      ? LabelLayout.rectQrGeometry(spec, heightMm).qr
+      : LabelLayout.qrSizeOf(spec);
+    if (!quantize) return wanted;
+    return LabelLayout.quantizeQrMm(quantize.totalModules, quantize.dpi, wanted).mm;
+  }
+
+  /** QUANTIFICATION de la cote d'un QR — 🚨 seconde moitié du correctif Q11.14 (la première
+      est côté serveur : émettre des CARRÉS et non des traits, cf. src-server/QrSvg).
+
+      Un module n'est un carré à l'impression QUE s'il tombe sur un nombre ENTIER de pixels de
+      sortie. Sinon le rasteur donne 3 px à une rangée, 4 à la suivante, et le code repart de
+      travers quel que soit le dessin. Or la cote physique d'un module vaut
+      `mm / totalModules` : à 20 mm sur 41 modules et 300 dpi, cela fait 5,76 px — jamais un
+      entier. La question est PHYSIQUE, pas logicielle : sans connaître la résolution, aucune
+      cote ne peut être juste pour toutes les imprimantes. D'où le choix de résolution offert
+      dans l'étage Tirage, et cette fonction, qui ARRONDIT VERS LE BAS le nombre de pixels par
+      module puis recompose la cote : le QR rétrécit un peu (jamais plus que d'un pixel par
+      module) et tient donc TOUJOURS dans la boîte qui l'attendait.
+
+      `totalModules` = le côté du viewBox du SVG servi, QUIET ZONE COMPRISE (c'est elle qui est
+      mise à l'échelle avec le reste : les 4 modules de blanc doivent eux aussi tomber juste).
+      `pxPerModule` ne descend jamais sous 1 — à 1 px par module on est déjà bien au-delà de
+      l'illisible, et l'avertissement `module-too-small` l'aura dit ; rendre 0 produirait une
+      cote nulle, donc un QR absent, ce qui est pire qu'un QR mauvais. */
+  static quantizeQrMm(totalModules: number, dpi: number, maxMm: number): { mm: number; pxPerModule: number } {
+    if (!Number.isFinite(totalModules) || totalModules <= 0 || !Number.isFinite(dpi) || dpi <= 0 || !Number.isFinite(maxMm) || maxMm <= 0) {
+      return { mm: maxMm, pxPerModule: 0 };   // entrée inexploitable : la cote demandée passe telle quelle
+    }
+    const pxPerModule = Math.max(1, Math.floor((maxMm / 25.4 * dpi) / totalModules));
+    return { mm: totalModules * pxPerModule * 25.4 / dpi, pxPerModule };
   }
 
   /** Géométrie du DRAPEAU de câble — DÉRIVÉE de la taille du QR (maquette `cableGeom`,
@@ -394,13 +442,28 @@ export class LabelLayout {
         · `columns-capped`   : colonnes demandées > plafond (planche seulement) ;
         · `multi-page`       : plus d'une feuille A4 (planche seulement) ;
         · `sleeve-tight`     : manchon — l'identifiant le plus long, estimé en mono 8 pt,
-                               ne tient pas dans la longueur le long du câble. */
-  static warnings(spec: LabelSpec, opts: { count: number; requestedCols: number; longestIdLength?: number }): LabelWarning[] {
+                               ne tient pas dans la longueur le long du câble ;
+        · `module-too-small` : un MODULE du QR tombe sous 0,5 mm (cf. MODULE_FLOOR_MM). Il
+                               demande `opts.totalModules` — le côté du QR servi, quiet zone
+                               comprise : SANS lui, aucun avis (on ne devine pas le nombre de
+                               modules d'un code qu'on n'a pas encore reçu, et un appel qui ne
+                               connaît pas son QR ne doit pas se voir inventer un verdict).
+                               La cote évaluée est celle qui sera RÉELLEMENT servie, donc
+                               quantifiée quand le spec porte un `dpi` (cf. renderQrMm) —
+                               sinon on avertirait sur une cote que personne n'imprime. */
+  static warnings(spec: LabelSpec, opts: { count: number; requestedCols: number; longestIdLength?: number; totalModules?: number }): LabelWarning[] {
     const out: LabelWarning[] = [];
     const sleeve = spec.content === "strip" || spec.content === "id";
     if (!sleeve) {
       const qr = LabelLayout.qrSizeOf(spec);
       if (qr < LabelLayout.QR_FLOOR_MM) out.push("qr-floor");
+      // Cote RÉELLEMENT servie (clamp des préréglages + quantification éventuelle) rapportée au
+      // nombre de modules : c'est la seule mesure qui parle de ce que l'imprimante doit résoudre.
+      const total = opts.totalModules;
+      if (total != null && Number.isFinite(total) && total > 0) {
+        const served = LabelLayout.renderQrMm(spec, undefined, spec.dpi ? { dpi: spec.dpi, totalModules: total } : undefined);
+        if (served / total < LabelLayout.MODULE_FLOOR_MM) out.push("module-too-small");
+      }
       if (spec.size === "custom" && spec.content === "full") {
         // Le personnalisé n'est PAS clampé (l'utilisateur contrôle ses cotes) : on
         // AVERTIT avec le padding réel de sa classe de police (cf. rectQrGeometry).
