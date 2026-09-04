@@ -11,9 +11,17 @@
         n'en accepte qu'UN pour toute la planche — ce qui ne pose aucun problème
         puisqu'une famille est précisément un ensemble de collections que
         `LabelPrintPolicy` traite à l'identique (`isFlagKind`, `isSpareLike`).
-     2. **Combien d'étiquettes par élément.** Un lien s'étiquette PAR PAIRE (un
-        drapeau à chaque bout, décision P9, en parité avec la fiche et l'action
-        de ligne) ; tout le reste s'étiquette une fois.
+     2. **Comment le lot se DÉVELOPPE en étiquettes.** Un lien s'étiquette PAR
+        PAIRE (un drapeau à chaque bout, décision P9, en parité avec la fiche et
+        l'action de ligne) ; tout le reste s'étiquette une fois.
+        🚨 T11 : ce n'est plus un NOMBRE que le panier applique lui-même
+        (`labelsPerItem`, qui poussait deux fois le même sujet dans la modale),
+        mais le DÉFAUT d'une bascule que la modale offre — A / B / A+B. Le
+        panier passe donc UN sujet par élément et c'est `LabelPrintPolicy.expand`
+        qui multiplie : la volumétrie redevient réglable après coup, et la modale
+        peut MARQUER quel drapeau va sur quel bout (ce qu'un doublon ne permettait
+        pas). Une famille sans bascule (petit matériel, équipements) n'en déclare
+        simplement pas.
 
    Une famille ABSENTE d'ici n'a pas d'action d'impression : `main.ts` ne la
    déclare alors pas dans `CartPanel.setup({ families })`, et ses listings ne
@@ -22,24 +30,26 @@
    ============================================================================ */
 
 import type { CartFamily } from "./CartFamilies";
-import type { LabelPrintKind } from "./LabelPrintPolicy";
+import type { LabelPrintKind, LabelEndsMode } from "./LabelPrintPolicy";
 
 /** Plan d'impression d'une famille — consommé tel quel par le câblage de `main.ts`. */
 export interface CartLabelPlan {
   /** Sujet de politique de la planche entière (cf. `LabelPrintPolicy`). */
   kind: LabelPrintKind;
-  /** Étiquettes tirées PAR élément du panier (2 = les deux extrémités d'un lien). */
-  labelsPerItem: number;
+  /** DÉFAUT de la bascule d'extrémités de la modale (T11) — `ab` pour ce qui a deux bouts.
+      Absent = la famille n'a pas d'extrémités, la bascule n'y sera même pas offerte. */
+  defaultEndsMode?: LabelEndsMode;
 }
 
 const PLANS: Readonly<Record<string, CartLabelPlan>> = {
   // `cable` vaut pour toute la famille : `isFlagKind` met câble et faisceau sur le même plan.
-  links: { kind: "cable", labelsPerItem: 2 },
+  // Un lien s'étiquette par PAIRE : la bascule part donc sur « A + B » (décision P9, T11).
+  links: { kind: "cable", defaultEndsMode: "ab" },
   // `spare` vaut pour toute la famille : `isSpareLike` met spare et sous-équipement sur le même plan.
-  components: { kind: "spare", labelsPerItem: 1 },
+  components: { kind: "spare" },
   // Les équipements ont leur propre anatomie (baie · U, famille + marque/modèle, série, ET
   // propriétaire — le seul sujet qui en porte un), donc leur propre famille et leur propre plan.
-  equipments: { kind: "equipment", labelsPerItem: 1 },
+  equipments: { kind: "equipment" },
 };
 
 export class CartLabelPlans {

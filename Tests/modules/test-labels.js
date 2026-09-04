@@ -15,8 +15,14 @@
      - core/LabelPrintPolicy : règles TRANSVERSES — 🚨 la matrice de cases par sujet
                           (offeredFieldsFor/defaultFieldsFor) a DISPARU (décision Q10.B) :
                           restent contenus/formats/défauts, l'UNION d'offre de planche
-                          (fieldOffer), la règle contenu × champ (fieldVisible), le verdict
-                          et la retombée sanitize (réconciliée avec l'offre) ;
+                          (fieldOffer), la règle contenu × champ (fieldVisible) et la retombée
+                          sanitize (réconciliée avec l'offre). 🚨 T11 (2026-09-03) : le verdict
+                          `visibility` (« montre / cache ») a DISPARU à son tour au profit de
+                          `availability` (« disponible / indisponible + CODE de raison »), et
+                          s'ajoutent la PROJECTION support ⇄ (gabarit, contenu), les registres
+                          d'avertissement, le développement du tirage (`expand`) et le papier ;
+     - core/LabelExportPlan : 🚨 T11 — nommage et arithmétique de l'export en images (Q11.13),
+                          dont la cote de QR à k pixels ENTIERS par module ;
      - core/LabelSubjects : les DÉCLARATIONS de champs imprimables par sujet (T10 —
                           spare : caractéristiques PAR TYPE via Spare.techSummary, achat,
                           stockage décoché ; sous-équipement : maître · repère, SANS la
@@ -24,13 +30,14 @@
                           STRICTEMENT ceux d'avant T10, verrouillés en dur ici).
    Harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, D } = require("./harness.js");
+const { ck, section, path, D } = require("./harness.js");
 
 module.exports = async () => {
   const { LabelLayout } = D("core/LabelLayout.js");
   const { LabelQrSvg } = D("core/LabelQrSvg.js");
   const { LabelHtml } = D("core/LabelHtml.js");
   const { LabelPrintPolicy } = D("core/LabelPrintPolicy.js");
+  const { LabelExportPlan } = D("core/LabelExportPlan.js");
   const { LabelSubjects } = D("core/LabelSubjects.js");
   const { LabelOrientation } = D("core/LabelOrientation.js");
   // T10 : la composition des caractéristiques d'un spare est celle du MODÈLE (techSummary,
@@ -798,8 +805,53 @@ module.exports = async () => {
     ck.eq(LabelPrintPolicy.fieldOffer([]).length, 0, "aucun sujet : offre vide (fonction totale)");
   });
 
-  await section("labels : LabelPrintPolicy — LA matrice (sujet × contenu × format × nombre × offre)", async () => {
-    // Offres représentatives — la forme qu'en produit fieldOffer (déclaration sans valeur).
+  await section("labels : LabelPrintPolicy — T11 : la PROJECTION support ⇄ (gabarit, contenu)", async () => {
+    /* L'axe « Support » de la refonte n'est PAS un nouvel axe du modèle : c'est une LECTURE de
+       (size, content). C'est toute la thèse du chantier (voie A) — le moteur d'impression et ses
+       cinq pièges d'impression n'ont pas à bouger pour que le panneau change de langage. */
+    ck.eq(LabelPrintPolicy.supportOf("m", "full"), "label", "gabarit rectangulaire + QR/texte → étiquette plate");
+    ck.eq(LabelPrintPolicy.supportOf("custom", "qr"), "label", "cotes libres + QR seul → étiquette plate aussi");
+    ck.eq(LabelPrintPolicy.supportOf("rack", "full"), "rackhead", "gabarit `rack` → tête de baie");
+    ck.eq(LabelPrintPolicy.supportOf("cable", "full"), "flag", "gabarit `cable` → drapeau");
+    ck.eq(LabelPrintPolicy.supportOf("cable", "qr"), "flag", "…QR seul compris (c'est le second panneau qui change)");
+    ck.eq(LabelPrintPolicy.supportOf("cable", "strip"), "sleeve", "contenu de manchon → manchon");
+    ck.eq(LabelPrintPolicy.supportOf("m", "id"), "sleeve", "🚨 le CONTENU l'emporte : un manchon reste un manchon quel que soit le gabarit hérité");
+
+    /* 🚨 L'INVARIANT : écrire un support puis le relire rend le même support, pour tout support
+       DISPONIBLE. Sans lui, un clic sur une carte pourrait laisser l'UI sur une autre carte —
+       exactement le genre d'état que l'ancienne modale savait produire. */
+    const kinds = ["equipment", "rack", "cable", "bundle", "spare", "subEquipment"];
+    for (const kind of kinds) {
+      const av = LabelPrintPolicy.availability(kind, "label", "full", []);
+      for (const sup of ["label", "rackhead", "flag", "sleeve"]) {
+        if (av.supports[sup] !== "ok") continue;
+        // Depuis des états de DÉPART variés : la projection doit être totale, pas seulement
+        // juste sur le chemin heureux.
+        for (const from of [{ size: "m", content: "full" }, { size: "cable", content: "strip" }, { size: "rack", content: "qr" }]) {
+          const out = LabelPrintPolicy.applySupport(kind, sup, Object.assign({}, from));
+          ck.eq(LabelPrintPolicy.supportOf(out.size, out.content), sup, `${kind} : ${from.size}/${from.content} → support ${sup} → relu ${sup}`);
+          ck(LabelPrintPolicy.contentsFor(kind).includes(out.content), `${kind}/${sup} : le contenu produit est OFFERT par le sujet`);
+          ck(LabelPrintPolicy.sizesFor(kind).includes(out.size), `${kind}/${sup} : le gabarit produit est OFFERT par le sujet`);
+        }
+      }
+    }
+    // Le couplage que l'ancienne modale laissait à l'utilisateur, écrit une fois pour toutes.
+    ck.eq(LabelPrintPolicy.applySupport("cable", "sleeve", { size: "cable", content: "full" }).content, "strip", "choisir « Manchon » force un contenu de manchon");
+    ck.eq(LabelPrintPolicy.applySupport("cable", "flag", { size: "cable", content: "id" }).content, "full", "…et en sortir rend un contenu à QR");
+    ck.eq(LabelPrintPolicy.applySupport("cable", "sleeve", { size: "cable", content: "id" }).content, "id", "un contenu de manchon DÉJÀ choisi est conservé (on ne réécrit pas un choix valide)");
+    // Retombée du gabarit : un câble n'a pas de S/M/L sur lequel retomber — il n'a que « libre ».
+    ck.eq(LabelPrintPolicy.labelSizesFor("cable").join(","), "custom", "câble en étiquette plate : cotes libres seulement (un rectangle ne s'attache pas à un brin)");
+    ck.eq(LabelPrintPolicy.labelSizesFor("equipment").join(","), "s,m,l,custom", "équipement : les trois préréglages + libre");
+    ck.eq(LabelPrintPolicy.labelSizesFor("rack").join(","), "s,m,l,custom", "baie : le gabarit `rack` sort de la liste PLATE (il EST la tête de baie)");
+    ck.eq(LabelPrintPolicy.applySupport("cable", "label", { size: "cable", content: "full" }).size, "custom", "câble → étiquette plate : retombe sur « libre », le seul gabarit qu'il offre");
+    ck.eq(LabelPrintPolicy.applySupport("equipment", "label", { size: "cable", content: "full" }).size, "m", "équipement → étiquette plate : retombe sur SON défaut (M)");
+  });
+
+  await section("labels : LabelPrintPolicy — T11 : DISPONIBILITÉ AVEC RAISON (remplace la matrice de `hidden`)", async () => {
+    /* 🚨 CETTE SECTION REMPLACE « LA matrice » d'avant T11. Le verdict ne dit plus « montre /
+       cache » mais « disponible / indisponible + CODE de raison » : le panneau grise et explique
+       au lieu de faire deviner. Même famille que PortCompatibility / BreakoutRules — des codes,
+       jamais de phrases (les libellés vivent dans i18n `labels.why.*`). */
     const equipmentOffer = [
       { id: "location", label: "Emplacement", checked: true, style: "loc" },
       { id: "type", label: "Type / famille", checked: false, style: "meta", hideOnSmall: true },
@@ -807,60 +859,309 @@ module.exports = async () => {
       { id: "owner", label: "Propriétaire", checked: false, style: "own", qrOnly: true },
     ];
     const cableOffer = [{ id: "type", label: "Type / famille", checked: true, style: "meta" }];
-    const v = (kind, content, size, count, offer) => LabelPrintPolicy.visibility(kind, content, size, count || 1, offer || (LabelPrintPolicy.isFlagKind(kind) ? cableOffer : equipmentOffer));
+    const av = (kind, support, content, offer) => LabelPrintPolicy.availability(kind, support, content, offer || (LabelPrintPolicy.isFlagKind(kind) ? cableOffer : equipmentOffer));
 
-    // 🚨 RETOUR n°1 : les cotes PERSONNALISÉES ne s'affichent QUE sous « Personnalisé ».
-    for (const size of ["s", "m", "l", "rack"]) {
-      ck(!v("equipment", "full", size).showWidthHeight, "format " + size + " : ni largeur ni hauteur saisissables");
-      ck(!v("equipment", "full", size).showQrMm, "format " + size + " : la cote de QR est IMPOSÉE par le préréglage");
-      ck(!v("equipment", "full", size).showMmRow, "format " + size + " : la rangée mm entière disparaît");
+    // -- SUPPORTS : les quatre sont TOUJOURS listés ; seule leur disponibilité change. --
+    const eq = av("equipment", "label", "full");
+    ck.eq(Object.keys(eq.supports).sort().join(","), "flag,label,rackhead,sleeve", "les QUATRE supports sont toujours répondus (aucun n'est muet)");
+    ck.eq(eq.supports.label, "ok", "tout objet peut porter un autocollant");
+    ck.eq(eq.supports.rackhead, "rack-only", "équipement : la tête de baie est refusée AVEC sa raison");
+    ck.eq(eq.supports.flag, "flag-only", "…le drapeau aussi");
+    ck.eq(eq.supports.sleeve, "flag-only", "…le manchon aussi");
+    ck.eq(av("rack", "rackhead", "full").supports.rackhead, "ok", "baie : la tête de baie s'ouvre");
+    ck.eq(av("rack", "rackhead", "full").supports.flag, "flag-only", "…mais pas le drapeau (une baie ne s'enroule pas)");
+    for (const kind of ["cable", "bundle"]) {
+      const flag = av(kind, "flag", "full");
+      ck(flag.supports.flag === "ok" && flag.supports.sleeve === "ok", kind + " : drapeau ET manchon ouverts (même anatomie)");
+      ck.eq(flag.supports.rackhead, "rack-only", kind + " : la tête de baie reste refusée");
+      ck.eq(flag.supports.label, "ok", kind + " : l'étiquette plate reste OFFERTE (par les cotes libres)");
     }
-    const custom = v("equipment", "full", "custom");
-    ck(custom.showWidthHeight && custom.showQrMm && custom.showMmRow, "personnalisé : largeur, hauteur ET cote de QR");
-    ck(!custom.showDiaLen, "personnalisé : pas de Ø/longueur (ce n'est pas un manchon)");
-    // La cote de QR reste offerte quand elle est LIBRE sans être « personnalisée » (QR seul, drapeau).
-    ck(v("equipment", "qr", "m").showQrMm && !v("equipment", "qr", "m").showWidthHeight, "QR seul : la cote du QR, et elle seule");
-    ck(v("cable", "full", "cable").showQrMm && !v("cable", "full", "cable").showWidthHeight, "drapeau : la cote du QR pilote la géométrie");
+    ck.eq(av("subEquipment", "label", "full").supports.sleeve, "flag-only", "sous-équipement : pas de manchon (isSpareLike n'enroule pas)");
 
-    // 🚨 RETOUR n°2 : Ø de câble et longueur de manchon SEULEMENT en mode manchon.
-    for (const kind of ["equipment", "rack", "spare", "cable", "bundle"]) {
-      ck(!v(kind, "full", LabelPrintPolicy.defaultSizeFor(kind)).showDiaLen, kind + " en QR+texte : ni Ø ni longueur de manchon");
-    }
-    const sleeve = v("cable", "strip", "cable");
-    ck(sleeve.showDiaLen && sleeve.showMmRow, "manchon : Ø et longueur affichés");
-    ck(!sleeve.showQrMm && !sleeve.showSizeSelect, "manchon : ni cote de QR (il n'y en a pas) ni sélecteur de format");
-    ck.eq(sleeve.header, "sleeve", "manchon : l'intitulé de section devient « Manchon »");
-    ck.eq(v("cable", "id", "cable").header, "sleeve", "identifiant seul : même intitulé");
-    ck.eq(v("equipment", "qr", "m").header, "qrSize", "QR seul : l'intitulé devient « Taille du QR »");
-    ck.eq(v("equipment", "full", "m").header, "format", "QR + texte : « Format »");
-    ck(v("equipment", "full", "m").showSizeSelect, "QR + texte : le sélecteur de format est là");
+    // -- CONTENUS : le couplage support ⇄ contenu, énoncé comme une raison. --
+    const flagFull = av("cable", "flag", "full");
+    ck.eq(flagFull.contents.full + "/" + flagFull.contents.qr, "ok/ok", "drapeau : QR + texte et QR seul");
+    ck.eq(flagFull.contents.strip, "needs-sleeve", "drapeau : un contenu de manchon DEMANDE le support manchon (raison, pas silence)");
+    const sleeve = av("cable", "sleeve", "strip");
+    ck.eq(sleeve.contents.strip + "/" + sleeve.contents.id, "ok/ok", "manchon : ses deux contenus");
+    ck.eq(sleeve.contents.full, "needs-not-sleeve", "manchon : « QR + texte » refusé — le manchon ne porte pas de QR");
+    ck.eq(sleeve.contents.qr, "needs-not-sleeve", "…« QR seul » aussi, et pour la même raison");
+    const eqContents = av("equipment", "label", "full").contents;
+    ck.eq(eqContents.strip + "/" + eqContents.id, "flag-only/flag-only", "équipement : les manchons refusés parce qu'un équipement ne s'enroule pas");
+    ck.eq(eqContents.full + "/" + eqContents.qr, "ok/ok", "…ses deux contenus restent ouverts");
 
-    // CASES (T10) : le verdict liste les IDS de l'offre visibles sous le contenu — la modale
-    // masque les autres. La règle est `fieldVisible`, la MÊME qui filtre les lignes imprimées.
-    ck.eq(v("equipment", "full", "m").visibleFieldIds.join(","), "location,type,serial,owner", "QR + texte : toute l'offre est visible");
-    const qrOnly = v("equipment", "qr", "m");
-    ck.eq(qrOnly.visibleFieldIds.join(","), "owner", "QR seul : seule la déclaration qrOnly survit (bande sous le carré)");
-    ck(!qrOnly.showIdRow, "QR seul : la rangée « Identifiant (toujours) » n'a plus de sens");
-    ck(qrOnly.showFieldsSection, "…mais la section survit pour cette seule case");
-    const idOnly = v("cable", "id", "cable");
-    ck.eq(idOnly.visibleFieldIds.length, 0, "identifiant seul : aucune case (c'est le principe du contenu)");
-    ck(!idOnly.showIdRow && !idOnly.showEndsToggle && !idOnly.showFieldsSection, "identifiant seul : la SECTION entière disparaît, bascule A/B comprise");
-    ck.eq(v("cable", "strip", "cable").visibleFieldIds.join(","), "type", "manchon repère complet : le type se propose");
-    ck(!LabelPrintPolicy.fieldVisible({ style: "sn" }, "strip"), "…mais un registre sn y serait écarté (règle héritée du modèle figé)");
+    // -- GABARITS : le S/M/L d'une étiquette plate, refusé AVEC sa raison sur un brin. --
+    const eqSizes = av("equipment", "label", "full").sizes;
+    ck.eq(eqSizes.s + "/" + eqSizes.m + "/" + eqSizes.l + "/" + eqSizes.custom, "ok/ok/ok/ok", "équipement : les trois préréglages et les cotes libres");
+    ck.eq(eqSizes.rack, "rack-only", "…le gabarit Baie refusé avec sa raison");
+    ck.eq(eqSizes.cable, "flag-only", "…le gabarit drapeau aussi");
+    const cableSizes = av("cable", "label", "full").sizes;
+    ck.eq(cableSizes.s + "/" + cableSizes.m + "/" + cableSizes.l, "not-flag/not-flag/not-flag", "🚨 câble : S/M/L refusés — « un rectangle ne s'attache pas à un brin »");
+    ck.eq(cableSizes.custom + "/" + cableSizes.cable, "ok/ok", "…restent les cotes libres et le drapeau");
+
+    // -- BASCULE A / B / A+B : anatomie (absente hors drapeau) vs refus (grisée sans texte). --
+    ck.eq(av("cable", "flag", "full").ends, "ok", "câble en QR + texte : la bascule d'extrémités a un sens");
+    ck.eq(av("bundle", "sleeve", "strip").ends, "ok", "faisceau en manchon repère complet : elle en a un aussi");
+    ck.eq(av("cable", "flag", "qr").ends, "no-text", "QR seul : plus de texte d'extrémité à marquer → refus NOMMÉ");
+    ck.eq(av("cable", "sleeve", "id").ends, "no-text", "identifiant seul : idem");
+    ck.eq(av("equipment", "label", "full").ends, "not-flag", "équipement : la question ne se pose pas (l'UI l'ABSENTE, elle ne la grise pas)");
+    ck.eq(av("rack", "rackhead", "full").ends, "not-flag", "baie : idem");
+
+    // -- COTES : elles DESCENDENT du support (règle des « cotes mm » d'avant T11, réexprimée). --
+    ck.eq(LabelPrintPolicy.cotesFor("sleeve", "strip").join(","), "dia,len", "manchon : Ø et longueur, rien d'autre (il n'a pas de QR)");
+    ck.eq(LabelPrintPolicy.cotesFor("rackhead", "full").join(","), "qr", "tête de baie : la cote du QR seule (100 × 60 est un format unique)");
+    ck.eq(LabelPrintPolicy.cotesFor("flag", "full").join(","), "qr", "🚨 drapeau : la cote du QR SEULE — toute sa géométrie en est dérivée");
+    ck.eq(LabelPrintPolicy.cotesFor("label", "full", "m").join(","), "", "étiquette plate à préréglage : aucune cote libre (le gabarit les impose)");
+    ck.eq(LabelPrintPolicy.cotesFor("label", "full", "custom").join(","), "w,h,qr", "cotes libres : largeur, hauteur ET cote de QR");
+    ck.eq(LabelPrintPolicy.cotesFor("label", "qr", "m").join(","), "qr", "QR seul : la cote du QR, et elle seule");
+    ck.eq(av("cable", "sleeve", "strip").cotes.join(","), "dia,len", "la disponibilité porte la MÊME liste que cotesFor (une seule règle)");
+
+    // -- CASES : la règle contenu × champ, rendue par id (l'UI grise, elle ne cache pas). --
+    const full = av("equipment", "label", "full");
+    ck.eq(Object.keys(full.fields).join(","), "location,type,serial,owner", "toute l'offre est répondue");
+    ck(Object.values(full.fields).every((v) => v === "ok"), "QR + texte : toutes les cases actives");
+    const qrOnly = av("equipment", "label", "qr");
+    ck.eq(qrOnly.fields.owner, "ok", "QR seul : la déclaration qrOnly survit (bande sous le carré)");
+    ck.eq(qrOnly.fields.location + "/" + qrOnly.fields.type, "no-text/no-text", "…les autres sont INERTES, avec leur raison (plus jamais `hidden`)");
+    ck.eq(av("cable", "sleeve", "id").fields.type, "no-text", "identifiant seul : aucune case active");
+    ck.eq(av("cable", "sleeve", "strip").fields.type, "ok", "manchon repère complet : le type se propose");
+    // La règle elle-même n'a pas bougé (elle pilote aussi les LIGNES imprimées).
+    ck(!LabelPrintPolicy.fieldVisible({ style: "sn" }, "strip"), "un registre sn reste écarté d'un manchon (règle héritée du modèle figé)");
     ck(LabelPrintPolicy.fieldVisible({ style: "sn" }, "full"), "fieldVisible : sn passe en QR + texte");
     ck(!LabelPrintPolicy.fieldVisible({ style: "own" }, "qr") && LabelPrintPolicy.fieldVisible({ style: "own", qrOnly: true }, "qr"), "fieldVisible : « QR seul » exige le drapeau qrOnly, pas un style");
 
-    // BASCULE A / B : structurelle, sujets à drapeau seulement, contenus à texte seulement.
-    ck(v("cable", "full", "cable").showEndsToggle && v("bundle", "full", "cable").showEndsToggle, "câble/faisceau : bascule « Extrémités A / B »");
-    ck(v("cable", "strip", "cable").showEndsToggle, "manchon repère complet : la bascule reste");
-    ck(!v("cable", "qr", "cable").showEndsToggle, "QR seul : plus de texte, plus de bascule");
-    ck(!v("equipment", "full", "m").showEndsToggle && !v("rack", "full", "rack").showEndsToggle, "équipement/baie : jamais de bascule A/B");
-
-    // PLANCHE : à partir de 2 étiquettes seulement.
-    ck(!v("equipment", "full", "m", 1).showSheetSection, "1 étiquette : pas de section Planche");
-    ck(v("equipment", "full", "m", 2).showSheetSection, "2 étiquettes : la section Planche apparaît");
+    // 🚨 `visibility` a DISPARU : c'est le verdict « montre/cache » que la refonte remplace.
+    ck.eq(typeof LabelPrintPolicy.visibility, "undefined", "🚨 l'ancienne matrice de visibilité n'existe plus (T11)");
   });
 
+  await section("labels : LabelPrintPolicy — T11 : registres d'avertissement (classification pure)", async () => {
+    /* Deux registres, pas un tas : ce qui COMPROMET l'objet imprimé va sous l'aperçu, ce qui
+       DÉCRIT ce qui sortira de l'imprimante va au pied. Le bouton Imprimer reste actif dans les
+       deux cas — on imprime pour son propre usage. */
+    ck.eq(LabelPrintPolicy.warningRegister("qr-floor"), "scan", "QR sous le plancher : ça compromet le scan");
+    ck.eq(LabelPrintPolicy.warningRegister("qr-exceeds-label"), "scan", "QR rogné : idem");
+    ck.eq(LabelPrintPolicy.warningRegister("sleeve-tight"), "scan", "manchon trop court pour son texte : idem");
+    ck.eq(LabelPrintPolicy.warningRegister("module-too-small"), "scan", "module sous 0,5 mm : le nouvel avis Q11.14 est un risque de SCAN");
+    ck.eq(LabelPrintPolicy.warningRegister("columns-capped"), "sheet", "colonnes plafonnées : ça décrit le tirage, ça ne compromet rien");
+    ck.eq(LabelPrintPolicy.warningRegister("multi-page"), "sheet", "planche multi-feuilles : idem");
+    // EXHAUSTIVITÉ : tout code de LabelLayout est classé (un code sans registre serait muet à l'UI).
+    const codes = ["qr-floor", "qr-exceeds-label", "columns-capped", "multi-page", "sleeve-tight", "module-too-small"];
+    ck(codes.every((c) => ["scan", "sheet"].includes(LabelPrintPolicy.warningRegister(c))), "les SIX codes sont classés dans un registre");
+  });
+
+  await section("labels : LabelPrintPolicy — T11 : `expand` (bouts × occurrences, GROUPÉS) et papier", async () => {
+    const a = { collection: "cables", id: "c1", name: "CBL-1", endA: "X", endB: "Y", fields: [] };
+    const b = { collection: "cables", id: "c2", name: "CBL-2", endA: "P", endB: "Q", fields: [] };
+    const eq = { collection: "equipments", id: "e1", name: "SRV-1", fields: [] };
+    const opts = (endsMode, occurrences) => ({ endsMode, occurrences });
+
+    // Un drapeau, deux bouts : le geste principal d'avant T11 — sauf qu'il est maintenant réglable.
+    const ab = LabelPrintPolicy.expand([a], "cable", opts("ab", 1));
+    ck.eq(ab.length, 2, "A + B → deux drapeaux");
+    ck.eq(ab.map((i) => i.localEnd).join(","), "A,B", "…et chacun MARQUE son bout (c'est ce qui les rend distincts)");
+    ck(ab.every((i) => i.subject === a), "…tous deux sur le MÊME sujet (aucune copie de sujet)");
+    ck.eq(LabelPrintPolicy.expand([a], "cable", opts("a", 1)).map((i) => i.localEnd).join(","), "A", "A seule → un drapeau, marqué A");
+    ck.eq(LabelPrintPolicy.expand([a], "cable", opts("b", 1)).map((i) => i.localEnd).join(","), "B", "B seule → un drapeau, marqué B");
+
+    // 🚨 GROUPEMENT : bout puis occurrence — « A, A, B, B », jamais « A, B, A, B ».
+    ck.eq(LabelPrintPolicy.expand([a], "cable", opts("ab", 2)).map((i) => i.localEnd).join(","), "A,A,B,B", "🚨 A+B × 2 : groupé PAR BOUT (A, A, B, B)");
+    ck.eq(LabelPrintPolicy.expand([a], "cable", opts("a", 3)).length, 3, "A seule × 3 → trois drapeaux");
+
+    // 🚨 SUJET en boucle EXTÉRIEURE : les deux drapeaux d'un même câble restent VOISINS sur la
+    // planche — on les découpe ensemble pour aller les poser ensemble.
+    const two = LabelPrintPolicy.expand([a, b], "cable", opts("ab", 1));
+    ck.eq(two.map((i) => i.subject.name + i.localEnd).join(","), "CBL-1A,CBL-1B,CBL-2A,CBL-2B", "🚨 deux liens : chaque paire reste groupée (jamais tous les A puis tous les B)");
+
+    // Sujets sans extrémités : pas de bouts, seulement des occurrences.
+    const spares = LabelPrintPolicy.expand([eq], "equipment", opts("ab", 3));
+    ck.eq(spares.length, 3, "équipement × 3 → trois étiquettes (« une pour la boîte, une pour le disque »)");
+    ck(spares.every((i) => i.localEnd === undefined), "…aucune n'est marquée d'un bout (un équipement n'en a pas)");
+    ck.eq(LabelPrintPolicy.expand([eq], "equipment", opts("ab", 1)).length, 1, "occurrences = 1 : le comportement d'avant T11, à l'identique");
+
+    // Fonction TOTALE : entrées dégénérées bornées plutôt que refusées.
+    ck.eq(LabelPrintPolicy.expand([], "cable", opts("ab", 2)).length, 0, "aucun sujet → aucune étiquette");
+    ck.eq(LabelPrintPolicy.expand([a], "cable", opts("ab", 0)).length, 2, "occurrences 0 → ramené à 1 (× 2 bouts)");
+    ck.eq(LabelPrintPolicy.expand([a], "cable", opts("ab", 999)).length, 2 * LabelPrintPolicy.OCCURRENCES_MAX, "occurrences démesurées → plafonnées");
+
+    // PAPIER : `auto` rejoue la règle implicite d'avant T11, un choix explicite prime.
+    ck.eq(LabelPrintPolicy.paperOf("auto", 1), "roll", "auto + 1 étiquette → page à la cote exacte (rouleau)");
+    ck.eq(LabelPrintPolicy.paperOf("auto", 2), "sheet", "auto + 2 étiquettes → planche A4 (la règle historique)");
+    ck.eq(LabelPrintPolicy.paperOf("roll", 150), "roll", "🚨 choix explicite « rouleau » : 150 étiquettes partent en 150 pages");
+    ck.eq(LabelPrintPolicy.paperOf("sheet", 1), "sheet", "…et « planche » impose la planche même pour une seule");
+  });
+
+  await section("labels : LabelPrintPolicy — T11 : sanitize des nouveaux réglages du tirage", async () => {
+    const base = () => ({ content: "full", size: "m", fields: {}, endsMode: "b", occurrences: 4, paper: "roll", dpi: 600, cols: 3 });
+    const eq = LabelPrintPolicy.sanitize("equipment", [], base());
+    ck.eq(eq.endsMode, "ab", "🚨 `endsMode` hérité d'un câble RETOMBE sur `ab` hors drapeau : sans objet, il ferait un tirage d'un seul drapeau au retour");
+    ck.eq(eq.occurrences, 4, "occurrences valides : conservées");
+    ck.eq(eq.paper + "/" + eq.dpi, "roll/600", "papier et résolution valides : conservés");
+    const cable = LabelPrintPolicy.sanitize("cable", [], base());
+    ck.eq(cable.endsMode, "b", "…mais un drapeau garde son « B seule » (c'est un choix, pas une coquille)");
+    // Bornes et valeurs illisibles.
+    ck.eq(LabelPrintPolicy.sanitize("cable", [], Object.assign(base(), { occurrences: 0 })).occurrences, 1, "occurrences 0 → 1");
+    ck.eq(LabelPrintPolicy.sanitize("cable", [], Object.assign(base(), { occurrences: 99 })).occurrences, LabelPrintPolicy.OCCURRENCES_MAX, "occurrences 99 → plafond");
+    ck.eq(LabelPrintPolicy.sanitize("cable", [], Object.assign(base(), { occurrences: 2.7 })).occurrences, 2, "occurrences fractionnaire → entier");
+    ck.eq(LabelPrintPolicy.sanitize("cable", [], Object.assign(base(), { occurrences: "x" })).occurrences, 1, "occurrences illisible → 1 (jamais NaN mémorisé)");
+    ck.eq(LabelPrintPolicy.sanitize("cable", [], Object.assign(base(), { paper: "papyrus" })).paper, "auto", "papier inconnu → auto");
+    ck.eq(LabelPrintPolicy.sanitize("cable", [], Object.assign(base(), { dpi: 1200 })).dpi, LabelPrintPolicy.DEFAULT_DPI, "résolution hors liste → le défaut (300)");
+    ck.eq(LabelPrintPolicy.sanitize("cable", [], Object.assign(base(), { endsMode: "z" })).endsMode, "ab", "bascule illisible → ab");
+    // Les défauts d'un contexte passent sanitize SANS être touchés (ils sont valides par construction).
+    for (const kind of ["equipment", "rack", "cable", "bundle", "spare", "subEquipment"]) {
+      const d = LabelPrintPolicy.defaults(kind);
+      const before = JSON.stringify(d);
+      ck.eq(JSON.stringify(LabelPrintPolicy.sanitize(kind, [], d)), before, kind + " : les défauts traversent sanitize inchangés");
+    }
+    ck.eq(LabelPrintPolicy.defaults("cable").endsMode, "ab", "🚨 défaut de la bascule = A + B — le geste principal d'avant T11 reste le défaut");
+    ck.eq(LabelPrintPolicy.defaults("equipment").occurrences, 1, "défaut d'occurrences = 1 (le comportement d'avant)");
+    ck.eq(LabelPrintPolicy.defaults("equipment").paper, "auto", "défaut de papier = la règle automatique");
+    ck.eq(LabelPrintPolicy.defaults("equipment").dpi, 300, "défaut de résolution = 300 dpi (la laser bureautique)");
+  });
+
+  await section("labels : LabelLayout — 🚨 Q11.14 : la cote du QR QUANTIFIÉE (modules carrés)", async () => {
+    /* Le diagnostic : un module n'est un carré à l'impression que s'il tombe sur un nombre ENTIER
+       de pixels de sortie. À 20 mm sur 41 modules et 300 dpi, un module fait 5,76 px — le rasteur
+       en met tantôt 5, tantôt 6, et « chaque ligne du QR est altérée ». On arrondit donc VERS LE
+       BAS le nombre de pixels par module, puis on recompose la cote. */
+    const q = LabelLayout.quantizeQrMm(41, 300, 20);
+    ck.eq(q.pxPerModule, 5, "41 modules à 300 dpi dans 20 mm : 5 px entiers par module (5,76 tronqué)");
+    ck(near(q.mm, 41 * 5 * 25.4 / 300), "…d'où une cote de " + q.mm.toFixed(2) + " mm");
+    ck(q.mm <= 20, "🚨 la cote quantifiée TIENT TOUJOURS dans la boîte (arrondi vers le bas, jamais vers le haut)");
+    const q203 = LabelLayout.quantizeQrMm(41, 203, 20);
+    ck.eq(q203.pxPerModule, 3, "la MÊME cote à 203 dpi : 3 px par module seulement (thermique)");
+    ck(q203.mm < q.mm, "…et donc un QR plus petit : la question est PHYSIQUE, pas logicielle");
+    const q600 = LabelLayout.quantizeQrMm(41, 600, 20);
+    ck.eq(q600.pxPerModule, 11, "à 600 dpi : 11 px par module");
+    ck(q600.mm > q.mm && q600.mm <= 20, "…une cote plus proche des 20 mm demandés, sans jamais les dépasser");
+    // Plancher : jamais 0 px par module (une cote nulle = un QR absent, pire qu'un QR mauvais).
+    ck.eq(LabelLayout.quantizeQrMm(41, 203, 2).pxPerModule, 1, "cote minuscule : 1 px par module au plancher, jamais 0");
+    // Entrées dégénérées : la cote demandée passe telle quelle (fonction totale).
+    ck.eq(LabelLayout.quantizeQrMm(0, 300, 20).mm, 20, "0 module → la cote demandée, intacte");
+    ck.eq(LabelLayout.quantizeQrMm(41, 0, 20).mm, 20, "0 dpi → idem");
+
+    /* 🚨 NON-RÉGRESSION : `renderQrMm` SANS le paramètre de quantification rend EXACTEMENT ce
+       qu'il rendait — c'est ce qui garantit que les goldens de gabarits sont intacts. */
+    for (const size of ["s", "m", "l", "rack"]) {
+      const sp = spec({ size });
+      ck.eq(LabelLayout.renderQrMm(sp), LabelLayout.rectQrGeometry(sp).qr, "gabarit " + size + " : cote inchangée sans quantification");
+    }
+    const m = spec({ size: "m" });
+    const quantized = LabelLayout.renderQrMm(m, undefined, { dpi: 300, totalModules: 41 });
+    ck(quantized <= LabelLayout.renderQrMm(m), "avec quantification : la cote ne peut que DESCENDRE (elle doit tenir)");
+    ck(near(quantized, LabelLayout.quantizeQrMm(41, 300, LabelLayout.renderQrMm(m)).mm), "…et c'est exactement celle de quantizeQrMm sur la cote nominale");
+    // Le drapeau/manchon/QR seul gardent leur propre chemin (leurs cotes DÉRIVENT du QR).
+    ck.eq(LabelLayout.renderQrMm(spec({ size: "cable", qr: 18 })), 18, "drapeau : la cote demandée, telle quelle, sans quantification");
+  });
+
+  await section("labels : LabelLayout — 🚨 Q11.14 : l'avertissement « module trop petit »", async () => {
+    /* Le plancher de 18 mm parle de la cote TOTALE ; il est déjà trop optimiste à 41 modules
+       (0,44 mm par module). Le nouvel avis parle du MODULE — la seule mesure qui dise ce que
+       l'imprimante doit résoudre. */
+    const opts = (over) => Object.assign({ count: 1, requestedCols: 3 }, over);
+    // SANS totalModules : aucun avis (on ne devine pas le nombre de modules d'un QR qu'on n'a pas).
+    ck(!LabelLayout.warnings(spec({ size: "m" }), opts({})).includes("module-too-small"), "🚨 sans `totalModules` : AUCUN avis (les appels d'avant T11 sont intacts)");
+    ck.eq(JSON.stringify(LabelLayout.warnings(spec({ size: "m" }), opts({}))), JSON.stringify(LabelLayout.warnings(spec({ size: "m" }), { count: 1, requestedCols: 3 })), "…et le verdict complet est identique à celui d'avant");
+    // AVEC : 20 mm sur 41 modules = 0,49 mm — sous le plancher, c'est le défaut signalé.
+    ck(LabelLayout.warnings(spec({ size: "m" }), opts({ totalModules: 41 })).includes("module-too-small"), "M (20 mm) sur 41 modules : module sous 0,5 mm → signalé");
+    ck(!LabelLayout.warnings(spec({ size: "l" }), opts({ totalModules: 41 })).includes("module-too-small"), "L (28 mm) sur 41 modules : 0,68 mm par module → rien à signaler");
+    ck(!LabelLayout.warnings(spec({ size: "rack" }), opts({ totalModules: 41 })).includes("module-too-small"), "tête de baie (34 mm) : large — rien à signaler");
+    // Un QR à MOINS de modules (payload plus court) repasse au-dessus : c'est bien le MODULE qui compte.
+    ck(!LabelLayout.warnings(spec({ size: "m" }), opts({ totalModules: 29 })).includes("module-too-small"), "🚨 le MÊME 20 mm sur 29 modules : 0,69 mm → aucun avis (c'est le module, pas la cote)");
+    /* 🚨 La cote évaluée est celle qui sera SERVIE, quantification comprise — sans quoi on
+       avertirait sur une cote que personne n'imprime. Un QR de 20,5 mm sur 41 modules fait
+       exactement 0,50 mm par module : rien à signaler TEL QUEL. Mais à 203 dpi la
+       quantification ne loge que 3 px par module (3,99 tronqué), la cote tombe à 15,4 mm et le
+       module à 0,38 mm — c'est ce QR-là qui sort de l'imprimante, c'est donc lui qu'on juge. */
+    const asked = spec({ size: "custom", content: "qr", qr: 20.5 });
+    ck(!LabelLayout.warnings(asked, opts({ totalModules: 41 })).includes("module-too-small"), "20,5 mm sur 41 modules = 0,50 mm par module : à la limite, rien à signaler");
+    const served = spec({ size: "custom", content: "qr", qr: 20.5, dpi: 203 });
+    ck(LabelLayout.warnings(served, opts({ totalModules: 41 })).includes("module-too-small"), "🚨 le MÊME réglage à 203 dpi : la cote servie tombe à 15,4 mm → l'avis suit la RÉALITÉ imprimée");
+    /* 🚨 ET À 600 dpi, ÇA AVERTIT ENCORE — c'est le fond du diagnostic Q11.14, pas un défaut du
+       test : monter la résolution réduit la PERTE de quantification (19,1 mm au lieu de 15,4)
+       mais ne crée pas de place. À 41 modules, il faut 20,5 mm de QR pour tenir le plancher, et
+       aucun réglage d'imprimante n'y changera rien. Le vrai levier est de RACCOURCIR le payload
+       (une route courte `/q/<id>` ferait tomber la version 4 → 3, soit 33 → 29 modules) — décidé
+       HORS PÉRIMÈTRE du chantier T11, et la raison pour laquelle cet avis est INFORMATIF. */
+    const hi = spec({ size: "custom", content: "qr", qr: 20.5, dpi: 600 });
+    ck(LabelLayout.warnings(hi, opts({ totalModules: 41 })).includes("module-too-small"), "🚨 même à 600 dpi : 41 modules dans 20,5 mm restent sous le plancher (le levier est le PAYLOAD, hors périmètre)");
+    ck(LabelLayout.renderQrMm(hi, undefined, { dpi: 600, totalModules: 41 }) > LabelLayout.renderQrMm(served, undefined, { dpi: 203, totalModules: 41 }), "…mais monter la résolution réduit bien la PERTE de quantification");
+    // Les manchons n'ont pas de QR : jamais d'avis de module.
+    ck(!LabelLayout.warnings(spec({ size: "cable", content: "strip" }), opts({ totalModules: 41 })).includes("module-too-small"), "manchon : pas de QR, donc pas de module à mesurer");
+    ck.eq(LabelLayout.MODULE_FLOOR_MM, 0.5, "le plancher de module est 0,5 mm (mesuré sur thermique 203 dpi)");
+  });
+
+  await section("labels : LabelHtml — 🚨 T11 : le drapeau MARQUE son extrémité (`localEnd`)", async () => {
+    /* Avant T11 les deux drapeaux d'une paire étaient RIGOUREUSEMENT identiques : rien ne disait
+       au poseur lequel allait à quelle extrémité, et la bascule A / B / A+B n'aurait eu qu'une
+       valeur utile. Le marquage est un GLYPHE et une classe — aucune cote ne bouge. */
+    const s = cableSubject();
+    const sp = spec({ size: "cable", qr: 18 });
+    const flagA = LabelHtml.label(s, sp, { ends: true, checked: {}, localEnd: "A" }, "<svg></svg>");
+    const flagB = LabelHtml.label(s, sp, { ends: true, checked: {}, localEnd: "B" }, "<svg></svg>");
+    ck(flagA.includes("▶ A") && !flagA.includes("▶ B"), "drapeau du bout A : sa lettre est pointée, l'autre non");
+    ck(flagB.includes("▶ B") && !flagB.includes("▶ A"), "drapeau du bout B : l'inverse");
+    ck(flagA !== flagB, "🚨 les deux drapeaux d'une paire ne sont PLUS identiques (c'était le défaut)");
+    ck(flagA.includes('class="l-loc local"'), "la ligne du bout local porte sa classe (mise en gras par le CSS)");
+    ck(LabelHtml.CSS.includes(".l-loc.local"), "…et le CSS partagé aperçu ⇄ imprimé la connaît");
+    ck(!/color\s*:/.test(/\.l-loc\.local\{[^}]*\}/.exec(LabelHtml.CSS)[0]), "🚨 aucune couleur : l'imprimé est noir sur blanc, le repère doit survivre au noir et blanc");
+
+    // 🚨 AUCUNE COTE NE BOUGE : le marquage n'ajoute pas de ligne, il en décore une.
+    const plain = LabelHtml.label(s, sp, { ends: true, checked: {} }, "<svg></svg>");
+    const dims = (html) => /style="width:([\d.]+)mm;height:([\d.]+)mm"/.exec(html);
+    ck.eq(dims(flagA)[0], dims(plain)[0], "cotes du drapeau marqué = celles du drapeau nu (golden de géométrie préservé)");
+    ck.eq((flagA.match(/class="l-loc/g) || []).length, (plain.match(/class="l-loc/g) || []).length, "même NOMBRE de lignes d'extrémité");
+    ck.eq(plain.includes("▶"), false, "sans `localEnd` : rendu STRICTEMENT identique à celui d'avant T11 (aucun glyphe)");
+
+    // La limite ASSUMÉE : sans les lignes A/B, il n'y a pas de lettre à pointer.
+    const noEnds = LabelHtml.label(s, sp, { ends: false, checked: {}, localEnd: "A" }, "<svg></svg>");
+    ck(!noEnds.includes("▶"), "« Extrémités A / B » décoché : plus de lettre, donc plus de repère (limite documentée)");
+
+    // Le MANCHON « repère complet » porte aussi les extrémités : il se marque de la même façon.
+    const sleeveA = LabelHtml.label(s, spec({ size: "cable", content: "strip", dia: 6, len: 25 }), { ends: true, checked: {}, localEnd: "A" }, "");
+    ck(sleeveA.includes("▶ A"), "manchon repère complet : même marquage (un manchon habille UN bout, lui aussi)");
+  });
+
+  await section("labels : LabelExportPlan — 🚨 Q11.13 : nommage et pixels de l'export en images", async () => {
+    /* Le nommage n'est pas cosmétique : un dossier de 150 fichiers se trie « 1, 10, 100, 11… »
+       dans tous les explorateurs, et l'ordre de la planche EST l'ordre de pose. */
+    ck.eq(LabelExportPlan.fileName("srv-01", 0, 1), "srv-01-1.png", "une seule étiquette : pas de rembourrage inutile");
+    ck.eq(LabelExportPlan.fileName("planche", 0, 150), "planche-001.png", "🚨 150 étiquettes : numéro cadré sur 3 chiffres (l'ordre de pose survit au tri du dossier)");
+    ck.eq(LabelExportPlan.fileName("planche", 149, 150), "planche-150.png", "…jusqu'à la dernière");
+    ck.eq(LabelExportPlan.fileName("planche", 9, 150), "planche-010.png", "…et le 10ᵉ se range bien avant le 100ᵉ");
+    ck.eq(LabelExportPlan.sheetFileName("baie-b12", 0, 3), "baie-b12-planche-1.png", "planche entière : nommage distinct (on ne confond pas une feuille et une étiquette)");
+    ck.eq(LabelExportPlan.zipName("baie-b12"), "baie-b12-etiquettes.zip", "archive : un seul téléchargement pour N images");
+
+    // MILLIMÈTRES → PIXELS : le pont est le dpi, la même valeur qui quantifie la cote du QR.
+    ck.eq(LabelExportPlan.pixels(50, 300), 591, "50 mm à 300 dpi → 591 px");
+    ck.eq(LabelExportPlan.pixels(30, 300), 354, "30 mm à 300 dpi → 354 px");
+    ck.eq(LabelExportPlan.pixels(50, 203), 400, "…la même étiquette à 203 dpi → 400 px");
+    ck.eq(LabelExportPlan.pixels(0, 300), 1, "cote nulle → 1 px (une image de 0 px n'est pas une image)");
+    ck.eq(LabelExportPlan.pixels(50, 0), 1, "dpi nul → idem (fonction totale)");
+
+    /* 🚨 LA SECONDE CONVERSION, ET POURQUOI ELLE N'EST PAS UN DOUBLON. L'étiquette est du HTML en
+       MILLIMÈTRES ; dans un `<foreignObject>`, un `mm` vaut 96/25,4 unités SVG — pas `dpi`/25,4.
+       Dimensionner le viewBox en pixels de SORTIE ferait tenir l'étiquette dans un tiers de
+       l'image, cadrée en haut à gauche. Le viewBox se pose donc en pixels CSS, les attributs
+       `width`/`height` du SVG portant la cote de sortie. */
+    ck.eq(LabelExportPlan.CSS_DPI, 96, "1 pouce = 96 pixels CSS (constante de la spec, pas un réglage)");
+    ck(near(LabelExportPlan.cssPixels(50), 188.976, 0.01), "50 mm = 188,98 pixels CSS…");
+    ck(near(LabelExportPlan.cssPixels(50), LabelExportPlan.pixels(50, 96), 0.5), "…soit exactement ce que `pixels()` rendrait à 96 dpi");
+    ck(LabelExportPlan.pixels(50, 300) > LabelExportPlan.cssPixels(50), "🚨 les deux ne parlent PAS du même pixel : à 300 dpi le rapport est le sur-échantillonnage voulu");
+    ck(near(LabelExportPlan.pixels(50, 300) / LabelExportPlan.cssPixels(50), 300 / 96, 0.01), "…et il vaut précisément dpi/96");
+    ck.eq(LabelExportPlan.cssPixels(0), 1, "cote nulle → 1 (fonction totale)");
+
+    // 🚨 LE QR : k pixels ENTIERS par module, la MÊME quantification qu'à l'impression.
+    const plan = LabelExportPlan.qrPixels(41, 300, 20);
+    ck.eq(plan.pxPerModule, 5, "41 modules, 300 dpi, 20 mm : 5 px par module");
+    ck.eq(plan.px, 41 * 5, "…soit une image de 205 px de côté, EXACTEMENT (aucune interpolation possible)");
+    ck(near(plan.mm, LabelLayout.quantizeQrMm(41, 300, 20).mm), "🚨 la cote en mm est celle de l'impression : l'image et le papier montrent le MÊME code");
+    ck(LabelExportPlan.qrPixels(41, 203, 2).pxPerModule >= 1, "cote minuscule : au moins 1 px par module (jamais une image vide)");
+
+    // Le côté TOTAL d'une matrice servie — quiet zone comprise (elle se dessine avec le reste).
+    ck.eq(LabelExportPlan.totalModulesOf({ size: 33, margin: 4, rows: [] }), 41, "33 modules + 2 × 4 de quiet zone = 41");
+    ck.eq(LabelExportPlan.totalModulesOf(null), 0, "matrice absente → 0 (l'appelant saute la quantification)");
+    ck.eq(LabelExportPlan.totalModulesOf({ size: 0, margin: 4, rows: [] }), 0, "matrice vide → 0");
+  });
   await section("labels : LabelPrintPolicy — sanitize : réglage MÉMORISÉ ramené dans l'offre du tirage", async () => {
     const offer = [
       { id: "location", label: "Emplacement", checked: true, style: "loc" },
@@ -907,5 +1208,71 @@ module.exports = async () => {
     // Le drapeau se rend comme celui d'un câble (même anatomie) : 2 panneaux + zone d'enroulement.
     const flag = LabelHtml.label(s, spec({ size: "cable", qr: 18 }), { ends: true, checked: { type: true } }, '<svg data-qr="1"></svg>');
     ck((flag.match(/class="pan/g) || []).length === 2 && flag.includes("PATCH-A1"), "faisceau : drapeau à 2 panneaux, extrémité A imprimée");
+  });
+
+  await section("labels : T11 — VERROUS SUR LES SOURCES (le panneau consomme la règle, il ne l'écrit pas)", async () => {
+    /* Patron du verrou T2-B1 : on relit les SOURCES. Le panneau n'est pas testable headless, mais
+       ce qui a fait DÉRIVER la modale l'est — des règles écrites dans le rendu DOM, invérifiables
+       parce qu'elles n'avaient de nom nulle part. Ces verrous disent que la refonte ne peut pas
+       rejouer ce défaut sans se faire remarquer. */
+    const fs = require("fs");
+    const src = (...p) => fs.readFileSync(path.join(__dirname, "..", "..", "src-client", ...p), "utf8");
+    const dialog = src("ui", "LabelPrintDialog.ts");
+
+    // -- 1. LE VERDICT VIENT DE LA POLITIQUE, ET DE NULLE PART AILLEURS --
+    ck(/LabelPrintPolicy\.availability\(/.test(dialog), "la modale demande son verdict à `availability`");
+    ck(!/LabelPrintPolicy\.visibility\(/.test(dialog), "…et n'appelle plus l'ancienne matrice de visibilité");
+    ck(/LabelPrintPolicy\.supportOf\(/.test(dialog) && /LabelPrintPolicy\.applySupport\(/.test(dialog), "le support est LU et ÉCRIT par la projection pure (jamais dérivé sur place)");
+    ck(/LabelPrintPolicy\.cotesFor\(/.test(dialog), "les cotes offertes descendent de la politique");
+    ck(/LabelPrintPolicy\.expand\(/.test(dialog) && /LabelPrintPolicy\.paperOf\(/.test(dialog), "le tirage (bouts × occurrences) et le papier viennent de la politique");
+    ck(/LabelPrintPolicy\.warningRegister\(/.test(dialog), "le classement des avertissements en DEUX registres vient de la politique");
+    /* 🚨 AUCUNE RÈGLE DE DISPONIBILITÉ RÉÉCRITE : la modale ne doit jamais décider elle-même
+       qu'un contrôle est refusé « parce que c'est un câble » ou « parce que c'est une baie ».
+       On cherche les tests d'anatomie qui n'ont rien à faire dans un rendu DOM. */
+    ck(!/kind === "cable"|kind === "bundle"|kind === "rack"|ctx\.kind === "/.test(dialog), "🚨 la modale ne teste JAMAIS le sujet pour décider d'une disponibilité (elle consomme des CODES)");
+    ck(!/isFlagKind|isSpareLike/.test(dialog), "…ni les prédicats de famille : ils vivent dans la politique, qui les a déjà appliqués");
+
+    // -- 2. `hidden` NE SERT PLUS À CACHER UN VERDICT --
+    const hiddenLines = dialog.split(/\r?\n/).filter((l) => /\.hidden\s*=/.test(l));
+    ck(hiddenLines.length > 0, "des masquages STRUCTURELS subsistent (une question sans objet dans ce contexte)");
+    ck(hiddenLines.every((l) => !/av\.supports|av\.contents|av\.sizes|av\.fields/.test(l)),
+      "🚨 aucun `hidden` posé depuis un verdict de disponibilité : une option refusée est GRISÉE avec sa raison, jamais escamotée");
+    ck(/\.disabled = /.test(dialog) && /\.title = /.test(dialog), "…c'est `disabled` + `title` qui portent le refus, et donc sa raison");
+    ck(/reasonText\(/.test(dialog), "toute raison passe par la traduction d'un CODE (aucune phrase en dur dans la modale)");
+
+    // -- 3. UNE SEULE ENTRÉE DRAPEAU PAR FICHE (fusion 11 → 9) --
+    const forms = src("views", "forms", "DetailForms.ts");
+    ck.eq((forms.match(/labels\.entry\.flag/g) || []).length, 2, "🚨 UN seul geste « Étiqueter… » par fiche à drapeau (câble et faisceau) — les deux entrées ont fusionné");
+    ck(!/labels\.entry\.cableOne|labels\.entry\.cableBoth/.test(forms), "…les libellés « Un drapeau » / « les 2 extrémités » ont disparu des sources");
+    ck(!/subjects: \[subject\(\), subject\(\)\]/.test(forms), "🚨 plus aucun sujet POUSSÉ EN DOUBLE : c'est la bascule de la modale qui décide du nombre");
+    ck((forms.match(/defaultEndsMode: "ab"/g) || []).length === 2, "…et le défaut A+B (le geste principal d'avant) est passé en argument");
+
+    // -- 4. LE PANIER NE DUPLIQUE PLUS LES SUJETS --
+    const main = src("app", "main.ts");
+    ck(!/labelsPerItem/.test(main), "🚨 `labelsPerItem` a disparu de main.ts : le panier ne duplique plus les sujets");
+    ck(/subjects\.push\(build\(record\)\)/.test(main), "…il pousse UN sujet par élément du panier");
+    ck(/plan\.defaultEndsMode/.test(main), "…et transmet le défaut de bascule de la famille");
+    ck(!/subjects: \[subject\(\), subject\(\)\]/.test(main), "les actions de LIGNE (câble, faisceau) ne dupliquent plus non plus");
+    ck(/fetchQrMatrix:/.test(main), "l'hôte injecte la récupération de MATRICE (export en images, Q11.13)");
+
+    // -- 5. i18n : tout CODE de refus a sa phrase, dans LES DEUX langues --
+    const reasons = ["flag-only", "rack-only", "needs-sleeve", "needs-not-sleeve", "not-flag", "no-text", "cols-capped", "roll-no-cuts"];
+    for (const locale of ["fr", "en"]) {
+      const cat = src("i18n", "locales", locale, "labels.ts");
+      for (const code of reasons) ck(cat.includes('"' + code + '"'), `i18n ${locale} : le code de refus « ${code} » a sa phrase`);
+      ck(/moduleTooSmall:/.test(cat), `i18n ${locale} : le nouvel avertissement « module trop petit » a sa phrase`);
+      ck(/exportImages:/.test(cat) && /unsupported:/.test(cat), `i18n ${locale} : l'export en images et son refus Safari sont dits`);
+      ck(!/cableOne:|cableBoth:|cableBothSource:/.test(cat), `i18n ${locale} : les clés des deux gestes fusionnés sont supprimées (pas de clé morte)`);
+    }
+
+    // -- 6. CSS : thématisée, sans couleur en dur (le thème clair suit de lui-même) --
+    const css = fs.readFileSync(path.join(__dirname, "..", "..", "src-client", "styles", "dc-manager.css"), "utf8");
+    const block = /\.label-print \{[\s\S]*?\.lp-sheetnote[^\n]*\n/.exec(css);
+    ck(!!block, "la CSS porte le bloc de la modale d'impression");
+    ck(!/#[0-9a-fA-F]{3,8}\b|rgba?\(|oklch\(/.test(block[0].replace(/#fff\b/g, "")), "🚨 aucune couleur en dur : tokens seulement (le `#fff` du papier d'aperçu excepté — c'est du PAPIER, pas du thème)");
+    ck(/min-height: 44px/.test(block[0]), "les boutons-cartes tiennent la cible tactile de 44 px");
+    ck(/\.lp-opt\[disabled\] \.lp-opt-hint/.test(block[0]), "🚨 la RAISON d'une option refusée a sa propre règle : elle reste lisible quand le titre s'estompe");
+    ck(!/\.label-print-/.test(css), "l'ancienne famille `.label-print-*` a entièrement cédé la place à `.lp-*`");
+    ck(/\.label-print \[hidden\] \{ display: none !important; \}/.test(css), "…et le `[hidden]` de la modale reste (les masquages structurels en dépendent)");
   });
 };

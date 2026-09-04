@@ -41,15 +41,20 @@ module.exports = async () => {
   });
 
   await section("panier : CartLabelPlan — le plan d'impression par famille", async () => {
-    // Le plan porte DEUX règles : le sujet de politique de la planche, et le nombre d'étiquettes
-    // par élément. La seconde est la décision P9 (« un lien s'étiquette par paire »).
+    // Le plan porte DEUX règles : le sujet de politique de la planche, et COMMENT le lot se
+    // développe en étiquettes. 🚨 T11 : la seconde n'est plus un NOMBRE que le panier applique
+    // lui-même (`labelsPerItem`, qui poussait deux fois le même sujet dans la modale) mais le
+    // DÉFAUT de la bascule A / B / A+B — c'est `LabelPrintPolicy.expand` qui multiplie, et la
+    // volumétrie reste donc réglable devant l'aperçu. La décision P9 (« un lien s'étiquette par
+    // paire ») survit intacte : elle est désormais un défaut, pas une imposition.
     ck.eq(CartLabelPlans.of("links").kind, "cable", "famille `links` → sujet `cable` (isFlagKind les égalise)");
-    ck.eq(CartLabelPlans.of("links").labelsPerItem, 2, "un lien = DEUX drapeaux (un par extrémité)");
+    ck.eq(CartLabelPlans.of("links").defaultEndsMode, "ab", "un lien part sur A + B (décision P9, devenue le défaut de la bascule)");
+    ck(!("labelsPerItem" in CartLabelPlans.of("links")), "🚨 plus de `labelsPerItem` : le panier ne duplique plus les sujets (T11)");
     ck.eq(CartLabelPlans.of("components").kind, "spare", "famille `components` → sujet `spare` (isSpareLike les égalise)");
-    ck.eq(CartLabelPlans.of("components").labelsPerItem, 1, "du petit matériel = UNE étiquette");
+    ck.eq(CartLabelPlans.of("components").defaultEndsMode, undefined, "du petit matériel n'a pas d'extrémités : aucune bascule à défauter");
     // Une famille sans action d'impression n'a pas de plan — et n'est donc pas offerte au panier.
     ck.eq(CartLabelPlans.of("equipments").kind, "equipment", "famille `equipments` → son propre sujet");
-    ck.eq(CartLabelPlans.of("equipments").labelsPerItem, 1, "un équipement = UNE étiquette");
+    ck.eq(CartLabelPlans.of("equipments").defaultEndsMode, undefined, "un équipement non plus");
     // Une famille sans action d'impression n'a pas de plan — et n'est donc pas offerte au panier.
     ck.eq(CartLabelPlans.of("racks"), null, "pas encore de plan pour les baies");
     // 🚨 L'argument `families` de CartPanel.setup est DÉRIVÉ de cette table : le verrou vérifie
