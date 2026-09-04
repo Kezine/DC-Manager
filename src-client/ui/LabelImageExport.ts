@@ -161,7 +161,9 @@ export class LabelImageExport {
     const plan = LabelExportPlan.qrPixels(total, dpi, wanted);
     const url = LabelImageExport.matrixToDataUrl(matrix, plan.pxPerModule);
     const mm = +plan.mm.toFixed(2);
-    return `<img src="${url}" width="${mm}mm" height="${mm}mm" alt="" style="width:${mm}mm;height:${mm}mm;display:block;flex:none">`;
+    // Balise AUTO-FERMÉE (`… />`) : le HTML de l'étiquette est rasterisé via un SVG chargé en
+    // IMAGE, donc parsé en XML STRICT — un `<img>` non fermé y rendrait le document illisible.
+    return `<img src="${url}" width="${mm}mm" height="${mm}mm" alt="" style="width:${mm}mm;height:${mm}mm;display:block;flex:none" />`;
   }
 
   /** Matrice → PNG en data: URI, `k` pixels par module. On dessine des RECTANGLES pleins sur
@@ -188,6 +190,15 @@ export class LabelImageExport {
 
   /** HTML d'étiquette → PNG. Enveloppe dans un SVG à `foreignObject`, puis passe au rasteriseur.
 
+      🚨 ON SÉRIALISE L'ENVELOPPE PAR LE DOM, ON NE CONCATÈNE PAS DES CHAÎNES — c'est le piège
+      n°6 de l'impression, à ne pas repayer. Un SVG chargé comme IMAGE (`new Image().src = blob:`
+      d'un `image/svg+xml`) est parsé en XML STRICT : le HTML de l'étiquette n'est PAS du XHTML
+      (balises vides non fermées comme `<img>` ou `<br>`, entités HTML, `<`/`&` littéraux dans le
+      `<style>`), et le moindre écart fait rejeter tout le document → `onerror` → « SVG illisible ».
+      On construit donc la racine dans le DOM (le parseur HTML tolérant), puis `XMLSerializer`
+      en émet une forme XML BIEN FORMÉE : namespace XHTML posé, balises vides auto-fermées, texte
+      et contenu de `<style>` échappés. Seule cette chaîne entre dans le `<foreignObject>`.
+
       🚨 DEUX SYSTÈMES D'UNITÉS, ET IL FAUT LES DEUX (cf. `LabelExportPlan.cssPixels`) :
         · le **viewBox** est en pixels CSS — c'est là-dedans que le HTML en millimètres se met en
           page (dans un `foreignObject`, un `mm` vaut 96/25,4 unités, pas `dpi`/25,4). Le poser en
@@ -199,10 +210,18 @@ export class LabelImageExport {
       posée à `mm` en CSS, retombe sur `k × modules` pixels de sortie — **1:1 par construction**. */
   private static rasterize(html: string, css: string, wMm: number, hMm: number, outW: number, outH: number): Promise<Blob> {
     const vbW = LabelExportPlan.cssPixels(wMm), vbH = LabelExportPlan.cssPixels(hMm);
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${outW}" height="${outH}" viewBox="0 0 ${+vbW.toFixed(3)} ${+vbH.toFixed(3)}">`
-      + `<foreignObject width="100%" height="100%">`
-      + `<div xmlns="http://www.w3.org/1999/xhtml" class="label-render"><style>${css}</style>${html}</div>`
-      + `</foreignObject></svg>`;
+    // Racine construite dans le DOM (parseur HTML tolérant), CSS d'abord puis le HTML de l'étiquette.
+    const root = document.createElement("div");
+    root.className = "label-render";
+    const style = document.createElement("style");
+    style.textContent = css;
+    root.appendChild(style);
+    root.insertAdjacentHTML("beforeend", html);
+    let xhtml = new XMLSerializer().serializeToString(root);
+    // Ceinture : le namespace XHTML doit être sur la racine sérialisée (les navigateurs le posent,
+    // mais on ne PARIE pas dessus — sans lui le `foreignObject` n'affiche rien).
+    if (!/^<div[^>]*\bxmlns=/.test(xhtml)) xhtml = xhtml.replace(/^<div\b/, '<div xmlns="http://www.w3.org/1999/xhtml"');
+    const svg = LabelExportPlan.wrapForRaster(xhtml, vbW, vbH, outW, outH);
     return ImageExport.svgToPngBlob(svg, outW, outH, "#ffffff");
   }
 }

@@ -1275,4 +1275,38 @@ module.exports = async () => {
     ck(!/\.label-print-/.test(css), "l'ancienne famille `.label-print-*` a entièrement cédé la place à `.lp-*`");
     ck(/\.label-print \[hidden\] \{ display: none !important; \}/.test(css), "…et le `[hidden]` de la modale reste (les masquages structurels en dépendent)");
   });
+
+  await section("labels : T11 — VERROUS SUR LE RASTER (SVG-image en XML strict, bug terrain « SVG illisible »)", async () => {
+    /* 🚨 PIÈGE N°6 DE L'IMPRESSION. « Exporter en images » chargeait le HTML de l'étiquette dans un
+       `<foreignObject>` par CONCATÉNATION de chaînes ; or un SVG chargé comme IMAGE est parsé en XML
+       STRICT, et le HTML n'est pas du XHTML (`<img>` non fermé, entités, `<`/`&` dans le `<style>`),
+       d'où le rejet du document et le toast « SVG illisible ». Le correctif SÉRIALISE l'enveloppe par
+       `XMLSerializer`. Le panneau n'est pas testable headless (DOM), mais ce qui a fait dériver
+       l'export l'est : la SOURCE de `LabelImageExport` et la partie PURE de l'enveloppe. */
+    const fs = require("fs");
+    const src = fs.readFileSync(path.join(__dirname, "..", "..", "src-client", "ui", "LabelImageExport.ts"), "utf8");
+
+    // -- 1. LA SOURCE PORTE LA CEINTURE ET LA SÉRIALISATION --
+    const imgLine = src.split(/\r?\n/).find((l) => /return `<img /.test(l));
+    ck(!!imgLine && /\/>`;?\s*$/.test(imgLine.trim()), "🚨 `qrImageTag` émet un `<img … />` AUTO-FERMÉ (illisible en XML sinon)");
+    const raster = /private static rasterize\([\s\S]*?\n  \}/.exec(src);
+    ck(!!raster, "on retrouve le corps de `rasterize`");
+    ck(/XMLSerializer/.test(raster[0]), "🚨 `rasterize` SÉRIALISE l'enveloppe (XMLSerializer), il ne concatène plus une `<div>` brute");
+    ck(/insertAdjacentHTML/.test(raster[0]) && /createElement/.test(raster[0]), "…l'enveloppe est CONSTRUITE dans le DOM avant d'être sérialisée");
+    ck(/LabelExportPlan\.wrapForRaster\(/.test(raster[0]), "…et le cadrage SVG passe par la méthode PURE `wrapForRaster` (vérifiable ici)");
+
+    // -- 2. `wrapForRaster` : PURE, bien équilibrée, cotes préservées --
+    const svg = LabelExportPlan.wrapForRaster('<div xmlns="http://www.w3.org/1999/xhtml" class="label-render">X</div>', 188.976, 94.488, 591, 295);
+    ck(svg.indexOf("<foreignObject") < svg.indexOf('class="label-render"'), "🚨 `<foreignObject` PRÉCÈDE le contenu XHTML injecté");
+    ck(svg.includes('viewBox="0 0 188.976 94.488"'), "le viewBox porte les cotes en pixels CSS transmises");
+    ck(svg.includes('width="591"') && svg.includes('height="295"'), "…et width/height portent la cote de SORTIE en pixels");
+    ck(svg.includes('xmlns="http://www.w3.org/2000/svg"'), "la racine SVG porte son namespace");
+    // Mini-vérificateur d'équilibre (pas un parseur XML) : chaque conteneur ouvert est refermé une fois.
+    const balanced = (s, tag) => (s.match(new RegExp("<" + tag + "\\b", "g")) || []).length === (s.match(new RegExp("</" + tag + ">", "g")) || []).length;
+    ck(balanced(svg, "svg") && balanced(svg, "foreignObject"), "🚨 balises `svg` et `foreignObject` équilibrées (ouvertes = fermées)");
+    ck(svg.endsWith("</foreignObject></svg>"), "…et l'enveloppe se referme dans le bon ordre");
+    // Les cotes sont arrondies à 3 décimales (pas de flottant à rallonge dans le viewBox).
+    const long = LabelExportPlan.wrapForRaster("<div/>", 1 / 3, 2 / 3, 10, 20);
+    ck(long.includes("viewBox=\"0 0 0.333 0.667\""), "les cotes du viewBox sont arrondies à 3 décimales");
+  });
 };

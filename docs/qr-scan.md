@@ -655,6 +655,11 @@ Bouton « **Exporter en images** » au pied, à gauche d'Imprimer, sous la même
   `<foreignObject>` avec la même CSS et la même fonte embarquée. Aucun second rendu, donc aucune
   divergence possible — c'est pourquoi la voie « produire un SVG vectoriel de l'étiquette » a été
   écartée (deux sources de vérité pour le même dessin, cinq pièges à repayer sur la seconde).
+- 🚨 **XML strict** : un SVG chargé comme image est parsé en XML, pas en HTML. Le HTML d'étiquette
+  n'étant pas du XHTML (balises vides, entités, `<`/`&` dans le `<style>`), l'enveloppe est
+  construite dans le DOM puis **sérialisée par `XMLSerializer`** (namespace XHTML posé, balises
+  auto-fermées, contenu échappé) avant d'entrer dans le `<foreignObject>` — sinon le document est
+  rejeté et l'export échoue (« SVG illisible »).
 - 🚨 **Le QR vient de la MATRICE** (`?format=matrix`, JSON `{ size, margin, rows }`), peinte sur un
   canvas à k pixels entiers par module : la boîte du QR fait `k × modules` pixels **exactement**, ses
   modules sont carrés par construction, sans dépendre d'aucun moteur de rendu.

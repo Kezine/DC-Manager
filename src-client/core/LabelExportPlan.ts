@@ -107,4 +107,22 @@ export class LabelExportPlan {
     const margin = Number.isFinite(matrix.margin) ? matrix.margin : 0;
     return matrix.size + 2 * margin;
   }
+
+  /** Enveloppe SVG à `<foreignObject>` autour d'un XHTML DÉJÀ SÉRIALISÉ — pur (chaîne → chaîne).
+      Le `xhtml` est censé provenir d'un `XMLSerializer` (donc XML bien formé, namespace XHTML
+      posé) : ce module ne le reparse pas, il ne fait que le CADRER dans un SVG rasterisable.
+
+      🚨 DEUX SYSTÈMES D'UNITÉS, ET IL FAUT LES DEUX (cf. `cssPixels`) :
+        · le **viewBox** est en pixels CSS — c'est là-dedans que le HTML en millimètres se met en
+          page (dans un `foreignObject`, un `mm` vaut 96/25,4 unités, pas `dpi`/25,4) ;
+        · les attributs **`width`/`height`** portent la cote de SORTIE en pixels — le rasteriseur
+          dessine le VECTEUR directement à la résolution voulue, sans agrandir une bitmap floue.
+      Extrait de `LabelImageExport.rasterize` pour être VÉRIFIABLE headless : l'équilibre des
+      balises et la présence des cotes se testent ici, hors DOM. */
+  static wrapForRaster(xhtml: string, vbW: number, vbH: number, outW: number, outH: number): string {
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${outW}" height="${outH}" viewBox="0 0 ${+vbW.toFixed(3)} ${+vbH.toFixed(3)}">`
+      + `<foreignObject width="100%" height="100%">`
+      + xhtml
+      + `</foreignObject></svg>`;
+  }
 }
