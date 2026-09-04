@@ -6,9 +6,13 @@
    dépôt — seulement la lecture de `format` / `size` d'une query string.
 
    Deux paramètres, deux politiques distinctes et VOULUES :
-     · `format` = png | svg (défaut png). Valeur INCONNUE → ERREUR (400) : on
-       préfère refuser bruyamment qu'imprimer un format que l'appelant croyait
-       obtenir. C'est une petite énumération fermée, pas une donnée continue.
+     · `format` = png | svg | matrix (défaut png). Valeur INCONNUE → ERREUR
+       (400) : on préfère refuser bruyamment qu'imprimer un format que
+       l'appelant croyait obtenir. C'est une petite énumération fermée, pas une
+       donnée continue. `matrix` n'est PAS une image : c'est la matrice de
+       modules en JSON, consommée par l'export en images des étiquettes, qui
+       rasterise le QR à un nombre ENTIER de pixels par module (cf. QrSvg et
+       le diagnostic Q11.14) — `size` n'y a donc aucun effet.
      · `size` = largeur en pixels, BORNÉE à [MIN_SIZE, MAX_SIZE] (défaut 256).
        Hors bornes → on RAMÈNE dans l'intervalle (jamais une erreur : une
        étiquette un peu plus grande/petite que demandé reste utile, et le
@@ -17,8 +21,9 @@
        n'exprime aucune intention interprétable sans deviner.
    ============================================================================ */
 
-/** Format d'image d'une étiquette QR — énumération FERMÉE (cf. politique ci-dessus). */
-export type QrFormat = "png" | "svg";
+/** Format servi pour une étiquette QR — énumération FERMÉE (cf. politique ci-dessus).
+    `png`/`svg` sont des images ; `matrix` est la MATRICE de modules en JSON. */
+export type QrFormat = "png" | "svg" | "matrix";
 
 /** Résultat de validation : soit des paramètres normalisés, soit un message d'erreur (→ 400).
     La forme discriminée (`error` présent ou non) laisse l'appelant brancher sans ambiguïté. */
@@ -30,7 +35,7 @@ export class QrCodeParams {
   /** Format par défaut quand `?format=` est absent. PNG : format universel pour l'impression. */
   static readonly DEFAULT_FORMAT: QrFormat = "png";
   /** Formats servis — liste blanche fermée (tout autre → 400). */
-  static readonly FORMATS: readonly QrFormat[] = ["png", "svg"];
+  static readonly FORMATS: readonly QrFormat[] = ["png", "svg", "matrix"];
   /** Largeur par défaut, et bornes du plafonnement. 64 px reste scannable ; 1024 px suffit à
       toute impression d'étiquette et borne le coût de génération d'une requête unique. */
   static readonly DEFAULT_SIZE = 256;

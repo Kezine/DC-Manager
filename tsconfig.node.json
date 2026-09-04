@@ -18,6 +18,12 @@
     // Validation PURE des paramètres de rendu d'une étiquette QR (format/size) — extraite de la route
     // `/qr` (api.ts) pour être testée en isolation ; aucune dépendance à Express ni au paquet `qrcode`.
     "src-server/src/QrCodeParams.ts",
+    // ÉMISSION PURE du SVG de QR à MODULES CARRÉS (diagnostic Q11.14) — extraite de la même route
+    // pour la même raison : elle n'entre PAS une URL mais une MATRICE de modules, donc elle se teste
+    // sans Express et sans le paquet `qrcode` (la lib ne sert qu'à produire la matrice, côté route).
+    // Le verrou d'intégration vit dans test-qr-params.js : la sortie doit rester lisible par
+    // `core/LabelQrSvg` (détection de quiet zone), sinon le QR rétrécirait en silence à l'impression.
+    "src-server/src/QrSvg.ts",
     // Repository RELATIONNEL (lot L2 migration DB) — chemin de PRODUCTION depuis la bascule L4 : testé
     // avec better-sqlite3 RÉEL (le shim des tests blob ne parle pas ce SQL).
     "src-server/src/RelationalRepository.ts",
