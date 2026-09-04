@@ -53,6 +53,40 @@ export class ImageExport {
     img.src = url;
   }
 
+  /** Rasterise une chaîne SVG en PNG et rend le BLOB (au lieu de le télécharger) — variante
+      SANS PERTE et SANS effet de bord de `svgToJpeg`, ajoutée pour l'export en images des
+      étiquettes QR (décision Q11.13).
+
+      🚨 POURQUOI PNG ET PAS JPEG ICI : un QR est du trait pur à très fort contraste ; la DCT
+      du JPEG y fabrique un halo autour de chaque module — exactement ce qui fait rater un
+      scan —, et la compression avec pertes ne gagne rien sur une image en noir et blanc.
+      🚨 POURQUOI UN BLOB ET PAS UN TÉLÉCHARGEMENT : l'appelant en produit N et les emballe
+      dans une archive ; déclencher N téléchargements demanderait N confirmations.
+      Le canvas est peint sur un fond OPAQUE : un PNG d'étiquette à fond transparent
+      s'imprimerait « noir sur rien », et le blanc fait partie du code (quiet zone).
+
+      ⚠ Rejette si le canvas est SALI (`SecurityError`) : c'est le cas de Safari dès qu'un
+      `foreignObject` entre dans le SVG. L'appelant l'attrape et le DIT ; il n'y a pas de
+      contournement propre, et un repli dégradé produirait des étiquettes fausses. */
+  static svgToPngBlob(svgStr: string, outW: number, outH: number, bg: string): Promise<Blob> {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" }));
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const c = document.createElement("canvas"); c.width = outW; c.height = outH;
+          const ctx = c.getContext("2d")!;
+          ctx.fillStyle = bg || "#ffffff"; ctx.fillRect(0, 0, outW, outH);
+          ctx.drawImage(img, 0, 0, outW, outH);
+          URL.revokeObjectURL(url);
+          c.toBlob((b) => { if (b) resolve(b); else reject(new Error("canvas.toBlob a rendu null")); }, "image/png");
+        } catch (e) { URL.revokeObjectURL(url); reject(e); }
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("SVG illisible par le rasteriseur")); };
+      img.src = url;
+    });
+  }
+
   /** SVG → téléchargement direct ; JPEG → rasterisation. `nameFn(ext)` produit le nom. */
   static run(opts: ExportOptions, svgStr: string, w: number, h: number, nameFn: (ext: string) => string): void {
     if (opts.format === "svg") { ImageExport.download(nameFn("svg"), new Blob([svgStr], { type: "image/svg+xml" })); Notify.toast(I18n.t("ui.export.svgDone")); return; }

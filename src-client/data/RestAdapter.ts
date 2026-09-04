@@ -206,14 +206,16 @@ export class RestAdapter extends DataAdapter {
     const res = await this._send("GET", "/facets/" + collection + "?field=" + encodeURIComponent(field));
     return (res && Array.isArray(res.values)) ? res.values.map((v: any) => String(v)) : null;
   }
-  /** SVG d'ÉTIQUETTE QR d'une fiche : `GET …/qr/<collection>/<id>?format=svg` (lot E — impression
-      d'étiquettes, cf. docs/qr-scan.md). LECTURE PURE, mais la réponse est du SVG BRUT (image/svg+xml),
-      pas du JSON : le protocole (`interpret`) ne s'applique pas — fetch dédié, mêmes cookies de session
-      (`credentials: include`). Rejette avec le message SERVEUR quand il est actionnable (503 explicite
-      « définir PUBLIC_BASE_URL », 404 fiche disparue…) : la modale d'impression l'affiche tel quel. */
-  async qrSvg(collection: string, id: string): Promise<string> {
+  /** Appel BRUT de la route d'étiquette QR : `GET …/qr/<collection>/<id>?format=<f>` (lot E —
+      impression d'étiquettes, cf. docs/qr-scan.md). LECTURE PURE, mais la réponse n'est pas
+      toujours du JSON d'API (`svg` rend du SVG brut) : le protocole (`interpret`) ne s'applique
+      pas — fetch dédié, mêmes cookies de session (`credentials: include`). Rejette avec le
+      message SERVEUR quand il est actionnable (503 explicite « définir PUBLIC_BASE_URL », 404
+      fiche disparue…) : la modale d'impression l'affiche tel quel. Partagé par les DEUX formats
+      consommés par le client, pour que la gestion d'erreur ne se mette pas à diverger. */
+  private async _qr(collection: string, id: string, format: "svg" | "matrix"): Promise<Response> {
     if (!this.docId) throw new Error("aucun document ouvert");
-    const res = await fetch(this.dataBase + "/qr/" + encodeURIComponent(collection) + "/" + encodeURIComponent(id) + "?format=svg", {
+    const res = await fetch(this.dataBase + "/qr/" + encodeURIComponent(collection) + "/" + encodeURIComponent(id) + "?format=" + format, {
       credentials: "include",
       headers: { "X-Client-Id": this.clientId },
     });
@@ -222,7 +224,20 @@ export class RestAdapter extends DataAdapter {
       try { message = String(((await res.json()) || {}).error || ""); } catch { /* corps non-JSON : statut seul */ }
       throw new Error(message || ("HTTP " + res.status));
     }
-    return res.text();
+    return res;
+  }
+
+  /** SVG d'étiquette QR — celui que l'APERÇU et le DOCUMENT D'IMPRESSION inlinent. */
+  async qrSvg(collection: string, id: string): Promise<string> {
+    return (await this._qr(collection, id, "svg")).text();
+  }
+
+  /** MATRICE de modules d'un QR (`?format=matrix`) — consommée par l'EXPORT EN IMAGES, qui
+      rasterise le code à un nombre ENTIER de pixels par module plutôt que de mettre un SVG à
+      l'échelle : c'est la seule façon d'obtenir des modules parfaitement carrés dans un PNG
+      (diagnostic Q11.14, cf. src-server/QrSvg). */
+  async qrMatrix(collection: string, id: string): Promise<{ size: number; margin: number; rows: string[] }> {
+    return (await this._qr(collection, id, "matrix")).json();
   }
   async saveMeta(meta: Record<string, any>): Promise<unknown> { return this._send("PUT", "/meta", meta); }
   /** MAINTENANCE du document courant (admin) : purge serveur des images ORPHELINES et des BINAIRES de

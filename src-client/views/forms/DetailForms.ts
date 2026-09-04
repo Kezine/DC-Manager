@@ -178,19 +178,16 @@ export class DetailForms extends IpamForms {
     // (doctrine §6.32). Une extrémité posée sur un ÉTAGE compte désormais, comme partout ailleurs.
     const footerActions: HTMLElement[] = [];
     if (host.locate && store.cableLocatable(c)) { const locBtn = document.createElement("button"); locBtn.type = "button"; locBtn.className = "btn btn-ghost"; locBtn.innerHTML = `<span class="gi">${Icons.LOCATE}</span>${I18n.t("lists.chrome.rowLocate")}`; locBtn.onclick = () => host.locate!("cable", c.id, () => this.cableDetail(store, host, id, onChanged)); footerActions.push(locBtn); }
-    // ÉTIQUETTES de câble (lot E étiquettes QR — mode API seulement, prédicat injecté) : un câble
-    // s'étiquette PAR PAIRE — le geste principal imprime DEUX drapeaux identiques (un par extrémité,
-    // décision E, défaut maquette), « Un drapeau » reste offert. Sens A → B = l'ordre de la fiche.
+    // ÉTIQUETTES de câble (lot E étiquettes QR — mode API seulement, prédicat injecté).
+    // 🚨 T11 : UN SEUL geste. « Un drapeau » et « Imprimer les 2 extrémités » étaient DEUX
+    // entrées pour une décision de même nature que toutes celles de la modale — et elle se
+    // prenait avant d'avoir vu le moindre aperçu. C'est désormais la bascule A / B / A+B,
+    // défaut A+B (le geste principal d'avant). Sens A → B = l'ordre de la fiche.
     if (LabelPrintDialog.available()) {
-      const subject = () => LabelSubjects.cable(store, c);
-      const oneBtn = document.createElement("button"); oneBtn.type = "button"; oneBtn.className = "btn btn-ghost";
-      oneBtn.textContent = I18n.t("labels.entry.cableOne");
-      oneBtn.onclick = () => LabelPrintDialog.open({ kind: "cable", subjects: [subject()], source: c.name || "" });
-      footerActions.push(oneBtn);
-      const bothBtn = document.createElement("button"); bothBtn.type = "button"; bothBtn.className = "btn btn-ghost";
-      bothBtn.innerHTML = `<span class="gi">${Icons.PRINT}</span>${I18n.t("labels.entry.cableBoth")}`;
-      bothBtn.onclick = () => LabelPrintDialog.open({ kind: "cable", subjects: [subject(), subject()], source: I18n.t("labels.entry.cableBothSource", { cable: c.name || "" }) });
-      footerActions.push(bothBtn);
+      const labelBtn = document.createElement("button"); labelBtn.type = "button"; labelBtn.className = "btn btn-ghost";
+      labelBtn.innerHTML = `<span class="gi">${Icons.PRINT}</span>${I18n.t("labels.entry.flag")}`;
+      labelBtn.onclick = () => LabelPrintDialog.open({ kind: "cable", subjects: [LabelSubjects.cable(store, c)], source: c.name || "", defaultEndsMode: "ab" });
+      footerActions.push(labelBtn);
     }
     if (this.canEditCollection("cables")) { const b = document.createElement("button"); b.type = "button"; b.className = "btn btn-primary"; b.textContent = I18n.t("lists.chrome.rowEdit"); b.onclick = () => this.cable(store, host, id, onChanged); footerActions.push(b); }
     host.openModal({ title: I18n.t("detail.cable.title"), subtitle: Html.escape(c.name || ""), body: root, footerActions, stackKey: "detail:cables/" + id, onResume: () => this.cableDetail(store, host, id, onChanged), hideFooter: true, wide: true });
@@ -253,19 +250,14 @@ export class DetailForms extends IpamForms {
 
     AuditLine.attach(root, b, host.userDirectory);   // « Créé/Modifié par » (mode API)
     // ÉTIQUETTES de faisceau (retour terrain 2026-08-20 — mode API seulement, prédicat injecté) :
-    // un trunk s'étiquette comme un câble, PAR PAIRE (un drapeau à chaque patch terminal). Mêmes
-    // libellés que la fiche câble : ils nomment l'ANATOMIE (le drapeau), pas la famille.
+    // un trunk s'étiquette comme un câble (un drapeau à chaque patch terminal), donc MÊME geste
+    // unique qu'elle depuis T11 — le libellé nomme l'ANATOMIE, pas la famille.
     const footerActions: HTMLElement[] = [];
     if (LabelPrintDialog.available()) {
-      const subject = () => LabelSubjects.bundle(store, b);
-      const oneBtn = document.createElement("button"); oneBtn.type = "button"; oneBtn.className = "btn btn-ghost";
-      oneBtn.textContent = I18n.t("labels.entry.cableOne");
-      oneBtn.onclick = () => LabelPrintDialog.open({ kind: "bundle", subjects: [subject()], source: b.name || "" });
-      footerActions.push(oneBtn);
-      const bothBtn = document.createElement("button"); bothBtn.type = "button"; bothBtn.className = "btn btn-ghost";
-      bothBtn.innerHTML = `<span class="gi">${Icons.PRINT}</span>${I18n.t("labels.entry.cableBoth")}`;
-      bothBtn.onclick = () => LabelPrintDialog.open({ kind: "bundle", subjects: [subject(), subject()], source: I18n.t("labels.entry.cableBothSource", { cable: b.name || "" }) });
-      footerActions.push(bothBtn);
+      const labelBtn = document.createElement("button"); labelBtn.type = "button"; labelBtn.className = "btn btn-ghost";
+      labelBtn.innerHTML = `<span class="gi">${Icons.PRINT}</span>${I18n.t("labels.entry.flag")}`;
+      labelBtn.onclick = () => LabelPrintDialog.open({ kind: "bundle", subjects: [LabelSubjects.bundle(store, b)], source: b.name || "", defaultEndsMode: "ab" });
+      footerActions.push(labelBtn);
     }
     footerActions.push(...this.footer(() => this.cableBundle(store, host, id, onChanged), "cableBundles"));
     host.openModal({ title: I18n.t("detail.bundle.title"), subtitle: Html.escape(b.name || ""), body: root, footerActions, stackKey: "detail:cableBundles/" + id, onResume: () => this.cableBundleDetail(store, host, id, onChanged), hideFooter: true, wide: true });
