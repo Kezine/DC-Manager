@@ -1334,6 +1334,16 @@ aurait donc compilé sur une API morte.
   résolution en dépend. Les deux conteneurs partagent donc un seul rendu — d'où le fait, gratuit, qu'un port
   d'étage se comporte exactement comme un port de salle vis-à-vis de `showPorts` et du masquage individuel.
   Écarté : un second chemin de dessin pour l'étage, qui aurait divergé au premier réglage ajouté.
+  - **L'orientation du connecteur suit une BASE DE FACE (normale + haut), jamais la rotation minimale.** Le
+    connecteur est un plan : sa normale doit sortir de la face, ET son roulis doit tenir droit. Une rotation
+    minimale +Z→normale (`setFromUnitVectors`) fixe la première mais laisse le roulis libre — le plan sort
+    tourné de 90° dès que la normale suit ±X (équipement libre tourné, faces gauche/droite, baie dont le
+    lacet met sa façade le long de X), et de travers sur une face dessus/dessous. Le résolveur produit donc,
+    à côté de la normale, un `up` = HAUT de la face (celui vers lequel `face_y` DÉCROÎT ; module pur
+    `geometry/FreeEquipGeometry.faceUpLocal`, composé par le lacet comme la normale) ; `geometry/FaceFrame`
+    en dérive la base orthonormée `(right, up, n)` que `DcThreeScene.addPortAt` pose par `makeBasis`. Les
+    faces verticales portent `up = +Z` ; les faces horizontales, un haut horizontal qui tourne avec
+    l'équipement. `up` absent ⇒ repli de `FaceFrame` (aucune régression sur ce qui marchait par chance).
 - **La règle du BREAKOUT est retrouvée par construction.** Une lane émerge du connecteur de son TRUNK
   (`parent_port_id`) : la version qui composait la chaîne DANS la vue l'avait oubliée, et rien ne l'aurait
   signalé. Ce n'est pas un détail d'implémentation mais l'argument le plus concret contre un second chemin de

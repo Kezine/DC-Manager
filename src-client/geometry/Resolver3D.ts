@@ -21,7 +21,12 @@ export interface ConduitDims { usableW: number; usableH: number; kind: "segment"
     passe par `resolveFaceAnchor3D` (le cas général), MONDE pour `resolvePortWorld3D` (contenu placé sur un
     conteneur SANS salle). Le type ne peut pas porter cette distinction sans se dédoubler pour rien : les deux
     portent exactement les mêmes champs, et c'est le point d'appel qui sait d'où il vient (cf. l'en-tête). */
-export interface Port3D { x: number; y: number; z: number; rackId: string | null; n: { x: number; y: number; z: number }; }
+export interface Port3D { x: number; y: number; z: number; rackId: string | null; n: { x: number; y: number; z: number };
+  /** Direction « HAUT » de la face dans le repère de sortie (celle vers laquelle `face_y` DÉCROÎT) — le
+      HAUT du connecteur DESSINÉ. La seule normale ne fixe pas le roulis du plan (piège de la rotation
+      minimale, cf. `geometry/FaceFrame`) : ce champ le tranche. Absent quand le mode ne connaît pas de base
+      de face — le dessin retombe alors sur le repli de `FaceFrame.basis`. */
+  up?: { x: number; y: number; z: number }; }
 
 /** Position sur une FACE d'équipement (fraction 0..1 de la largeur/hauteur + face) — sous-ensemble des champs
     de géométrie d'un `Port` consommés par la résolution 3D. Permet de résoudre un point de face SANS port persisté
@@ -132,12 +137,13 @@ export class Resolver3D {
     // compose donc dans le repère de l'origine qu'on lui donne — d'où du monde ici.
     // ⚠ `halfW`/`halfD` sont INERTES : ils ne servent que de REPLI quand la position manque, or l'origine
     // du conteneur est toujours fournie. Ils valent 0 pour dire « aucun repli à faire », pas une demi-taille.
-    const p = PlacementFrame.place(
-      { x: worldOriginX, y: worldOriginY, yawDeg: eq.dc_orientation, halfW: 0, halfD: 0 },
-      FreeEquipGeometry.portLocal(eq, geo),
-      FreeEquipGeometry.faceNormalLocal(geo.face_side),
-    );
-    return { x: p.x, y: p.y, z: p.z + worldOriginZ, rackId: null, n: p.n };
+    const placement = { x: worldOriginX, y: worldOriginY, yawDeg: eq.dc_orientation, halfW: 0, halfD: 0 };
+    const p = PlacementFrame.place(placement, FreeEquipGeometry.portLocal(eq, geo), FreeEquipGeometry.faceNormalLocal(geo.face_side));
+    // HAUT de la face pour le dessin du connecteur : le conteneur étant une pure TRANSLATION (cf. la note
+    // ci-dessus sur la normale), seul le lacet PROPRE de l'équipement tourne le haut — exactement comme la
+    // normale. Sur une face horizontale (dessus/dessous) il devient horizontal et suit le lacet.
+    const up = PlacementFrame.composeDir(PlacementFrame.basis(placement), FreeEquipGeometry.faceUpLocal(geo.face_side));
+    return { x: p.x, y: p.y, z: p.z + worldOriginZ, rackId: null, n: p.n, up };
   }
 
   /** Résout le PORT UPLINK virtuel d'un faisceau sur son équipement d'extrémité (patch) : centre de la face
@@ -170,7 +176,8 @@ export class Resolver3D {
       const yl = b.front ? yMin : yMax;
       const zl = b.z0 + (1 - fy) * (b.z1 - b.z0);
       const p = PlacementFrame.place(RackGeometry.roomPlacement(rack), { x: xl, y: yl, z: zl }, { x: 0, y: sgn });
-      return { x: p.x, y: p.y, z: p.z, rackId: rack.id, n: p.n };
+      // face VERTICALE (façade de la baie) : le HAUT du connecteur est +Z quel que soit le lacet.
+      return { x: p.x, y: p.y, z: p.z, rackId: rack.id, n: p.n, up: { x: 0, y: 0, z: 1 } };
     }
     if (eq.placement_mode === "tray" && eq.tray_item_id) {
       // POSÉ SUR UNE ÉTAGÈRE : la seule chaîne à TROIS conteneurs emboîtés, chacun dans son rôle.
@@ -192,10 +199,15 @@ export class Resolver3D {
       const fx = (geo.face_x != null) ? geo.face_x : 0.5, fy = (geo.face_y != null) ? geo.face_y : 0.5;
       // base Z = le DESSUS DU PLATEAU, et non `dc_z` : un posé repose sur son étagère.
       const face = FreeEquipGeometry.faceLocal(eq, geo.face_side, fx, fy, plankZ);
+      const trayBasis = PlacementFrame.basis(RackGeometry.trayContentPlacementInRack(rack, tray, eq));
+      const roomBasis = PlacementFrame.basis(RackGeometry.roomPlacement(rack));
       const inRack = PlacementFrame.place(RackGeometry.trayContentPlacementInRack(rack, tray, eq),
         { x: face.lx, y: face.ly, z: face.lz }, FreeEquipGeometry.faceNormalLocal(geo.face_side));
       const p = PlacementFrame.place(RackGeometry.roomPlacement(rack), { x: inRack.x, y: inRack.y, z: inRack.z }, inRack.n);
-      return { x: p.x, y: p.y, z: p.z, rackId: rack.id, n: p.n };
+      // HAUT de la face pour le dessin : composé par la MÊME chaîne que la normale (étagère PUIS baie) — un
+      // posé peut porter des faces HORIZONTALES (dessus/dessous), dont le haut suit alors les deux lacets.
+      const up = PlacementFrame.composeDir(roomBasis, PlacementFrame.composeDir(trayBasis, FreeEquipGeometry.faceUpLocal(geo.face_side)));
+      return { x: p.x, y: p.y, z: p.z, rackId: rack.id, n: p.n, up };
     }
     if (eq.placement_mode === "wall" && eq.rack_id) {
       const rack = s.get("racks", eq.rack_id); if (!rack || rack.datacenter_id !== dcId) return null;
@@ -208,15 +220,20 @@ export class Resolver3D {
       const zl = b.z0 + (1 - fy) * (b.z1 - b.z0);
       // seul mode BAIE dont la normale locale est portée par la BOÎTE (paroi gauche/droite ou fond de marge).
       const p = PlacementFrame.place(RackGeometry.roomPlacement(rack), { x: xl, y: yl, z: zl }, { x: b.n.x, y: b.n.y });
-      return { x: p.x, y: p.y, z: p.z, rackId: rack.id, n: p.n };
+      // face VERTICALE (paroi gauche/droite ou fond de marge) : HAUT du connecteur = +Z.
+      return { x: p.x, y: p.y, z: p.z, rackId: rack.id, n: p.n, up: { x: 0, y: 0, z: 1 } };
     }
     if (eq.dim_mode === "free") {
       // MODE LIBRE : l'hôte n'est pas une baie mais la SALLE elle-même. L'équipement produit son point et sa
       // normale LOCAUX (boîte 6 faces) ; le conteneur applique son lacet propre (`dc_orientation`) et sa
       // position. Seule face à pouvoir être HORIZONTALE (dessus/dessous) — d'où une normale à 3 composantes.
       if (eq.dc_id !== dcId || eq.dc_x == null || eq.dc_y == null) return null;
-      const p = PlacementFrame.place(FreeEquipGeometry.roomPlacement(eq), FreeEquipGeometry.portLocal(eq, geo), FreeEquipGeometry.faceNormalLocal(geo.face_side));
-      return { x: p.x, y: p.y, z: p.z, rackId: null, n: p.n };
+      const placement = FreeEquipGeometry.roomPlacement(eq);
+      const p = PlacementFrame.place(placement, FreeEquipGeometry.portLocal(eq, geo), FreeEquipGeometry.faceNormalLocal(geo.face_side));
+      // HAUT de la face pour le dessin : le lacet propre de l'équipement le tourne comme la normale. Faces
+      // dessus/dessous ⇒ haut HORIZONTAL suivant le lacet ; faces verticales ⇒ +Z inchangé.
+      const up = PlacementFrame.composeDir(PlacementFrame.basis(placement), FreeEquipGeometry.faceUpLocal(geo.face_side));
+      return { x: p.x, y: p.y, z: p.z, rackId: null, n: p.n, up };
     }
     if (eq.placement_mode !== "rack" || !eq.rack_id || eq.rack_u == null) return null;
     const rack = s.get("racks", eq.rack_id); if (!rack || rack.datacenter_id !== dcId) return null;
@@ -250,7 +267,8 @@ export class Resolver3D {
       { x: lateral, y: -off, z: RackGeometry.uBaseZ(rack) + ((eq.rack_u - 1) + zf * uh) * U_MM },
       { x: 0, y: -ns },
     );
-    return { x: p.x, y: p.y, z: p.z, rackId: rack.id, n: p.n };
+    // face VERTICALE (façade avant/arrière d'un monté en U) : HAUT du connecteur = +Z quel que soit le lacet.
+    return { x: p.x, y: p.y, z: p.z, rackId: rack.id, n: p.n, up: { x: 0, y: 0, z: 1 } };
   }
 
   /* ---- waypoints ---- */

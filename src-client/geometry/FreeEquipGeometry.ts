@@ -143,6 +143,24 @@ export class FreeEquipGeometry {
     }
   }
 
+  /** Direction « HAUT » sortante d'une FACE dans le repère LOCAL de l'équipement (AVANT lacet) : celle vers
+      laquelle la fraction verticale `face_y` DÉCROÎT (`fy = 0` en haut de l'éditeur de façade). Sert au
+      dessin du connecteur 3D (base de face, cf. `geometry/FaceFrame`) pour FIXER le roulis du plan — la
+      seule normale ne le déterminerait pas. Elle DÉRIVE de `faceLocal`, dont elle est la dérivée en `fy` :
+      • faces VERTICALES (avant/arrière/gauche/droite) : `lz = z0 + (1 − fy)·h` → fy décroît vers le HAUT
+        (+Z local), que le lacet laisse inchangé ;
+      • dessus (`top`) : `ly = (0.5 − fy)·d` → fy décroît vers l'ARRIÈRE (+Y local) ;
+      • dessous (`bottom`) : `ly = (fy − 0.5)·d` → fy décroît vers l'AVANT (−Y local).
+      Le conteneur (`PlacementFrame.composeDir`) applique ensuite le lacet propre de l'équipement : sur une
+      face horizontale, le haut TOURNE avec l'équipement ; sur une face verticale, il reste vertical. */
+  static faceUpLocal(face: string): { x: number; y: number; z: number } {
+    switch (EquipFaces.norm(face)) {
+      case "top": return { x: 0, y: 1, z: 0 };     // fy décroît vers l'arrière (+Y)
+      case "bottom": return { x: 0, y: -1, z: 0 };  // fy décroît vers l'avant (−Y)
+      default: return { x: 0, y: 0, z: 1 };          // faces verticales : fy décroît vers le haut (+Z)
+    }
+  }
+
   /** Lecture du placement de l'équipement LIBRE dans sa salle, à donner à son CONTENEUR — la SALLE, dont
       `PlacementFrame` compose le repère : la seule chose que le conteneur ait besoin de savoir de lui
       (doctrine §6.2). Le nom des champs est

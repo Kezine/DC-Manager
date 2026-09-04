@@ -13,6 +13,7 @@ import type { FreeBox } from "../../../geometry/FreeEquipGeometry";
 // CONTENEUR SALLE : `origin()` = centre d'un contenu en local salle. Ce rendu a FIXÉ la convention
 // « position absente ⇒ demi-empreinte » (docs/placement.md §6.12) ; il la LIT désormais au lieu de la réécrire.
 import { PlacementFrame } from "../../../geometry/PlacementFrame";
+import { FaceFrame } from "../../../geometry/FaceFrame";   // base ORTHONORMÉE d'une face (normale + haut) : fixe le ROULIS du connecteur, que la rotation minimale laissait libre
 import { TrayFrame } from "../../../geometry/TrayFrame";
 import { RackLabelLayout } from "../../../geometry/RackLabelLayout";
 import { DoorGeometry } from "../../../geometry/DoorGeometry";
@@ -383,9 +384,18 @@ export class DcThreeScene extends DcThreeCamera {
     const n = new THREE.Vector3(pt.n ? pt.n.x : 0, pt.n ? pt.n.y : 0, pt.n ? pt.n.z : 1);
     if (n.lengthSq() < 1e-6) n.set(0, 0, 1);
     n.normalize();
+    // ORIENTATION DU PLAN = base ORTHONORMÉE de la face (normale + haut), et NON la rotation minimale
+    // +Z→n : celle-ci fixait la normale mais laissait le ROULIS libre (connecteur tourné de 90° dès que la
+    // normale suivait ±X, roulis arbitraire sur une face dessus/dessous). Le HAUT vient du résolveur
+    // (`pt.up`) ; absent, `FaceFrame.basis` retombe sur son repli. Le plan `PlaneGeometry` a sa largeur sur
+    // X local, sa hauteur sur Y local, sa normale +Z local → colonnes (right, up, n) de `makeBasis`.
+    const b = FaceFrame.basis({ x: n.x, y: n.y, z: n.z }, pt.up);
+    const right = new THREE.Vector3(b.right.x, b.right.y, b.right.z);
+    const up = new THREE.Vector3(b.up.x, b.up.y, b.up.z);
+    const nrm = new THREE.Vector3(b.n.x, b.n.y, b.n.z);
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({ color: col, roughness: 0.5, metalness: 0.2, emissive: cab ? 0x0e1216 : 0x000000, side: THREE.DoubleSide }));
     mesh.position.set(pt.x + n.x * 1.5, pt.y + n.y * 1.5, pt.z + n.z * 1.5);   // 1,5 mm hors de la face
-    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
+    mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, nrm));
     mesh.userData = Object.assign({ pick: { type: "port", id: p.id, cable: cab ? cab.id : null }, layer: "port" }, extra);   // couche "port" (+ côté éventuel)
     // bordure NOIRE (cadre du connecteur, comme le SVG) — enfant → hérite de la pose
     const hw = w / 2, hh = h / 2, bg = new THREE.BufferGeometry();

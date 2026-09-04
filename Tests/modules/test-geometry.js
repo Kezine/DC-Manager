@@ -1,7 +1,7 @@
 /* Tests modules — géométrie pure (racks, salles, portes, splines, positionnement, 3D).
    Sections extraites de run.js (audit P5) ; harnais et assertions : harness.js. */
 "use strict";
-const { ck, section, path, D, SHARED, SERVER, TsImports, mkStorage, Store, BrowserStorageAdapter, PlacementContainers, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, PlacementFrame, TrayFrame, TrayGeometry, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, RouteMiniGraph, LeaderLayout, FaceAlign, FacePanelBands, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, TrunkRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, SiteLayout, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, Positioning, PivotBounds, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, FILLET_RADIUS_PER_K_MM, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
+const { ck, section, path, D, SHARED, SERVER, TsImports, mkStorage, Store, BrowserStorageAdapter, PlacementContainers, FieldIndex, Equipment, Cable, Port, Normalize, Labeler, ClickGuard, Projection, Box, Painter, RackGeometry, PlacementFrame, FaceFrame, TrayFrame, TrayGeometry, GraphGeometry, RouteGraphLayout, ROUTE_GRAPH, RouteMiniGraph, LeaderLayout, FaceAlign, FacePanelBands, RackLabelLayout, Homography, ImageStitch, EquipmentTypes, PortRoles, Depths, EquipFaces, RackScene, Resolver3D, CableRouting, TrunkRouting, U_MM, RACK_MOUNT_WIDTH, COLOR_PALETTE, Html, Color, Format, GridGeometry, GraphView, Sort, Ip, Prefs, DatacenterView, FloorLayout, SiteLayout, SITE_FALLBACK_STEP_M, SITE_SCALE_DEFAULT_M_PER_KM, Positioning, PivotBounds, CameraFraming, DoorGeometry, Doors, DOOR_WALLS, DOOR_DEFAULT_WIDTH_MM, DoorTool, Measure, CableSpline, FILLET_RADIUS_PER_K_MM, MeasureTool, RouteTool, ImageStore, FaceImage, SaveState, EntityRegistry, ReloadPlanner, COLLECTION_THREE_IMPACT, RenderImpact, Changeset, SharedSchema, Text, PAGE_SIZE_DEFAULT, Validation, Cascade, Rack, CABLE_STATUSES, EQUIP_DEPTHS, GROUP_TYPES, RACK_ITEM_KINDS, SPARE_TYPES, SPARE_STATUSES, EQUIP_FACE_IDS, makeStore } = require("./harness.js");
 
 module.exports = async () => {
   await section("Géométrie & couleurs (pures)", async () => {
@@ -735,7 +735,75 @@ module.exports = async () => {
     const wp = await s.create("ports", { equipment_id: we.id, name: "wp", face_x: 0.5, face_y: 0.5 });
     const wr = r3.resolvePort3D(wp.id, dc.id);
     ck(wr && isFinite(wr.x) && isFinite(wr.z), "resolvePort3D(wall) → point fini");
+    // BASE DE FACE (haut) POUR LE DESSIN DU CONNECTEUR — le port porte désormais un `up` = HAUT de sa face
+    // (celui vers lequel face_y DÉCROÎT). Les modes VERTICAUX (rack/side/wall) le posent à +Z, quel que soit
+    // le lacet : c'est ce qui empêche le connecteur de tourner de 90° quand la normale suit ±X.
+    ck(pr && pr.up && Math.abs(pr.up.x) < 1e-12 && Math.abs(pr.up.y) < 1e-12 && Math.abs(pr.up.z - 1) < 1e-12, "resolvePort3D(rack) → up = +Z (face verticale)");
+    ck(sr && sr.up && Math.abs(sr.up.z - 1) < 1e-12, "resolvePort3D(side) → up = +Z");
+    ck(wr && wr.up && Math.abs(wr.up.z - 1) < 1e-12, "resolvePort3D(wall) → up = +Z");
+    // ÉQUIPEMENT LIBRE TOURNÉ DE 90° : la façade regarde le long de ±X (normale horizontale ⇒ c'était LE cas
+    // qui tournait le connecteur), mais son HAUT reste +Z — le plan doit donc sortir « à plat », plus large
+    // que haut, et non pivoté d'un quart de tour.
+    const re = await s.create("equipments", { name: "rot", dim_mode: "free", dc_id: dc.id, dc_x: 5000, dc_y: 5000, dc_orientation: 90, free_w_mm: 200, free_h_mm: 100, free_l_mm: 200 });
+    const rp = await s.create("ports", { equipment_id: re.id, name: "rp", face_x: 0.5, face_y: 0.5, face_side: "front" });
+    const rr = r3.resolvePort3D(rp.id, dc.id);
+    ck(rr && (Math.abs(rr.n.x) > 0.99) && Math.abs(rr.n.z) < 1e-9, "libre tourné 90° : normale de la façade le long de ±X");
+    ck(rr && rr.up && Math.abs(rr.up.x) < 1e-9 && Math.abs(rr.up.y) < 1e-9 && Math.abs(rr.up.z - 1) < 1e-9, "libre tourné 90° : HAUT de la façade = +Z (connecteur à plat, pas pivoté)");
+    // FACE DESSUS du même équipement tourné : normale VERTICALE, mais le haut devient HORIZONTAL et suit le
+    // lacet (fy décroît vers l'arrière +Y local → tourné de 90° = −X monde).
+    const tp = await s.create("ports", { equipment_id: re.id, name: "tp", face_x: 0.5, face_y: 0.5, face_side: "top" });
+    const tr = r3.resolvePort3D(tp.id, dc.id);
+    ck(tr && Math.abs(tr.n.z - 1) < 1e-9, "face dessus : normale verticale +Z");
+    ck(tr && tr.up && Math.abs(tr.up.z) < 1e-9 && (Math.abs(tr.up.x) + Math.abs(tr.up.y)) > 0.99, "face dessus d'un libre tourné : HAUT HORIZONTAL, composé par le lacet");
   }
+  });
+
+  await section("FaceFrame : base orthonormée d'une face (normale + haut) — fixe le roulis du connecteur", async () => {
+    const dot = (a, b) => a.x * b.x + a.y * b.y + a.z * b.z;
+    const norm = (v) => Math.hypot(v.x, v.y, v.z);
+    const orthonorme = (b, name) => {
+      ck(Math.abs(norm(b.right) - 1) < 1e-9 && Math.abs(norm(b.up) - 1) < 1e-9 && Math.abs(norm(b.n) - 1) < 1e-9, name + " : les trois vecteurs sont UNITAIRES");
+      ck(Math.abs(dot(b.right, b.up)) < 1e-9 && Math.abs(dot(b.up, b.n)) < 1e-9 && Math.abs(dot(b.n, b.right)) < 1e-9, name + " : les trois vecteurs sont ORTHOGONAUX");
+      // trièdre DIRECT : right × up = n (sinon makeBasis produirait une réflexion, connecteur retourné).
+      const cx = b.right.y * b.up.z - b.right.z * b.up.y, cy = b.right.z * b.up.x - b.right.x * b.up.z, cz = b.right.x * b.up.y - b.right.y * b.up.x;
+      ck(Math.abs(cx - b.n.x) < 1e-9 && Math.abs(cy - b.n.y) < 1e-9 && Math.abs(cz - b.n.z) < 1e-9, name + " : trièdre DIRECT (right × up = n)");
+    };
+    // Normale HORIZONTALE le long de ±X (le cas qui tournait le connecteur), HAUT absent ⇒ défaut +Z : le
+    // haut résultant DOIT être +Z et le right horizontal — c'est la correction même.
+    for (const nx of [1, -1]) {
+      const b = FaceFrame.basis({ x: nx, y: 0, z: 0 });
+      ck(Math.abs(b.up.x) < 1e-9 && Math.abs(b.up.y) < 1e-9 && Math.abs(b.up.z - 1) < 1e-9, "n=±X, up absent → up résultant = +Z (nx=" + nx + ")");
+      ck(Math.abs(b.right.z) < 1e-9, "n=±X → right HORIZONTAL (nx=" + nx + ")");
+      orthonorme(b, "n=±X (nx=" + nx + ")");
+    }
+    // Normale ±Y (façade non tournée) : marchait déjà par chance, mais on FIGE le haut à +Z.
+    for (const ny of [1, -1]) {
+      const b = FaceFrame.basis({ x: 0, y: ny, z: 0 });
+      ck(Math.abs(b.up.z - 1) < 1e-9 && Math.abs(b.right.z) < 1e-9, "n=±Y, up absent → up = +Z, right horizontal (ny=" + ny + ")");
+      orthonorme(b, "n=±Y (ny=" + ny + ")");
+    }
+    // Face HORIZONTALE (n=+Z) AVEC un haut fourni (0,1,0) : la base est EXACTEMENT celle-là.
+    {
+      const b = FaceFrame.basis({ x: 0, y: 0, z: 1 }, { x: 0, y: 1, z: 0 });
+      ck(Math.abs(b.up.x) < 1e-9 && Math.abs(b.up.y - 1) < 1e-9 && Math.abs(b.up.z) < 1e-9, "n=+Z, up fourni (0,1,0) → up = (0,1,0)");
+      ck(Math.abs(b.right.x - 1) < 1e-9 && Math.abs(b.right.y) < 1e-9 && Math.abs(b.right.z) < 1e-9, "n=+Z, up fourni (0,1,0) → right = (1,0,0)");
+      orthonorme(b, "n=+Z, up fourni");
+    }
+    // COLINÉARITÉ (haut fourni parallèle à la normale, ou haut par défaut +Z sur une face horizontale) ⇒
+    // repli sur un axe transverse : la base reste orthonormée au lieu de dégénérer.
+    {
+      const b = FaceFrame.basis({ x: 0, y: 0, z: 1 }, { x: 0, y: 0, z: 1 });
+      orthonorme(b, "colinéarité (up ∥ n) → repli");
+      const b2 = FaceFrame.basis({ x: 0, y: 0, z: -1 });   // n vertical, up absent = +Z ⇒ colinéaire
+      orthonorme(b2, "n=−Z, up absent → repli orthonormé");
+    }
+    // -- VERROU SUR LA SOURCE (patron « VERROUS SUR LES SOURCES ») : le dessin du connecteur n'utilise PLUS
+    //    la rotation minimale et passe bien par FaceFrame. On relit la SOURCE .ts, jamais le compilé. --
+    const fs = require("fs");
+    const scene = fs.readFileSync(path.join(__dirname, "..", "..", "src-client", "views", "dc", "three", "DcThreeScene.ts"), "utf8");
+    ck(!/setFromUnitVectors/.test(scene), "🚨 DcThreeScene ne fixe PLUS l'orientation du port par setFromUnitVectors (rotation minimale = roulis libre)");
+    ck(/FaceFrame\.basis\(/.test(scene), "DcThreeScene construit la base de face via FaceFrame.basis(...)");
+    ck(/makeBasis\(/.test(scene), "…et pose le plan par makeBasis(right, up, n)");
   });
 
   /* ============================================================================================
