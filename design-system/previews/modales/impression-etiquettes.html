@@ -1,4 +1,4 @@
-<!-- @dsCard group="Modales" name="Impression d'étiquettes QR" subtitle="modale large hideFooter : contexte + 4 étages fixes (Tirage en tête dès 2 étiquettes) ; option indisponible GRISÉE avec sa raison, jamais cachée ; deux registres d'avertissement" -->
+<!-- @dsCard group="Modales" name="Impression d'étiquettes QR" subtitle="modale large hideFooter : contexte + 4 étages fixes (Tirage en tête dès 2 étiquettes) ; refus d'ÉTAT grisé avec sa raison, refus STRUCTUREL absent ; deux registres d'avertissement" -->
 <!doctype html>
 <html lang="fr">
 <head>
@@ -3350,6 +3350,10 @@
      ⚠ T11 : `hidden` ne sert PLUS à cacher un VERDICT (une option indisponible est grisée avec sa
      raison) — seulement une question qui ne se pose pas dans ce contexte. */
   .label-print [hidden] { display: none !important; }
+  /* Un gabarit STRUCTURELLEMENT impossible est masqué (retour terrain 2026-09-04) ; le séparateur
+     d'un segment ne doit alors pas rester « collé » au bord — sans quoi « Personnalisé » seul, sur
+     un câble, montre un filet vertical parasite derrière la bordure du groupe. */
+  .label-print .rm-toggle button[hidden] + button { border-left: none; }
   .lp-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 
   /* -- CONTEXTE : qui, combien, avec quelle mémoire (jamais masqué) -- */
@@ -3496,16 +3500,19 @@
   <header class="ds-card-head">
     <div class="ds-card-group">Modales</div>
     <div class="ds-card-title">Impression d'étiquettes QR</div>
-    <div class="ds-card-sub">modale large hideFooter : contexte + 4 étages fixes (Tirage en tête dès 2 étiquettes) ; option indisponible GRISÉE avec sa raison, jamais cachée ; deux registres d'avertissement</div>
+    <div class="ds-card-sub">modale large hideFooter : contexte + 4 étages fixes (Tirage en tête dès 2 étiquettes) ; refus d'ÉTAT grisé avec sa raison, refus STRUCTUREL absent ; deux registres d'avertissement</div>
   </header>
 <!-- DÉRIVÉ de src-client/ui/LabelPrintDialog.ts (refonte T11, 2026-09-03) — maquette de référence :
      design-system/briefs/qr-print-redesign-maquette.html. Visage figé : ÉQUIPEMENT, planche de 150
      depuis le panier ⇒ l'étage « ◈ Tirage » passe EN TÊTE (`.lp-stage-lead`), seul déplacement
      structurel du panneau.
-     🚨 CE QUE LA CARTE MONTRE, et qui est la thèse de la refonte : une option indisponible reste
-     LISTÉE, `disabled`, avec sa RAISON sur sa propre ligne (`.lp-opt[disabled] .lp-opt-hint`, en
-     ton d'alerte) — le panneau explique au lieu de faire deviner. Les CASES de champ non déclarées
-     par l'objet, elles, sont ABSENTES (T10) : deux traitements, jamais trois.
+     🚨 CE QUE LA CARTE MONTRE, thèse de la refonte NUANCÉE par le terrain (2026-09-04) : un refus
+     d'ÉTAT — qu'un autre clic PEUT lever — reste LISTÉ, `disabled`, avec sa RAISON sur sa propre
+     ligne (`.lp-opt[disabled] .lp-opt-hint`, en ton d'alerte) : ici les colonnes plafonnées. Un
+     refus STRUCTUREL — lié au TYPE de sujet, jamais levable (tête de baie, drapeau, manchon sur un
+     équipement) — est désormais ABSENT, comme les CASES de champ non déclarées (T10) : « afficher
+     les options désactivées pour un type de collection prend de la place pour rien ». Deux
+     traitements, jamais trois.
      APERÇU STATIQUE : la modale est sortie de son overlay plein écran ; le QR est remplacé par un
      carré gris légendé (la génération est SERVEUR — la galerie n'a pas de route `/qr`), et l'aperçu
      de planche est schématisé plutôt que rendu en mm réels. Les segments et cases sont figés. -->
@@ -3584,14 +3591,13 @@
               <p class="lp-why"><span class="gi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16.5"/><line x1="12" y1="7.6" x2="12" y2="7.7"/></svg></span><span>Planche A4, marge 8 mm : 32 étiquettes par feuille → 5 feuilles. · papier choisi automatiquement</span></p>
             </div>
 
-            <!-- ① SUPPORT : les quatre toujours listés ; indisponible ⇒ grisé AVEC sa raison. -->
+            <!-- ① SUPPORT : un support d'une AUTRE ANATOMIE (tête de baie, drapeau, manchon) est un
+                 refus STRUCTUREL → ABSENT pour un équipement. Ne reste que « Étiquette plate » :
+                 l'étage garde sa carte unique, on NE masque PAS l'étage. -->
             <div class="lp-stage">
               <div class="lp-stage-head"><span class="lp-stage-n">①</span><span class="lp-stage-t">Support</span><span class="lp-stage-v">Étiquette plate</span></div>
               <div class="lp-opts">
                 <button type="button" class="lp-opt" aria-pressed="true"><span class="lp-opt-dot"></span><span class="lp-opt-body"><span class="lp-opt-title">Étiquette plate</span><em class="lp-opt-hint">autocollant façade ou bac</em></span></button>
-                <button type="button" class="lp-opt" aria-pressed="false" disabled title="réservé aux baies"><span class="lp-opt-dot"></span><span class="lp-opt-body"><span class="lp-opt-title">Tête de baie — 100 × 60</span><em class="lp-opt-hint">réservé aux baies</em></span></button>
-                <button type="button" class="lp-opt" aria-pressed="false" disabled title="réservé aux câbles et faisceaux — ce qui s'enroule"><span class="lp-opt-dot"></span><span class="lp-opt-body"><span class="lp-opt-title">Drapeau de câble</span><em class="lp-opt-hint">réservé aux câbles et faisceaux — ce qui s'enroule</em></span></button>
-                <button type="button" class="lp-opt" aria-pressed="false" disabled title="réservé aux câbles et faisceaux — ce qui s'enroule"><span class="lp-opt-dot"></span><span class="lp-opt-body"><span class="lp-opt-title">Manchon</span><em class="lp-opt-hint">réservé aux câbles et faisceaux — ce qui s'enroule</em></span></button>
               </div>
               <div class="lp-field">
                 <span class="lp-field-l">Gabarit</span>
@@ -3607,16 +3613,16 @@
               <p class="lp-why"><span class="gi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16.5"/><line x1="12" y1="7.6" x2="12" y2="7.7"/></svg></span><span>QR 17,4 mm — sous le plancher de 18 mm.</span></p>
             </div>
 
-            <!-- ② CONTENU : les quatre listés dans tous les contextes. -->
+            <!-- ② CONTENU : les contenus de MANCHON (repère complet / identifiant seul) sont
+                 réservés à ce qui s'enroule — refus STRUCTUREL → ABSENTS pour un équipement.
+                 Restent « QR + texte » et « QR seul ». -->
             <div class="lp-stage">
               <div class="lp-stage-head"><span class="lp-stage-n">②</span><span class="lp-stage-t">Contenu</span><span class="lp-stage-v">QR + texte</span></div>
               <div class="lp-opts">
                 <button type="button" class="lp-opt" aria-pressed="true"><span class="lp-opt-dot"></span><span class="lp-opt-body"><span class="lp-opt-title">QR + texte</span><em class="lp-opt-hint">le cas courant</em></span></button>
                 <button type="button" class="lp-opt" aria-pressed="false"><span class="lp-opt-dot"></span><span class="lp-opt-body"><span class="lp-opt-title">QR seul</span><em class="lp-opt-hint">très petites façades</em></span></button>
-                <button type="button" class="lp-opt" aria-pressed="false" disabled title="réservé aux câbles et faisceaux — ce qui s'enroule"><span class="lp-opt-dot"></span><span class="lp-opt-body"><span class="lp-opt-title">Manchon — repère complet</span><em class="lp-opt-hint">réservé aux câbles et faisceaux — ce qui s'enroule</em></span></button>
-                <button type="button" class="lp-opt" aria-pressed="false" disabled title="réservé aux câbles et faisceaux — ce qui s'enroule"><span class="lp-opt-dot"></span><span class="lp-opt-body"><span class="lp-opt-title">Manchon — identifiant seul</span><em class="lp-opt-hint">réservé aux câbles et faisceaux — ce qui s'enroule</em></span></button>
               </div>
-              <p class="lp-why"><span class="gi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16.5"/><line x1="12" y1="7.6" x2="12" y2="7.7"/></svg></span><span>Les quatre contenus restent listés dans tous les contextes : ce qui change est leur disponibilité, énoncée sur la ligne.</span></p>
+              <p class="lp-why"><span class="gi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16.5"/><line x1="12" y1="7.6" x2="12" y2="7.7"/></svg></span><span>Les contenus de manchon sont absents ici — refus STRUCTUREL. Sous « QR seul », en revanche, les cases sans texte se grisent AVEC leur raison (« sans texte sous ce contenu ») : ça, c'est un refus d'ÉTAT, que le retour à « QR + texte » lève.</span></p>
             </div>
 
             <!-- ③ INFORMATIONS ADDITIONNELLES : longueur VARIABLE (les cases descendent de
@@ -3665,7 +3671,7 @@
       </div>
     </div>
   </div>
-  <p class="ds-note"><strong>Deux traitements, jamais trois.</strong> Une option d'un axe fixe qui n'a pas cours ici reste <em>listée</em>, <code>disabled</code>, avec sa raison sur sa propre ligne (<code>.lp-opt[disabled] .lp-opt-hint</code> — le titre s'estompe, la raison reste pleinement lisible). Une question <em>sans objet</em> dans ce contexte est <em>absente</em> (les cotes en mm sous un préréglage, la bascule d'extrémités sur un objet sans bouts). Une case de champ que l'objet ne déclare pas est <em>absente</em> aussi — structurel depuis T10. Les codes de refus viennent de <code>LabelPrintPolicy.availability</code> ; la modale n'écrit aucune règle, elle traduit un code.</p>
+  <p class="ds-note"><strong>Deux traitements, jamais trois.</strong> Un refus d'<strong>ÉTAT</strong> — qu'un autre clic du panneau <em>peut</em> lever (un support incompatible, un contenu sans texte, les colonnes plafonnées montrées ici) — reste <em>listé</em>, <code>disabled</code>, avec sa raison sur sa propre ligne (<code>.lp-opt[disabled] .lp-opt-hint</code> — le titre s'estompe, la raison reste pleinement lisible). Un refus <strong>STRUCTUREL</strong> — lié au TYPE de sujet, jamais levable (tête de baie, drapeau ou manchon sur un équipement ; S/M/L sur un brin ; bascule d'extrémités sur un objet sans bouts) — est <em>absent</em>, comme la case d'un champ que l'objet ne déclare pas (structurel depuis T10). <code>LabelPrintPolicy.isStructuralReason(code)</code> tranche entre les deux familles ; les codes viennent de <code>LabelPrintPolicy.availability</code>, la modale n'écrit aucune règle. Retour terrain 2026-09-04 : « c'est inutile d'afficher les options désactivées pour un type de collection, ça prend de la place pour rien. »</p>
   <p class="ds-note"><strong>Les deux registres d'avertissement.</strong> « Risque de scan » (<code>.lp-risk</code>) est <em>collé sous l'aperçu</em>, en ton d'alerte et formulé à conséquence : ça compromet l'objet imprimé, et ça se voit sur l'aperçu. « Conséquence de tirage » (<code>.lp-sheetnote</code>) vit <em>au pied, à côté du bouton</em>, en ton neutre : ça ne compromet rien, ça décrit ce qui va sortir de l'imprimante. <strong>« Imprimer » reste toujours actif</strong> — on imprime pour son propre usage.</p>
 </section>
 

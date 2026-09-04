@@ -934,6 +934,23 @@ module.exports = async () => {
     ck.eq(typeof LabelPrintPolicy.visibility, "undefined", "🚨 l'ancienne matrice de visibilité n'existe plus (T11)");
   });
 
+  await section("labels : LabelPrintPolicy — refus STRUCTUREL vs refus d'ÉTAT (retour terrain 2026-09-04)", async () => {
+    /* La maquette rendait TOUTE option refusée « visible, désactivée, avec sa raison ». Le terrain a
+       tranché : un refus lié au TYPE de sujet, jamais levable dans le panneau, ne vaut pas la place
+       qu'il prend — il devient ABSENT. Seul reste grisé ce qu'un autre clic PEUT lever. `isStructuralReason`
+       classe les six codes que la disponibilité peut rendre pour les axes fixes. */
+    // STRUCTURELS : liés à l'anatomie du sujet, jamais levables dans le panneau → l'option DISPARAÎT.
+    ck(LabelPrintPolicy.isStructuralReason("flag-only"), "flag-only (manchon/drapeau réservé à ce qui s'enroule) = STRUCTUREL");
+    ck(LabelPrintPolicy.isStructuralReason("rack-only"), "rack-only (tête de baie réservée aux baies) = STRUCTUREL");
+    ck(LabelPrintPolicy.isStructuralReason("not-flag"), "not-flag (S/M/L ou extrémités hors sujet à drapeau) = STRUCTUREL");
+    // D'ÉTAT : un autre clic les lève → l'option reste GRISÉE avec sa raison (marche à suivre préservée).
+    ck(!LabelPrintPolicy.isStructuralReason("needs-sleeve"), "needs-sleeve (choisir le support « Manchon ») = ÉTAT");
+    ck(!LabelPrintPolicy.isStructuralReason("needs-not-sleeve"), "needs-not-sleeve (quitter le manchon) = ÉTAT");
+    ck(!LabelPrintPolicy.isStructuralReason("no-text"), "no-text (un contenu qui imprime du texte) = ÉTAT");
+    // `ok` n'est pas un refus : ni structurel, ni d'état.
+    ck(!LabelPrintPolicy.isStructuralReason("ok"), "ok n'est pas un refus (ni structurel, ni d'état)");
+  });
+
   await section("labels : LabelPrintPolicy — T11 : registres d'avertissement (classification pure)", async () => {
     /* Deux registres, pas un tas : ce qui COMPROMET l'objet imprimé va sous l'aperçu, ce qui
        DÉCRIT ce qui sortira de l'imprimante va au pied. Le bouton Imprimer reste actif dans les
@@ -1232,12 +1249,20 @@ module.exports = async () => {
     ck(!/kind === "cable"|kind === "bundle"|kind === "rack"|ctx\.kind === "/.test(dialog), "🚨 la modale ne teste JAMAIS le sujet pour décider d'une disponibilité (elle consomme des CODES)");
     ck(!/isFlagKind|isSpareLike/.test(dialog), "…ni les prédicats de famille : ils vivent dans la politique, qui les a déjà appliqués");
 
-    // -- 2. `hidden` NE SERT PLUS À CACHER UN VERDICT --
+    // -- 2. `hidden` POSÉ DEPUIS UN VERDICT : SEULEMENT pour un refus STRUCTUREL, et via la
+    //    POLITIQUE (retour terrain 2026-09-04). Un refus d'ÉTAT reste grisé avec sa raison. --
     const hiddenLines = dialog.split(/\r?\n/).filter((l) => /\.hidden\s*=/.test(l));
-    ck(hiddenLines.length > 0, "des masquages STRUCTURELS subsistent (une question sans objet dans ce contexte)");
-    ck(hiddenLines.every((l) => !/av\.supports|av\.contents|av\.sizes|av\.fields/.test(l)),
-      "🚨 aucun `hidden` posé depuis un verdict de disponibilité : une option refusée est GRISÉE avec sa raison, jamais escamotée");
-    ck(/\.disabled = /.test(dialog) && /\.title = /.test(dialog), "…c'est `disabled` + `title` qui portent le refus, et donc sa raison");
+    ck(hiddenLines.length > 0, "des masquages subsistent (une question sans objet dans ce contexte)");
+    ck(/LabelPrintPolicy\.isStructuralReason\(/.test(dialog), "🚨 la modale demande à la POLITIQUE si un refus est structurel (jamais de liste de codes en dur ici)");
+    // Support, gabarit, contenu ET extrémités masquent leur option quand — et seulement quand — le
+    // refus est STRUCTUREL. On compte les `hidden` qui routent par isStructuralReason.
+    const structuralHidden = hiddenLines.filter((l) => /LabelPrintPolicy\.isStructuralReason\(/.test(l));
+    ck(structuralHidden.length >= 5, "🚨 les quatre axes (support, gabarit, contenu, extrémités ×2 rangées) masquent leur option sur refus STRUCTUREL — pas de place perdue pour un type de collection");
+    ck(hiddenLines.every((l) => !/=== "not-flag"|=== "flag-only"|=== "rack-only"/.test(l)),
+      "🚨 aucune ligne de `hidden` ne compare un code structurel EN DUR : c'est isStructuralReason qui juge (une seule règle)");
+    ck(hiddenLines.every((l) => !/av\.fields/.test(l)),
+      "🚨 une CASE de champ n'est JAMAIS masquée par un verdict : son seul refus (`no-text`) est un ÉTAT (grisé avec raison)");
+    ck(/\.disabled = /.test(dialog) && /\.title = /.test(dialog), "…et un refus d'ÉTAT reste porté par `disabled` + `title`, donc par sa raison");
     ck(/reasonText\(/.test(dialog), "toute raison passe par la traduction d'un CODE (aucune phrase en dur dans la modale)");
 
     // -- 3. UNE SEULE ENTRÉE DRAPEAU PAR FICHE (fusion 11 → 9) --

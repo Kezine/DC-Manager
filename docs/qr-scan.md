@@ -501,15 +501,24 @@ Le retour terrain de 2026-08-20 était « **tous les contrôles dans tous les co
 vocabulaire d'un sujet à l'autre**, et une option disparue n'apprend rien. La règle vit donc toujours
 dans UN module pur — mais son verdict a changé de nature. `availability(sujet, support, contenu,
 offre)` rend, **par option**, soit `ok` soit un **CODE de raison** ; la modale **grise et traduit**
-(clés `labels.why.*`) là où elle posait `hidden`. Même famille que `PortCompatibility` /
-`BreakoutRules` : des codes, jamais de phrases.
+(clés `labels.why.*`). Même famille que `PortCompatibility` / `BreakoutRules` : des codes, jamais de
+phrases.
+
+Un troisième retour terrain (**2026-09-04**) a nuancé la règle : « **c'est inutile d'afficher les
+options désactivées pour un type de collection, ça prend de la place pour rien** ». D'où deux familles
+de refus, tranchées par `isStructuralReason(code)` : un refus **STRUCTUREL** — lié au TYPE de sujet,
+qu'aucun autre clic du panneau ne peut lever (`flag-only`, `rack-only`, `not-flag`) — rend l'option
+**absente** ; un refus lié à l'**ÉTAT** courant — qu'un autre clic lève (`needs-sleeve`,
+`needs-not-sleeve`, `no-text`, colonnes plafonnées) — la laisse **grisée avec sa raison**, pour ne pas
+priver l'utilisateur de la marche à suivre.
 
 **Deux traitements, jamais trois** :
 
 | Situation | Traitement |
 |---|---|
-| Option d'un axe FIXE, indisponible ici (support, contenu, gabarit, bascule d'extrémités) | **listée, `disabled`, avec sa raison** sur sa propre ligne |
-| Question qui ne se pose pas dans ce contexte (cote sans objet sous ce support, bascule d'extrémités sur un objet sans bouts) | **absente** |
+| Refus d'**ÉTAT** d'un axe fixe — levable par un autre clic (support incompatible, contenu sans texte, colonnes plafonnées) | **listé, `disabled`, avec sa raison** sur sa propre ligne |
+| Refus **STRUCTUREL** d'un axe fixe — lié au type de sujet, jamais levable (manchon/drapeau sur un équipement, baie sur un câble, S/M/L sur un brin, bascule d'extrémités sur un objet sans bouts) | **absent** (`hidden`), comme la bascule A/B/A+B l'était déjà hors sujet à drapeau |
+| Question qui ne se pose pas dans ce contexte (cote sans objet sous ce support) | **absente** |
 | Case de champ non déclarée par le sujet | **absente** — structurel depuis T10 (« pas de case sans donnée ») |
 
 #### L'axe « Support » est une PROJECTION
@@ -749,8 +758,10 @@ ligne** : c'est ce qui rend la planche mixte sûre sans le moindre cas particuli
 (`dc-manager.css`). Sans cette ligne les `hidden` de la modale sont **inertes** — `[hidden]` vient
 de la feuille du NAVIGATEUR, et toute règle d'auteur qui pose un `display` la bat, quelle que soit
 sa spécificité ; or `.btn`, `.lp-num`, `.lp-mm` et `.lp-field` en posent une. C'était la cause
-première du retour terrain de 2026-08-20. ⚠ **T11 : `hidden` ne cache plus aucun VERDICT** — il ne
-sert qu'aux questions structurellement sans objet dans le contexte (cf. « Disponibilité avec raison »).
+première du retour terrain de 2026-08-20. ⚠ **`hidden` ne cache jamais un refus d'ÉTAT** (grisé avec
+sa raison) — il ne sert qu'aux questions structurellement sans objet dans le contexte et aux refus
+**STRUCTURELS** (`isStructuralReason`), depuis le retour terrain de 2026-09-04 (cf. « Disponibilité
+avec raison »).
 
 ### Le repère du bout local (Q11.2)
 
@@ -909,8 +920,10 @@ réécrit pour le nouveau verdict) ; les **registres** d'avertissement et leur e
 (groupement `A, A, B, B` et sujet en boucle extérieure) et le **papier** ; le `sanitize` des nouveaux
 réglages ; la **quantification** du QR et sa non-régression sans dpi ; l'avertissement **`module-too-small`** ;
 le **repère du bout local** dans le HTML rendu (avec la preuve que les cotes n'ont pas bougé) ; le
-plan d'**export** (`core/LabelExportPlan`) ; et des **verrous sur les sources** (patron T2-B1) : la
-modale ne réécrit aucune règle de disponibilité, aucun `hidden` n'est posé depuis un verdict,
+plan d'**export** (`core/LabelExportPlan`) ; la classification `isStructuralReason` des six codes de
+refus (structurel ⇒ absent, état ⇒ grisé) ; et des **verrous sur les sources** (patron T2-B1) : la
+modale ne réécrit aucune règle de disponibilité, un `hidden` sur une option ne se pose QUE via
+`isStructuralReason` (jamais un refus d'état escamoté, jamais une case de champ),
 `DetailForms` n'a plus qu'une entrée drapeau par fiche, `main.ts` ne duplique plus les sujets du
 panier, tout code de refus a sa phrase dans les DEUX langues, et la CSS de la modale n'a aucune
 couleur en dur. Côté serveur, `Tests/modules/test-qr-params.js` verrouille l'émetteur **`QrSvg`**

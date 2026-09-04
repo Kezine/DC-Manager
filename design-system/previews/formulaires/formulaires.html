@@ -3350,6 +3350,10 @@
      ⚠ T11 : `hidden` ne sert PLUS à cacher un VERDICT (une option indisponible est grisée avec sa
      raison) — seulement une question qui ne se pose pas dans ce contexte. */
   .label-print [hidden] { display: none !important; }
+  /* Un gabarit STRUCTURELLEMENT impossible est masqué (retour terrain 2026-09-04) ; le séparateur
+     d'un segment ne doit alors pas rester « collé » au bord — sans quoi « Personnalisé » seul, sur
+     un câble, montre un filet vertical parasite derrière la bordure du groupe. */
+  .label-print .rm-toggle button[hidden] + button { border-left: none; }
   .lp-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 
   /* -- CONTEXTE : qui, combien, avec quelle mémoire (jamais masqué) -- */

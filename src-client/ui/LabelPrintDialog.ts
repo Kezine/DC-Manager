@@ -25,13 +25,20 @@
         de la modale ne bouge plus d'un sujet à l'autre. Le SEUL déplacement
         structurel est l'ORDRE : Tirage passe en tête dès que le tirage compte
         au moins deux étiquettes, parce qu'il devient alors la première question.
-     2. **DISPONIBILITÉ AVEC RAISON au lieu de `hidden`.** Une option
-        indisponible reste LISTÉE, `disabled`, avec sa raison lisible — c'est le
-        panneau qui explique la règle, au lieu de la faire deviner. Les verdicts
-        viennent tous de `LabelPrintPolicy.availability` : AUCUNE règle de
-        disponibilité n'est écrite ici (verrou de test sur cette source).
-        Les CASES de champ non déclarées restent, elles, ABSENTES (T10, décision
-        Q10.C) : deux traitements, jamais trois.
+     2. **DISPONIBILITÉ AVEC RAISON — nuancée par le terrain (2026-09-04).** Un
+        refus lié à l'ÉTAT courant (support incompatible, contenu sans texte…),
+        qu'un autre clic PEUT lever, reste LISTÉ, `disabled`, avec sa raison
+        lisible : le panneau explique la règle au lieu de la faire deviner. Mais
+        un refus STRUCTUREL — lié au TYPE de sujet, jamais levable dans le panneau
+        (un manchon sur un équipement, une baie sur un câble, S/M/L sur un brin) —
+        est désormais ABSENT (`hidden`), comme la bascule A/B/A+B l'était déjà
+        hors sujet à drapeau : « afficher les options désactivées pour un type de
+        collection prend de la place pour rien ». C'est
+        `LabelPrintPolicy.isStructuralReason(code)` qui tranche, et
+        `LabelPrintPolicy.availability` qui rend les verdicts : AUCUNE règle de
+        disponibilité n'est écrite ici (verrou de test sur cette source). Les
+        CASES de champ non déclarées restent ABSENTES pour une autre raison (T10,
+        décision Q10.C) — un `no-text` de champ, lui, est un refus d'ÉTAT (grisé).
      3. **L'axe SUPPORT remplace le fourre-tout « Format ».** On choisit
         l'OBJET PHYSIQUE (étiquette plate · tête de baie · drapeau · manchon) ;
         gabarit et contenu en découlent (`supportOf`/`applySupport`, projection
@@ -560,6 +567,10 @@ export class LabelPrintDialog {
       support.value.textContent = t("dialog.support." + currentSupport);
       for (const card of supportCards) {
         const reason = av.supports[card.id];
+        // Refus STRUCTUREL (support d'une autre anatomie) → carte ABSENTE ; refus d'ÉTAT → grisée
+        // avec raison. Les supports n'ont que des refus structurels : une carte grisée n'existe
+        // donc jamais ici — seule « Étiquette plate » (toujours ok) reste pour un équipement.
+        card.btn.hidden = LabelPrintPolicy.isStructuralReason(reason);
         card.btn.disabled = reason !== "ok";
         card.btn.setAttribute("aria-pressed", card.id === currentSupport ? "true" : "false");
         card.hint.textContent = reason === "ok" ? t("dialog.supportHint." + card.id) : reasonText(reason);
@@ -569,6 +580,9 @@ export class LabelPrintDialog {
       (sizeSeg as unknown as { value: string }).value = st.size;
       sizeButtons.forEach((btn, index) => {
         const reason = av.sizes[LABEL_SIZES[index]];
+        // Un gabarit d'une autre anatomie (S/M/L sur un brin de câble, `not-flag`) est ABSENT,
+        // pas grisé : ne reste que « Personnalisé » sous « Étiquette plate » d'un sujet à drapeau.
+        btn.hidden = LabelPrintPolicy.isStructuralReason(reason);
         btn.disabled = reason !== "ok";
         btn.title = reason === "ok" ? "" : reasonText(reason);
       });
@@ -580,9 +594,10 @@ export class LabelPrintDialog {
       if (document.activeElement !== cqI) cqI.value = String(st.qr);
       if (document.activeElement !== cdI) cdI.value = String(st.dia);
       if (document.activeElement !== clI) clI.value = String(st.len);
-      // La bascule d'extrémités est ABSENTE hors drapeau (question sans objet), GRISÉE quand
-      // le contenu n'a pas de texte d'extrémité à marquer (refus qui s'explique).
-      endsRow.hidden = av.ends === "not-flag";
+      // La bascule d'extrémités est ABSENTE hors drapeau (refus STRUCTUREL `not-flag`, question
+      // sans objet), GRISÉE quand le contenu n'a pas de texte d'extrémité à marquer (`no-text`,
+      // refus d'ÉTAT qui s'explique et qu'un autre contenu lève).
+      endsRow.hidden = LabelPrintPolicy.isStructuralReason(av.ends);
       (endsSeg as unknown as { value: string }).value = st.endsMode;
       endsButtons.forEach((btn) => {
         btn.disabled = av.ends === "no-text";
@@ -597,6 +612,9 @@ export class LabelPrintDialog {
       contentStage.value.textContent = t("dialog.content." + st.content);
       for (const card of contentCards) {
         const reason = av.contents[card.id];
+        // Contenu structurellement impossible (manchon hors câble, `flag-only`) → ABSENT ; refus
+        // d'ÉTAT (`needs-sleeve`/`needs-not-sleeve`, levable en changeant de support) → grisé.
+        card.btn.hidden = LabelPrintPolicy.isStructuralReason(reason);
         card.btn.disabled = reason !== "ok";
         card.btn.setAttribute("aria-pressed", card.id === st.content ? "true" : "false");
         card.hint.textContent = reason === "ok" ? t("dialog.contentHint." + card.id) : reasonText(reason);
@@ -611,7 +629,7 @@ export class LabelPrintDialog {
       // La rangée « Identifiant » ne disparaît JAMAIS (c'est ce que le QR encode et ce que
       // l'étiquette existe pour dire) ; sous un contenu sans texte, elle porte juste la raison.
       idRow.title = (st.content === "qr" || st.content === "id") ? reasonText("no-text") : "";
-      endsTextToggle.hidden = av.ends === "not-flag";
+      endsTextToggle.hidden = LabelPrintPolicy.isStructuralReason(av.ends);
       endsTextToggle.disabled = av.ends === "no-text";
       endsTextToggle.title = av.ends === "no-text" ? reasonText("no-text") : "";
       for (const f of fieldToggles) {

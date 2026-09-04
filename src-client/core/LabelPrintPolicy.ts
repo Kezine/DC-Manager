@@ -298,6 +298,25 @@ export class LabelPrintPolicy {
 
   /* ------------------------ T11 : la DISPONIBILITÉ avec raison ------------------------ */
 
+  /** Un refus est-il STRUCTUREL — lié au TYPE de sujet, donc JAMAIS levable dans le panneau ?
+      RÈGLE ARBITRÉE (retour terrain T11, 2026-09-04) : deux familles de refus, deux
+      traitements. La maquette disait « visible, désactivée, avec sa raison » pour TOUTE option
+      refusée ; le terrain a tranché — « c'est inutile d'afficher les options désactivées pour un
+      type de collection, ça prend de la place pour rien ». Un refus qu'AUCUN autre clic du
+      panneau ne peut lever (un manchon sur un équipement, une baie sur un câble, un gabarit S/M/L
+      sur un brin) devient donc ABSENT (`hidden`) — comme la bascule A/B/A+B l'était déjà hors
+      sujet à drapeau. Un refus lié à l'ÉTAT courant (`needs-sleeve`, `needs-not-sleeve`,
+      `no-text`, colonnes plafonnées) reste, lui, GRISÉ avec sa raison : un autre clic PEUT le
+      lever, le cacher priverait l'utilisateur de la marche à suivre.
+      Les trois codes structurels — `flag-only` (réservé à ce qui s'enroule), `rack-only`
+      (réservé aux baies), `not-flag` (pas d'anatomie de drapeau) — décrivent une IMPOSSIBILITÉ
+      d'ANATOMIE, partagée par les supports, les contenus, les gabarits et la bascule d'extrémités.
+      Codes en `string` (et non un type d'union) pour rester le juge COMMUN des quatre axes, dont
+      les unions de raisons diffèrent : la modale lui passe le code qu'elle vient de lire. */
+  static isStructuralReason(code: string): boolean {
+    return code === "flag-only" || code === "rack-only" || code === "not-flag";
+  }
+
   /** LE VERDICT : pour chaque option des axes FIXES, `ok` ou le CODE de son refus.
       Remplace `visibility` — l'UI grise et explique là où elle cachait (cf. en-tête).
 
